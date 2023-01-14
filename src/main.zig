@@ -64,6 +64,62 @@ fn parseArgs(args: *std.ArrayList([]const u8)) Command {
     return Command{ .usage = {} };
 }
 
+// returns a single random character. just lower case for now.
+// eventually i'll make it return upper case and maybe numbers too.
+fn randChar() !u8 {
+    var rand_int: u8 = 0;
+    try std.os.getrandom(std.mem.asBytes(&rand_int));
+    var rand_float: f32 = (@intToFloat(f32, rand_int) / @intToFloat(f32, std.math.maxInt(u8)));
+    const min = 'a';
+    const max = 'z';
+    return @floatToInt(u8, rand_float * (max - min)) + min;
+}
+
+// fills the given buffer with random chars.
+fn fillWithRandChars(buffer: []u8) !void {
+    var i: u32 = 0;
+    while (i < buffer.len) {
+        buffer[i] = try randChar();
+        i += 1;
+    }
+}
+
+// writes the file at the given path into the .git dir.
+// this will need to go somewhere else eventually, just
+// keeping it here until i figure out how to organize stuff.
+fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator) !void {
+    // get absolute path of the file
+    var path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
+    const in_path = try cwd.realpath(path, &path_buffer);
+    var in = try std.fs.openFileAbsolute(in_path, .{ .mode = std.fs.File.OpenMode.read_only });
+    defer in.close();
+
+    // calc the sha1 of its contents
+    var sha1_hex_buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
+    const sha1_hex = try hash.sha1(in, &sha1_hex_buffer);
+
+    // make dirs
+    var git_dir = try cwd.openDir(".git", .{});
+    defer git_dir.close();
+    var objects_dir = try git_dir.openDir("objects", .{});
+    defer objects_dir.close();
+    var first_hash_dir = try objects_dir.makeOpenPath(sha1_hex[0..2], .{});
+    defer first_hash_dir.close();
+
+    // open temp file
+    var rand_chars = [_]u8{0} ** 6;
+    try fillWithRandChars(&rand_chars);
+    const tmp_file_name = "tmp_obj_" ++ rand_chars;
+    const tmp_file = try first_hash_dir.createFile(tmp_file_name, .{});
+    defer tmp_file.close();
+
+    // compress the file
+    try compress.compress(in, tmp_file, allocator);
+
+    // rename the file
+    try std.fs.rename(first_hash_dir, tmp_file_name, first_hash_dir, sha1_hex[2..]);
+}
+
 /// this is meant to be the main entry point if you wanted to use zit
 /// as a library. there will definitely be more specialized functions
 /// you can call as well, but if you just want to pass the CLI args and
@@ -136,27 +192,7 @@ pub fn zitMain(args: *std.ArrayList([]const u8), allocator: std.mem.Allocator) !
                 }
                 // if it's a file...
                 if (entry.kind == std.fs.File.Kind.File) {
-                    // get absolute path of the file
-                    var path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
-                    const in_path = try cwd.realpath(entry.name, &path_buffer);
-                    var in = try std.fs.openFileAbsolute(in_path, .{ .mode = std.fs.File.OpenMode.read_only });
-                    defer in.close();
-
-                    // calc the sha1 of its contents
-                    var sha1_hex_buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
-                    const sha1_hex = try hash.sha1(in, &sha1_hex_buffer);
-
-                    std.debug.print("{}: '{s}' {s}\n", .{ entry.kind, in_path, sha1_hex });
-
-                    // compress the file
-                    var out_compressed = try cwd.createFile("out_compressed", .{ .read = true });
-                    defer out_compressed.close();
-                    try compress.compress(in, out_compressed, allocator);
-
-                    // decompress it so we know it works
-                    var out_decompressed = try cwd.createFile("out_decompressed", .{});
-                    defer out_decompressed.close();
-                    try compress.decompress(out_compressed, out_decompressed, allocator);
+                    try writeObject(cwd, entry.name, allocator);
                 }
             }
         },
