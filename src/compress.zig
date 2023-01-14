@@ -61,3 +61,43 @@ pub fn decompress(in: std.fs.File, out: std.fs.File, allocator: std.mem.Allocato
     // write the result to the out file
     _ = try out.write(write_buffer[0..out_size]);
 }
+
+test "compress and decompress" {
+    const temp_dir_name = "temp-test";
+
+    const allocator = std.testing.allocator;
+    var args = std.ArrayList([]const u8).init(allocator);
+    defer args.deinit();
+
+    // get the current working directory path
+    var cwd_path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
+    const cwd_path = try std.fs.cwd().realpath(".", &cwd_path_buffer);
+    var cwd = try std.fs.openDirAbsolute(cwd_path, .{});
+    defer cwd.close();
+
+    // create the temp dir
+    var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
+    defer cwd.deleteTree(temp_dir_name) catch {};
+    defer temp_dir.close();
+
+    // make file
+    const hello_txt_content = "hello, world!";
+    var hello_txt = try temp_dir.createFile("hello.txt", .{ .read = true });
+    try hello_txt.writeAll(hello_txt_content);
+    defer hello_txt.close();
+
+    // compress the file
+    var out_compressed = try temp_dir.createFile("hello.txt.compressed", .{ .read = true });
+    defer out_compressed.close();
+    try compress(hello_txt, out_compressed, allocator);
+
+    // decompress it so we know it works
+    var out_decompressed = try temp_dir.createFile("out_decompressed", .{ .read = true });
+    defer out_decompressed.close();
+    try decompress(out_compressed, out_decompressed, allocator);
+
+    // read the decompressed file into memory and check that it's the same
+    var read_buffer = [_]u8{0} ** MAX_FILE_SIZE_BYTES;
+    const size = try out_decompressed.pread(&read_buffer, 0);
+    try std.testing.expect(std.mem.eql(u8, hello_txt_content, read_buffer[0..size]));
+}

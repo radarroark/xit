@@ -17,11 +17,9 @@ test "init and commit" {
     var cwd = try std.fs.openDirAbsolute(cwd_path, .{});
     defer cwd.close();
 
-    // when the test is done, delete the entire temp dir
-    defer cwd.deleteTree(temp_dir_name) catch {};
-
     // create the temp dir
     var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
+    defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
     // init repo
@@ -35,8 +33,10 @@ test "init and commit" {
     var git_dir = try repo_dir.openDir(".git", .{});
     defer git_dir.close();
 
-    // change the cwd and make a file
+    // change the cwd
     try repo_dir.setAsCwd();
+
+    // make file
     var hello_txt = try repo_dir.createFile("hello.txt", .{});
     try hello_txt.writeAll("hello, world!");
     defer hello_txt.close();
@@ -45,4 +45,7 @@ test "init and commit" {
     args.clearAndFree();
     try args.append("commit");
     try main.zitMain(&args, allocator);
+
+    // reset the cwd
+    try cwd.setAsCwd();
 }
