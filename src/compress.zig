@@ -63,7 +63,7 @@ pub fn decompress(in: std.fs.File, out: std.fs.File, allocator: std.mem.Allocato
 }
 
 test "compress and decompress" {
-    const temp_dir_name = "temp-test";
+    const temp_dir_name = "temp-test-compress";
 
     const allocator = std.testing.allocator;
     var args = std.ArrayList([]const u8).init(allocator);

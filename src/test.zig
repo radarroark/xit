@@ -1,9 +1,9 @@
 const std = @import("std");
 const main = @import("./main.zig");
 
-const temp_dir_name = "temp-test";
-
 test "init and commit" {
+    const temp_dir_name = "temp-test-init-and-commit";
+
     const allocator = std.testing.allocator;
     var args = std.ArrayList([]const u8).init(allocator);
     defer args.deinit();
