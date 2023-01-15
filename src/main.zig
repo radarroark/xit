@@ -87,37 +87,84 @@ fn fillWithRandChars(buffer: []u8) !void {
 // writes the file at the given path into the .git dir.
 // this will need to go somewhere else eventually, just
 // keeping it here until i figure out how to organize stuff.
-fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator) !void {
+fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, entries: *std.ArrayList([]const u8)) !void {
+    // open the internal dirs
+    var git_dir = try cwd.openDir(".git", .{});
+    defer git_dir.close();
+    var objects_dir = try git_dir.openDir("objects", .{});
+    defer objects_dir.close();
+
     // get absolute path of the file
     var path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
     const in_path = try cwd.realpath(path, &path_buffer);
     var in = try std.fs.openFileAbsolute(in_path, .{ .mode = std.fs.File.OpenMode.read_only });
     defer in.close();
 
-    // calc the sha1 of its contents
-    var sha1_hex_buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
-    const sha1_hex = try hash.sha1(in, &sha1_hex_buffer);
+    // see if it's a file or dir
+    const meta = try in.metadata();
+    switch (meta.kind()) {
+        std.fs.File.Kind.File => {
+            // calc the sha1 of its contents
+            var sha1_bytes = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+            try hash.sha1_file(in, &sha1_bytes);
+            var sha1_hex_buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
+            const sha1_hex = try std.fmt.bufPrint(&sha1_hex_buffer, "{}", .{std.fmt.fmtSliceHexLower(&sha1_bytes)});
 
-    // make dirs
-    var git_dir = try cwd.openDir(".git", .{});
-    defer git_dir.close();
-    var objects_dir = try git_dir.openDir("objects", .{});
-    defer objects_dir.close();
-    var first_hash_dir = try objects_dir.makeOpenPath(sha1_hex[0..2], .{});
-    defer first_hash_dir.close();
+            // make the two char dir
+            var first_hash_dir = try objects_dir.makeOpenPath(sha1_hex[0..2], .{});
+            defer first_hash_dir.close();
 
-    // open temp file
-    var rand_chars = [_]u8{0} ** 6;
-    try fillWithRandChars(&rand_chars);
-    const tmp_file_name = "tmp_obj_" ++ rand_chars;
-    const tmp_file = try first_hash_dir.createFile(tmp_file_name, .{});
-    defer tmp_file.close();
+            // open temp file
+            var rand_chars = [_]u8{0} ** 6;
+            try fillWithRandChars(&rand_chars);
+            const tmp_file_name = "tmp_obj_" ++ rand_chars;
+            const tmp_file = try first_hash_dir.createFile(tmp_file_name, .{});
+            defer tmp_file.close();
 
-    // compress the file
-    try compress.compress(in, tmp_file, allocator);
+            // compress the file
+            try compress.compress(in, tmp_file, allocator);
 
-    // rename the file
-    try std.fs.rename(first_hash_dir, tmp_file_name, first_hash_dir, sha1_hex[2..]);
+            // rename the file
+            try std.fs.rename(first_hash_dir, tmp_file_name, first_hash_dir, sha1_hex[2..]);
+
+            // add the file to entries
+            const entry = try std.fmt.allocPrint(allocator, "100644 {s}\x00{s}", .{ path, &sha1_bytes });
+            try entries.append(entry);
+        },
+        std.fs.File.Kind.Directory => {
+            // create tree contents
+            const tree_contents = try std.mem.join(allocator, "", entries.items);
+            defer allocator.free(tree_contents);
+
+            // create tree
+            const tree = try std.fmt.allocPrint(allocator, "tree {}\x00{s}", .{ tree_contents.len, tree_contents });
+            defer allocator.free(tree);
+
+            // calc the sha1 of its contents
+            var sha1_bytes = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+            try hash.sha1_buffer(tree, &sha1_bytes);
+            var sha1_hex_buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
+            const sha1_hex = try std.fmt.bufPrint(&sha1_hex_buffer, "{}", .{std.fmt.fmtSliceHexLower(&sha1_bytes)});
+
+            // make the two char dir
+            var first_hash_dir = try objects_dir.makeOpenPath(sha1_hex[0..2], .{});
+            defer first_hash_dir.close();
+
+            // open temp file
+            var rand_chars = [_]u8{0} ** 6;
+            try fillWithRandChars(&rand_chars);
+            const tmp_file_name = "tmp_obj_" ++ rand_chars;
+            const tmp_file = try first_hash_dir.createFile(tmp_file_name, .{});
+            defer tmp_file.close();
+
+            // write tree to the temp file
+            try tmp_file.writeAll(tree);
+
+            // rename the file
+            try std.fs.rename(first_hash_dir, tmp_file_name, first_hash_dir, sha1_hex[2..]);
+        },
+        else => return,
+    }
 }
 
 /// this is meant to be the main entry point if you wanted to use zit
@@ -179,6 +226,15 @@ pub fn zitMain(args: *std.ArrayList([]const u8), allocator: std.mem.Allocator) !
             var cwd = try std.fs.openDirAbsolute(cwd_path, .{});
             defer cwd.close();
 
+            // make list to store entries
+            var entries = std.ArrayList([]const u8).init(allocator);
+            defer {
+                for (entries.items) |entry| {
+                    allocator.free(entry);
+                }
+                entries.deinit();
+            }
+
             // get an iterator for the files in the cwd
             var root_dir = try cwd.makeOpenPathIterable(".", .{});
             defer root_dir.close();
@@ -190,11 +246,11 @@ pub fn zitMain(args: *std.ArrayList([]const u8), allocator: std.mem.Allocator) !
                 if (std.mem.eql(u8, entry.name, ".git")) {
                     continue;
                 }
-                // if it's a file...
-                if (entry.kind == std.fs.File.Kind.File) {
-                    try writeObject(cwd, entry.name, allocator);
-                }
+                // write the object to .git/objects
+                try writeObject(cwd, entry.name, allocator, &entries);
             }
+
+            try writeObject(cwd, ".", allocator, &entries);
         },
     }
 }
