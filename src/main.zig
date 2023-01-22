@@ -141,27 +141,99 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
             defer allocator.free(tree);
 
             // calc the sha1 of its contents
-            var sha1_bytes = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-            try hash.sha1_buffer(tree, &sha1_bytes);
-            var sha1_hex_buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
-            const sha1_hex = try std.fmt.bufPrint(&sha1_hex_buffer, "{}", .{std.fmt.fmtSliceHexLower(&sha1_bytes)});
+            var tree_sha1_bytes = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+            try hash.sha1_buffer(tree, &tree_sha1_bytes);
+            var tree_sha1_hex_buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
+            const tree_sha1_hex = try std.fmt.bufPrint(&tree_sha1_hex_buffer, "{}", .{std.fmt.fmtSliceHexLower(&tree_sha1_bytes)});
 
             // make the two char dir
-            var first_hash_dir = try objects_dir.makeOpenPath(sha1_hex[0..2], .{});
-            defer first_hash_dir.close();
+            var tree_first_hash_dir = try objects_dir.makeOpenPath(tree_sha1_hex[0..2], .{});
+            defer tree_first_hash_dir.close();
 
             // open temp file
-            var rand_chars = [_]u8{0} ** 6;
-            try fillWithRandChars(&rand_chars);
-            const tmp_file_name = "tmp_obj_" ++ rand_chars;
-            const tmp_file = try first_hash_dir.createFile(tmp_file_name, .{});
-            defer tmp_file.close();
+            var tree_rand_chars = [_]u8{0} ** 6;
+            try fillWithRandChars(&tree_rand_chars);
+            const tree_tmp_file_name = "tmp_obj_" ++ tree_rand_chars;
+            const tree_tmp_file = try tree_first_hash_dir.createFile(tree_tmp_file_name, .{ .read = true });
+            defer tree_tmp_file.close();
 
-            // write tree to the temp file
-            try tmp_file.writeAll(tree);
+            // write to the temp file
+            try tree_tmp_file.writeAll(tree);
+
+            // open compressed temp file
+            var tree_comp_rand_chars = [_]u8{0} ** 6;
+            try fillWithRandChars(&tree_comp_rand_chars);
+            const tree_comp_tmp_file_name = "tmp_obj_" ++ tree_comp_rand_chars;
+            const tree_comp_tmp_file = try tree_first_hash_dir.createFile(tree_comp_tmp_file_name, .{});
+            defer tree_comp_tmp_file.close();
+
+            // compress the file
+            try compress.compress(tree_tmp_file, tree_comp_tmp_file, allocator);
+
+            // delete first temp file
+            try tree_first_hash_dir.deleteFile(tree_tmp_file_name);
 
             // rename the file
-            try std.fs.rename(first_hash_dir, tmp_file_name, first_hash_dir, sha1_hex[2..]);
+            try std.fs.rename(tree_first_hash_dir, tree_comp_tmp_file_name, tree_first_hash_dir, tree_sha1_hex[2..]);
+
+            // if this is the root of the repo, make the commit object too
+            if (std.mem.eql(u8, path, ".")) {
+                // hard-code stuff for now
+                const author = "radar <radar@foo.com> 1512325222 +0000";
+                const message = "let there be light";
+                const parents = "";
+
+                // create commit contents
+                const commit_contents = try std.fmt.allocPrint(allocator, "tree {s}{s}\nauthor {s}\ncommitter {s}\n\n{s}", .{ tree_sha1_hex, parents, author, author, message });
+                defer allocator.free(commit_contents);
+
+                // create commit
+                const commit = try std.fmt.allocPrint(allocator, "commit {}\x00{s}", .{ commit_contents.len, commit_contents });
+                defer allocator.free(commit);
+
+                // calc the sha1 of its contents
+                var commit_sha1_bytes = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+                try hash.sha1_buffer(commit, &commit_sha1_bytes);
+                var commit_sha1_hex_buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
+                const commit_sha1_hex = try std.fmt.bufPrint(&commit_sha1_hex_buffer, "{}", .{std.fmt.fmtSliceHexLower(&commit_sha1_bytes)});
+
+                // make the two char dir
+                var commit_first_hash_dir = try objects_dir.makeOpenPath(commit_sha1_hex[0..2], .{});
+                defer commit_first_hash_dir.close();
+
+                // open temp file
+                var commit_rand_chars = [_]u8{0} ** 6;
+                try fillWithRandChars(&commit_rand_chars);
+                const commit_tmp_file_name = "tmp_obj_" ++ commit_rand_chars;
+                const commit_tmp_file = try commit_first_hash_dir.createFile(commit_tmp_file_name, .{ .read = true });
+                defer commit_tmp_file.close();
+
+                // write to the temp file
+                try commit_tmp_file.writeAll(commit);
+
+                // open compressed temp file
+                var commit_comp_rand_chars = [_]u8{0} ** 6;
+                try fillWithRandChars(&commit_comp_rand_chars);
+                const commit_comp_tmp_file_name = "tmp_obj_" ++ commit_comp_rand_chars;
+                const commit_comp_tmp_file = try commit_first_hash_dir.createFile(commit_comp_tmp_file_name, .{});
+                defer commit_comp_tmp_file.close();
+
+                // compress the file
+                try compress.compress(commit_tmp_file, commit_comp_tmp_file, allocator);
+
+                // delete first temp file
+                try commit_first_hash_dir.deleteFile(commit_tmp_file_name);
+
+                // rename the file
+                try std.fs.rename(commit_first_hash_dir, commit_comp_tmp_file_name, commit_first_hash_dir, commit_sha1_hex[2..]);
+
+                // open HEAD
+                const head_file = try git_dir.createFile("HEAD", .{});
+                defer head_file.close();
+
+                // write commit id to HEAD
+                try head_file.writeAll(commit_sha1_hex);
+            }
         },
         else => return,
     }

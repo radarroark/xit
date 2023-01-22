@@ -9,6 +9,7 @@
 
 const std = @import("std");
 const deflate = std.compress.deflate;
+const zlib = std.compress.zlib;
 
 const MAX_FILE_SIZE_BYTES = 1024;
 
@@ -16,6 +17,8 @@ const CompressError = error{
     FileTooLarge,
 };
 
+/// zig doesn't have a zlib compressor in the stdlib yet, so this one is implemented
+/// manually. once it arrives, this code is getting tossed to the curb.
 pub fn compress(in: std.fs.File, out: std.fs.File, allocator: std.mem.Allocator) !void {
     // read the in file into memory
     var read_buffer = [_]u8{0} ** MAX_FILE_SIZE_BYTES;
@@ -23,19 +26,47 @@ pub fn compress(in: std.fs.File, out: std.fs.File, allocator: std.mem.Allocator)
     if (in_size == MAX_FILE_SIZE_BYTES) {
         return CompressError.FileTooLarge;
     }
+    const read_slice = read_buffer[0..in_size];
+
+    // define compression level
+    const Level = enum(u2) {
+        fastest = 0,
+        fast = 1,
+        default = 2,
+        maximum = 3,
+    };
+    const zlib_level = Level.default;
+    const deflate_level: deflate.Compression = switch (zlib_level) {
+        .fastest => .no_compression,
+        .fast => .best_speed,
+        .default => .default_compression,
+        .maximum => .best_compression,
+    };
 
     // init the compressor
-    var write_buffer = std.ArrayList(u8).init(allocator);
-    defer write_buffer.deinit();
-    var comp = try deflate.compressor(allocator, write_buffer.writer(), .{ .level = .best_speed });
+    const writer = out.writer();
+    var comp = try deflate.compressor(allocator, writer, .{ .level = deflate_level });
     defer comp.deinit();
 
-    // do the dirty work
-    _ = try comp.write(read_buffer[0..in_size]);
-    try comp.flush();
+    // write the header
+    const CM: u4 = 8;
+    const CINFO: u4 = 7;
+    const CMF: u8 = (@as(u8, CINFO) << 4) | CM;
+    const FLEVEL: u2 = @enumToInt(zlib_level);
+    const FDICT: u1 = 0;
+    const FLG_temp = (@as(u8, FLEVEL) << 6) | (@as(u8, FDICT) << 5);
+    const FCHECK: u5 = 31 - ((@as(u16, CMF) * 256 + FLG_temp) % 31);
+    const FLG = FLG_temp | FCHECK;
+    try writer.writeAll(&.{ CMF, FLG });
 
-    // write the result to the out file
-    _ = try out.write(write_buffer.items);
+    // do the dirty work
+    const comp_size = try comp.write(read_slice);
+    try comp.close();
+
+    // write the hash
+    var hasher = std.hash.Adler32.init();
+    hasher.update(read_slice[0..comp_size]);
+    try writer.writeIntBig(u32, hasher.final());
 }
 
 pub fn decompress(in: std.fs.File, out: std.fs.File, allocator: std.mem.Allocator) !void {
@@ -45,21 +76,16 @@ pub fn decompress(in: std.fs.File, out: std.fs.File, allocator: std.mem.Allocato
     if (in_size == MAX_FILE_SIZE_BYTES) {
         return CompressError.FileTooLarge;
     }
-
-    // init the decompressor
-    var fib = std.io.fixedBufferStream(read_buffer[0..in_size]);
-    var comp = try deflate.decompressor(allocator, fib.reader(), null);
-    defer comp.deinit();
+    var fixed_buffer = std.io.fixedBufferStream(read_buffer[0..in_size]);
 
     // do the dirty work
-    var write_buffer = [_]u8{0} ** MAX_FILE_SIZE_BYTES;
-    const out_size = try comp.reader().read(&write_buffer);
-    if (out_size == MAX_FILE_SIZE_BYTES) {
-        return CompressError.FileTooLarge;
-    }
+    var zlib_stream = try zlib.zlibStream(allocator, fixed_buffer.reader());
+    defer zlib_stream.deinit();
+    const buf = try zlib_stream.reader().readAllAlloc(allocator, std.math.maxInt(usize));
+    defer allocator.free(buf);
 
     // write the result to the out file
-    _ = try out.write(write_buffer[0..out_size]);
+    _ = try out.write(buf);
 }
 
 test "compress and decompress" {
@@ -83,8 +109,8 @@ test "compress and decompress" {
     // make file
     const hello_txt_content = "hello, world!";
     var hello_txt = try temp_dir.createFile("hello.txt", .{ .read = true });
-    try hello_txt.writeAll(hello_txt_content);
     defer hello_txt.close();
+    try hello_txt.writeAll(hello_txt_content);
 
     // compress the file
     var out_compressed = try temp_dir.createFile("hello.txt.compressed", .{ .read = true });
