@@ -38,10 +38,18 @@ test "init and commit" {
 
     // make file
     var hello_txt = try repo_dir.createFile("hello.txt", .{});
-    try hello_txt.writeAll("hello, world!");
     defer hello_txt.close();
+    try hello_txt.pwriteAll("hello, world!", 0);
 
     // make a commit
+    args.clearAndFree();
+    try args.append("commit");
+    try main.zitMain(&args, allocator);
+
+    // change the file
+    try hello_txt.pwriteAll("goodbye, world!", 0);
+
+    // make another commit
     args.clearAndFree();
     try args.append("commit");
     try main.zitMain(&args, allocator);

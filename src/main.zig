@@ -158,7 +158,7 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
             defer tree_tmp_file.close();
 
             // write to the temp file
-            try tree_tmp_file.writeAll(tree);
+            try tree_tmp_file.pwriteAll(tree, 0);
 
             // open compressed temp file
             var tree_comp_rand_chars = [_]u8{0} ** 6;
@@ -178,13 +178,30 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
 
             // if this is the root of the repo, make the commit object too
             if (std.mem.eql(u8, path, ".")) {
-                // hard-code stuff for now
+                // open HEAD
+                const head_file_or_err = git_dir.openFile("HEAD", .{ .mode = .read_write });
+                const head_file = try if (head_file_or_err == error.FileNotFound)
+                    git_dir.createFile("HEAD", .{ .read = true })
+                else
+                    head_file_or_err;
+                defer head_file.close();
+
+                // read HEAD
+                var head_file_buffer = [_]u8{0} ** 1024; // FIXME: this is arbitrary...
+                const head_file_size = try head_file.pread(&head_file_buffer, 0);
+                const head_file_slice = head_file_buffer[0..head_file_size];
+
+                // metadata
                 const author = "radar <radar@foo.com> 1512325222 +0000";
                 const message = "let there be light";
-                const parents = "";
+                const parent = if (head_file_size > 0)
+                    try std.fmt.allocPrint(allocator, "parent {s}\n", .{head_file_slice})
+                else
+                    try std.fmt.allocPrint(allocator, "", .{});
+                defer allocator.free(parent);
 
                 // create commit contents
-                const commit_contents = try std.fmt.allocPrint(allocator, "tree {s}{s}\nauthor {s}\ncommitter {s}\n\n{s}", .{ tree_sha1_hex, parents, author, author, message });
+                const commit_contents = try std.fmt.allocPrint(allocator, "tree {s}\n{s}author {s}\ncommitter {s}\n\n{s}", .{ tree_sha1_hex, parent, author, author, message });
                 defer allocator.free(commit_contents);
 
                 // create commit
@@ -209,7 +226,7 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
                 defer commit_tmp_file.close();
 
                 // write to the temp file
-                try commit_tmp_file.writeAll(commit);
+                try commit_tmp_file.pwriteAll(commit, 0);
 
                 // open compressed temp file
                 var commit_comp_rand_chars = [_]u8{0} ** 6;
@@ -227,12 +244,8 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
                 // rename the file
                 try std.fs.rename(commit_first_hash_dir, commit_comp_tmp_file_name, commit_first_hash_dir, commit_sha1_hex[2..]);
 
-                // open HEAD
-                const head_file = try git_dir.createFile("HEAD", .{});
-                defer head_file.close();
-
                 // write commit id to HEAD
-                try head_file.writeAll(commit_sha1_hex);
+                try head_file.pwriteAll(commit_sha1_hex, 0);
             }
         },
         else => return,
