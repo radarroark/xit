@@ -41,12 +41,17 @@ test "init and commit" {
     defer hello_txt.close();
     try hello_txt.pwriteAll("hello, world!", 0);
 
+    // make another file
+    var readme = try repo_dir.createFile("README", .{});
+    defer readme.close();
+    try readme.pwriteAll("My cool project", 0);
+
     // make a commit
     args.clearAndFree();
     try args.append("commit");
     try main.zitMain(&args, allocator);
 
-    // change the file
+    // change the first file
     try hello_txt.pwriteAll("goodbye, world!", 0);
 
     // make another commit

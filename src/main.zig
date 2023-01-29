@@ -114,6 +114,17 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
             var first_hash_dir = try objects_dir.makeOpenPath(sha1_hex[0..2], .{});
             defer first_hash_dir.close();
 
+            // if the file already exists, exit early
+            const rest_of_hash = sha1_hex[2..];
+            if (first_hash_dir.openFile(rest_of_hash, .{})) |rest_of_hash_file| {
+                rest_of_hash_file.close();
+                return;
+            } else |err| {
+                if (err != error.FileNotFound) {
+                    return err;
+                }
+            }
+
             // open temp file
             var rand_chars = [_]u8{0} ** 6;
             try fillWithRandChars(&rand_chars);
@@ -125,7 +136,7 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
             try compress.compress(in, tmp_file, allocator);
 
             // rename the file
-            try std.fs.rename(first_hash_dir, tmp_file_name, first_hash_dir, sha1_hex[2..]);
+            try std.fs.rename(first_hash_dir, tmp_file_name, first_hash_dir, rest_of_hash);
 
             // add the file to entries
             const entry = try std.fmt.allocPrint(allocator, "100644 {s}\x00{s}", .{ path, &sha1_bytes });
