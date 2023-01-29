@@ -178,17 +178,18 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
 
             // if this is the root of the repo, make the commit object too
             if (std.mem.eql(u8, path, ".")) {
-                // open HEAD
-                const head_file_or_err = git_dir.openFile("HEAD", .{ .mode = .read_write });
-                const head_file = try if (head_file_or_err == error.FileNotFound)
-                    git_dir.createFile("HEAD", .{ .read = true })
-                else
-                    head_file_or_err;
-                defer head_file.close();
-
                 // read HEAD
                 var head_file_buffer = [_]u8{0} ** 1024; // FIXME: this is arbitrary...
-                const head_file_size = try head_file.pread(&head_file_buffer, 0);
+                var head_file_size: usize = 0;
+                {
+                    const head_file_or_err = git_dir.openFile("HEAD", .{ .mode = .read_only });
+                    const head_file = try if (head_file_or_err == error.FileNotFound)
+                        git_dir.createFile("HEAD", .{ .read = true })
+                    else
+                        head_file_or_err;
+                    defer head_file.close();
+                    head_file_size = try head_file.pread(&head_file_buffer, 0);
+                }
                 const head_file_slice = head_file_buffer[0..head_file_size];
 
                 // metadata
@@ -245,7 +246,13 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
                 try std.fs.rename(commit_first_hash_dir, commit_comp_tmp_file_name, commit_first_hash_dir, commit_sha1_hex[2..]);
 
                 // write commit id to HEAD
-                try head_file.pwriteAll(commit_sha1_hex, 0);
+                // first write to a lock file and then rename it to HEAD for safety
+                {
+                    const head_file = try git_dir.createFile("HEAD.lock", .{ .exclusive = true, .lock = .Exclusive });
+                    defer head_file.close();
+                    try head_file.pwriteAll(commit_sha1_hex, 0);
+                }
+                try git_dir.rename("HEAD.lock", "HEAD");
             }
         },
         else => return,
