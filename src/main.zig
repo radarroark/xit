@@ -84,6 +84,8 @@ fn fillWithRandChars(buffer: []u8) !void {
     }
 }
 
+pub const MAX_FILE_READ_SIZE: comptime_int = 1000; // FIXME: this is arbitrary...
+
 // writes the file at the given path into the .git dir.
 // this will need to go somewhere else eventually, just
 // keeping it here until i figure out how to organize stuff.
@@ -111,12 +113,12 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
             const sha1_hex = try std.fmt.bufPrint(&sha1_hex_buffer, "{}", .{std.fmt.fmtSliceHexLower(&sha1_bytes)});
 
             // make the two char dir
-            var first_hash_dir = try objects_dir.makeOpenPath(sha1_hex[0..2], .{});
-            defer first_hash_dir.close();
+            var hash_prefix_dir = try objects_dir.makeOpenPath(sha1_hex[0..2], .{});
+            defer hash_prefix_dir.close();
 
             // if the file already exists, exit early
             const rest_of_hash = sha1_hex[2..];
-            if (first_hash_dir.openFile(rest_of_hash, .{})) |rest_of_hash_file| {
+            if (hash_prefix_dir.openFile(rest_of_hash, .{})) |rest_of_hash_file| {
                 rest_of_hash_file.close();
                 return;
             } else |err| {
@@ -129,14 +131,14 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
             var rand_chars = [_]u8{0} ** 6;
             try fillWithRandChars(&rand_chars);
             const tmp_file_name = "tmp_obj_" ++ rand_chars;
-            const tmp_file = try first_hash_dir.createFile(tmp_file_name, .{});
+            const tmp_file = try hash_prefix_dir.createFile(tmp_file_name, .{});
             defer tmp_file.close();
 
             // compress the file
             try compress.compress(in, tmp_file, allocator);
 
             // rename the file
-            try std.fs.rename(first_hash_dir, tmp_file_name, first_hash_dir, rest_of_hash);
+            try std.fs.rename(hash_prefix_dir, tmp_file_name, hash_prefix_dir, rest_of_hash);
 
             // add the file to entries
             const entry = try std.fmt.allocPrint(allocator, "100644 {s}\x00{s}", .{ path, &sha1_bytes });
@@ -158,14 +160,14 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
             const tree_sha1_hex = try std.fmt.bufPrint(&tree_sha1_hex_buffer, "{}", .{std.fmt.fmtSliceHexLower(&tree_sha1_bytes)});
 
             // make the two char dir
-            var tree_first_hash_dir = try objects_dir.makeOpenPath(tree_sha1_hex[0..2], .{});
-            defer tree_first_hash_dir.close();
+            var tree_hash_prefix_dir = try objects_dir.makeOpenPath(tree_sha1_hex[0..2], .{});
+            defer tree_hash_prefix_dir.close();
 
             // open temp file
             var tree_rand_chars = [_]u8{0} ** 6;
             try fillWithRandChars(&tree_rand_chars);
             const tree_tmp_file_name = "tmp_obj_" ++ tree_rand_chars;
-            const tree_tmp_file = try tree_first_hash_dir.createFile(tree_tmp_file_name, .{ .read = true });
+            const tree_tmp_file = try tree_hash_prefix_dir.createFile(tree_tmp_file_name, .{ .read = true });
             defer tree_tmp_file.close();
 
             // write to the temp file
@@ -175,22 +177,22 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
             var tree_comp_rand_chars = [_]u8{0} ** 6;
             try fillWithRandChars(&tree_comp_rand_chars);
             const tree_comp_tmp_file_name = "tmp_obj_" ++ tree_comp_rand_chars;
-            const tree_comp_tmp_file = try tree_first_hash_dir.createFile(tree_comp_tmp_file_name, .{});
+            const tree_comp_tmp_file = try tree_hash_prefix_dir.createFile(tree_comp_tmp_file_name, .{});
             defer tree_comp_tmp_file.close();
 
             // compress the file
             try compress.compress(tree_tmp_file, tree_comp_tmp_file, allocator);
 
             // delete first temp file
-            try tree_first_hash_dir.deleteFile(tree_tmp_file_name);
+            try tree_hash_prefix_dir.deleteFile(tree_tmp_file_name);
 
             // rename the file
-            try std.fs.rename(tree_first_hash_dir, tree_comp_tmp_file_name, tree_first_hash_dir, tree_sha1_hex[2..]);
+            try std.fs.rename(tree_hash_prefix_dir, tree_comp_tmp_file_name, tree_hash_prefix_dir, tree_sha1_hex[2..]);
 
             // if this is the root of the repo, make the commit object too
             if (std.mem.eql(u8, path, ".")) {
                 // read HEAD
-                var head_file_buffer = [_]u8{0} ** 1024; // FIXME: this is arbitrary...
+                var head_file_buffer = [_]u8{0} ** MAX_FILE_READ_SIZE;
                 var head_file_size: usize = 0;
                 {
                     const head_file_or_err = git_dir.openFile("HEAD", .{ .mode = .read_only });
@@ -227,14 +229,14 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
                 const commit_sha1_hex = try std.fmt.bufPrint(&commit_sha1_hex_buffer, "{}", .{std.fmt.fmtSliceHexLower(&commit_sha1_bytes)});
 
                 // make the two char dir
-                var commit_first_hash_dir = try objects_dir.makeOpenPath(commit_sha1_hex[0..2], .{});
-                defer commit_first_hash_dir.close();
+                var commit_hash_prefix_dir = try objects_dir.makeOpenPath(commit_sha1_hex[0..2], .{});
+                defer commit_hash_prefix_dir.close();
 
                 // open temp file
                 var commit_rand_chars = [_]u8{0} ** 6;
                 try fillWithRandChars(&commit_rand_chars);
                 const commit_tmp_file_name = "tmp_obj_" ++ commit_rand_chars;
-                const commit_tmp_file = try commit_first_hash_dir.createFile(commit_tmp_file_name, .{ .read = true });
+                const commit_tmp_file = try commit_hash_prefix_dir.createFile(commit_tmp_file_name, .{ .read = true });
                 defer commit_tmp_file.close();
 
                 // write to the temp file
@@ -244,17 +246,17 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
                 var commit_comp_rand_chars = [_]u8{0} ** 6;
                 try fillWithRandChars(&commit_comp_rand_chars);
                 const commit_comp_tmp_file_name = "tmp_obj_" ++ commit_comp_rand_chars;
-                const commit_comp_tmp_file = try commit_first_hash_dir.createFile(commit_comp_tmp_file_name, .{});
+                const commit_comp_tmp_file = try commit_hash_prefix_dir.createFile(commit_comp_tmp_file_name, .{});
                 defer commit_comp_tmp_file.close();
 
                 // compress the file
                 try compress.compress(commit_tmp_file, commit_comp_tmp_file, allocator);
 
                 // delete first temp file
-                try commit_first_hash_dir.deleteFile(commit_tmp_file_name);
+                try commit_hash_prefix_dir.deleteFile(commit_tmp_file_name);
 
                 // rename the file
-                try std.fs.rename(commit_first_hash_dir, commit_comp_tmp_file_name, commit_first_hash_dir, commit_sha1_hex[2..]);
+                try std.fs.rename(commit_hash_prefix_dir, commit_comp_tmp_file_name, commit_hash_prefix_dir, commit_sha1_hex[2..]);
 
                 // write commit id to HEAD
                 // first write to a lock file and then rename it to HEAD for safety
