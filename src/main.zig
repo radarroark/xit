@@ -8,6 +8,7 @@
 //!  Let this be our first!" -- Lunar: Silver Star Story
 
 const std = @import("std");
+const builtin = @import("builtin");
 const process = std.process;
 const hash = @import("./hash.zig");
 const compress = @import("./compress.zig");
@@ -140,8 +141,15 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
             // rename the file
             try std.fs.rename(hash_prefix_dir, tmp_file_name, hash_prefix_dir, rest_of_hash);
 
+            // get the file's mode
+            const is_executable = switch (builtin.os.tag) {
+                .windows => false,
+                else => meta.permissions().inner.unixHas(std.fs.File.PermissionsUnix.Class.user, .execute),
+            };
+            const mode = if (is_executable) "100755" else "100644";
+
             // add the file to entries
-            const entry = try std.fmt.allocPrint(allocator, "100644 {s}\x00{s}", .{ path, &sha1_bytes });
+            const entry = try std.fmt.allocPrint(allocator, "{s} {s}\x00{s}", .{ mode, path, &sha1_bytes });
             try entries.append(entry);
         },
         std.fs.File.Kind.Directory => {
