@@ -1,5 +1,17 @@
 const std = @import("std");
 const main = @import("./main.zig");
+const expect = std.testing.expect;
+const hash = @import("./hash.zig");
+
+fn readContents(dir: std.fs.Dir, path: []const u8, out: *[main.MAX_FILE_READ_SIZE]u8) !usize {
+    var file_size: usize = 0;
+    {
+        const file = try dir.openFile(path, .{ .mode = .read_only });
+        defer file.close();
+        file_size = try file.pread(out, 0);
+    }
+    return file_size;
+}
 
 test "init and commit" {
     const temp_dir_name = "temp-test-init-and-commit";
@@ -51,6 +63,22 @@ test "init and commit" {
     try args.append("commit");
     try main.zitMain(&args, allocator);
 
+    {
+        // get HEAD contents
+        var head_file_buffer = [_]u8{0} ** main.MAX_FILE_READ_SIZE;
+        const head_file_size = try readContents(git_dir, "HEAD", &head_file_buffer);
+        try expect(head_file_size == hash.SHA1_HEX_LEN);
+        const head_file_slice = head_file_buffer[0..head_file_size];
+
+        // check that the commit object was created
+        var objects_dir = try git_dir.openDir("objects", .{});
+        defer objects_dir.close();
+        var hash_prefix_dir = try objects_dir.openDir(head_file_slice[0..2], .{});
+        defer hash_prefix_dir.close();
+        var hash_suffix_file = try hash_prefix_dir.openFile(head_file_slice[2..], .{});
+        defer hash_suffix_file.close();
+    }
+
     // change the first file
     try hello_txt.pwriteAll("goodbye, world!", 0);
 
@@ -58,6 +86,22 @@ test "init and commit" {
     args.clearAndFree();
     try args.append("commit");
     try main.zitMain(&args, allocator);
+
+    {
+        // get HEAD contents
+        var head_file_buffer = [_]u8{0} ** main.MAX_FILE_READ_SIZE;
+        const head_file_size = try readContents(git_dir, "HEAD", &head_file_buffer);
+        try expect(head_file_size == hash.SHA1_HEX_LEN);
+        const head_file_slice = head_file_buffer[0..head_file_size];
+
+        // check that the commit object was created
+        var objects_dir = try git_dir.openDir("objects", .{});
+        defer objects_dir.close();
+        var hash_prefix_dir = try objects_dir.openDir(head_file_slice[0..2], .{});
+        defer hash_prefix_dir.close();
+        var hash_suffix_file = try hash_prefix_dir.openFile(head_file_slice[2..], .{});
+        defer hash_suffix_file.close();
+    }
 
     // reset the cwd
     try cwd.setAsCwd();
