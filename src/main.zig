@@ -90,7 +90,7 @@ pub const MAX_FILE_READ_SIZE: comptime_int = 1000; // FIXME: this is arbitrary..
 // writes the file at the given path into the .git dir.
 // this will need to go somewhere else eventually, just
 // keeping it here until i figure out how to organize stuff.
-fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, entries: *std.ArrayList([]const u8)) !void {
+fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, entries: ?*std.ArrayList([]const u8)) !void {
     // open the internal dirs
     var git_dir = try cwd.openDir(".git", .{});
     defer git_dir.close();
@@ -150,11 +150,35 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
 
             // add the file to entries
             const entry = try std.fmt.allocPrint(allocator, "{s} {s}\x00{s}", .{ mode, path, &sha1_bytes });
-            try entries.append(entry);
+            try entries.?.append(entry);
         },
         std.fs.File.Kind.Directory => {
+            // make list to store entries
+            var subentries = std.ArrayList([]const u8).init(allocator);
+            defer {
+                for (subentries.items) |entry| {
+                    allocator.free(entry);
+                }
+                subentries.deinit();
+            }
+
+            // iterate recursively
+            var subdir = try cwd.openIterableDir(path, .{});
+            defer subdir.close();
+            var iter = subdir.iterate();
+            while (try iter.next()) |entry| {
+                // don't traverse the .git dir
+                if (std.mem.eql(u8, entry.name, ".git")) {
+                    continue;
+                }
+
+                const subpath = try std.fs.path.join(allocator, &[_][]const u8{ path, entry.name });
+                defer allocator.free(subpath);
+                try writeObject(cwd, subpath, allocator, &subentries);
+            }
+
             // create tree contents
-            const tree_contents = try std.mem.join(allocator, "", entries.items);
+            const tree_contents = try std.mem.join(allocator, "", subentries.items);
             defer allocator.free(tree_contents);
 
             // create tree
@@ -274,6 +298,10 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
                     try head_file.pwriteAll(commit_sha1_hex, 0);
                 }
                 try git_dir.rename("HEAD.lock", "HEAD");
+            } else {
+                // add the dir to entries
+                const entry = try std.fmt.allocPrint(allocator, "40000 {s}\x00{s}", .{ path, &tree_sha1_bytes });
+                try entries.?.append(entry);
             }
         },
         else => return,
@@ -339,31 +367,8 @@ pub fn zitMain(args: *std.ArrayList([]const u8), allocator: std.mem.Allocator) !
             var cwd = try std.fs.openDirAbsolute(cwd_path, .{});
             defer cwd.close();
 
-            // make list to store entries
-            var entries = std.ArrayList([]const u8).init(allocator);
-            defer {
-                for (entries.items) |entry| {
-                    allocator.free(entry);
-                }
-                entries.deinit();
-            }
-
-            // get an iterator for the files in the cwd
-            var root_dir = try cwd.makeOpenPathIterable(".", .{});
-            defer root_dir.close();
-            var iter = root_dir.iterate();
-
-            // iterate over each file (not recursive...to do that, use walk instead of iterate)
-            while (try iter.next()) |entry| {
-                // skip things
-                if (std.mem.eql(u8, entry.name, ".git")) {
-                    continue;
-                }
-                // write the object to .git/objects
-                try writeObject(cwd, entry.name, allocator, &entries);
-            }
-
-            try writeObject(cwd, ".", allocator, &entries);
+            // write commit object
+            try writeObject(cwd, ".", allocator, null);
         },
     }
 }

@@ -82,6 +82,17 @@ test "init and commit" {
     // change the first file
     try hello_txt.pwriteAll("goodbye, world!", 0);
 
+    // make a few dirs
+    var src_dir = try repo_dir.makeOpenPath("src", .{});
+    defer src_dir.close();
+    var src_zig_dir = try src_dir.makeOpenPath("zig", .{});
+    defer src_zig_dir.close();
+
+    // make a file in the dir
+    var main_zig = try src_zig_dir.createFile("main.zig", .{});
+    defer main_zig.close();
+    try main_zig.pwriteAll("pub fn main() !void {}", 0);
+
     // make another commit
     args.clearAndFree();
     try args.append("commit");
