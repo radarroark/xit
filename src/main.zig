@@ -45,24 +45,84 @@ const Command = union(CommandKind) {
     init: struct {
         dir: []const u8,
     },
-    commit,
+    commit: struct {
+        message: ?[]const u8,
+    },
+};
+
+const CommandError = error{
+    MessageMissing,
 };
 
 /// returns the data from the process args in a nicer format.
-/// i'm trying not to handle errors here. but maybe i will
-/// need to eventually. we'll see.
-fn parseArgs(args: *std.ArrayList([]const u8)) Command {
+fn parseArgs(args: *std.ArrayList([]const u8), allocator: std.mem.Allocator) !Command {
     if (args.items.len >= 1) {
+        // put args into data structures for easy access
+        var pos_args = std.ArrayList([]const u8).init(allocator);
+        defer pos_args.deinit();
+        var map_args = std.StringArrayHashMap(?[]const u8).init(allocator);
+        defer map_args.deinit();
+        for (args.items[1..]) |arg| {
+            if (arg.len == 0) {
+                continue;
+            } else if (arg.len > 1 and arg[0] == '-') {
+                try map_args.put(arg, null);
+            } else {
+                const keys = map_args.keys();
+                if (keys.len > 0) {
+                    const last_key = keys[keys.len - 1];
+                    const last_val = map_args.get(last_key);
+                    // if there isn't a spot for this arg in the map,
+                    // it is a positional arg
+                    if (last_val == null or last_val.? != null) {
+                        try pos_args.append(arg);
+                    }
+                    // otherwise put it in the map
+                    else if (last_val.? == null) {
+                        try map_args.put(last_key, arg);
+                    }
+                }
+            }
+        }
+        // branch on the first arg
         if (std.mem.eql(u8, args.items[0], "init")) {
             return Command{ .init = .{ .dir = if (args.items.len > 1) args.items[1] else "." } };
         } else if (std.mem.eql(u8, args.items[0], "commit")) {
-            return Command{ .commit = {} };
+            // if a message is included, it must have a non-null value
+            const message_maybe = map_args.get("-m");
+            const message = if (message_maybe == null) null else (message_maybe.? orelse return CommandError.MessageMissing);
+            return Command{ .commit = .{ .message = message } };
         } else {
             return Command{ .invalid = .{ .name = args.items[0] } };
         }
     }
 
     return Command{ .usage = {} };
+}
+
+test "parseArgs" {
+    const allocator = std.testing.allocator;
+    var args = std.ArrayList([]const u8).init(allocator);
+    defer args.deinit();
+
+    try args.append("commit");
+    try args.append("-m");
+    try std.testing.expect(CommandError.MessageMissing == parseArgs(&args, allocator));
+
+    args.clearAndFree();
+    try args.append("commit");
+    const cmd_without_msg = try parseArgs(&args, allocator);
+    try std.testing.expect(cmd_without_msg == .commit);
+    try std.testing.expect(null == cmd_without_msg.commit.message);
+
+    args.clearAndFree();
+    try args.append("commit");
+    try args.append("-m");
+    try args.append("let there be light");
+    const cmd_with_msg = try parseArgs(&args, allocator);
+    try std.testing.expect(cmd_with_msg == .commit);
+    try std.testing.expect(null != cmd_with_msg.commit.message);
+    try std.testing.expect(std.mem.eql(u8, "let there be light", cmd_with_msg.commit.message.?));
 }
 
 // returns a single random character. just lower case for now.
@@ -90,7 +150,7 @@ pub const MAX_FILE_READ_SIZE: comptime_int = 1000; // FIXME: this is arbitrary..
 // writes the file at the given path into the .git dir.
 // this will need to go somewhere else eventually, just
 // keeping it here until i figure out how to organize stuff.
-fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, entries: ?*std.ArrayList([]const u8)) !void {
+fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, entries: ?*std.ArrayList([]const u8), cmd: Command) !void {
     // open the internal dirs
     var git_dir = try cwd.openDir(".git", .{});
     defer git_dir.close();
@@ -174,7 +234,7 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
 
                 const subpath = try std.fs.path.join(allocator, &[_][]const u8{ path, entry.name });
                 defer allocator.free(subpath);
-                try writeObject(cwd, subpath, allocator, &subentries);
+                try writeObject(cwd, subpath, allocator, &subentries, cmd);
             }
 
             // create tree contents
@@ -239,7 +299,7 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
 
                 // metadata
                 const author = "radar <radar@foo.com> 1512325222 +0000";
-                const message = "let there be light";
+                const message = cmd.commit.message orelse "";
                 const parent = if (head_file_size > 0)
                     try std.fmt.allocPrint(allocator, "parent {s}\n", .{head_file_slice})
                 else
@@ -314,7 +374,7 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
 /// have it behave just like the standalone git client than this is
 /// where it's at, homie.
 pub fn zitMain(args: *std.ArrayList([]const u8), allocator: std.mem.Allocator) !void {
-    const cmd = parseArgs(args);
+    const cmd = try parseArgs(args, allocator);
 
     const stdout = std.io.getStdOut().writer();
     const stderr = std.io.getStdErr().writer();
@@ -368,7 +428,7 @@ pub fn zitMain(args: *std.ArrayList([]const u8), allocator: std.mem.Allocator) !
             defer cwd.close();
 
             // write commit object
-            try writeObject(cwd, ".", allocator, null);
+            try writeObject(cwd, ".", allocator, null, cmd);
         },
     }
 }

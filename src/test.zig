@@ -61,6 +61,8 @@ test "init and commit" {
     // make a commit
     args.clearAndFree();
     try args.append("commit");
+    try args.append("-m");
+    try args.append("first commit");
     try main.zitMain(&args, allocator);
 
     {
@@ -96,6 +98,8 @@ test "init and commit" {
     // make another commit
     args.clearAndFree();
     try args.append("commit");
+    try args.append("-m");
+    try args.append("second commit");
     try main.zitMain(&args, allocator);
 
     {
