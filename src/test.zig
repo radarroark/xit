@@ -35,6 +35,7 @@ test "init and commit" {
     defer temp_dir.close();
 
     // init repo
+    args.clearAndFree();
     try args.append("init");
     try args.append(temp_dir_name ++ "/repo");
     try main.zitMain(&args, allocator);
@@ -52,6 +53,12 @@ test "init and commit" {
     var hello_txt = try repo_dir.createFile("hello.txt", .{});
     defer hello_txt.close();
     try hello_txt.pwriteAll("hello, world!", 0);
+
+    // add the file
+    args.clearAndFree();
+    try args.append("add");
+    try args.append("hello.txt");
+    try main.zitMain(&args, allocator);
 
     // make another file
     var readme = try repo_dir.createFile("README", .{});

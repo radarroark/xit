@@ -34,6 +34,7 @@ const CommandKind = enum {
     invalid,
     usage,
     init,
+    add,
     commit,
 };
 
@@ -45,13 +46,17 @@ const Command = union(CommandKind) {
     init: struct {
         dir: []const u8,
     },
+    add: struct {
+        paths: std.ArrayList([]const u8),
+    },
     commit: struct {
         message: ?[]const u8,
     },
 };
 
 const CommandError = error{
-    MessageMissing,
+    AddPathsMissing,
+    CommitMessageMissing,
 };
 
 /// returns the data from the process args in a nicer format.
@@ -86,16 +91,23 @@ fn parseArgs(args: *std.ArrayList([]const u8), allocator: std.mem.Allocator) !Co
                     else if (last_val.? == null) {
                         try map_args.put(last_key, arg);
                     }
+                } else {
+                    try pos_args.append(arg);
                 }
             }
         }
         // branch on the first arg
         if (std.mem.eql(u8, args.items[0], "init")) {
             return Command{ .init = .{ .dir = if (args.items.len > 1) args.items[1] else "." } };
+        } else if (std.mem.eql(u8, args.items[0], "add")) {
+            if (pos_args.items.len == 0) {
+                return CommandError.AddPathsMissing;
+            }
+            return Command{ .add = .{ .paths = try pos_args.clone() } };
         } else if (std.mem.eql(u8, args.items[0], "commit")) {
             // if a message is included, it must have a non-null value
             const message_maybe = map_args.get("-m");
-            const message = if (message_maybe == null) null else (message_maybe.? orelse return CommandError.MessageMissing);
+            const message = if (message_maybe == null) null else (message_maybe.? orelse return CommandError.CommitMessageMissing);
             return Command{ .commit = .{ .message = message } };
         } else {
             return Command{ .invalid = .{ .name = args.items[0] } };
@@ -110,24 +122,36 @@ test "parseArgs" {
     var args = std.ArrayList([]const u8).init(allocator);
     defer args.deinit();
 
-    try args.append("commit");
-    try args.append("-m");
-    try std.testing.expect(CommandError.MessageMissing == parseArgs(&args, allocator));
+    args.clearAndFree();
+    try args.append("add");
+    try std.testing.expect(CommandError.AddPathsMissing == parseArgs(&args, allocator));
+
+    args.clearAndFree();
+    try args.append("add");
+    try args.append("file.txt");
+    const add_cmd = try parseArgs(&args, allocator);
+    try std.testing.expect(add_cmd == .add);
+    defer add_cmd.add.paths.deinit();
 
     args.clearAndFree();
     try args.append("commit");
-    const cmd_without_msg = try parseArgs(&args, allocator);
-    try std.testing.expect(cmd_without_msg == .commit);
-    try std.testing.expect(null == cmd_without_msg.commit.message);
+    try args.append("-m");
+    try std.testing.expect(CommandError.CommitMessageMissing == parseArgs(&args, allocator));
+
+    args.clearAndFree();
+    try args.append("commit");
+    const commit_cmd_without_msg = try parseArgs(&args, allocator);
+    try std.testing.expect(commit_cmd_without_msg == .commit);
+    try std.testing.expect(null == commit_cmd_without_msg.commit.message);
 
     args.clearAndFree();
     try args.append("commit");
     try args.append("-m");
     try args.append("let there be light");
-    const cmd_with_msg = try parseArgs(&args, allocator);
-    try std.testing.expect(cmd_with_msg == .commit);
-    try std.testing.expect(null != cmd_with_msg.commit.message);
-    try std.testing.expect(std.mem.eql(u8, "let there be light", cmd_with_msg.commit.message.?));
+    const commit_cmd_with_msg = try parseArgs(&args, allocator);
+    try std.testing.expect(commit_cmd_with_msg == .commit);
+    try std.testing.expect(null != commit_cmd_with_msg.commit.message);
+    try std.testing.expect(std.mem.eql(u8, "let there be light", commit_cmd_with_msg.commit.message.?));
 }
 
 /// returns a single random character. just lower case for now.
@@ -246,7 +270,7 @@ pub const MAX_FILE_READ_SIZE: comptime_int = 1000; // FIXME: this is arbitrary..
 /// will have the oid when it's done. on windows files are
 /// never marked as executable because apparently i can't
 /// even check if they are...maybe i'll figure that out later.
-fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, entries_maybe: ?*std.ArrayList([]const u8), sha1_hex_buffer: *[hash.SHA1_HEX_LEN]u8) !void {
+fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, entries_maybe: ?*std.ArrayList([]const u8), sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8) !void {
     // open the internal dirs
     var git_dir = try cwd.openDir(".git", .{});
     defer git_dir.close();
@@ -264,9 +288,9 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
     switch (meta.kind()) {
         std.fs.File.Kind.File => {
             // calc the sha1 of its contents
-            var sha1_bytes = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-            try hash.sha1_file(in, &sha1_bytes);
-            const sha1_hex = try std.fmt.bufPrint(sha1_hex_buffer, "{}", .{std.fmt.fmtSliceHexLower(&sha1_bytes)});
+            try hash.sha1_file(in, sha1_bytes_buffer);
+            var sha1_hex_buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
+            const sha1_hex = try std.fmt.bufPrint(&sha1_hex_buffer, "{}", .{std.fmt.fmtSliceHexLower(sha1_bytes_buffer)});
 
             // make the two char dir
             var hash_prefix_dir = try objects_dir.makeOpenPath(sha1_hex[0..2], .{});
@@ -287,14 +311,38 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
             var rand_chars = [_]u8{0} ** 6;
             try fillWithRandChars(&rand_chars);
             const tmp_file_name = "tmp_obj_" ++ rand_chars;
-            const tmp_file = try hash_prefix_dir.createFile(tmp_file_name, .{});
+            const tmp_file = try hash_prefix_dir.createFile(tmp_file_name, .{ .read = true });
             defer tmp_file.close();
 
-            // compress the file
-            try compress.compress(in, tmp_file, allocator);
+            // create blob header
+            const file_size = meta.size();
+            const blob = try std.fmt.allocPrint(allocator, "blob {}\x00", .{file_size});
+            defer allocator.free(blob);
+            try tmp_file.writeAll(blob);
 
-            // rename the file
-            try std.fs.rename(hash_prefix_dir, tmp_file_name, hash_prefix_dir, rest_of_hash);
+            // copy file into temp file
+            var read_buffer = [_]u8{0} ** MAX_FILE_READ_SIZE;
+            var offset: u64 = 0;
+            while (true) {
+                const size = try in.pread(&read_buffer, offset);
+                offset += size;
+                if (size == 0) {
+                    break;
+                }
+                try tmp_file.writeAll(read_buffer[0..size]);
+            }
+
+            // compress the file
+            const compressed_tmp_file_name = tmp_file_name ++ ".compressed";
+            const compressed_tmp_file = try hash_prefix_dir.createFile(compressed_tmp_file_name, .{});
+            defer compressed_tmp_file.close();
+            try compress.compress(tmp_file, compressed_tmp_file, allocator);
+
+            // delete uncompressed temp file
+            try hash_prefix_dir.deleteFile(tmp_file_name);
+
+            // rename the compressed temp file
+            try std.fs.rename(hash_prefix_dir, compressed_tmp_file_name, hash_prefix_dir, rest_of_hash);
 
             // get the file's mode
             const is_executable = switch (builtin.os.tag) {
@@ -305,7 +353,7 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
 
             // add to entries if it's not null
             if (entries_maybe) |entries| {
-                const entry = try std.fmt.allocPrint(allocator, "{s} {s}\x00{s}", .{ mode, path, &sha1_bytes });
+                const entry = try std.fmt.allocPrint(allocator, "{s} {s}\x00{s}", .{ mode, path, sha1_bytes_buffer });
                 try entries.append(entry);
             }
         },
@@ -331,8 +379,8 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
 
                 const subpath = try std.fs.path.join(allocator, &[_][]const u8{ path, entry.name });
                 defer allocator.free(subpath);
-                var sub_sha1_hex_buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
-                try writeObject(cwd, subpath, allocator, &subentries, &sub_sha1_hex_buffer);
+                var sub_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+                try writeObject(cwd, subpath, allocator, &subentries, &sub_sha1_bytes_buffer);
             }
 
             // create tree contents
@@ -344,9 +392,9 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
             defer allocator.free(tree);
 
             // calc the sha1 of its contents
-            var tree_sha1_bytes = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-            try hash.sha1_buffer(tree, &tree_sha1_bytes);
-            const tree_sha1_hex = try std.fmt.bufPrint(sha1_hex_buffer, "{}", .{std.fmt.fmtSliceHexLower(&tree_sha1_bytes)});
+            try hash.sha1_buffer(tree, sha1_bytes_buffer);
+            var tree_sha1_hex_buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
+            const tree_sha1_hex = try std.fmt.bufPrint(&tree_sha1_hex_buffer, "{}", .{std.fmt.fmtSliceHexLower(sha1_bytes_buffer)});
 
             // make the two char dir
             var tree_hash_prefix_dir = try objects_dir.makeOpenPath(tree_sha1_hex[0..2], .{});
@@ -380,12 +428,97 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
 
             // add to entries if it's not null
             if (entries_maybe) |entries| {
-                const entry = try std.fmt.allocPrint(allocator, "40000 {s}\x00{s}", .{ path, &tree_sha1_bytes });
+                const entry = try std.fmt.allocPrint(allocator, "40000 {s}\x00{s}", .{ path, sha1_bytes_buffer });
                 try entries.append(entry);
             }
         },
         else => return,
     }
+}
+
+/// writes the index file with the supplied paths.
+fn writeIndex(cwd: std.fs.Dir, paths: std.ArrayList([]const u8), allocator: std.mem.Allocator) !void {
+    // open git dir
+    var git_dir = try cwd.openDir(".git", .{});
+    defer git_dir.close();
+
+    // open index
+    // first write to a lock file and then rename it to index for safety
+    const index_file = try git_dir.createFile("index.lock", .{ .exclusive = true, .lock = .Exclusive });
+    defer index_file.close();
+
+    // create header
+    const version: u32 = 2;
+    const count: u32 = @intCast(u32, paths.items.len);
+    const header = try std.fmt.allocPrint(allocator, "DIRC{s}{s}", .{
+        std.mem.asBytes(&std.mem.nativeToBig(u32, version)),
+        std.mem.asBytes(&std.mem.nativeToBig(u32, count)),
+    });
+    defer allocator.free(header);
+
+    var h = std.crypto.hash.Sha1.init(.{});
+
+    try index_file.writeAll(header);
+    h.update(header);
+    for (paths.items) |path| {
+        var sha1_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+        try writeObject(cwd, path, allocator, null, &sha1_buffer);
+        const file = try cwd.openFile(path, .{ .mode = .read_only });
+        defer file.close();
+        const meta = try file.metadata();
+        const ctime: i128 = meta.created() orelse 0;
+        const ctime_secs: i32 = @intCast(i32, @divTrunc(ctime, std.time.ns_per_s));
+        const ctime_nsecs: i32 = @intCast(i32, @mod(ctime, std.time.ns_per_s));
+        const mtime: i128 = meta.modified();
+        const mtime_secs: i32 = @intCast(i32, @divTrunc(mtime, std.time.ns_per_s));
+        const mtime_nsecs: i32 = @intCast(i32, @mod(mtime, std.time.ns_per_s));
+        const dev: u32 = 0;
+        const ino: u32 = 0;
+        const is_executable = switch (builtin.os.tag) {
+            .windows => false,
+            else => meta.permissions().inner.unixHas(std.fs.File.PermissionsUnix.Class.user, .execute),
+        };
+        const mode: u32 = if (is_executable) 100755 else 100644;
+        const uid: u32 = 0;
+        const gid: u32 = 0;
+        const file_size: u32 = @intCast(u32, meta.size());
+        const path_size: u16 = @intCast(u16, path.len);
+        const entry = try std.fmt.allocPrint(allocator, "{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}", .{
+            std.mem.asBytes(&std.mem.nativeToBig(i32, ctime_secs)),
+            std.mem.asBytes(&std.mem.nativeToBig(i32, ctime_nsecs)),
+            std.mem.asBytes(&std.mem.nativeToBig(i32, mtime_secs)),
+            std.mem.asBytes(&std.mem.nativeToBig(i32, mtime_nsecs)),
+            std.mem.asBytes(&std.mem.nativeToBig(u32, dev)),
+            std.mem.asBytes(&std.mem.nativeToBig(u32, ino)),
+            std.mem.asBytes(&std.mem.nativeToBig(u32, mode)),
+            std.mem.asBytes(&std.mem.nativeToBig(u32, uid)),
+            std.mem.asBytes(&std.mem.nativeToBig(u32, gid)),
+            std.mem.asBytes(&std.mem.nativeToBig(u32, file_size)),
+            sha1_buffer,
+            std.mem.asBytes(&std.mem.nativeToBig(u16, path_size)),
+            path,
+        });
+        defer allocator.free(entry);
+        try index_file.writeAll(entry);
+        h.update(entry);
+        var null_count = entry.len % 8;
+        if (null_count == 0) {
+            null_count = 8;
+        }
+        while (null_count > 0) {
+            try index_file.writeAll("\x00");
+            h.update("\x00");
+            null_count -= 1;
+        }
+    }
+
+    // write the checksum
+    var overall_sha1_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+    h.final(&overall_sha1_buffer);
+    try index_file.writeAll(&overall_sha1_buffer);
+
+    // rename lock file to index
+    try git_dir.rename("index.lock", "index");
 }
 
 /// this is meant to be the main entry point if you wanted to use zit
@@ -398,6 +531,12 @@ pub fn zitMain(args: *std.ArrayList([]const u8), allocator: std.mem.Allocator) !
 
     const stdout = std.io.getStdOut().writer();
     const stderr = std.io.getStdErr().writer();
+
+    // get the cwd path
+    var cwd_path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
+    const cwd_path = try std.fs.cwd().realpath(".", &cwd_path_buffer);
+    var cwd = try std.fs.openDirAbsolute(cwd_path, .{});
+    defer cwd.close();
 
     switch (cmd) {
         Command.invalid => {
@@ -440,17 +579,17 @@ pub fn zitMain(args: *std.ArrayList([]const u8), allocator: std.mem.Allocator) !
             try git_dir.makeDir("objects");
             try git_dir.makeDir("refs");
         },
+        Command.add => {
+            defer cmd.add.paths.deinit();
+            try writeIndex(cwd, cmd.add.paths, allocator);
+        },
         Command.commit => {
-            // get the cwd path
-            var cwd_path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
-            const cwd_path = try std.fs.cwd().realpath(".", &cwd_path_buffer);
-            var cwd = try std.fs.openDirAbsolute(cwd_path, .{});
-            defer cwd.close();
-
             // write commit object
+            var sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+            try writeObject(cwd, ".", allocator, null, &sha1_bytes_buffer);
             var sha1_hex_buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
-            try writeObject(cwd, ".", allocator, null, &sha1_hex_buffer);
-            try writeCommit(cwd, allocator, cmd, &sha1_hex_buffer);
+            const sha1_hex = try std.fmt.bufPrint(&sha1_hex_buffer, "{}", .{std.fmt.fmtSliceHexLower(&sha1_bytes_buffer)});
+            try writeCommit(cwd, allocator, cmd, sha1_hex);
         },
     }
 }
