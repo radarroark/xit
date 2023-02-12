@@ -436,6 +436,79 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
     }
 }
 
+fn writeFileToIndex(cwd: std.fs.Dir, path: []const u8, index_file: std.fs.File, h: *std.crypto.hash.Sha1, allocator: std.mem.Allocator, file_count: *u32) !void {
+    const file = try cwd.openFile(path, .{ .mode = .read_only });
+    defer file.close();
+    const meta = try file.metadata();
+    switch (meta.kind()) {
+        std.fs.File.Kind.File => {
+            var sha1_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+            try writeObject(cwd, path, allocator, null, &sha1_buffer);
+            const ctime: i128 = meta.created() orelse 0;
+            const ctime_secs: i32 = @intCast(i32, @divTrunc(ctime, std.time.ns_per_s));
+            const ctime_nsecs: i32 = @intCast(i32, @mod(ctime, std.time.ns_per_s));
+            const mtime: i128 = meta.modified();
+            const mtime_secs: i32 = @intCast(i32, @divTrunc(mtime, std.time.ns_per_s));
+            const mtime_nsecs: i32 = @intCast(i32, @mod(mtime, std.time.ns_per_s));
+            const dev: u32 = 0;
+            const ino: u32 = 0;
+            const is_executable = switch (builtin.os.tag) {
+                .windows => false,
+                else => meta.permissions().inner.unixHas(std.fs.File.PermissionsUnix.Class.user, .execute),
+            };
+            const mode: u32 = if (is_executable) 100755 else 100644;
+            const uid: u32 = 0;
+            const gid: u32 = 0;
+            const file_size: u32 = @intCast(u32, meta.size());
+            const path_size: u16 = @intCast(u16, path.len);
+            const entry = try std.fmt.allocPrint(allocator, "{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}", .{
+                std.mem.asBytes(&std.mem.nativeToBig(i32, ctime_secs)),
+                std.mem.asBytes(&std.mem.nativeToBig(i32, ctime_nsecs)),
+                std.mem.asBytes(&std.mem.nativeToBig(i32, mtime_secs)),
+                std.mem.asBytes(&std.mem.nativeToBig(i32, mtime_nsecs)),
+                std.mem.asBytes(&std.mem.nativeToBig(u32, dev)),
+                std.mem.asBytes(&std.mem.nativeToBig(u32, ino)),
+                std.mem.asBytes(&std.mem.nativeToBig(u32, mode)),
+                std.mem.asBytes(&std.mem.nativeToBig(u32, uid)),
+                std.mem.asBytes(&std.mem.nativeToBig(u32, gid)),
+                std.mem.asBytes(&std.mem.nativeToBig(u32, file_size)),
+                sha1_buffer,
+                std.mem.asBytes(&std.mem.nativeToBig(u16, path_size)),
+                path,
+            });
+            defer allocator.free(entry);
+            try index_file.writeAll(entry);
+            h.update(entry);
+            var null_count = entry.len % 8;
+            if (null_count == 0) {
+                null_count = 8;
+            }
+            while (null_count > 0) {
+                try index_file.writeAll("\x00");
+                h.update("\x00");
+                null_count -= 1;
+            }
+            file_count.* += 1;
+        },
+        std.fs.File.Kind.Directory => {
+            var dir = try cwd.openIterableDir(path, .{});
+            defer dir.close();
+            var iter = dir.iterate();
+            while (try iter.next()) |entry| {
+                // don't traverse the .git dir
+                if (std.mem.eql(u8, entry.name, ".git")) {
+                    continue;
+                }
+
+                const subpath = try std.fs.path.join(allocator, &[_][]const u8{ path, entry.name });
+                defer allocator.free(subpath);
+                try writeFileToIndex(cwd, subpath, index_file, h, allocator, file_count);
+            }
+        },
+        else => return,
+    }
+}
+
 /// writes the index file with the supplied paths.
 fn writeIndex(cwd: std.fs.Dir, paths: std.ArrayList([]const u8), allocator: std.mem.Allocator) !void {
     // open git dir
@@ -449,10 +522,10 @@ fn writeIndex(cwd: std.fs.Dir, paths: std.ArrayList([]const u8), allocator: std.
 
     // create header
     const version: u32 = 2;
-    const count: u32 = @intCast(u32, paths.items.len);
+    var file_count: u32 = 0; // will modify this after
     const header = try std.fmt.allocPrint(allocator, "DIRC{s}{s}", .{
         std.mem.asBytes(&std.mem.nativeToBig(u32, version)),
-        std.mem.asBytes(&std.mem.nativeToBig(u32, count)),
+        std.mem.asBytes(&std.mem.nativeToBig(u32, file_count)),
     });
     defer allocator.free(header);
 
@@ -461,61 +534,16 @@ fn writeIndex(cwd: std.fs.Dir, paths: std.ArrayList([]const u8), allocator: std.
     try index_file.writeAll(header);
     h.update(header);
     for (paths.items) |path| {
-        var sha1_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-        try writeObject(cwd, path, allocator, null, &sha1_buffer);
-        const file = try cwd.openFile(path, .{ .mode = .read_only });
-        defer file.close();
-        const meta = try file.metadata();
-        const ctime: i128 = meta.created() orelse 0;
-        const ctime_secs: i32 = @intCast(i32, @divTrunc(ctime, std.time.ns_per_s));
-        const ctime_nsecs: i32 = @intCast(i32, @mod(ctime, std.time.ns_per_s));
-        const mtime: i128 = meta.modified();
-        const mtime_secs: i32 = @intCast(i32, @divTrunc(mtime, std.time.ns_per_s));
-        const mtime_nsecs: i32 = @intCast(i32, @mod(mtime, std.time.ns_per_s));
-        const dev: u32 = 0;
-        const ino: u32 = 0;
-        const is_executable = switch (builtin.os.tag) {
-            .windows => false,
-            else => meta.permissions().inner.unixHas(std.fs.File.PermissionsUnix.Class.user, .execute),
-        };
-        const mode: u32 = if (is_executable) 100755 else 100644;
-        const uid: u32 = 0;
-        const gid: u32 = 0;
-        const file_size: u32 = @intCast(u32, meta.size());
-        const path_size: u16 = @intCast(u16, path.len);
-        const entry = try std.fmt.allocPrint(allocator, "{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}", .{
-            std.mem.asBytes(&std.mem.nativeToBig(i32, ctime_secs)),
-            std.mem.asBytes(&std.mem.nativeToBig(i32, ctime_nsecs)),
-            std.mem.asBytes(&std.mem.nativeToBig(i32, mtime_secs)),
-            std.mem.asBytes(&std.mem.nativeToBig(i32, mtime_nsecs)),
-            std.mem.asBytes(&std.mem.nativeToBig(u32, dev)),
-            std.mem.asBytes(&std.mem.nativeToBig(u32, ino)),
-            std.mem.asBytes(&std.mem.nativeToBig(u32, mode)),
-            std.mem.asBytes(&std.mem.nativeToBig(u32, uid)),
-            std.mem.asBytes(&std.mem.nativeToBig(u32, gid)),
-            std.mem.asBytes(&std.mem.nativeToBig(u32, file_size)),
-            sha1_buffer,
-            std.mem.asBytes(&std.mem.nativeToBig(u16, path_size)),
-            path,
-        });
-        defer allocator.free(entry);
-        try index_file.writeAll(entry);
-        h.update(entry);
-        var null_count = entry.len % 8;
-        if (null_count == 0) {
-            null_count = 8;
-        }
-        while (null_count > 0) {
-            try index_file.writeAll("\x00");
-            h.update("\x00");
-            null_count -= 1;
-        }
+        try writeFileToIndex(cwd, path, index_file, &h, allocator, &file_count);
     }
 
     // write the checksum
     var overall_sha1_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
     h.final(&overall_sha1_buffer);
     try index_file.writeAll(&overall_sha1_buffer);
+
+    // update file count
+    try index_file.pwriteAll(std.mem.asBytes(&std.mem.nativeToBig(u32, file_count)), 8);
 
     // rename lock file to index
     try git_dir.rename("index.lock", "index");
