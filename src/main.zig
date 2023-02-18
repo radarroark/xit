@@ -534,6 +534,15 @@ fn writeIndex(cwd: std.fs.Dir, paths: std.ArrayList([]const u8), allocator: std.
         try appendFile(cwd, path, allocator, &arena, &files);
     }
 
+    // sort the files
+    const SortCtx = struct {
+        keys: [][]const u8,
+        pub fn lessThan(ctx: @This(), a_index: usize, b_index: usize) bool {
+            return std.mem.lessThan(u8, ctx.keys[a_index], ctx.keys[b_index]);
+        }
+    };
+    files.sort(SortCtx{ .keys = files.keys() });
+
     // write the header
     const version: u32 = 2;
     const file_count: u32 = @truncate(u32, files.count());
