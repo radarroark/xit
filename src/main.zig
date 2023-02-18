@@ -469,7 +469,7 @@ fn appendFile(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, a
             const file_size: u32 = @truncate(u32, meta.size());
             const path_size: u16 = @truncate(u16, path.len);
             var entry = std.ArrayList(u8).init(arena.allocator());
-            try entry.writer().print("{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}", .{
+            try entry.writer().print("{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}\x00", .{
                 std.mem.asBytes(&std.mem.nativeToBig(i32, ctime_secs)),
                 std.mem.asBytes(&std.mem.nativeToBig(i32, ctime_nsecs)),
                 std.mem.asBytes(&std.mem.nativeToBig(i32, mtime_secs)),
@@ -484,13 +484,8 @@ fn appendFile(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, a
                 std.mem.asBytes(&std.mem.nativeToBig(u16, path_size)),
                 path,
             });
-            var null_count = entry.items.len % 8;
-            if (null_count == 0) {
-                null_count = 8;
-            }
-            while (null_count > 0) {
+            while (entry.items.len % 8 != 0) {
                 try entry.writer().print("\x00", .{});
-                null_count -= 1;
             }
             try files.put(path, entry.items);
         },
