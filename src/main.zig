@@ -360,12 +360,11 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
         std.fs.File.Kind.Directory => {
             // make list to store entries
             var subentries = std.ArrayList([]const u8).init(allocator);
-            defer {
-                for (subentries.items) |entry| {
-                    allocator.free(entry);
-                }
-                subentries.deinit();
-            }
+            defer subentries.deinit();
+
+            // make arena so the items added to subentries are cleared
+            var arena = std.heap.ArenaAllocator.init(allocator);
+            defer arena.deinit();
 
             // iterate recursively
             var subdir = try cwd.openIterableDir(path, .{});
@@ -380,7 +379,7 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
                 const subpath = try std.fs.path.join(allocator, &[_][]const u8{ path, entry.name });
                 defer allocator.free(subpath);
                 var sub_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-                try writeObject(cwd, subpath, allocator, &subentries, &sub_sha1_bytes_buffer);
+                try writeObject(cwd, subpath, arena.allocator(), &subentries, &sub_sha1_bytes_buffer);
             }
 
             // create tree contents
@@ -555,7 +554,11 @@ fn writeIndex(cwd: std.fs.Dir, paths: std.ArrayList([]const u8), allocator: std.
 /// have it behave just like the standalone git client than this is
 /// where it's at, homie.
 pub fn zitMain(args: *std.ArrayList([]const u8), allocator: std.mem.Allocator) !void {
-    const cmd = try parseArgs(args, allocator);
+    // make arena for any allocations that need to be made by parseArgs
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    const cmd = try parseArgs(args, arena.allocator());
 
     const stdout = std.io.getStdOut().writer();
     const stderr = std.io.getStdErr().writer();
@@ -608,7 +611,6 @@ pub fn zitMain(args: *std.ArrayList([]const u8), allocator: std.mem.Allocator) !
             try git_dir.makeDir("refs");
         },
         Command.add => {
-            defer cmd.add.paths.deinit();
             try writeIndex(cwd, cmd.add.paths, allocator);
         },
         Command.commit => {
