@@ -65,7 +65,7 @@ const CommandError = error{
 /// i should roll my own and let it evolve along with my needs.
 /// i'm actually pretty happy with this already...it's stupid
 /// but it works, and unlike those libs i understand every line.
-fn parseArgs(args: *std.ArrayList([]const u8), allocator: std.mem.Allocator) !Command {
+fn parseArgs(args: *std.ArrayList([]const u8), allocator: std.mem.Allocator, arena: *std.heap.ArenaAllocator) !Command {
     if (args.items.len >= 1) {
         // put args into data structures for easy access
         var pos_args = std.ArrayList([]const u8).init(allocator);
@@ -103,7 +103,9 @@ fn parseArgs(args: *std.ArrayList([]const u8), allocator: std.mem.Allocator) !Co
             if (pos_args.items.len == 0) {
                 return CommandError.AddPathsMissing;
             }
-            return Command{ .add = .{ .paths = try pos_args.clone() } };
+            var paths = try std.ArrayList([]const u8).initCapacity(arena.allocator(), pos_args.capacity);
+            paths.appendSliceAssumeCapacity(pos_args.items);
+            return Command{ .add = .{ .paths = paths } };
         } else if (std.mem.eql(u8, args.items[0], "commit")) {
             // if a message is included, it must have a non-null value
             const message_maybe = map_args.get("-m");
@@ -122,25 +124,28 @@ test "parseArgs" {
     var args = std.ArrayList([]const u8).init(allocator);
     defer args.deinit();
 
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
     args.clearAndFree();
     try args.append("add");
-    try std.testing.expect(CommandError.AddPathsMissing == parseArgs(&args, allocator));
+    try std.testing.expect(CommandError.AddPathsMissing == parseArgs(&args, allocator, &arena));
 
     args.clearAndFree();
     try args.append("add");
     try args.append("file.txt");
-    const add_cmd = try parseArgs(&args, allocator);
+    const add_cmd = try parseArgs(&args, allocator, &arena);
     try std.testing.expect(add_cmd == .add);
     defer add_cmd.add.paths.deinit();
 
     args.clearAndFree();
     try args.append("commit");
     try args.append("-m");
-    try std.testing.expect(CommandError.CommitMessageMissing == parseArgs(&args, allocator));
+    try std.testing.expect(CommandError.CommitMessageMissing == parseArgs(&args, allocator, &arena));
 
     args.clearAndFree();
     try args.append("commit");
-    const commit_cmd_without_msg = try parseArgs(&args, allocator);
+    const commit_cmd_without_msg = try parseArgs(&args, allocator, &arena);
     try std.testing.expect(commit_cmd_without_msg == .commit);
     try std.testing.expect(null == commit_cmd_without_msg.commit.message);
 
@@ -148,7 +153,7 @@ test "parseArgs" {
     try args.append("commit");
     try args.append("-m");
     try args.append("let there be light");
-    const commit_cmd_with_msg = try parseArgs(&args, allocator);
+    const commit_cmd_with_msg = try parseArgs(&args, allocator, &arena);
     try std.testing.expect(commit_cmd_with_msg == .commit);
     try std.testing.expect(null != commit_cmd_with_msg.commit.message);
     try std.testing.expect(std.mem.eql(u8, "let there be light", commit_cmd_with_msg.commit.message.?));
@@ -362,7 +367,7 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
             var subentries = std.ArrayList([]const u8).init(allocator);
             defer subentries.deinit();
 
-            // make arena so the items added to subentries are cleared
+            // make arena for the entries themselves
             var arena = std.heap.ArenaAllocator.init(allocator);
             defer arena.deinit();
 
@@ -435,7 +440,10 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
     }
 }
 
-fn writeFileToIndex(cwd: std.fs.Dir, path: []const u8, index_file: std.fs.File, h: *std.crypto.hash.Sha1, allocator: std.mem.Allocator, file_count: *u32) !void {
+fn appendFile(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, arena: *std.heap.ArenaAllocator, files: *std.StringArrayHashMap([]const u8)) !void {
+    if (files.contains(path)) {
+        return;
+    }
     const file = try cwd.openFile(path, .{ .mode = .read_only });
     defer file.close();
     const meta = try file.metadata();
@@ -444,11 +452,11 @@ fn writeFileToIndex(cwd: std.fs.Dir, path: []const u8, index_file: std.fs.File, 
             var sha1_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
             try writeObject(cwd, path, allocator, null, &sha1_buffer);
             const ctime: i128 = meta.created() orelse 0;
-            const ctime_secs: i32 = @intCast(i32, @divTrunc(ctime, std.time.ns_per_s));
-            const ctime_nsecs: i32 = @intCast(i32, @mod(ctime, std.time.ns_per_s));
+            const ctime_secs: i32 = @truncate(i32, @divTrunc(ctime, std.time.ns_per_s));
+            const ctime_nsecs: i32 = @truncate(i32, @mod(ctime, std.time.ns_per_s));
             const mtime: i128 = meta.modified();
-            const mtime_secs: i32 = @intCast(i32, @divTrunc(mtime, std.time.ns_per_s));
-            const mtime_nsecs: i32 = @intCast(i32, @mod(mtime, std.time.ns_per_s));
+            const mtime_secs: i32 = @truncate(i32, @divTrunc(mtime, std.time.ns_per_s));
+            const mtime_nsecs: i32 = @truncate(i32, @mod(mtime, std.time.ns_per_s));
             const dev: u32 = 0;
             const ino: u32 = 0;
             const is_executable = switch (builtin.os.tag) {
@@ -458,9 +466,10 @@ fn writeFileToIndex(cwd: std.fs.Dir, path: []const u8, index_file: std.fs.File, 
             const mode: u32 = if (is_executable) 100755 else 100644;
             const uid: u32 = 0;
             const gid: u32 = 0;
-            const file_size: u32 = @intCast(u32, meta.size());
-            const path_size: u16 = @intCast(u16, path.len);
-            const entry = try std.fmt.allocPrint(allocator, "{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}", .{
+            const file_size: u32 = @truncate(u32, meta.size());
+            const path_size: u16 = @truncate(u16, path.len);
+            var entry = std.ArrayList(u8).init(arena.allocator());
+            try entry.writer().print("{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}", .{
                 std.mem.asBytes(&std.mem.nativeToBig(i32, ctime_secs)),
                 std.mem.asBytes(&std.mem.nativeToBig(i32, ctime_nsecs)),
                 std.mem.asBytes(&std.mem.nativeToBig(i32, mtime_secs)),
@@ -475,19 +484,15 @@ fn writeFileToIndex(cwd: std.fs.Dir, path: []const u8, index_file: std.fs.File, 
                 std.mem.asBytes(&std.mem.nativeToBig(u16, path_size)),
                 path,
             });
-            defer allocator.free(entry);
-            try index_file.writeAll(entry);
-            h.update(entry);
-            var null_count = entry.len % 8;
+            var null_count = entry.items.len % 8;
             if (null_count == 0) {
                 null_count = 8;
             }
             while (null_count > 0) {
-                try index_file.writeAll("\x00");
-                h.update("\x00");
+                try entry.writer().print("\x00", .{});
                 null_count -= 1;
             }
-            file_count.* += 1;
+            try files.put(path, entry.items);
         },
         std.fs.File.Kind.Directory => {
             var dir = try cwd.openIterableDir(path, .{});
@@ -501,7 +506,7 @@ fn writeFileToIndex(cwd: std.fs.Dir, path: []const u8, index_file: std.fs.File, 
 
                 const subpath = try std.fs.path.join(allocator, &[_][]const u8{ path, entry.name });
                 defer allocator.free(subpath);
-                try writeFileToIndex(cwd, subpath, index_file, h, allocator, file_count);
+                try appendFile(cwd, subpath, allocator, arena, files);
             }
         },
         else => return,
@@ -519,30 +524,38 @@ fn writeIndex(cwd: std.fs.Dir, paths: std.ArrayList([]const u8), allocator: std.
     const index_file = try git_dir.createFile("index.lock", .{ .exclusive = true, .lock = .Exclusive });
     defer index_file.close();
 
-    // create header
+    // read all the files
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    var files = std.StringArrayHashMap([]const u8).init(arena.allocator());
+    for (paths.items) |path| {
+        try appendFile(cwd, path, allocator, &arena, &files);
+    }
+
+    // write the header
     const version: u32 = 2;
-    var file_count: u32 = 0; // will modify this after
+    const file_count: u32 = @truncate(u32, files.count());
     const header = try std.fmt.allocPrint(allocator, "DIRC{s}{s}", .{
         std.mem.asBytes(&std.mem.nativeToBig(u32, version)),
         std.mem.asBytes(&std.mem.nativeToBig(u32, file_count)),
     });
     defer allocator.free(header);
-
-    var h = std.crypto.hash.Sha1.init(.{});
-
     try index_file.writeAll(header);
-    h.update(header);
-    for (paths.items) |path| {
-        try writeFileToIndex(cwd, path, index_file, &h, allocator, &file_count);
+
+    // write the files
+    for (files.values()) |entry| {
+        try index_file.writeAll(entry);
     }
 
     // write the checksum
+    var h = std.crypto.hash.Sha1.init(.{});
+    h.update(header);
+    for (files.values()) |entry| {
+        h.update(entry);
+    }
     var overall_sha1_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
     h.final(&overall_sha1_buffer);
     try index_file.writeAll(&overall_sha1_buffer);
-
-    // update file count
-    try index_file.pwriteAll(std.mem.asBytes(&std.mem.nativeToBig(u32, file_count)), 8);
 
     // rename lock file to index
     try git_dir.rename("index.lock", "index");
@@ -558,7 +571,7 @@ pub fn zitMain(args: *std.ArrayList([]const u8), allocator: std.mem.Allocator) !
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    const cmd = try parseArgs(args, arena.allocator());
+    const cmd = try parseArgs(args, allocator, &arena);
 
     const stdout = std.io.getStdOut().writer();
     const stderr = std.io.getStdErr().writer();
