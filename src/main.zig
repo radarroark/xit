@@ -504,7 +504,10 @@ fn appendFile(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, a
                     continue;
                 }
 
-                const subpath = try std.fs.path.join(allocator, &[_][]const u8{ path, entry.name });
+                const subpath = if (std.mem.eql(u8, path, "."))
+                    try std.fmt.allocPrint(allocator, "{s}", .{entry.name})
+                else
+                    try std.fs.path.join(allocator, &[_][]const u8{ path, entry.name });
                 defer allocator.free(subpath);
                 try appendFile(cwd, subpath, allocator, arena, files);
             }
