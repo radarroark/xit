@@ -468,6 +468,9 @@ const IndexError = error {
     InvalidNullPadding,
 };
 
+/// if path is a file, adds it as an entry to the index struct.
+/// if path is a dir, adds its children recursively.
+/// ignoring symlinks for now but will add that later.
 fn putEntry(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, arena: *std.heap.ArenaAllocator, index: *Index) !void {
     if (index.entries.contains(path)) {
         return;
@@ -483,6 +486,9 @@ fn putEntry(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, are
                 .windows => false,
                 else => meta.permissions().inner.unixHas(std.fs.File.PermissionsUnix.Class.user, .execute),
             };
+            // is there a better place to write the object than here? probably...
+            var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+            try writeObject(cwd, path, allocator, null, &oid);
             const entry = Index.Entry{
                 .ctime_secs = @truncate(i32, @divTrunc(ctime, std.time.ns_per_s)),
                 .ctime_nsecs = @truncate(i32, @mod(ctime, std.time.ns_per_s)),
@@ -494,7 +500,7 @@ fn putEntry(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, are
                 .uid = 0,
                 .gid = 0,
                 .file_size = @truncate(u32, meta.size()),
-                .oid = [_]u8{0} ** hash.SHA1_BYTES_LEN,
+                .oid = oid,
                 .path_size = @truncate(u16, path.len),
                 .path = path,
             };
@@ -541,12 +547,14 @@ fn readIndex(git_dir: std.fs.Dir, arena: *std.heap.ArenaAllocator) !Index {
         return error.InvalidSignature;
     }
 
+    // ignoring version 3 and 4 for now
     const version = try reader.readIntBig(u32);
     if (version != 2) {
         return error.InvalidVersion;
     }
 
     var entry_count = try reader.readIntBig(u32);
+
     while (entry_count > 0) {
         entry_count -= 1;
         const start_pos = try reader.context.getPos();
@@ -578,6 +586,12 @@ fn readIndex(git_dir: std.fs.Dir, arena: *std.heap.ArenaAllocator) !Index {
         }
         try entries.put(entry.path, entry);
     }
+
+    // TODO: check the checksum
+    // skipping for now because it will probably require changing
+    // how i read the data above. i need access to the raw bytes
+    // (before the big endian and type conversions) to do the hashing.
+    _ = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
 
     return Index{ .version = version, .entries = entries };
 }
@@ -628,8 +642,6 @@ fn writeIndex(cwd: std.fs.Dir, paths: std.ArrayList([]const u8), allocator: std.
 
     // write the entries
     for (index.entries.values()) |entry| {
-        var sha1_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-        try writeObject(cwd, entry.path, allocator, null, &sha1_buffer);
         var entry_buffer = std.ArrayList(u8).init(allocator);
         defer entry_buffer.deinit();
         try entry_buffer.writer().print("{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}\x00", .{
@@ -643,7 +655,7 @@ fn writeIndex(cwd: std.fs.Dir, paths: std.ArrayList([]const u8), allocator: std.
             std.mem.asBytes(&std.mem.nativeToBig(u32, entry.uid)),
             std.mem.asBytes(&std.mem.nativeToBig(u32, entry.gid)),
             std.mem.asBytes(&std.mem.nativeToBig(u32, entry.file_size)),
-            sha1_buffer,
+            entry.oid,
             std.mem.asBytes(&std.mem.nativeToBig(u16, entry.path_size)),
             entry.path,
         });
