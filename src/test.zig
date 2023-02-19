@@ -102,6 +102,12 @@ test "init and commit" {
     defer main_zig.close();
     try main_zig.pwriteAll("pub fn main() !void {}", 0);
 
+    // add the files
+    args.clearAndFree();
+    try args.append("add");
+    try args.append(".");
+    try main.zitMain(&args, allocator);
+
     // make another commit
     args.clearAndFree();
     try args.append("commit");
