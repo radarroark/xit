@@ -442,7 +442,7 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
 
 pub const Index = struct {
     version: u32,
-    entries: *std.StringArrayHashMap(Entry),
+    entries: std.StringArrayHashMap(Entry),
 
     pub const Entry = struct {
         ctime_secs: i32,
@@ -455,12 +455,20 @@ pub const Index = struct {
         uid: u32,
         gid: u32,
         file_size: u32,
+        oid: [hash.SHA1_BYTES_LEN]u8,
         path_size: u16,
         path: []const u8,
     };
 };
 
-fn appendEntry(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, arena: *std.heap.ArenaAllocator, index: *Index) !void {
+const IndexError = error {
+    InvalidSignature,
+    InvalidVersion,
+    InvalidPathSize,
+    InvalidNullPadding,
+};
+
+fn putEntry(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, arena: *std.heap.ArenaAllocator, index: *Index) !void {
     if (index.entries.contains(path)) {
         return;
     }
@@ -486,6 +494,7 @@ fn appendEntry(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
                 .uid = 0,
                 .gid = 0,
                 .file_size = @truncate(u32, meta.size()),
+                .oid = [_]u8{0} ** hash.SHA1_BYTES_LEN,
                 .path_size = @truncate(u16, path.len),
                 .path = path,
             };
@@ -505,11 +514,72 @@ fn appendEntry(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
                     try std.fmt.allocPrint(arena.allocator(), "{s}", .{entry.name})
                 else
                     try std.fs.path.join(arena.allocator(), &[_][]const u8{ path, entry.name });
-                try appendEntry(cwd, subpath, allocator, arena, index);
+                try putEntry(cwd, subpath, allocator, arena, index);
             }
         },
         else => return,
     }
+}
+
+/// reads the index file into an Index struct.
+fn readIndex(git_dir: std.fs.Dir, arena: *std.heap.ArenaAllocator) !Index {
+    var entries = std.StringArrayHashMap(Index.Entry).init(arena.allocator());
+
+    // open index
+    const index_file = git_dir.openFile("index", .{ .mode = .read_only }) catch |err| {
+        switch (err) {
+            error.FileNotFound => return Index{ .version = 2, .entries = entries },
+            else => return err,
+        }
+    };
+    defer index_file.close();
+
+    const reader = index_file.reader();
+    const signature = try reader.readBytesNoEof(4);
+
+    if (!std.mem.eql(u8, "DIRC", &signature)) {
+        return error.InvalidSignature;
+    }
+
+    const version = try reader.readIntBig(u32);
+    if (version != 2) {
+        return error.InvalidVersion;
+    }
+
+    var entry_count = try reader.readIntBig(u32);
+    while (entry_count > 0) {
+        entry_count -= 1;
+        const start_pos = try reader.context.getPos();
+        const entry = Index.Entry{
+            .ctime_secs = try reader.readIntBig(i32),
+            .ctime_nsecs = try reader.readIntBig(i32),
+            .mtime_secs = try reader.readIntBig(i32),
+            .mtime_nsecs = try reader.readIntBig(i32),
+            .dev = try reader.readIntBig(u32),
+            .ino = try reader.readIntBig(u32),
+            .mode = try reader.readIntBig(u32),
+            .uid = try reader.readIntBig(u32),
+            .gid = try reader.readIntBig(u32),
+            .file_size = try reader.readIntBig(u32),
+            .oid = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN),
+            .path_size = try reader.readIntBig(u16),
+            .path = try reader.readUntilDelimiterAlloc(arena.allocator(), 0, std.fs.MAX_PATH_BYTES),
+        };
+        if (entry.path.len != entry.path_size) {
+            return error.InvalidPathSize;
+        }
+        var entry_size = try reader.context.getPos() - start_pos;
+        while (entry_size % 8 != 0) {
+            entry_size += 1;
+            const bytes = try reader.readBytesNoEof(1);
+            if (bytes[0] != 0) {
+                return error.InvalidNullPadding;
+            }
+        }
+        try entries.put(entry.path, entry);
+    }
+
+    return Index{ .version = version, .entries = entries };
 }
 
 /// writes the index file with the supplied paths.
@@ -520,21 +590,17 @@ fn writeIndex(cwd: std.fs.Dir, paths: std.ArrayList([]const u8), allocator: std.
 
     // open index
     // first write to a lock file and then rename it to index for safety
-    const index_file = try git_dir.createFile("index.lock", .{ .exclusive = true, .lock = .Exclusive });
-    defer index_file.close();
+    const index_lock_file = try git_dir.createFile("index.lock", .{ .exclusive = true, .lock = .Exclusive });
+    defer index_lock_file.close();
 
     // create Index
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
-    var entries = std.StringArrayHashMap(Index.Entry).init(arena.allocator());
-    var index = Index{
-        .version = 2,
-        .entries = &entries,
-    };
+    var index = try readIndex(git_dir, &arena);
 
-    // read all the entries
+    // read all the new entries
     for (paths.items) |path| {
-        try appendEntry(cwd, path, allocator, &arena, &index);
+        try putEntry(cwd, path, allocator, &arena, &index);
     }
 
     // sort the entries
@@ -551,13 +617,13 @@ fn writeIndex(cwd: std.fs.Dir, paths: std.ArrayList([]const u8), allocator: std.
 
     // write the header
     const version: u32 = 2;
-    const file_count: u32 = @truncate(u32, index.entries.count());
+    const entry_count: u32 = @truncate(u32, index.entries.count());
     const header = try std.fmt.allocPrint(allocator, "DIRC{s}{s}", .{
         std.mem.asBytes(&std.mem.nativeToBig(u32, version)),
-        std.mem.asBytes(&std.mem.nativeToBig(u32, file_count)),
+        std.mem.asBytes(&std.mem.nativeToBig(u32, entry_count)),
     });
     defer allocator.free(header);
-    try index_file.writeAll(header);
+    try index_lock_file.writeAll(header);
     h.update(header);
 
     // write the entries
@@ -584,14 +650,14 @@ fn writeIndex(cwd: std.fs.Dir, paths: std.ArrayList([]const u8), allocator: std.
         while (entry_buffer.items.len % 8 != 0) {
             try entry_buffer.writer().print("\x00", .{});
         }
-        try index_file.writeAll(entry_buffer.items);
+        try index_lock_file.writeAll(entry_buffer.items);
         h.update(entry_buffer.items);
     }
 
     // write the checksum
     var overall_sha1_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
     h.final(&overall_sha1_buffer);
-    try index_file.writeAll(&overall_sha1_buffer);
+    try index_lock_file.writeAll(&overall_sha1_buffer);
 
     // rename lock file to index
     try git_dir.rename("index.lock", "index");
