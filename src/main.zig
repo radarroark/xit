@@ -440,8 +440,28 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
     }
 }
 
-fn appendFile(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, arena: *std.heap.ArenaAllocator, files: *std.StringArrayHashMap([]const u8)) !void {
-    if (files.contains(path)) {
+pub const Index = struct {
+    version: u32,
+    entries: *std.StringArrayHashMap(Entry),
+
+    pub const Entry = struct {
+        ctime_secs: i32,
+        ctime_nsecs: i32,
+        mtime_secs: i32,
+        mtime_nsecs: i32,
+        dev: u32,
+        ino: u32,
+        mode: u32,
+        uid: u32,
+        gid: u32,
+        file_size: u32,
+        path_size: u16,
+        path: []const u8,
+    };
+};
+
+fn appendEntry(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, arena: *std.heap.ArenaAllocator, index: *Index) !void {
+    if (index.entries.contains(path)) {
         return;
     }
     const file = try cwd.openFile(path, .{ .mode = .read_only });
@@ -449,45 +469,27 @@ fn appendFile(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, a
     const meta = try file.metadata();
     switch (meta.kind()) {
         std.fs.File.Kind.File => {
-            var sha1_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-            try writeObject(cwd, path, allocator, null, &sha1_buffer);
-            const ctime: i128 = meta.created() orelse 0;
-            const ctime_secs: i32 = @truncate(i32, @divTrunc(ctime, std.time.ns_per_s));
-            const ctime_nsecs: i32 = @truncate(i32, @mod(ctime, std.time.ns_per_s));
-            const mtime: i128 = meta.modified();
-            const mtime_secs: i32 = @truncate(i32, @divTrunc(mtime, std.time.ns_per_s));
-            const mtime_nsecs: i32 = @truncate(i32, @mod(mtime, std.time.ns_per_s));
-            const dev: u32 = 0;
-            const ino: u32 = 0;
+            const ctime = meta.created() orelse 0;
+            const mtime = meta.modified();
             const is_executable = switch (builtin.os.tag) {
                 .windows => false,
                 else => meta.permissions().inner.unixHas(std.fs.File.PermissionsUnix.Class.user, .execute),
             };
-            const mode: u32 = if (is_executable) 100755 else 100644;
-            const uid: u32 = 0;
-            const gid: u32 = 0;
-            const file_size: u32 = @truncate(u32, meta.size());
-            const path_size: u16 = @truncate(u16, path.len);
-            var entry = std.ArrayList(u8).init(arena.allocator());
-            try entry.writer().print("{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}\x00", .{
-                std.mem.asBytes(&std.mem.nativeToBig(i32, ctime_secs)),
-                std.mem.asBytes(&std.mem.nativeToBig(i32, ctime_nsecs)),
-                std.mem.asBytes(&std.mem.nativeToBig(i32, mtime_secs)),
-                std.mem.asBytes(&std.mem.nativeToBig(i32, mtime_nsecs)),
-                std.mem.asBytes(&std.mem.nativeToBig(u32, dev)),
-                std.mem.asBytes(&std.mem.nativeToBig(u32, ino)),
-                std.mem.asBytes(&std.mem.nativeToBig(u32, mode)),
-                std.mem.asBytes(&std.mem.nativeToBig(u32, uid)),
-                std.mem.asBytes(&std.mem.nativeToBig(u32, gid)),
-                std.mem.asBytes(&std.mem.nativeToBig(u32, file_size)),
-                sha1_buffer,
-                std.mem.asBytes(&std.mem.nativeToBig(u16, path_size)),
-                path,
-            });
-            while (entry.items.len % 8 != 0) {
-                try entry.writer().print("\x00", .{});
-            }
-            try files.put(path, entry.items);
+            const entry = Index.Entry{
+                .ctime_secs = @truncate(i32, @divTrunc(ctime, std.time.ns_per_s)),
+                .ctime_nsecs = @truncate(i32, @mod(ctime, std.time.ns_per_s)),
+                .mtime_secs = @truncate(i32, @divTrunc(mtime, std.time.ns_per_s)),
+                .mtime_nsecs = @truncate(i32, @mod(mtime, std.time.ns_per_s)),
+                .dev = 0,
+                .ino = 0,
+                .mode = if (is_executable) 100755 else 100644,
+                .uid = 0,
+                .gid = 0,
+                .file_size = @truncate(u32, meta.size()),
+                .path_size = @truncate(u16, path.len),
+                .path = path,
+            };
+            try index.entries.put(path, entry);
         },
         std.fs.File.Kind.Directory => {
             var dir = try cwd.openIterableDir(path, .{});
@@ -503,7 +505,7 @@ fn appendFile(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, a
                     try std.fmt.allocPrint(arena.allocator(), "{s}", .{entry.name})
                 else
                     try std.fs.path.join(arena.allocator(), &[_][]const u8{ path, entry.name });
-                try appendFile(cwd, subpath, allocator, arena, files);
+                try appendEntry(cwd, subpath, allocator, arena, index);
             }
         },
         else => return,
@@ -521,44 +523,72 @@ fn writeIndex(cwd: std.fs.Dir, paths: std.ArrayList([]const u8), allocator: std.
     const index_file = try git_dir.createFile("index.lock", .{ .exclusive = true, .lock = .Exclusive });
     defer index_file.close();
 
-    // read all the files
+    // create Index
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
-    var files = std.StringArrayHashMap([]const u8).init(arena.allocator());
+    var entries = std.StringArrayHashMap(Index.Entry).init(arena.allocator());
+    var index = Index{
+        .version = 2,
+        .entries = &entries,
+    };
+
+    // read all the entries
     for (paths.items) |path| {
-        try appendFile(cwd, path, allocator, &arena, &files);
+        try appendEntry(cwd, path, allocator, &arena, &index);
     }
 
-    // sort the files
+    // sort the entries
     const SortCtx = struct {
         keys: [][]const u8,
         pub fn lessThan(ctx: @This(), a_index: usize, b_index: usize) bool {
             return std.mem.lessThan(u8, ctx.keys[a_index], ctx.keys[b_index]);
         }
     };
-    files.sort(SortCtx{ .keys = files.keys() });
+    index.entries.sort(SortCtx{ .keys = index.entries.keys() });
+
+    // start the checksum
+    var h = std.crypto.hash.Sha1.init(.{});
 
     // write the header
     const version: u32 = 2;
-    const file_count: u32 = @truncate(u32, files.count());
+    const file_count: u32 = @truncate(u32, index.entries.count());
     const header = try std.fmt.allocPrint(allocator, "DIRC{s}{s}", .{
         std.mem.asBytes(&std.mem.nativeToBig(u32, version)),
         std.mem.asBytes(&std.mem.nativeToBig(u32, file_count)),
     });
     defer allocator.free(header);
     try index_file.writeAll(header);
+    h.update(header);
 
-    // write the files
-    for (files.values()) |entry| {
-        try index_file.writeAll(entry);
+    // write the entries
+    for (index.entries.values()) |entry| {
+        var sha1_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+        try writeObject(cwd, entry.path, allocator, null, &sha1_buffer);
+        var entry_buffer = std.ArrayList(u8).init(allocator);
+        defer entry_buffer.deinit();
+        try entry_buffer.writer().print("{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}\x00", .{
+            std.mem.asBytes(&std.mem.nativeToBig(i32, entry.ctime_secs)),
+            std.mem.asBytes(&std.mem.nativeToBig(i32, entry.ctime_nsecs)),
+            std.mem.asBytes(&std.mem.nativeToBig(i32, entry.mtime_secs)),
+            std.mem.asBytes(&std.mem.nativeToBig(i32, entry.mtime_nsecs)),
+            std.mem.asBytes(&std.mem.nativeToBig(u32, entry.dev)),
+            std.mem.asBytes(&std.mem.nativeToBig(u32, entry.ino)),
+            std.mem.asBytes(&std.mem.nativeToBig(u32, entry.mode)),
+            std.mem.asBytes(&std.mem.nativeToBig(u32, entry.uid)),
+            std.mem.asBytes(&std.mem.nativeToBig(u32, entry.gid)),
+            std.mem.asBytes(&std.mem.nativeToBig(u32, entry.file_size)),
+            sha1_buffer,
+            std.mem.asBytes(&std.mem.nativeToBig(u16, entry.path_size)),
+            entry.path,
+        });
+        while (entry_buffer.items.len % 8 != 0) {
+            try entry_buffer.writer().print("\x00", .{});
+        }
+        try index_file.writeAll(entry_buffer.items);
+        h.update(entry_buffer.items);
     }
 
     // write the checksum
-    var h = std.crypto.hash.Sha1.init(.{});
-    h.update(header);
-    for (files.values()) |entry| {
-        h.update(entry);
-    }
     var overall_sha1_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
     h.final(&overall_sha1_buffer);
     try index_file.writeAll(&overall_sha1_buffer);
