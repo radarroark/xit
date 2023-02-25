@@ -267,9 +267,113 @@ fn writeCommit(cwd: std.fs.Dir, allocator: std.mem.Allocator, cmd: Command, tree
     try git_dir.rename("HEAD.lock", "HEAD");
 }
 
+fn writeBlob(file: std.fs.File, meta: std.fs.File.Metadata, objects_dir: std.fs.Dir, allocator: std.mem.Allocator, sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8) !void {
+    // calc the sha1 of its contents
+    try hash.sha1_file(file, sha1_bytes_buffer);
+    var sha1_hex_buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
+    const sha1_hex = try std.fmt.bufPrint(&sha1_hex_buffer, "{}", .{std.fmt.fmtSliceHexLower(sha1_bytes_buffer)});
+
+    // make the two char dir
+    var hash_prefix_dir = try objects_dir.makeOpenPath(sha1_hex[0..2], .{});
+    defer hash_prefix_dir.close();
+
+    // if the file already exists, exit early
+    const rest_of_hash = sha1_hex[2..];
+    if (hash_prefix_dir.openFile(rest_of_hash, .{})) |rest_of_hash_file| {
+        rest_of_hash_file.close();
+        return;
+    } else |err| {
+        if (err != error.FileNotFound) {
+            return err;
+        }
+    }
+
+    // open temp file
+    var rand_chars = [_]u8{0} ** 6;
+    try fillWithRandChars(&rand_chars);
+    const tmp_file_name = "tmp_obj_" ++ rand_chars;
+    const tmp_file = try hash_prefix_dir.createFile(tmp_file_name, .{ .read = true });
+    defer tmp_file.close();
+
+    // create blob header
+    const file_size = meta.size();
+    const blob = try std.fmt.allocPrint(allocator, "blob {}\x00", .{file_size});
+    defer allocator.free(blob);
+    try tmp_file.writeAll(blob);
+
+    // copy file into temp file
+    var read_buffer = [_]u8{0} ** MAX_FILE_READ_SIZE;
+    var offset: u64 = 0;
+    while (true) {
+        const size = try file.pread(&read_buffer, offset);
+        offset += size;
+        if (size == 0) {
+            break;
+        }
+        try tmp_file.writeAll(read_buffer[0..size]);
+    }
+
+    // compress the file
+    const compressed_tmp_file_name = tmp_file_name ++ ".compressed";
+    const compressed_tmp_file = try hash_prefix_dir.createFile(compressed_tmp_file_name, .{});
+    defer compressed_tmp_file.close();
+    try compress.compress(tmp_file, compressed_tmp_file, allocator);
+
+    // delete uncompressed temp file
+    try hash_prefix_dir.deleteFile(tmp_file_name);
+
+    // rename the compressed temp file
+    try std.fs.rename(hash_prefix_dir, compressed_tmp_file_name, hash_prefix_dir, rest_of_hash);
+}
+
+fn writeTree(objects_dir: std.fs.Dir, allocator: std.mem.Allocator, entries: *std.ArrayList([]const u8), sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8) !void {
+    // create tree contents
+    const tree_contents = try std.mem.join(allocator, "", entries.items);
+    defer allocator.free(tree_contents);
+
+    // create tree
+    const tree = try std.fmt.allocPrint(allocator, "tree {}\x00{s}", .{ tree_contents.len, tree_contents });
+    defer allocator.free(tree);
+
+    // calc the sha1 of its contents
+    try hash.sha1_buffer(tree, sha1_bytes_buffer);
+    var tree_sha1_hex_buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
+    const tree_sha1_hex = try std.fmt.bufPrint(&tree_sha1_hex_buffer, "{}", .{std.fmt.fmtSliceHexLower(sha1_bytes_buffer)});
+
+    // make the two char dir
+    var tree_hash_prefix_dir = try objects_dir.makeOpenPath(tree_sha1_hex[0..2], .{});
+    defer tree_hash_prefix_dir.close();
+
+    // open temp file
+    var tree_rand_chars = [_]u8{0} ** 6;
+    try fillWithRandChars(&tree_rand_chars);
+    const tree_tmp_file_name = "tmp_obj_" ++ tree_rand_chars;
+    const tree_tmp_file = try tree_hash_prefix_dir.createFile(tree_tmp_file_name, .{ .read = true });
+    defer tree_tmp_file.close();
+
+    // write to the temp file
+    try tree_tmp_file.pwriteAll(tree, 0);
+
+    // open compressed temp file
+    var tree_comp_rand_chars = [_]u8{0} ** 6;
+    try fillWithRandChars(&tree_comp_rand_chars);
+    const tree_comp_tmp_file_name = "tmp_obj_" ++ tree_comp_rand_chars;
+    const tree_comp_tmp_file = try tree_hash_prefix_dir.createFile(tree_comp_tmp_file_name, .{});
+    defer tree_comp_tmp_file.close();
+
+    // compress the file
+    try compress.compress(tree_tmp_file, tree_comp_tmp_file, allocator);
+
+    // delete first temp file
+    try tree_hash_prefix_dir.deleteFile(tree_tmp_file_name);
+
+    // rename the file
+    try std.fs.rename(tree_hash_prefix_dir, tree_comp_tmp_file_name, tree_hash_prefix_dir, tree_sha1_hex[2..]);
+}
+
 pub const MAX_FILE_READ_SIZE: comptime_int = 1000; // FIXME: this is arbitrary...
 
-/// writes the file at the given path into the .git dir.
+/// writes the file/dir at the given path into the .git dir.
 /// if it's a dir, all of its contents will be added too.
 /// entries can be null when first called and sha1_hex_buffer
 /// will have the oid when it's done. on windows files are
@@ -284,80 +388,25 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
 
     // get absolute path of the file
     var path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
-    const in_path = try cwd.realpath(path, &path_buffer);
-    var in = try std.fs.openFileAbsolute(in_path, .{ .mode = std.fs.File.OpenMode.read_only });
-    defer in.close();
+    const file_path = try cwd.realpath(path, &path_buffer);
+    var file = try std.fs.openFileAbsolute(file_path, .{ .mode = std.fs.File.OpenMode.read_only });
+    defer file.close();
 
     // see if it's a file or dir
-    const meta = try in.metadata();
+    const meta = try file.metadata();
     switch (meta.kind()) {
         std.fs.File.Kind.File => {
-            // calc the sha1 of its contents
-            try hash.sha1_file(in, sha1_bytes_buffer);
-            var sha1_hex_buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
-            const sha1_hex = try std.fmt.bufPrint(&sha1_hex_buffer, "{}", .{std.fmt.fmtSliceHexLower(sha1_bytes_buffer)});
-
-            // make the two char dir
-            var hash_prefix_dir = try objects_dir.makeOpenPath(sha1_hex[0..2], .{});
-            defer hash_prefix_dir.close();
-
-            // if the file already exists, exit early
-            const rest_of_hash = sha1_hex[2..];
-            if (hash_prefix_dir.openFile(rest_of_hash, .{})) |rest_of_hash_file| {
-                rest_of_hash_file.close();
-                return;
-            } else |err| {
-                if (err != error.FileNotFound) {
-                    return err;
-                }
-            }
-
-            // open temp file
-            var rand_chars = [_]u8{0} ** 6;
-            try fillWithRandChars(&rand_chars);
-            const tmp_file_name = "tmp_obj_" ++ rand_chars;
-            const tmp_file = try hash_prefix_dir.createFile(tmp_file_name, .{ .read = true });
-            defer tmp_file.close();
-
-            // create blob header
-            const file_size = meta.size();
-            const blob = try std.fmt.allocPrint(allocator, "blob {}\x00", .{file_size});
-            defer allocator.free(blob);
-            try tmp_file.writeAll(blob);
-
-            // copy file into temp file
-            var read_buffer = [_]u8{0} ** MAX_FILE_READ_SIZE;
-            var offset: u64 = 0;
-            while (true) {
-                const size = try in.pread(&read_buffer, offset);
-                offset += size;
-                if (size == 0) {
-                    break;
-                }
-                try tmp_file.writeAll(read_buffer[0..size]);
-            }
-
-            // compress the file
-            const compressed_tmp_file_name = tmp_file_name ++ ".compressed";
-            const compressed_tmp_file = try hash_prefix_dir.createFile(compressed_tmp_file_name, .{});
-            defer compressed_tmp_file.close();
-            try compress.compress(tmp_file, compressed_tmp_file, allocator);
-
-            // delete uncompressed temp file
-            try hash_prefix_dir.deleteFile(tmp_file_name);
-
-            // rename the compressed temp file
-            try std.fs.rename(hash_prefix_dir, compressed_tmp_file_name, hash_prefix_dir, rest_of_hash);
-
-            // get the file's mode
-            const is_executable = switch (builtin.os.tag) {
-                .windows => false,
-                else => meta.permissions().inner.unixHas(std.fs.File.PermissionsUnix.Class.user, .execute),
-            };
-            const mode = if (is_executable) "100755" else "100644";
+            try writeBlob(file, meta, objects_dir, allocator, sha1_bytes_buffer);
 
             // add to entries if it's not null
             if (entries_maybe) |entries| {
+                // get the file's mode
+                const is_executable = switch (builtin.os.tag) {
+                    .windows => false,
+                    else => meta.permissions().inner.unixHas(std.fs.File.PermissionsUnix.Class.user, .execute),
+                };
+                const mode = if (is_executable) "100755" else "100644";
+
                 const entry = try std.fmt.allocPrint(arena.allocator(), "{s} {s}\x00{s}", .{ mode, path, sha1_bytes_buffer });
                 try entries.append(entry);
             }
@@ -387,48 +436,7 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
                 try writeObject(cwd, subpath, allocator, &subarena, &subentries, &sub_sha1_bytes_buffer);
             }
 
-            // create tree contents
-            const tree_contents = try std.mem.join(allocator, "", subentries.items);
-            defer allocator.free(tree_contents);
-
-            // create tree
-            const tree = try std.fmt.allocPrint(allocator, "tree {}\x00{s}", .{ tree_contents.len, tree_contents });
-            defer allocator.free(tree);
-
-            // calc the sha1 of its contents
-            try hash.sha1_buffer(tree, sha1_bytes_buffer);
-            var tree_sha1_hex_buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
-            const tree_sha1_hex = try std.fmt.bufPrint(&tree_sha1_hex_buffer, "{}", .{std.fmt.fmtSliceHexLower(sha1_bytes_buffer)});
-
-            // make the two char dir
-            var tree_hash_prefix_dir = try objects_dir.makeOpenPath(tree_sha1_hex[0..2], .{});
-            defer tree_hash_prefix_dir.close();
-
-            // open temp file
-            var tree_rand_chars = [_]u8{0} ** 6;
-            try fillWithRandChars(&tree_rand_chars);
-            const tree_tmp_file_name = "tmp_obj_" ++ tree_rand_chars;
-            const tree_tmp_file = try tree_hash_prefix_dir.createFile(tree_tmp_file_name, .{ .read = true });
-            defer tree_tmp_file.close();
-
-            // write to the temp file
-            try tree_tmp_file.pwriteAll(tree, 0);
-
-            // open compressed temp file
-            var tree_comp_rand_chars = [_]u8{0} ** 6;
-            try fillWithRandChars(&tree_comp_rand_chars);
-            const tree_comp_tmp_file_name = "tmp_obj_" ++ tree_comp_rand_chars;
-            const tree_comp_tmp_file = try tree_hash_prefix_dir.createFile(tree_comp_tmp_file_name, .{});
-            defer tree_comp_tmp_file.close();
-
-            // compress the file
-            try compress.compress(tree_tmp_file, tree_comp_tmp_file, allocator);
-
-            // delete first temp file
-            try tree_hash_prefix_dir.deleteFile(tree_tmp_file_name);
-
-            // rename the file
-            try std.fs.rename(tree_hash_prefix_dir, tree_comp_tmp_file_name, tree_hash_prefix_dir, tree_sha1_hex[2..]);
+            try writeTree(objects_dir, allocator, &subentries, sha1_bytes_buffer);
 
             // add to entries if it's not null
             if (entries_maybe) |entries| {
