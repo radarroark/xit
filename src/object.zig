@@ -232,7 +232,7 @@ pub fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocat
 /// uses the commit message provided to the command.
 /// updates HEAD when it's done using a file locking thingy
 /// so other processes don't step on each others' toes.
-pub fn writeCommit(cwd: std.fs.Dir, allocator: std.mem.Allocator, command: cmd.Command, tree_sha1_hex: []const u8) !void {
+pub fn writeCommit(cwd: std.fs.Dir, allocator: std.mem.Allocator, command: cmd.CommandData, tree_sha1_hex: []const u8) !void {
     // open the internal dirs
     var git_dir = try cwd.openDir(".git", .{});
     defer git_dir.close();
