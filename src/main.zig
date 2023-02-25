@@ -267,6 +267,38 @@ fn writeCommit(cwd: std.fs.Dir, allocator: std.mem.Allocator, cmd: Command, tree
     try git_dir.rename("HEAD.lock", "HEAD");
 }
 
+pub const Tree = struct {
+    const Self = @This();
+
+    entries: std.ArrayList([]const u8),
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator) Tree {
+        return .{
+            .entries = std.ArrayList([]const u8).init(allocator),
+            .allocator = allocator,
+        };
+    }
+
+    pub fn deinit(self: *Self) void {
+        for (self.entries.items) |entry| {
+            self.allocator.free(entry);
+        }
+        self.entries.deinit();
+    }
+
+    pub fn addBlobEntry(self: *Self, mode: u32, path: []const u8, oid: []const u8) !void {
+        const mode_str = if (mode == 100755) "100755" else "100644";
+        const entry = try std.fmt.allocPrint(self.allocator, "{s} {s}\x00{s}", .{ mode_str, path, oid });
+        try self.entries.append(entry);
+    }
+
+    pub fn addTreeEntry(self: *Self, path: []const u8, oid: []const u8) !void {
+        const entry = try std.fmt.allocPrint(self.allocator, "40000 {s}\x00{s}", .{ path, oid });
+        try self.entries.append(entry);
+    }
+};
+
 fn writeBlob(file: std.fs.File, meta: std.fs.File.Metadata, objects_dir: std.fs.Dir, allocator: std.mem.Allocator, sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8) !void {
     // calc the sha1 of its contents
     try hash.sha1_file(file, sha1_bytes_buffer);
@@ -379,7 +411,7 @@ pub const MAX_FILE_READ_SIZE: comptime_int = 1000; // FIXME: this is arbitrary..
 /// will have the oid when it's done. on windows files are
 /// never marked as executable because apparently i can't
 /// even check if they are...maybe i'll figure that out later.
-fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, arena: *std.heap.ArenaAllocator, entries_maybe: ?*std.ArrayList([]const u8), sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8) !void {
+fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, tree_maybe: ?*Tree, sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8) !void {
     // open the internal dirs
     var git_dir = try cwd.openDir(".git", .{});
     defer git_dir.close();
@@ -399,26 +431,18 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
             try writeBlob(file, meta, objects_dir, allocator, sha1_bytes_buffer);
 
             // add to entries if it's not null
-            if (entries_maybe) |entries| {
-                // get the file's mode
+            if (tree_maybe) |tree| {
                 const is_executable = switch (builtin.os.tag) {
                     .windows => false,
                     else => meta.permissions().inner.unixHas(std.fs.File.PermissionsUnix.Class.user, .execute),
                 };
-                const mode = if (is_executable) "100755" else "100644";
-
-                const entry = try std.fmt.allocPrint(arena.allocator(), "{s} {s}\x00{s}", .{ mode, path, sha1_bytes_buffer });
-                try entries.append(entry);
+                const mode: u32 = if (is_executable) 100755 else 100644;
+                try tree.addBlobEntry(mode, path, sha1_bytes_buffer);
             }
         },
         std.fs.File.Kind.Directory => {
-            // make list to store entries
-            var subentries = std.ArrayList([]const u8).init(allocator);
-            defer subentries.deinit();
-
-            // make arena for the subentries
-            var subarena = std.heap.ArenaAllocator.init(allocator);
-            defer subarena.deinit();
+            var subtree = Tree.init(allocator);
+            defer subtree.deinit();
 
             // iterate recursively
             var subdir = try cwd.openIterableDir(path, .{});
@@ -433,15 +457,14 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
                 const subpath = try std.fs.path.join(allocator, &[_][]const u8{ path, entry.name });
                 defer allocator.free(subpath);
                 var sub_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-                try writeObject(cwd, subpath, allocator, &subarena, &subentries, &sub_sha1_bytes_buffer);
+                try writeObject(cwd, subpath, allocator, &subtree, &sub_sha1_bytes_buffer);
             }
 
-            try writeTree(objects_dir, allocator, &subentries, sha1_bytes_buffer);
+            try writeTree(objects_dir, allocator, &subtree.entries, sha1_bytes_buffer);
 
             // add to entries if it's not null
-            if (entries_maybe) |entries| {
-                const entry = try std.fmt.allocPrint(arena.allocator(), "40000 {s}\x00{s}", .{ path, sha1_bytes_buffer });
-                try entries.append(entry);
+            if (tree_maybe) |tree| {
+                try tree.addTreeEntry(path, sha1_bytes_buffer);
             }
         },
         else => return,
@@ -496,7 +519,7 @@ fn putEntry(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, are
             };
             // is there a better place to write the object than here? probably...
             var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-            try writeObject(cwd, path, allocator, arena, null, &oid);
+            try writeObject(cwd, path, allocator, null, &oid);
             const entry = Index.Entry{
                 .ctime_secs = @truncate(i32, @divTrunc(ctime, std.time.ns_per_s)),
                 .ctime_nsecs = @truncate(i32, @mod(ctime, std.time.ns_per_s)),
@@ -751,7 +774,7 @@ pub fn zitMain(args: *std.ArrayList([]const u8), allocator: std.mem.Allocator) !
         Command.commit => {
             // write commit object
             var sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-            try writeObject(cwd, ".", allocator, &arena, null, &sha1_bytes_buffer);
+            try writeObject(cwd, ".", allocator, null, &sha1_bytes_buffer);
             var sha1_hex_buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
             const sha1_hex = try std.fmt.bufPrint(&sha1_hex_buffer, "{}", .{std.fmt.fmtSliceHexLower(&sha1_bytes_buffer)});
             try writeCommit(cwd, allocator, cmd, sha1_hex);
