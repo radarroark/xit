@@ -461,7 +461,7 @@ pub const Index = struct {
     };
 };
 
-const IndexError = error {
+const ReadIndexError = error {
     InvalidSignature,
     InvalidVersion,
     InvalidPathSize,
