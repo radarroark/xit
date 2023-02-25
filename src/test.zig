@@ -2,7 +2,9 @@ const std = @import("std");
 const main = @import("./main.zig");
 const hash = @import("./hash.zig");
 
-fn readContents(dir: std.fs.Dir, path: []const u8, out: *[main.MAX_FILE_READ_SIZE]u8) !usize {
+const MAX_FILE_READ_SIZE: comptime_int = 1000; // FIXME: this is arbitrary...
+
+fn readContents(dir: std.fs.Dir, path: []const u8, out: *[MAX_FILE_READ_SIZE]u8) !usize {
     var file_size: usize = 0;
     {
         const file = try dir.openFile(path, .{ .mode = .read_only });
@@ -73,7 +75,7 @@ test "init and commit" {
 
     {
         // get HEAD contents
-        var head_file_buffer = [_]u8{0} ** main.MAX_FILE_READ_SIZE;
+        var head_file_buffer = [_]u8{0} ** MAX_FILE_READ_SIZE;
         const head_file_size = try readContents(git_dir, "HEAD", &head_file_buffer);
         try std.testing.expect(head_file_size == hash.SHA1_HEX_LEN);
         const head_file_slice = head_file_buffer[0..head_file_size];
@@ -116,7 +118,7 @@ test "init and commit" {
 
     {
         // get HEAD contents
-        var head_file_buffer = [_]u8{0} ** main.MAX_FILE_READ_SIZE;
+        var head_file_buffer = [_]u8{0} ** MAX_FILE_READ_SIZE;
         const head_file_size = try readContents(git_dir, "HEAD", &head_file_buffer);
         try std.testing.expect(head_file_size == hash.SHA1_HEX_LEN);
         const head_file_slice = head_file_buffer[0..head_file_size];
