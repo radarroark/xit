@@ -275,7 +275,7 @@ pub const MAX_FILE_READ_SIZE: comptime_int = 1000; // FIXME: this is arbitrary..
 /// will have the oid when it's done. on windows files are
 /// never marked as executable because apparently i can't
 /// even check if they are...maybe i'll figure that out later.
-fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, entries_maybe: ?*std.ArrayList([]const u8), sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8) !void {
+fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, arena: *std.heap.ArenaAllocator, entries_maybe: ?*std.ArrayList([]const u8), sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8) !void {
     // open the internal dirs
     var git_dir = try cwd.openDir(".git", .{});
     defer git_dir.close();
@@ -358,7 +358,7 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
 
             // add to entries if it's not null
             if (entries_maybe) |entries| {
-                const entry = try std.fmt.allocPrint(allocator, "{s} {s}\x00{s}", .{ mode, path, sha1_bytes_buffer });
+                const entry = try std.fmt.allocPrint(arena.allocator(), "{s} {s}\x00{s}", .{ mode, path, sha1_bytes_buffer });
                 try entries.append(entry);
             }
         },
@@ -367,9 +367,9 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
             var subentries = std.ArrayList([]const u8).init(allocator);
             defer subentries.deinit();
 
-            // make arena for the entries themselves
-            var arena = std.heap.ArenaAllocator.init(allocator);
-            defer arena.deinit();
+            // make arena for the subentries
+            var subarena = std.heap.ArenaAllocator.init(allocator);
+            defer subarena.deinit();
 
             // iterate recursively
             var subdir = try cwd.openIterableDir(path, .{});
@@ -384,7 +384,7 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
                 const subpath = try std.fs.path.join(allocator, &[_][]const u8{ path, entry.name });
                 defer allocator.free(subpath);
                 var sub_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-                try writeObject(cwd, subpath, arena.allocator(), &subentries, &sub_sha1_bytes_buffer);
+                try writeObject(cwd, subpath, allocator, &subarena, &subentries, &sub_sha1_bytes_buffer);
             }
 
             // create tree contents
@@ -432,7 +432,7 @@ fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, 
 
             // add to entries if it's not null
             if (entries_maybe) |entries| {
-                const entry = try std.fmt.allocPrint(allocator, "40000 {s}\x00{s}", .{ path, sha1_bytes_buffer });
+                const entry = try std.fmt.allocPrint(arena.allocator(), "40000 {s}\x00{s}", .{ path, sha1_bytes_buffer });
                 try entries.append(entry);
             }
         },
@@ -488,7 +488,7 @@ fn putEntry(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, are
             };
             // is there a better place to write the object than here? probably...
             var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-            try writeObject(cwd, path, allocator, null, &oid);
+            try writeObject(cwd, path, allocator, arena, null, &oid);
             const entry = Index.Entry{
                 .ctime_secs = @truncate(i32, @divTrunc(ctime, std.time.ns_per_s)),
                 .ctime_nsecs = @truncate(i32, @mod(ctime, std.time.ns_per_s)),
@@ -743,7 +743,7 @@ pub fn zitMain(args: *std.ArrayList([]const u8), allocator: std.mem.Allocator) !
         Command.commit => {
             // write commit object
             var sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-            try writeObject(cwd, ".", allocator, null, &sha1_bytes_buffer);
+            try writeObject(cwd, ".", allocator, &arena, null, &sha1_bytes_buffer);
             var sha1_hex_buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
             const sha1_hex = try std.fmt.bufPrint(&sha1_hex_buffer, "{}", .{std.fmt.fmtSliceHexLower(&sha1_bytes_buffer)});
             try writeCommit(cwd, allocator, cmd, sha1_hex);
