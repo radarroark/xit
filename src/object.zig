@@ -1,3 +1,7 @@
+//! an object is a file or dir stored in the repo.
+//! at least, that's how i think of it. no packed
+//! objects for now, but that'll come eventually.
+
 const std = @import("std");
 const builtin = @import("builtin");
 const hash = @import("./hash.zig");
@@ -247,6 +251,8 @@ pub fn writeCommit(cwd: std.fs.Dir, allocator: std.mem.Allocator, command: cmd.C
     // read index
     var index = try idx.readIndex(git_dir, allocator);
     defer index.deinit();
+
+    // add index entries to tree
     for (index.entries.values()) |entry| {
         try tree.addBlobEntry(entry.mode, entry.path, &entry.oid);
     }

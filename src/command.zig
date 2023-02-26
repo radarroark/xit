@@ -1,3 +1,5 @@
+//! the command parsed from CLI args.
+
 const std = @import("std");
 
 pub const CommandKind = enum {

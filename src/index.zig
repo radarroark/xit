@@ -1,3 +1,6 @@
+//! tracks the files that are staged. the commit
+//! command will use this when creating the tree.
+
 const std = @import("std");
 const builtin = @import("builtin");
 const object = @import("./object.zig");
