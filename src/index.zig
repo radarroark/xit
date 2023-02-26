@@ -11,6 +11,7 @@ pub const Index = struct {
 
     version: u32,
     entries: std.StringArrayHashMap(Entry),
+    dirToPaths: std.StringArrayHashMap(std.StringArrayHashMap(void)),
     allocator: std.mem.Allocator,
     arena: std.heap.ArenaAllocator,
 
@@ -34,6 +35,7 @@ pub const Index = struct {
         return .{
             .version = 2,
             .entries = std.StringArrayHashMap(Index.Entry).init(allocator),
+            .dirToPaths = std.StringArrayHashMap(std.StringArrayHashMap(void)).init(allocator),
             .allocator = allocator,
             .arena = std.heap.ArenaAllocator.init(allocator),
         };
@@ -42,19 +44,41 @@ pub const Index = struct {
     pub fn deinit(self: *Self) void {
         self.arena.deinit();
         self.entries.deinit();
+        for (self.dirToPaths.values()) |*paths| {
+            paths.deinit();
+        }
+        self.dirToPaths.deinit();
     }
 
     /// if path is a file, adds it as an entry to the index struct.
     /// if path is a dir, adds its children recursively.
     /// ignoring symlinks for now but will add that later.
-    fn putEntry(self: *Self, cwd: std.fs.Dir, path: []const u8) !void {
-        // remove entries that conflict with the names of any parent directories
-        var parent_path_maybe = std.fs.path.dirname(path);
-        while (parent_path_maybe) |parent_path| {
-            if (self.entries.contains(parent_path)) {
-                _ = self.entries.orderedRemove(parent_path);
+    fn putPath(self: *Self, cwd: std.fs.Dir, path: []const u8) !void {
+        // remove entries that are parents of this path (directory replaces file)
+        {
+            var parent_path_maybe = std.fs.path.dirname(path);
+            while (parent_path_maybe) |parent_path| {
+                if (self.entries.contains(parent_path)) {
+                    self.removeEntry(parent_path);
+                }
+                parent_path_maybe = std.fs.path.dirname(parent_path);
             }
-            parent_path_maybe = std.fs.path.dirname(parent_path);
+        }
+        // remove entries that are children of this path (file replaces directory)
+        {
+            var child_paths_maybe = self.dirToPaths.getEntry(path);
+            if (child_paths_maybe) |child_paths| {
+                const child_paths_array = child_paths.value_ptr.*.keys();
+                // make a copy of the paths because removeEntry will modify it
+                var child_paths_array_copy = std.ArrayList([]const u8).init(self.allocator);
+                defer child_paths_array_copy.deinit();
+                for (child_paths_array) |child_path| {
+                    try child_paths_array_copy.append(child_path);
+                }
+                for (child_paths_array_copy.items) |child_path| {
+                    self.removeEntry(child_path);
+                }
+            }
         }
         // read the metadata
         const file = try cwd.openFile(path, .{ .mode = .read_only });
@@ -92,7 +116,7 @@ pub const Index = struct {
                     .path_size = @truncate(u16, path.len),
                     .path = path,
                 };
-                try self.entries.put(path, entry);
+                try self.putEntry(entry);
             },
             std.fs.File.Kind.Directory => {
                 var dir = try cwd.openIterableDir(path, .{});
@@ -108,10 +132,39 @@ pub const Index = struct {
                         try std.fmt.allocPrint(self.arena.allocator(), "{s}", .{entry.name})
                     else
                         try std.fs.path.join(self.arena.allocator(), &[_][]const u8{ path, entry.name });
-                    try self.putEntry(cwd, subpath);
+                    try self.putPath(cwd, subpath);
                 }
             },
             else => return,
+        }
+    }
+
+    fn putEntry(self: *Self, entry: Entry) !void {
+        try self.entries.put(entry.path, entry);
+        // populate dirToPaths
+        var parent_path_maybe = std.fs.path.dirname(entry.path);
+        while (parent_path_maybe) |parent_path| {
+            var child_paths_maybe = self.dirToPaths.getEntry(parent_path);
+            if (child_paths_maybe) |child_paths| {
+                try child_paths.value_ptr.*.put(entry.path, {});
+            } else {
+                var child_paths = std.StringArrayHashMap(void).init(self.allocator);
+                try child_paths.put(entry.path, {});
+                try self.dirToPaths.put(parent_path, child_paths);
+            }
+            parent_path_maybe = std.fs.path.dirname(parent_path);
+        }
+    }
+
+    fn removeEntry(self: *Self, path: []const u8) void {
+        _ = self.entries.orderedRemove(path);
+        var parent_path_maybe = std.fs.path.dirname(path);
+        while (parent_path_maybe) |parent_path| {
+            var child_paths_maybe = self.dirToPaths.getEntry(parent_path);
+            if (child_paths_maybe) |child_paths| {
+                _ = child_paths.value_ptr.*.orderedRemove(path);
+            }
+            parent_path_maybe = std.fs.path.dirname(parent_path);
         }
     }
 };
@@ -181,7 +234,7 @@ pub fn readIndex(git_dir: std.fs.Dir, allocator: std.mem.Allocator) !Index {
                 return error.InvalidNullPadding;
             }
         }
-        try index.entries.put(entry.path, entry);
+        try index.putEntry(entry);
     }
 
     // TODO: check the checksum
@@ -210,7 +263,7 @@ pub fn writeIndex(cwd: std.fs.Dir, paths: std.ArrayList([]const u8), allocator: 
 
     // read all the new entries
     for (paths.items) |path| {
-        try index.putEntry(cwd, path);
+        try index.putPath(cwd, path);
     }
 
     // sort the entries

@@ -146,6 +146,8 @@ test "init and commit" {
     defer hello_txt_dir.close();
     var nested_txt = try hello_txt_dir.createFile("nested.txt", .{});
     defer nested_txt.close();
+    var nested2_txt = try hello_txt_dir.createFile("nested2.txt", .{});
+    defer nested2_txt.close();
 
     // add the new file
     args.clearAndFree();
@@ -154,12 +156,38 @@ test "init and commit" {
     try main.zitMain(&args, allocator);
 
     // read index
-    var index = try idx.readIndex(git_dir, allocator);
-    defer index.deinit();
-    try std.testing.expect(index.entries.count() == 3);
-    try std.testing.expect(index.entries.contains("README"));
-    try std.testing.expect(index.entries.contains("src/zig/main.zig"));
-    try std.testing.expect(index.entries.contains("hello.txt/nested.txt"));
+    {
+        var index = try idx.readIndex(git_dir, allocator);
+        defer index.deinit();
+        try std.testing.expect(index.entries.count() == 4);
+        try std.testing.expect(index.entries.contains("README"));
+        try std.testing.expect(index.entries.contains("src/zig/main.zig"));
+        try std.testing.expect(index.entries.contains("hello.txt/nested.txt"));
+        try std.testing.expect(index.entries.contains("hello.txt/nested2.txt"));
+    }
+
+    // replace directory with file
+    try hello_txt_dir.deleteFile("nested.txt");
+    try hello_txt_dir.deleteFile("nested2.txt");
+    try repo_dir.deleteDir("hello.txt");
+    var hello_txt2 = try repo_dir.createFile("hello.txt", .{});
+    defer hello_txt2.close();
+
+    // add the new file
+    args.clearAndFree();
+    try args.append("add");
+    try args.append(".");
+    try main.zitMain(&args, allocator);
+
+    // read index
+    {
+        var index = try idx.readIndex(git_dir, allocator);
+        defer index.deinit();
+        try std.testing.expect(index.entries.count() == 3);
+        try std.testing.expect(index.entries.contains("README"));
+        try std.testing.expect(index.entries.contains("src/zig/main.zig"));
+        try std.testing.expect(index.entries.contains("hello.txt"));
+    }
 
     // reset the cwd
     try cwd.setAsCwd();

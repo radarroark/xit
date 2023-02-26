@@ -205,7 +205,12 @@ pub fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocat
     const meta = try file.metadata();
     switch (meta.kind()) {
         std.fs.File.Kind.File => {
-            try writeBlob(file, meta, objects_dir, allocator, sha1_bytes_buffer);
+            writeBlob(file, meta, objects_dir, allocator, sha1_bytes_buffer) catch |err| {
+                switch (err) {
+                    error.ObjectAlreadyExists => {},
+                    else => return err,
+                }
+            };
 
             // add to entries if it's not null
             if (tree_maybe) |tree| {
@@ -237,7 +242,12 @@ pub fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocat
                 try writeObject(cwd, subpath, allocator, &subtree, &sub_sha1_bytes_buffer);
             }
 
-            try writeTree(objects_dir, allocator, &subtree.entries, sha1_bytes_buffer);
+            writeTree(objects_dir, allocator, &subtree.entries, sha1_bytes_buffer) catch |err| {
+                switch (err) {
+                    error.ObjectAlreadyExists => {},
+                    else => return err,
+                }
+            };
 
             // add to entries if it's not null
             if (tree_maybe) |tree| {
