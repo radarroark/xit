@@ -176,7 +176,6 @@ pub const ReadIndexError = error {
     InvalidNullPadding,
 };
 
-/// reads the index file into an Index struct.
 pub fn readIndex(git_dir: std.fs.Dir, allocator: std.mem.Allocator) !Index {
     var index = Index.init(allocator);
     errdefer index.deinit();
@@ -246,8 +245,7 @@ pub fn readIndex(git_dir: std.fs.Dir, allocator: std.mem.Allocator) !Index {
     return index;
 }
 
-/// writes the index file with the supplied paths.
-pub fn writeIndex(cwd: std.fs.Dir, paths: std.ArrayList([]const u8), allocator: std.mem.Allocator) !void {
+fn writeIndexImpl(cwd: std.fs.Dir, paths: std.ArrayList([]const u8), allocator: std.mem.Allocator) !void {
     // open git dir
     var git_dir = try cwd.openDir(".git", .{});
     defer git_dir.close();
@@ -322,4 +320,14 @@ pub fn writeIndex(cwd: std.fs.Dir, paths: std.ArrayList([]const u8), allocator: 
 
     // rename lock file to index
     try git_dir.rename("index.lock", "index");
+}
+
+pub fn writeIndex(cwd: std.fs.Dir, paths: std.ArrayList([]const u8), allocator: std.mem.Allocator) !void {
+    writeIndexImpl(cwd, paths, allocator) catch |err| {
+        // make sure the lock file is deleted
+        var git_dir = try cwd.openDir(".git", .{});
+        defer git_dir.close();
+        try git_dir.deleteFile("index.lock");
+        return err;
+    };
 }

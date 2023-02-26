@@ -189,6 +189,18 @@ test "init and commit" {
         try std.testing.expect(index.entries.contains("hello.txt"));
     }
 
+    // can't add a non-existent file
+    args.clearAndFree();
+    try args.append("add");
+    try args.append("no-such-file");
+    try std.testing.expect(error.FileNotFound == main.zitMain(&args, allocator));
+
+    // a stale index lock file isn't hanging around
+    {
+        const lock_file_or_err = git_dir.openFile("index.lock", .{ .mode = .read_only });
+        try std.testing.expect(lock_file_or_err == error.FileNotFound);
+    }
+
     // reset the cwd
     try cwd.setAsCwd();
 }
