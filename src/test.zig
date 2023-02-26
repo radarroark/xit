@@ -1,6 +1,7 @@
 const std = @import("std");
 const main = @import("./main.zig");
 const hash = @import("./hash.zig");
+const idx = @import("./index.zig");
 
 const MAX_FILE_READ_SIZE: comptime_int = 1000; // FIXME: this is arbitrary...
 
@@ -138,6 +139,27 @@ test "init and commit" {
         var hash_suffix_file = try hash_prefix_dir.openFile(head_file_slice[2..], .{});
         defer hash_suffix_file.close();
     }
+
+    // replace file with directory
+    try repo_dir.deleteFile("hello.txt");
+    var hello_txt_dir = try repo_dir.makeOpenPath("hello.txt", .{});
+    defer hello_txt_dir.close();
+    var nested_txt = try hello_txt_dir.createFile("nested.txt", .{});
+    defer nested_txt.close();
+
+    // add the new file
+    args.clearAndFree();
+    try args.append("add");
+    try args.append(".");
+    try main.zitMain(&args, allocator);
+
+    // read index
+    var index = try idx.readIndex(git_dir, allocator);
+    defer index.deinit();
+    try std.testing.expect(index.entries.count() == 3);
+    try std.testing.expect(index.entries.contains("README"));
+    try std.testing.expect(index.entries.contains("src/zig/main.zig"));
+    try std.testing.expect(index.entries.contains("hello.txt/nested.txt"));
 
     // reset the cwd
     try cwd.setAsCwd();

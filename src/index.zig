@@ -48,23 +48,35 @@ pub const Index = struct {
     /// if path is a dir, adds its children recursively.
     /// ignoring symlinks for now but will add that later.
     fn putEntry(self: *Self, cwd: std.fs.Dir, path: []const u8) !void {
-        if (self.entries.contains(path)) {
-            return;
+        // remove entries that conflict with the names of any parent directories
+        var parent_path_maybe = std.fs.path.dirname(path);
+        while (parent_path_maybe) |parent_path| {
+            if (self.entries.contains(parent_path)) {
+                _ = self.entries.orderedRemove(parent_path);
+            }
+            parent_path_maybe = std.fs.path.dirname(parent_path);
         }
+        // read the metadata
         const file = try cwd.openFile(path, .{ .mode = .read_only });
         defer file.close();
         const meta = try file.metadata();
         switch (meta.kind()) {
             std.fs.File.Kind.File => {
+                // exit early if this path is already in the index
+                if (self.entries.contains(path)) {
+                    return;
+                }
+                // get the stats
                 const ctime = meta.created() orelse 0;
                 const mtime = meta.modified();
                 const is_executable = switch (builtin.os.tag) {
                     .windows => false,
                     else => meta.permissions().inner.unixHas(std.fs.File.PermissionsUnix.Class.user, .execute),
                 };
-                // is there a better place to write the object than here? probably...
+                // write the object
                 var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
                 try object.writeObject(cwd, path, self.allocator, null, &oid);
+                // add the entry
                 const entry = Index.Entry{
                     .ctime_secs = @truncate(i32, @divTrunc(ctime, std.time.ns_per_s)),
                     .ctime_nsecs = @truncate(i32, @mod(ctime, std.time.ns_per_s)),
