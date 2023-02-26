@@ -74,6 +74,7 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8))
                 return CommandError.AddPathsMissing;
             }
             var paths = try std.ArrayList([]const u8).initCapacity(allocator, pos_args.capacity);
+            errdefer paths.deinit(); // pointless for now but for future sake
             paths.appendSliceAssumeCapacity(pos_args.items);
             return CommandData{ .add = .{ .paths = paths } };
         } else if (std.mem.eql(u8, args.items[0], "commit")) {
