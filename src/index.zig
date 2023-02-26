@@ -4,8 +4,12 @@ const object = @import("./object.zig");
 const hash = @import("./hash.zig");
 
 pub const Index = struct {
+    const Self = @This();
+
     version: u32,
     entries: std.StringArrayHashMap(Entry),
+    allocator: std.mem.Allocator,
+    arena: std.heap.ArenaAllocator,
 
     pub const Entry = struct {
         ctime_secs: i32,
@@ -22,6 +26,79 @@ pub const Index = struct {
         path_size: u16,
         path: []const u8,
     };
+
+    pub fn init(allocator: std.mem.Allocator) Index {
+        return .{
+            .version = 2,
+            .entries = std.StringArrayHashMap(Index.Entry).init(allocator),
+            .allocator = allocator,
+            .arena = std.heap.ArenaAllocator.init(allocator),
+        };
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.arena.deinit();
+        self.entries.deinit();
+    }
+
+    /// if path is a file, adds it as an entry to the index struct.
+    /// if path is a dir, adds its children recursively.
+    /// ignoring symlinks for now but will add that later.
+    fn putEntry(self: *Self, cwd: std.fs.Dir, path: []const u8) !void {
+        if (self.entries.contains(path)) {
+            return;
+        }
+        const file = try cwd.openFile(path, .{ .mode = .read_only });
+        defer file.close();
+        const meta = try file.metadata();
+        switch (meta.kind()) {
+            std.fs.File.Kind.File => {
+                const ctime = meta.created() orelse 0;
+                const mtime = meta.modified();
+                const is_executable = switch (builtin.os.tag) {
+                    .windows => false,
+                    else => meta.permissions().inner.unixHas(std.fs.File.PermissionsUnix.Class.user, .execute),
+                };
+                // is there a better place to write the object than here? probably...
+                var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+                try object.writeObject(cwd, path, self.allocator, null, &oid);
+                const entry = Index.Entry{
+                    .ctime_secs = @truncate(i32, @divTrunc(ctime, std.time.ns_per_s)),
+                    .ctime_nsecs = @truncate(i32, @mod(ctime, std.time.ns_per_s)),
+                    .mtime_secs = @truncate(i32, @divTrunc(mtime, std.time.ns_per_s)),
+                    .mtime_nsecs = @truncate(i32, @mod(mtime, std.time.ns_per_s)),
+                    .dev = 0,
+                    .ino = 0,
+                    .mode = if (is_executable) 100755 else 100644,
+                    .uid = 0,
+                    .gid = 0,
+                    .file_size = @truncate(u32, meta.size()),
+                    .oid = oid,
+                    .path_size = @truncate(u16, path.len),
+                    .path = path,
+                };
+                try self.entries.put(path, entry);
+            },
+            std.fs.File.Kind.Directory => {
+                var dir = try cwd.openIterableDir(path, .{});
+                defer dir.close();
+                var iter = dir.iterate();
+                while (try iter.next()) |entry| {
+                    // don't traverse the .git dir
+                    if (std.mem.eql(u8, entry.name, ".git")) {
+                        continue;
+                    }
+
+                    const subpath = if (std.mem.eql(u8, path, "."))
+                        try std.fmt.allocPrint(self.arena.allocator(), "{s}", .{entry.name})
+                    else
+                        try std.fs.path.join(self.arena.allocator(), &[_][]const u8{ path, entry.name });
+                    try self.putEntry(cwd, subpath);
+                }
+            },
+            else => return,
+        }
+    }
 };
 
 pub const ReadIndexError = error {
@@ -31,73 +108,15 @@ pub const ReadIndexError = error {
     InvalidNullPadding,
 };
 
-/// if path is a file, adds it as an entry to the index struct.
-/// if path is a dir, adds its children recursively.
-/// ignoring symlinks for now but will add that later.
-fn putEntry(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, arena: *std.heap.ArenaAllocator, index: *Index) !void {
-    if (index.entries.contains(path)) {
-        return;
-    }
-    const file = try cwd.openFile(path, .{ .mode = .read_only });
-    defer file.close();
-    const meta = try file.metadata();
-    switch (meta.kind()) {
-        std.fs.File.Kind.File => {
-            const ctime = meta.created() orelse 0;
-            const mtime = meta.modified();
-            const is_executable = switch (builtin.os.tag) {
-                .windows => false,
-                else => meta.permissions().inner.unixHas(std.fs.File.PermissionsUnix.Class.user, .execute),
-            };
-            // is there a better place to write the object than here? probably...
-            var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-            try object.writeObject(cwd, path, allocator, null, &oid);
-            const entry = Index.Entry{
-                .ctime_secs = @truncate(i32, @divTrunc(ctime, std.time.ns_per_s)),
-                .ctime_nsecs = @truncate(i32, @mod(ctime, std.time.ns_per_s)),
-                .mtime_secs = @truncate(i32, @divTrunc(mtime, std.time.ns_per_s)),
-                .mtime_nsecs = @truncate(i32, @mod(mtime, std.time.ns_per_s)),
-                .dev = 0,
-                .ino = 0,
-                .mode = if (is_executable) 100755 else 100644,
-                .uid = 0,
-                .gid = 0,
-                .file_size = @truncate(u32, meta.size()),
-                .oid = oid,
-                .path_size = @truncate(u16, path.len),
-                .path = path,
-            };
-            try index.entries.put(path, entry);
-        },
-        std.fs.File.Kind.Directory => {
-            var dir = try cwd.openIterableDir(path, .{});
-            defer dir.close();
-            var iter = dir.iterate();
-            while (try iter.next()) |entry| {
-                // don't traverse the .git dir
-                if (std.mem.eql(u8, entry.name, ".git")) {
-                    continue;
-                }
-
-                const subpath = if (std.mem.eql(u8, path, "."))
-                    try std.fmt.allocPrint(arena.allocator(), "{s}", .{entry.name})
-                else
-                    try std.fs.path.join(arena.allocator(), &[_][]const u8{ path, entry.name });
-                try putEntry(cwd, subpath, allocator, arena, index);
-            }
-        },
-        else => return,
-    }
-}
-
 /// reads the index file into an Index struct.
-pub fn readIndex(git_dir: std.fs.Dir, arena: *std.heap.ArenaAllocator) !Index {
-    var entries = std.StringArrayHashMap(Index.Entry).init(arena.allocator());
+pub fn readIndex(git_dir: std.fs.Dir, allocator: std.mem.Allocator) !Index {
+    var index = Index.init(allocator);
+    errdefer index.deinit();
 
     // open index
     const index_file = git_dir.openFile("index", .{ .mode = .read_only }) catch |err| {
         switch (err) {
-            error.FileNotFound => return Index{ .version = 2, .entries = entries },
+            error.FileNotFound => return index,
             else => return err,
         }
     };
@@ -111,8 +130,8 @@ pub fn readIndex(git_dir: std.fs.Dir, arena: *std.heap.ArenaAllocator) !Index {
     }
 
     // ignoring version 3 and 4 for now
-    const version = try reader.readIntBig(u32);
-    if (version != 2) {
+    index.version = try reader.readIntBig(u32);
+    if (index.version != 2) {
         return error.InvalidVersion;
     }
 
@@ -134,7 +153,7 @@ pub fn readIndex(git_dir: std.fs.Dir, arena: *std.heap.ArenaAllocator) !Index {
             .file_size = try reader.readIntBig(u32),
             .oid = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN),
             .path_size = try reader.readIntBig(u16),
-            .path = try reader.readUntilDelimiterAlloc(arena.allocator(), 0, std.fs.MAX_PATH_BYTES),
+            .path = try reader.readUntilDelimiterAlloc(index.arena.allocator(), 0, std.fs.MAX_PATH_BYTES),
         };
         if (entry.path.len != entry.path_size) {
             return error.InvalidPathSize;
@@ -147,7 +166,7 @@ pub fn readIndex(git_dir: std.fs.Dir, arena: *std.heap.ArenaAllocator) !Index {
                 return error.InvalidNullPadding;
             }
         }
-        try entries.put(entry.path, entry);
+        try index.entries.put(entry.path, entry);
     }
 
     // TODO: check the checksum
@@ -156,7 +175,7 @@ pub fn readIndex(git_dir: std.fs.Dir, arena: *std.heap.ArenaAllocator) !Index {
     // (before the big endian and type conversions) to do the hashing.
     _ = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
 
-    return Index{ .version = version, .entries = entries };
+    return index;
 }
 
 /// writes the index file with the supplied paths.
@@ -170,14 +189,13 @@ pub fn writeIndex(cwd: std.fs.Dir, paths: std.ArrayList([]const u8), allocator: 
     const index_lock_file = try git_dir.createFile("index.lock", .{ .exclusive = true, .lock = .Exclusive });
     defer index_lock_file.close();
 
-    // create Index
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
-    var index = try readIndex(git_dir, &arena);
+    // create index
+    var index = try readIndex(git_dir, allocator);
+    defer index.deinit();
 
     // read all the new entries
     for (paths.items) |path| {
-        try putEntry(cwd, path, allocator, &arena, &index);
+        try index.putEntry(cwd, path);
     }
 
     // sort the entries
