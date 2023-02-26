@@ -12,7 +12,7 @@ const process = std.process;
 const hash = @import("./hash.zig");
 const object = @import("./object.zig");
 const cmd = @import("./command.zig");
-const index = @import("./index.zig");
+const idx = @import("./index.zig");
 
 /// takes the args passed to this program and puts them
 /// in an arraylist. do we need to do this? i don't know,
@@ -91,15 +91,10 @@ pub fn zitMain(args: *std.ArrayList([]const u8), allocator: std.mem.Allocator) !
             try git_dir.makeDir("refs");
         },
         cmd.CommandData.add => {
-            try index.writeIndex(cwd, command.data.add.paths, allocator);
+            try idx.writeIndex(cwd, command.data.add.paths, allocator);
         },
         cmd.CommandData.commit => {
-            // write commit object
-            var sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-            try object.writeObject(cwd, ".", allocator, null, &sha1_bytes_buffer);
-            var sha1_hex_buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
-            const sha1_hex = try std.fmt.bufPrint(&sha1_hex_buffer, "{}", .{std.fmt.fmtSliceHexLower(&sha1_bytes_buffer)});
-            try object.writeCommit(cwd, allocator, command.data, sha1_hex);
+            try object.writeCommit(cwd, allocator, command.data);
         },
     }
 }

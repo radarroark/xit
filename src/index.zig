@@ -189,7 +189,7 @@ pub fn writeIndex(cwd: std.fs.Dir, paths: std.ArrayList([]const u8), allocator: 
     const index_lock_file = try git_dir.createFile("index.lock", .{ .exclusive = true, .lock = .Exclusive });
     defer index_lock_file.close();
 
-    // create index
+    // read index
     var index = try readIndex(git_dir, allocator);
     defer index.deinit();
 

@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const hash = @import("./hash.zig");
 const compress = @import("./compress.zig");
 const cmd = @import("./command.zig");
+const idx = @import("./index.zig");
 
 const MAX_FILE_READ_SIZE: comptime_int = 1000; // FIXME: this is arbitrary...
 
@@ -232,12 +233,29 @@ pub fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocat
 /// uses the commit message provided to the command.
 /// updates HEAD when it's done using a file locking thingy
 /// so other processes don't step on each others' toes.
-pub fn writeCommit(cwd: std.fs.Dir, allocator: std.mem.Allocator, command: cmd.CommandData, tree_sha1_hex: []const u8) !void {
+pub fn writeCommit(cwd: std.fs.Dir, allocator: std.mem.Allocator, command: cmd.CommandData) !void {
     // open the internal dirs
     var git_dir = try cwd.openDir(".git", .{});
     defer git_dir.close();
     var objects_dir = try git_dir.openDir("objects", .{});
     defer objects_dir.close();
+
+    // create tree
+    var tree = Tree.init(allocator);
+    defer tree.deinit();
+
+    // read index
+    var index = try idx.readIndex(git_dir, allocator);
+    defer index.deinit();
+    for (index.entries.values()) |entry| {
+        try tree.addBlobEntry(entry.mode, entry.path, &entry.oid);
+    }
+
+    // write and hash tree
+    var tree_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+    try writeTree(objects_dir, allocator, &tree.entries, &tree_sha1_bytes_buffer);
+    var tree_sha1_hex_buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
+    const tree_sha1_hex = try std.fmt.bufPrint(&tree_sha1_hex_buffer, "{}", .{std.fmt.fmtSliceHexLower(&tree_sha1_bytes_buffer)});
 
     // read HEAD
     var head_file_buffer = [_]u8{0} ** MAX_FILE_READ_SIZE;
