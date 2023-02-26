@@ -11,6 +11,10 @@ const idx = @import("./index.zig");
 
 const MAX_FILE_READ_SIZE: comptime_int = 1000; // FIXME: this is arbitrary...
 
+pub const ObjectError = error {
+    ObjectAlreadyExists,
+};
+
 /// returns a single random character. just lower case for now.
 /// eventually i'll make it return upper case and maybe numbers too.
 fn randChar() !u8 {
@@ -72,12 +76,12 @@ fn writeBlob(file: std.fs.File, meta: std.fs.File.Metadata, objects_dir: std.fs.
     // make the two char dir
     var hash_prefix_dir = try objects_dir.makeOpenPath(sha1_hex[0..2], .{});
     defer hash_prefix_dir.close();
+    const hash_suffix = sha1_hex[2..];
 
-    // if the file already exists, exit early
-    const rest_of_hash = sha1_hex[2..];
-    if (hash_prefix_dir.openFile(rest_of_hash, .{})) |rest_of_hash_file| {
-        rest_of_hash_file.close();
-        return;
+    // exit early if the file already exists
+    if (hash_prefix_dir.openFile(hash_suffix, .{})) |hash_suffix_file| {
+        hash_suffix_file.close();
+        return error.ObjectAlreadyExists;
     } else |err| {
         if (err != error.FileNotFound) {
             return err;
@@ -119,7 +123,7 @@ fn writeBlob(file: std.fs.File, meta: std.fs.File.Metadata, objects_dir: std.fs.
     try hash_prefix_dir.deleteFile(tmp_file_name);
 
     // rename the compressed temp file
-    try std.fs.rename(hash_prefix_dir, compressed_tmp_file_name, hash_prefix_dir, rest_of_hash);
+    try std.fs.rename(hash_prefix_dir, compressed_tmp_file_name, hash_prefix_dir, hash_suffix);
 }
 
 fn writeTree(objects_dir: std.fs.Dir, allocator: std.mem.Allocator, entries: *std.ArrayList([]const u8), sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8) !void {
@@ -139,6 +143,17 @@ fn writeTree(objects_dir: std.fs.Dir, allocator: std.mem.Allocator, entries: *st
     // make the two char dir
     var tree_hash_prefix_dir = try objects_dir.makeOpenPath(tree_sha1_hex[0..2], .{});
     defer tree_hash_prefix_dir.close();
+    const tree_hash_suffix = tree_sha1_hex[2..];
+
+    // exit early if there is nothing to commit
+    if (tree_hash_prefix_dir.openFile(tree_hash_suffix, .{})) |tree_hash_suffix_file| {
+        tree_hash_suffix_file.close();
+        return error.ObjectAlreadyExists;
+    } else |err| {
+        if (err != error.FileNotFound) {
+            return err;
+        }
+    }
 
     // open temp file
     var tree_rand_chars = [_]u8{0} ** 6;
@@ -164,7 +179,7 @@ fn writeTree(objects_dir: std.fs.Dir, allocator: std.mem.Allocator, entries: *st
     try tree_hash_prefix_dir.deleteFile(tree_tmp_file_name);
 
     // rename the file
-    try std.fs.rename(tree_hash_prefix_dir, tree_comp_tmp_file_name, tree_hash_prefix_dir, tree_sha1_hex[2..]);
+    try std.fs.rename(tree_hash_prefix_dir, tree_comp_tmp_file_name, tree_hash_prefix_dir, tree_hash_suffix);
 }
 
 /// writes the file/dir at the given path into the .git dir.
@@ -303,6 +318,7 @@ pub fn writeCommit(cwd: std.fs.Dir, allocator: std.mem.Allocator, command: cmd.C
     // make the two char dir
     var commit_hash_prefix_dir = try objects_dir.makeOpenPath(commit_sha1_hex[0..2], .{});
     defer commit_hash_prefix_dir.close();
+    const commit_hash_suffix = commit_sha1_hex[2..];
 
     // open temp file
     var commit_rand_chars = [_]u8{0} ** 6;
@@ -328,7 +344,7 @@ pub fn writeCommit(cwd: std.fs.Dir, allocator: std.mem.Allocator, command: cmd.C
     try commit_hash_prefix_dir.deleteFile(commit_tmp_file_name);
 
     // rename the file
-    try std.fs.rename(commit_hash_prefix_dir, commit_comp_tmp_file_name, commit_hash_prefix_dir, commit_sha1_hex[2..]);
+    try std.fs.rename(commit_hash_prefix_dir, commit_comp_tmp_file_name, commit_hash_prefix_dir, commit_hash_suffix);
 
     // write commit id to HEAD
     // first write to a lock file and then rename it to HEAD for safety

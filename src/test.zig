@@ -89,6 +89,13 @@ test "init and commit" {
         defer hash_suffix_file.close();
     }
 
+    // can't commit again because nothing has changed
+    args.clearAndFree();
+    try args.append("commit");
+    try args.append("-m");
+    try args.append("pointless commit");
+    try std.testing.expect(error.ObjectAlreadyExists == main.zitMain(&args, allocator));
+
     // change the first file
     try hello_txt.pwriteAll("goodbye, world!", 0);
 
