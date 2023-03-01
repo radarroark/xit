@@ -11,7 +11,7 @@ const idx = @import("./index.zig");
 
 const MAX_FILE_READ_SIZE: comptime_int = 1000; // FIXME: this is arbitrary...
 
-pub const ObjectError = error {
+pub const ObjectError = error{
     ObjectAlreadyExists,
 };
 
@@ -28,10 +28,8 @@ fn randChar() !u8 {
 
 /// fills the given buffer with random chars.
 fn fillWithRandChars(buffer: []u8) !void {
-    var i: u32 = 0;
-    while (i < buffer.len) {
+    for (0..buffer.len) |i| {
         buffer[i] = try randChar();
-        i += 1;
     }
 }
 
