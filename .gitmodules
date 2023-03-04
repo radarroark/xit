@@ -4,3 +4,6 @@
 [submodule "src/test/deps/zlib"]
 	path = src/test/deps/zlib
 	url = https://github.com/madler/zlib.git
+[submodule "src/test/deps/mbedtls"]
+	path = src/test/deps/mbedtls
+	url = https://github.com/Mbed-TLS/mbedtls.git
