@@ -1,3 +1,6 @@
 [submodule "src/test/deps/libgit2"]
 	path = src/test/deps/libgit2
 	url = https://github.com/libgit2/libgit2.git
+[submodule "src/test/deps/zlib"]
+	path = src/test/deps/zlib
+	url = https://github.com/madler/zlib.git
