@@ -169,7 +169,7 @@ pub const Index = struct {
     }
 };
 
-pub const ReadIndexError = error {
+pub const ReadIndexError = error{
     InvalidSignature,
     InvalidVersion,
     InvalidPathSize,
@@ -245,7 +245,7 @@ pub fn readIndex(git_dir: std.fs.Dir, allocator: std.mem.Allocator) !Index {
     return index;
 }
 
-fn writeIndexImpl(cwd: std.fs.Dir, paths: std.ArrayList([]const u8), allocator: std.mem.Allocator) !void {
+pub fn writeIndex(cwd: std.fs.Dir, paths: std.ArrayList([]const u8), allocator: std.mem.Allocator) !void {
     // open git dir
     var git_dir = try cwd.openDir(".git", .{});
     defer git_dir.close();
@@ -254,6 +254,7 @@ fn writeIndexImpl(cwd: std.fs.Dir, paths: std.ArrayList([]const u8), allocator: 
     // first write to a lock file and then rename it to index for safety
     const index_lock_file = try git_dir.createFile("index.lock", .{ .exclusive = true, .lock = .Exclusive });
     defer index_lock_file.close();
+    errdefer git_dir.deleteFile("index.lock") catch {}; // make sure the lock file is deleted on error
 
     // read index
     var index = try readIndex(git_dir, allocator);
@@ -320,14 +321,4 @@ fn writeIndexImpl(cwd: std.fs.Dir, paths: std.ArrayList([]const u8), allocator: 
 
     // rename lock file to index
     try git_dir.rename("index.lock", "index");
-}
-
-pub fn writeIndex(cwd: std.fs.Dir, paths: std.ArrayList([]const u8), allocator: std.mem.Allocator) !void {
-    writeIndexImpl(cwd, paths, allocator) catch |err| {
-        // make sure the lock file is deleted
-        var git_dir = try cwd.openDir(".git", .{});
-        defer git_dir.close();
-        try git_dir.deleteFile("index.lock");
-        return err;
-    };
 }
