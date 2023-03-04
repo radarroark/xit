@@ -7,3 +7,6 @@
 [submodule "src/test/deps/mbedtls"]
 	path = src/test/deps/mbedtls
 	url = https://github.com/Mbed-TLS/mbedtls.git
+[submodule "src/test/deps/libssh2"]
+	path = src/test/deps/libssh2
+	url = https://github.com/libssh2/libssh2.git
