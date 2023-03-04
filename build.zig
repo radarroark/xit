@@ -1,10 +1,10 @@
 const std = @import("std");
+const libgit2 = @import("src/test/deps/libgit2.zig");
+const zlib = @import("src/test/deps/zlib.zig");
+const mbedtls = @import("src/test/deps/mbedtls.zig");
+const libssh2 = @import("src/test/deps/libssh2.zig");
 
-pub fn build(b: *std.build.Builder) void {
-    // Standard target options allows the person running `zig build` to choose
-    // what target to build for. Here we do not override the defaults, which
-    // means any target is allowed, and the default is native. Other options
-    // for restricting supported target set are available.
+pub fn build(b: *std.build.Builder) !void {
     const target = b.standardTargetOptions(.{});
 
     const optimize = b.standardOptimizeOption(.{});
@@ -26,10 +26,23 @@ pub fn build(b: *std.build.Builder) void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
+    const z = zlib.create(b, target, optimize);
+    const tls = mbedtls.create(b, target, optimize);
+    const ssh2 = libssh2.create(b, target, optimize);
+    tls.link(ssh2.step);
+
+    const git2 = try libgit2.create(b, target, optimize);
+    ssh2.link(git2.step);
+    tls.link(git2.step);
+    z.link(git2.step, .{});
+
     const exe_tests = b.addTest(.{
         .root_source_file = .{ .path = "src/test.zig" },
         .optimize = optimize,
     });
+    exe_tests.linkLibC();
+    exe_tests.addIncludePath("src/test/deps/libgit2/include");
+    exe_tests.linkLibrary(git2.step);
 
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&exe_tests.step);

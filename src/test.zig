@@ -3,6 +3,15 @@ const main = @import("./main.zig");
 const hash = @import("./hash.zig");
 const idx = @import("./index.zig");
 
+const c = @cImport({
+    @cInclude("git2.h");
+});
+
+test "libgit2" {
+    _ = c.git_libgit2_init();
+    _ = c.git_libgit2_shutdown();
+}
+
 const MAX_FILE_READ_SIZE: comptime_int = 1000; // FIXME: this is arbitrary...
 
 fn readContents(dir: std.fs.Dir, path: []const u8, out: *[MAX_FILE_READ_SIZE]u8) !usize {
