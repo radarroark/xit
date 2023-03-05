@@ -110,6 +110,19 @@ test "init and commit" {
     try expectEqual(0, c.git_repository_open(&repo, @ptrCast([*c]const u8, repo_path)));
     defer c.git_repository_free(repo);
 
+    // read the commit with libgit
+    {
+        var head: ?*c.git_reference = null;
+        try expectEqual(0, c.git_repository_head(&head, repo));
+        defer c.git_reference_free(head);
+        const oid = c.git_reference_target(head);
+        try std.testing.expect(null != oid);
+        var commit: ?*c.git_commit = null;
+        try expectEqual(0, c.git_commit_lookup(&commit, repo, oid));
+        defer c.git_commit_free(commit);
+        try std.testing.expectEqualStrings("first commit", std.mem.sliceTo(c.git_commit_message(commit), 0));
+    }
+
     // can't commit again because nothing has changed
     args.clearAndFree();
     try args.append("commit");
@@ -158,6 +171,19 @@ test "init and commit" {
         defer hash_prefix_dir.close();
         var hash_suffix_file = try hash_prefix_dir.openFile(head_file_slice[2..], .{});
         defer hash_suffix_file.close();
+    }
+
+    // read the commit with libgit
+    {
+        var head: ?*c.git_reference = null;
+        try expectEqual(0, c.git_repository_head(&head, repo));
+        defer c.git_reference_free(head);
+        const oid = c.git_reference_target(head);
+        try std.testing.expect(null != oid);
+        var commit: ?*c.git_commit = null;
+        try expectEqual(0, c.git_commit_lookup(&commit, repo, oid));
+        defer c.git_commit_free(commit);
+        try std.testing.expectEqualStrings("second commit", std.mem.sliceTo(c.git_commit_message(commit), 0));
     }
 
     // replace file with directory
