@@ -107,11 +107,12 @@ test "init and commit" {
     var repo_path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
     const repo_path = try repo_dir.realpath(".", &repo_path_buffer);
     var repo: ?*c.git_repository = null;
-    try expectEqual(0, c.git_repository_open(&repo, @ptrCast([*c]const u8, repo_path)));
-    defer c.git_repository_free(repo);
 
     // read the commit with libgit
     {
+        try expectEqual(0, c.git_repository_open(&repo, @ptrCast([*c]const u8, repo_path)));
+        defer c.git_repository_free(repo);
+
         var head: ?*c.git_reference = null;
         try expectEqual(0, c.git_repository_head(&head, repo));
         defer c.git_reference_free(head);
@@ -175,6 +176,9 @@ test "init and commit" {
 
     // read the commit with libgit
     {
+        try expectEqual(0, c.git_repository_open(&repo, @ptrCast([*c]const u8, repo_path)));
+        defer c.git_repository_free(repo);
+
         var head: ?*c.git_reference = null;
         try expectEqual(0, c.git_repository_head(&head, repo));
         defer c.git_reference_free(head);
@@ -212,6 +216,17 @@ test "init and commit" {
         try std.testing.expect(index.entries.contains("hello.txt/nested2.txt"));
     }
 
+    // read index with libgit
+    {
+        try expectEqual(0, c.git_repository_open(&repo, @ptrCast([*c]const u8, repo_path)));
+        defer c.git_repository_free(repo);
+
+        var index: ?*c.git_index = null;
+        try expectEqual(0, c.git_repository_index(&index, repo));
+        defer c.git_index_free(index);
+        try expectEqual(4, c.git_index_entrycount(index));
+    }
+
     // replace directory with file
     try hello_txt_dir.deleteFile("nested.txt");
     try hello_txt_dir.deleteFile("nested2.txt");
@@ -233,6 +248,17 @@ test "init and commit" {
         try std.testing.expect(index.entries.contains("README"));
         try std.testing.expect(index.entries.contains("src/zig/main.zig"));
         try std.testing.expect(index.entries.contains("hello.txt"));
+    }
+
+    // read index with libgit
+    {
+        try expectEqual(0, c.git_repository_open(&repo, @ptrCast([*c]const u8, repo_path)));
+        defer c.git_repository_free(repo);
+
+        var index: ?*c.git_index = null;
+        try expectEqual(0, c.git_repository_index(&index, repo));
+        defer c.git_index_free(index);
+        try expectEqual(3, c.git_index_entrycount(index));
     }
 
     // can't add a non-existent file
