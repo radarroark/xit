@@ -62,6 +62,7 @@ test "init and commit" {
 
     // change the cwd
     try repo_dir.setAsCwd();
+    defer cwd.setAsCwd() catch {};
 
     // make file
     var hello_txt = try repo_dir.createFile("hello.txt", .{});
@@ -219,7 +220,4 @@ test "init and commit" {
         const lock_file_or_err = git_dir.openFile("index.lock", .{ .mode = .read_only });
         try expectEqual(error.FileNotFound, lock_file_or_err);
     }
-
-    // reset the cwd
-    try cwd.setAsCwd();
 }
