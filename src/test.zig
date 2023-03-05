@@ -7,11 +7,6 @@ const c = @cImport({
     @cInclude("git2.h");
 });
 
-test "libgit2" {
-    _ = c.git_libgit2_init();
-    _ = c.git_libgit2_shutdown();
-}
-
 const MAX_FILE_READ_SIZE: comptime_int = 1000; // FIXME: this is arbitrary...
 
 fn readContents(dir: std.fs.Dir, path: []const u8, out: *[MAX_FILE_READ_SIZE]u8) !usize {
@@ -30,6 +25,10 @@ test "init and commit" {
     const allocator = std.testing.allocator;
     var args = std.ArrayList([]const u8).init(allocator);
     defer args.deinit();
+
+    // start libgit
+    _ = c.git_libgit2_init();
+    defer _ = c.git_libgit2_shutdown();
 
     // get the current working directory path.
     // we can't just call std.fs.cwd() all the time because we're
@@ -98,6 +97,13 @@ test "init and commit" {
         var hash_suffix_file = try hash_prefix_dir.openFile(head_file_slice[2..], .{});
         defer hash_suffix_file.close();
     }
+
+    // open repo with libgit
+    var repo_path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
+    const repo_path = try repo_dir.realpath(".", &repo_path_buffer);
+    var repo: ?*c.git_repository = null;
+    try std.testing.expectEqual(c.git_repository_open(&repo, @ptrCast([*c]const u8, repo_path)), 0);
+    defer c.git_repository_free(repo);
 
     // can't commit again because nothing has changed
     args.clearAndFree();
