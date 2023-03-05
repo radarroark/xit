@@ -87,7 +87,7 @@ test "init and commit" {
         // get HEAD contents
         var head_file_buffer = [_]u8{0} ** MAX_FILE_READ_SIZE;
         const head_file_size = try readContents(git_dir, "HEAD", &head_file_buffer);
-        try std.testing.expect(head_file_size == hash.SHA1_HEX_LEN);
+        try std.testing.expectEqual(head_file_size, hash.SHA1_HEX_LEN);
         const head_file_slice = head_file_buffer[0..head_file_size];
 
         // check that the commit object was created
@@ -104,7 +104,7 @@ test "init and commit" {
     try args.append("commit");
     try args.append("-m");
     try args.append("pointless commit");
-    try std.testing.expect(error.ObjectAlreadyExists == main.zitMain(&args, allocator));
+    try std.testing.expectEqual(main.zitMain(&args, allocator), error.ObjectAlreadyExists);
 
     // change the first file
     try hello_txt.pwriteAll("goodbye, world!", 0);
@@ -137,7 +137,7 @@ test "init and commit" {
         // get HEAD contents
         var head_file_buffer = [_]u8{0} ** MAX_FILE_READ_SIZE;
         const head_file_size = try readContents(git_dir, "HEAD", &head_file_buffer);
-        try std.testing.expect(head_file_size == hash.SHA1_HEX_LEN);
+        try std.testing.expectEqual(head_file_size, hash.SHA1_HEX_LEN);
         const head_file_slice = head_file_buffer[0..head_file_size];
 
         // check that the commit object was created
@@ -168,7 +168,7 @@ test "init and commit" {
     {
         var index = try idx.readIndex(git_dir, allocator);
         defer index.deinit();
-        try std.testing.expect(index.entries.count() == 4);
+        try std.testing.expectEqual(index.entries.count(), 4);
         try std.testing.expect(index.entries.contains("README"));
         try std.testing.expect(index.entries.contains("src/zig/main.zig"));
         try std.testing.expect(index.entries.contains("hello.txt/nested.txt"));
@@ -192,7 +192,7 @@ test "init and commit" {
     {
         var index = try idx.readIndex(git_dir, allocator);
         defer index.deinit();
-        try std.testing.expect(index.entries.count() == 3);
+        try std.testing.expectEqual(index.entries.count(), 3);
         try std.testing.expect(index.entries.contains("README"));
         try std.testing.expect(index.entries.contains("src/zig/main.zig"));
         try std.testing.expect(index.entries.contains("hello.txt"));
@@ -202,12 +202,12 @@ test "init and commit" {
     args.clearAndFree();
     try args.append("add");
     try args.append("no-such-file");
-    try std.testing.expect(error.FileNotFound == main.zitMain(&args, allocator));
+    try std.testing.expectEqual(main.zitMain(&args, allocator), error.FileNotFound);
 
     // a stale index lock file isn't hanging around
     {
         const lock_file_or_err = git_dir.openFile("index.lock", .{ .mode = .read_only });
-        try std.testing.expect(lock_file_or_err == error.FileNotFound);
+        try std.testing.expectEqual(lock_file_or_err, error.FileNotFound);
     }
 
     // reset the cwd
