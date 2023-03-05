@@ -28,8 +28,8 @@ fn randChar() !u8 {
 
 /// fills the given buffer with random chars.
 fn fillWithRandChars(buffer: []u8) !void {
-    for (0..buffer.len) |i| {
-        buffer[i] = try randChar();
+    for (buffer) |*ch| {
+        ch.* = try randChar();
     }
 }
 
