@@ -103,14 +103,14 @@ test "init and commit" {
         defer hash_suffix_file.close();
     }
 
-    // open repo with libgit
+    // get repo path for libgit
     var repo_path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
-    const repo_path = try repo_dir.realpath(".", &repo_path_buffer);
+    const repo_path = @ptrCast([*c]const u8, try repo_dir.realpath(".", &repo_path_buffer));
     var repo: ?*c.git_repository = null;
 
     // read the commit with libgit
     {
-        try expectEqual(0, c.git_repository_open(&repo, @ptrCast([*c]const u8, repo_path)));
+        try expectEqual(0, c.git_repository_open(&repo, repo_path));
         defer c.git_repository_free(repo);
 
         var head: ?*c.git_reference = null;
@@ -176,7 +176,7 @@ test "init and commit" {
 
     // read the commit with libgit
     {
-        try expectEqual(0, c.git_repository_open(&repo, @ptrCast([*c]const u8, repo_path)));
+        try expectEqual(0, c.git_repository_open(&repo, repo_path));
         defer c.git_repository_free(repo);
 
         var head: ?*c.git_reference = null;
@@ -218,7 +218,7 @@ test "init and commit" {
 
     // read index with libgit
     {
-        try expectEqual(0, c.git_repository_open(&repo, @ptrCast([*c]const u8, repo_path)));
+        try expectEqual(0, c.git_repository_open(&repo, repo_path));
         defer c.git_repository_free(repo);
 
         var index: ?*c.git_index = null;
@@ -252,7 +252,7 @@ test "init and commit" {
 
     // read index with libgit
     {
-        try expectEqual(0, c.git_repository_open(&repo, @ptrCast([*c]const u8, repo_path)));
+        try expectEqual(0, c.git_repository_open(&repo, repo_path));
         defer c.git_repository_free(repo);
 
         var index: ?*c.git_index = null;
