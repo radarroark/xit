@@ -34,8 +34,6 @@ fn fillWithRandChars(buffer: []u8) !void {
 }
 
 pub const Tree = struct {
-    const Self = @This();
-
     entries: std.ArrayList([]const u8),
     allocator: std.mem.Allocator,
 
@@ -46,20 +44,20 @@ pub const Tree = struct {
         };
     }
 
-    pub fn deinit(self: *Self) void {
+    pub fn deinit(self: *Tree) void {
         for (self.entries.items) |entry| {
             self.allocator.free(entry);
         }
         self.entries.deinit();
     }
 
-    pub fn addBlobEntry(self: *Self, mode: u32, path: []const u8, oid: []const u8) !void {
+    pub fn addBlobEntry(self: *Tree, mode: u32, path: []const u8, oid: []const u8) !void {
         const mode_str = if (mode == 100755) "100755" else "100644";
         const entry = try std.fmt.allocPrint(self.allocator, "{s} {s}\x00{s}", .{ mode_str, path, oid });
         try self.entries.append(entry);
     }
 
-    pub fn addTreeEntry(self: *Self, path: []const u8, oid: []const u8) !void {
+    pub fn addTreeEntry(self: *Tree, path: []const u8, oid: []const u8) !void {
         const entry = try std.fmt.allocPrint(self.allocator, "40000 {s}\x00{s}", .{ path, oid });
         try self.entries.append(entry);
     }

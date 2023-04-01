@@ -9,8 +9,6 @@
 const std = @import("std");
 
 pub const Status = struct {
-    const Self = @This();
-
     entries: std.ArrayList([]const u8),
     arena: std.heap.ArenaAllocator,
 
@@ -26,7 +24,7 @@ pub const Status = struct {
         };
     }
 
-    pub fn deinit(self: *Self) void {
+    pub fn deinit(self: *Status) void {
         self.entries.deinit();
         self.arena.deinit();
     }

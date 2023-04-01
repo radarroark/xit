@@ -97,8 +97,6 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8))
 }
 
 pub const Command = struct {
-    const Self = @This();
-
     data: CommandData,
 
     pub fn init(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8)) !Command {
@@ -107,7 +105,7 @@ pub const Command = struct {
         };
     }
 
-    pub fn deinit(self: *Self) void {
+    pub fn deinit(self: *Command) void {
         switch (self.data) {
             .add => {
                 self.data.add.paths.deinit();

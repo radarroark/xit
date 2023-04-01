@@ -7,8 +7,6 @@ const object = @import("./object.zig");
 const hash = @import("./hash.zig");
 
 pub const Index = struct {
-    const Self = @This();
-
     version: u32,
     entries: std.StringArrayHashMap(Entry),
     dirToPaths: std.StringArrayHashMap(std.StringArrayHashMap(void)),
@@ -41,7 +39,7 @@ pub const Index = struct {
         };
     }
 
-    pub fn deinit(self: *Self) void {
+    pub fn deinit(self: *Index) void {
         self.arena.deinit();
         self.entries.deinit();
         for (self.dirToPaths.values()) |*paths| {
@@ -53,7 +51,7 @@ pub const Index = struct {
     /// if path is a file, adds it as an entry to the index struct.
     /// if path is a dir, adds its children recursively.
     /// ignoring symlinks for now but will add that later.
-    fn putPath(self: *Self, cwd: std.fs.Dir, path: []const u8) !void {
+    fn putPath(self: *Index, cwd: std.fs.Dir, path: []const u8) !void {
         // remove entries that are parents of this path (directory replaces file)
         {
             var parent_path_maybe = std.fs.path.dirname(path);
@@ -139,7 +137,7 @@ pub const Index = struct {
         }
     }
 
-    fn putEntry(self: *Self, entry: Entry) !void {
+    fn putEntry(self: *Index, entry: Entry) !void {
         try self.entries.put(entry.path, entry);
         // populate dirToPaths
         var parent_path_maybe = std.fs.path.dirname(entry.path);
@@ -156,7 +154,7 @@ pub const Index = struct {
         }
     }
 
-    fn removeEntry(self: *Self, path: []const u8) void {
+    fn removeEntry(self: *Index, path: []const u8) void {
         _ = self.entries.orderedRemove(path);
         var parent_path_maybe = std.fs.path.dirname(path);
         while (parent_path_maybe) |parent_path| {
