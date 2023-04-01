@@ -13,6 +13,7 @@ const hash = @import("./hash.zig");
 const object = @import("./object.zig");
 const cmd = @import("./command.zig");
 const idx = @import("./index.zig");
+const stat = @import("./status.zig");
 
 /// takes the args passed to this program and puts them
 /// in an arraylist. do we need to do this? i don't know,
@@ -95,6 +96,13 @@ pub fn zitMain(args: *std.ArrayList([]const u8), allocator: std.mem.Allocator) !
         },
         cmd.CommandData.commit => {
             try object.writeCommit(cwd, allocator, command.data);
+        },
+        cmd.CommandData.status => {
+            var status = try stat.Status.init(allocator, cwd);
+            defer status.deinit();
+            for (status.entries.items) |entry| {
+                try stdout.print("{s}\n", .{entry});
+            }
         },
     }
 }

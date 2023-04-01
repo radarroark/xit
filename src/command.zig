@@ -8,6 +8,7 @@ pub const CommandKind = enum {
     init,
     add,
     commit,
+    status,
 };
 
 pub const CommandData = union(CommandKind) {
@@ -24,6 +25,7 @@ pub const CommandData = union(CommandKind) {
     commit: struct {
         message: ?[]const u8,
     },
+    status,
 };
 
 pub const CommandError = error{
@@ -84,6 +86,8 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8))
             const message_maybe = map_args.get("-m");
             const message = if (message_maybe == null) null else (message_maybe.? orelse return CommandError.CommitMessageMissing);
             return CommandData{ .commit = .{ .message = message } };
+        } else if (std.mem.eql(u8, args.items[0], "status")) {
+            return CommandData{ .status = {} };
         } else {
             return CommandData{ .invalid = .{ .name = args.items[0] } };
         }

@@ -2,6 +2,7 @@ const std = @import("std");
 const main = @import("./main.zig");
 const hash = @import("./hash.zig");
 const idx = @import("./index.zig");
+const stat = @import("./status.zig");
 
 const c = @cImport({
     @cInclude("git2.h");
@@ -271,5 +272,42 @@ test "init and commit" {
     {
         const lock_file_or_err = git_dir.openFile("index.lock", .{ .mode = .read_only });
         try expectEqual(error.FileNotFound, lock_file_or_err);
+    }
+
+    // make file
+    var goodbye_txt = try repo_dir.createFile("goodbye.txt", .{});
+    defer goodbye_txt.close();
+    try goodbye_txt.pwriteAll("Goodbye", 0);
+
+    // make another file
+    var farewell_txt = try repo_dir.createFile("farewell.txt", .{});
+    defer farewell_txt.close();
+    try farewell_txt.pwriteAll("Farewell", 0);
+
+    // add the new files
+    args.clearAndFree();
+    try args.append("add");
+    try args.append(".");
+    try main.zitMain(&args, allocator);
+
+    // get status
+    // we're calling the command directly so we can look at the entries.
+    // if we call it via zitMain it will just print to stdout...
+    // great for humans, not for unit tests.
+    var status = try stat.Status.init(allocator, repo_dir);
+    defer status.deinit();
+    try expectEqual(5, status.entries.items.len);
+
+    // get status with libgit
+    {
+        try expectEqual(0, c.git_repository_open(&repo, repo_path));
+        defer c.git_repository_free(repo);
+
+        var status_list: ?*c.git_status_list = null;
+        var status_options: c.git_status_options = undefined;
+        try expectEqual(0, c.git_status_options_init(&status_options, c.GIT_STATUS_OPTIONS_VERSION));
+        try expectEqual(0, c.git_status_list_new(&status_list, repo, &status_options));
+        defer c.git_status_list_free(status_list);
+        try expectEqual(5, c.git_status_list_entrycount(status_list));
     }
 }
