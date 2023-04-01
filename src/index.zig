@@ -9,7 +9,7 @@ const hash = @import("./hash.zig");
 pub const Index = struct {
     version: u32,
     entries: std.StringArrayHashMap(Entry),
-    dirToPaths: std.StringArrayHashMap(std.StringArrayHashMap(void)),
+    dir_to_paths: std.StringArrayHashMap(std.StringArrayHashMap(void)),
     allocator: std.mem.Allocator,
     arena: std.heap.ArenaAllocator,
 
@@ -33,7 +33,7 @@ pub const Index = struct {
         return .{
             .version = 2,
             .entries = std.StringArrayHashMap(Index.Entry).init(allocator),
-            .dirToPaths = std.StringArrayHashMap(std.StringArrayHashMap(void)).init(allocator),
+            .dir_to_paths = std.StringArrayHashMap(std.StringArrayHashMap(void)).init(allocator),
             .allocator = allocator,
             .arena = std.heap.ArenaAllocator.init(allocator),
         };
@@ -42,10 +42,10 @@ pub const Index = struct {
     pub fn deinit(self: *Index) void {
         self.arena.deinit();
         self.entries.deinit();
-        for (self.dirToPaths.values()) |*paths| {
+        for (self.dir_to_paths.values()) |*paths| {
             paths.deinit();
         }
-        self.dirToPaths.deinit();
+        self.dir_to_paths.deinit();
     }
 
     /// if path is a file, adds it as an entry to the index struct.
@@ -64,7 +64,7 @@ pub const Index = struct {
         }
         // remove entries that are children of this path (file replaces directory)
         {
-            var child_paths_maybe = self.dirToPaths.getEntry(path);
+            var child_paths_maybe = self.dir_to_paths.getEntry(path);
             if (child_paths_maybe) |child_paths| {
                 const child_paths_array = child_paths.value_ptr.*.keys();
                 // make a copy of the paths because removeEntry will modify it
@@ -139,16 +139,16 @@ pub const Index = struct {
 
     fn putEntry(self: *Index, entry: Entry) !void {
         try self.entries.put(entry.path, entry);
-        // populate dirToPaths
+        // populate dir_to_paths
         var parent_path_maybe = std.fs.path.dirname(entry.path);
         while (parent_path_maybe) |parent_path| {
-            var child_paths_maybe = self.dirToPaths.getEntry(parent_path);
+            var child_paths_maybe = self.dir_to_paths.getEntry(parent_path);
             if (child_paths_maybe) |child_paths| {
                 try child_paths.value_ptr.*.put(entry.path, {});
             } else {
                 var child_paths = std.StringArrayHashMap(void).init(self.allocator);
                 try child_paths.put(entry.path, {});
-                try self.dirToPaths.put(parent_path, child_paths);
+                try self.dir_to_paths.put(parent_path, child_paths);
             }
             parent_path_maybe = std.fs.path.dirname(parent_path);
         }
@@ -158,7 +158,7 @@ pub const Index = struct {
         _ = self.entries.orderedRemove(path);
         var parent_path_maybe = std.fs.path.dirname(path);
         while (parent_path_maybe) |parent_path| {
-            var child_paths_maybe = self.dirToPaths.getEntry(parent_path);
+            var child_paths_maybe = self.dir_to_paths.getEntry(parent_path);
             if (child_paths_maybe) |child_paths| {
                 _ = child_paths.value_ptr.*.orderedRemove(path);
             }
