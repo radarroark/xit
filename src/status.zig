@@ -7,17 +7,24 @@
 //! be done in here instead...
 
 const std = @import("std");
+const idx = @import("./index.zig");
 
 pub const Status = struct {
     entries: std.ArrayList([]const u8),
     arena: std.heap.ArenaAllocator,
 
-    pub fn init(allocator: std.mem.Allocator, cwd: std.fs.Dir) !Status {
+    pub fn init(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, git_dir: std.fs.Dir) !Status {
         var entries = std.ArrayList([]const u8).init(allocator);
         errdefer entries.deinit();
+
         var arena = std.heap.ArenaAllocator.init(allocator);
         errdefer arena.deinit();
-        try addEntry(arena.allocator(), &entries, cwd, ".");
+
+        var index = try idx.readIndex(allocator, git_dir);
+        defer index.deinit();
+
+        try addEntry(arena.allocator(), &entries, repo_dir, ".", index);
+
         return Status{
             .entries = entries,
             .arena = arena,
@@ -30,16 +37,18 @@ pub const Status = struct {
     }
 };
 
-fn addEntry(allocator: std.mem.Allocator, entries: *std.ArrayList([]const u8), cwd: std.fs.Dir, path: []const u8) !void {
-    const file = try cwd.openFile(path, .{ .mode = .read_only });
+fn addEntry(allocator: std.mem.Allocator, entries: *std.ArrayList([]const u8), repo_dir: std.fs.Dir, path: []const u8, index: idx.Index) !void {
+    const file = try repo_dir.openFile(path, .{ .mode = .read_only });
     defer file.close();
     const meta = try file.metadata();
     switch (meta.kind()) {
         std.fs.File.Kind.File => {
-            try entries.append(path);
+            if (!index.entries.contains(path)) {
+                try entries.append(path);
+            }
         },
         std.fs.File.Kind.Directory => {
-            var dir = try cwd.openIterableDir(path, .{});
+            var dir = try repo_dir.openIterableDir(path, .{});
             defer dir.close();
             var iter = dir.iterate();
             while (try iter.next()) |entry| {
@@ -52,7 +61,7 @@ fn addEntry(allocator: std.mem.Allocator, entries: *std.ArrayList([]const u8), c
                     try std.fmt.allocPrint(allocator, "{s}", .{entry.name})
                 else
                     try std.fs.path.join(allocator, &[_][]const u8{ path, entry.name });
-                try addEntry(allocator, entries, cwd, subpath);
+                try addEntry(allocator, entries, repo_dir, subpath, index);
             }
         },
         else => return,

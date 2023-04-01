@@ -98,7 +98,9 @@ pub fn zitMain(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8)) !
             try object.writeCommit(allocator, cwd, command.data);
         },
         cmd.CommandData.status => {
-            var status = try stat.Status.init(allocator, cwd);
+            var git_dir = try cwd.openDir(".git", .{});
+            defer git_dir.close();
+            var status = try stat.Status.init(allocator, cwd, git_dir);
             defer status.deinit();
             for (status.entries.items) |entry| {
                 try stdout.print("{s}\n", .{entry});
