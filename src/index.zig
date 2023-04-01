@@ -97,7 +97,7 @@ pub const Index = struct {
                 };
                 // write the object
                 var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-                try object.writeObject(cwd, path, self.allocator, null, &oid);
+                try object.writeObject(self.allocator, cwd, path, null, &oid);
                 // add the entry
                 const entry = Index.Entry{
                     .ctime_secs = @truncate(i32, @divTrunc(ctime, std.time.ns_per_s)),
@@ -174,7 +174,7 @@ pub const ReadIndexError = error{
     InvalidNullPadding,
 };
 
-pub fn readIndex(git_dir: std.fs.Dir, allocator: std.mem.Allocator) !Index {
+pub fn readIndex(allocator: std.mem.Allocator, git_dir: std.fs.Dir) !Index {
     var index = Index.init(allocator);
     errdefer index.deinit();
 
@@ -243,7 +243,7 @@ pub fn readIndex(git_dir: std.fs.Dir, allocator: std.mem.Allocator) !Index {
     return index;
 }
 
-pub fn writeIndex(cwd: std.fs.Dir, paths: std.ArrayList([]const u8), allocator: std.mem.Allocator) !void {
+pub fn writeIndex(allocator: std.mem.Allocator, cwd: std.fs.Dir, paths: std.ArrayList([]const u8)) !void {
     // open git dir
     var git_dir = try cwd.openDir(".git", .{});
     defer git_dir.close();
@@ -255,7 +255,7 @@ pub fn writeIndex(cwd: std.fs.Dir, paths: std.ArrayList([]const u8), allocator: 
     errdefer git_dir.deleteFile("index.lock") catch {}; // make sure the lock file is deleted on error
 
     // read index
-    var index = try readIndex(git_dir, allocator);
+    var index = try readIndex(allocator, git_dir);
     defer index.deinit();
 
     // read all the new entries

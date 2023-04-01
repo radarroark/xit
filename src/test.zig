@@ -53,7 +53,7 @@ test "init and commit" {
     args.clearAndFree();
     try args.append("init");
     try args.append(temp_dir_name ++ "/repo");
-    try main.zitMain(&args, allocator);
+    try main.zitMain(allocator, &args);
 
     // make sure the dirs were created
     var repo_dir = try temp_dir.openDir("repo", .{});
@@ -79,14 +79,14 @@ test "init and commit" {
     args.clearAndFree();
     try args.append("add");
     try args.append(".");
-    try main.zitMain(&args, allocator);
+    try main.zitMain(allocator, &args);
 
     // make a commit
     args.clearAndFree();
     try args.append("commit");
     try args.append("-m");
     try args.append("first commit");
-    try main.zitMain(&args, allocator);
+    try main.zitMain(allocator, &args);
 
     {
         // get HEAD contents
@@ -130,7 +130,7 @@ test "init and commit" {
     try args.append("commit");
     try args.append("-m");
     try args.append("pointless commit");
-    try expectEqual(error.ObjectAlreadyExists, main.zitMain(&args, allocator));
+    try expectEqual(error.ObjectAlreadyExists, main.zitMain(allocator, &args));
 
     // change the first file
     try hello_txt.pwriteAll("goodbye, world!", 0);
@@ -150,14 +150,14 @@ test "init and commit" {
     args.clearAndFree();
     try args.append("add");
     try args.append(".");
-    try main.zitMain(&args, allocator);
+    try main.zitMain(allocator, &args);
 
     // make another commit
     args.clearAndFree();
     try args.append("commit");
     try args.append("-m");
     try args.append("second commit");
-    try main.zitMain(&args, allocator);
+    try main.zitMain(allocator, &args);
 
     {
         // get HEAD contents
@@ -204,11 +204,11 @@ test "init and commit" {
     args.clearAndFree();
     try args.append("add");
     try args.append(".");
-    try main.zitMain(&args, allocator);
+    try main.zitMain(allocator, &args);
 
     // read index
     {
-        var index = try idx.readIndex(git_dir, allocator);
+        var index = try idx.readIndex(allocator, git_dir);
         defer index.deinit();
         try expectEqual(4, index.entries.count());
         try std.testing.expect(index.entries.contains("README"));
@@ -239,11 +239,11 @@ test "init and commit" {
     args.clearAndFree();
     try args.append("add");
     try args.append(".");
-    try main.zitMain(&args, allocator);
+    try main.zitMain(allocator, &args);
 
     // read index
     {
-        var index = try idx.readIndex(git_dir, allocator);
+        var index = try idx.readIndex(allocator, git_dir);
         defer index.deinit();
         try expectEqual(3, index.entries.count());
         try std.testing.expect(index.entries.contains("README"));
@@ -266,7 +266,7 @@ test "init and commit" {
     args.clearAndFree();
     try args.append("add");
     try args.append("no-such-file");
-    try expectEqual(error.FileNotFound, main.zitMain(&args, allocator));
+    try expectEqual(error.FileNotFound, main.zitMain(allocator, &args));
 
     // a stale index lock file isn't hanging around
     {
@@ -288,7 +288,7 @@ test "init and commit" {
     args.clearAndFree();
     try args.append("add");
     try args.append(".");
-    try main.zitMain(&args, allocator);
+    try main.zitMain(allocator, &args);
 
     // get status
     // we're calling the command directly so we can look at the entries.

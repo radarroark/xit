@@ -184,7 +184,7 @@ fn writeTree(objects_dir: std.fs.Dir, allocator: std.mem.Allocator, entries: *st
 /// will have the oid when it's done. on windows files are
 /// never marked as executable because apparently i can't
 /// even check if they are...maybe i'll figure that out later.
-pub fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocator, tree_maybe: ?*Tree, sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8) !void {
+pub fn writeObject(allocator: std.mem.Allocator, cwd: std.fs.Dir, path: []const u8, tree_maybe: ?*Tree, sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8) !void {
     // open the internal dirs
     var git_dir = try cwd.openDir(".git", .{});
     defer git_dir.close();
@@ -235,7 +235,7 @@ pub fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocat
                 const subpath = try std.fs.path.join(allocator, &[_][]const u8{ path, entry.name });
                 defer allocator.free(subpath);
                 var sub_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-                try writeObject(cwd, subpath, allocator, &subtree, &sub_sha1_bytes_buffer);
+                try writeObject(allocator, cwd, subpath, &subtree, &sub_sha1_bytes_buffer);
             }
 
             writeTree(objects_dir, allocator, &subtree.entries, sha1_bytes_buffer) catch |err| {
@@ -258,7 +258,7 @@ pub fn writeObject(cwd: std.fs.Dir, path: []const u8, allocator: std.mem.Allocat
 /// uses the commit message provided to the command.
 /// updates HEAD when it's done using a file locking thingy
 /// so other processes don't step on each others' toes.
-pub fn writeCommit(cwd: std.fs.Dir, allocator: std.mem.Allocator, command: cmd.CommandData) !void {
+pub fn writeCommit(allocator: std.mem.Allocator, cwd: std.fs.Dir, command: cmd.CommandData) !void {
     // open the internal dirs
     var git_dir = try cwd.openDir(".git", .{});
     defer git_dir.close();
@@ -270,7 +270,7 @@ pub fn writeCommit(cwd: std.fs.Dir, allocator: std.mem.Allocator, command: cmd.C
     defer tree.deinit();
 
     // read index
-    var index = try idx.readIndex(git_dir, allocator);
+    var index = try idx.readIndex(allocator, git_dir);
     defer index.deinit();
 
     // add index entries to tree

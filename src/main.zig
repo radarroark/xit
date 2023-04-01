@@ -37,7 +37,7 @@ fn appendArgs(out: *std.ArrayList([]const u8)) !void {
 /// you can call as well, but if you just want to pass the CLI args and
 /// have it behave just like the standalone git client than this is
 /// where it's at, homie.
-pub fn zitMain(args: *std.ArrayList([]const u8), allocator: std.mem.Allocator) !void {
+pub fn zitMain(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8)) !void {
     var command = try cmd.Command.init(allocator, args);
     defer command.deinit();
 
@@ -92,10 +92,10 @@ pub fn zitMain(args: *std.ArrayList([]const u8), allocator: std.mem.Allocator) !
             try git_dir.makeDir("refs");
         },
         cmd.CommandData.add => {
-            try idx.writeIndex(cwd, command.data.add.paths, allocator);
+            try idx.writeIndex(allocator, cwd, command.data.add.paths);
         },
         cmd.CommandData.commit => {
-            try object.writeCommit(cwd, allocator, command.data);
+            try object.writeCommit(allocator, cwd, command.data);
         },
         cmd.CommandData.status => {
             var status = try stat.Status.init(allocator, cwd);
@@ -120,5 +120,5 @@ pub fn main() !void {
     defer args.deinit();
 
     try appendArgs(&args);
-    try zitMain(&args, allocator);
+    try zitMain(allocator, &args);
 }
