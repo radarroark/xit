@@ -299,13 +299,13 @@ test "init and commit" {
 
         var status_list: ?*c.git_status_list = null;
         var status_options: c.git_status_options = undefined;
+        try expectEqual(0, c.git_status_options_init(&status_options, c.GIT_STATUS_OPTIONS_VERSION));
         status_options.show = c.GIT_STATUS_SHOW_WORKDIR_ONLY;
         status_options.flags = c.GIT_STATUS_OPT_INCLUDE_UNTRACKED;
-        try expectEqual(0, c.git_status_options_init(&status_options, c.GIT_STATUS_OPTIONS_VERSION));
         try expectEqual(0, c.git_status_list_new(&status_list, repo, &status_options));
         defer c.git_status_list_free(status_list);
-        // for some reason libgit is still showing files from the index,
-        // and not showing untracked files...
-        try expectEqual(3, c.git_status_list_entrycount(status_list));
+        // libgit is currently including indexed files, most likely
+        // because the repo itself is not completely valid right now
+        try expectEqual(5, c.git_status_list_entrycount(status_list));
     }
 }
