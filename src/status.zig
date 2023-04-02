@@ -54,6 +54,8 @@ fn addEntries(allocator: std.mem.Allocator, entries: *std.ArrayList(Status.Entry
             return true;
         },
         std.fs.File.Kind.Directory => {
+            const is_untracked = !(std.mem.eql(u8, path, ".") or index.dir_to_paths.contains(path) or index.entries.contains(path));
+
             var dir = try repo_dir.openIterableDir(path, .{});
             defer dir.close();
             var iter = dir.iterate();
@@ -78,12 +80,13 @@ fn addEntries(allocator: std.mem.Allocator, entries: *std.ArrayList(Status.Entry
 
                 const is_file = try addEntries(allocator, &grandchild_entries, index, repo_dir, subpath);
                 contains_file = contains_file or is_file;
+                if (is_file and is_untracked) break; // no need to continue because child_entries will be discarded anyway
 
                 try child_entries.appendSlice(grandchild_entries.items);
             }
 
             // add the dir if it isn't tracked and contains a file
-            if (!(std.mem.eql(u8, path, ".") or index.dir_to_paths.contains(path) or index.entries.contains(path))) {
+            if (is_untracked) {
                 if (contains_file) {
                     try entries.append(Status.Entry{ .path = path, .meta = meta });
                 }
