@@ -284,9 +284,11 @@ test "end to end" {
         defer goodbye_txt.close();
         try goodbye_txt.pwriteAll("Goodbye", 0);
 
-        // make dir
+        // make dirs
         var a_dir = try repo_dir.makeOpenPath("a", .{});
         defer a_dir.close();
+        var b_dir = try repo_dir.makeOpenPath("b", .{});
+        defer b_dir.close();
 
         // make file in dir
         var farewell_txt = try a_dir.createFile("farewell.txt", .{});
@@ -300,6 +302,15 @@ test "end to end" {
         var status = try stat.Status.init(allocator, repo_dir, git_dir);
         defer status.deinit();
         try expectEqual(2, status.entries.items.len);
+
+        // check the entries
+        var entryMap = std.StringHashMap(void).init(allocator);
+        defer entryMap.deinit();
+        for (status.entries.items) |entry| {
+            try entryMap.put(entry.path, {});
+        }
+        try std.testing.expect(entryMap.contains("a"));
+        try std.testing.expect(entryMap.contains("goodbye.txt"));
 
         // get status with libgit
         {

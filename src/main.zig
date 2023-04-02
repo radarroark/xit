@@ -103,7 +103,7 @@ pub fn zitMain(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8)) !
             var status = try stat.Status.init(allocator, cwd, git_dir);
             defer status.deinit();
             for (status.entries.items) |entry| {
-                try stdout.print("{s}\n", .{entry});
+                try stdout.print("{s}\n", .{entry.path});
             }
         },
     }
