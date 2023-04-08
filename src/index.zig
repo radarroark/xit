@@ -91,10 +91,6 @@ pub const Index = struct {
                 // get the stats
                 const ctime = meta.created() orelse 0;
                 const mtime = meta.modified();
-                const is_executable = switch (builtin.os.tag) {
-                    .windows => false,
-                    else => meta.permissions().inner.unixHas(std.fs.File.PermissionsUnix.Class.user, .execute),
-                };
                 // write the object
                 var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
                 try object.writeObject(self.allocator, cwd, path, null, &oid);
@@ -106,7 +102,7 @@ pub const Index = struct {
                     .mtime_nsecs = @truncate(i32, @mod(mtime, std.time.ns_per_s)),
                     .dev = 0,
                     .ino = 0,
-                    .mode = if (is_executable) 100755 else 100644,
+                    .mode = getMode(meta),
                     .uid = 0,
                     .gid = 0,
                     .file_size = @truncate(u32, meta.size()),
@@ -166,6 +162,14 @@ pub const Index = struct {
         }
     }
 };
+
+pub fn getMode(meta: std.fs.File.Metadata) u32 {
+    const is_executable = switch (builtin.os.tag) {
+        .windows => false,
+        else => meta.permissions().inner.unixHas(std.fs.File.PermissionsUnix.Class.user, .execute),
+    };
+    return if (is_executable) 100755 else 100644;
+}
 
 pub const ReadIndexError = error{
     InvalidSignature,

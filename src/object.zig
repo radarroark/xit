@@ -210,12 +210,7 @@ pub fn writeObject(allocator: std.mem.Allocator, cwd: std.fs.Dir, path: []const 
 
             // add to entries if it's not null
             if (tree_maybe) |tree| {
-                const is_executable = switch (builtin.os.tag) {
-                    .windows => false,
-                    else => meta.permissions().inner.unixHas(std.fs.File.PermissionsUnix.Class.user, .execute),
-                };
-                const mode: u32 = if (is_executable) 100755 else 100644;
-                try tree.addBlobEntry(mode, path, sha1_bytes_buffer);
+                try tree.addBlobEntry(idx.getMode(meta), path, sha1_bytes_buffer);
             }
         },
         std.fs.File.Kind.Directory => {

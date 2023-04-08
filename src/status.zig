@@ -55,7 +55,7 @@ fn addEntries(allocator: std.mem.Allocator, untracked: *std.ArrayList(Status.Ent
     switch (meta.kind()) {
         std.fs.File.Kind.File => {
             if (index.entries.get(path)) |entry| {
-                if (entry.file_size != meta.size()) {
+                if (entry.file_size != meta.size() or entry.mode != idx.getMode(meta)) {
                     try modified.append(Status.Entry{ .path = path, .meta = meta });
                 }
             } else {
