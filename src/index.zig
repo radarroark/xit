@@ -88,18 +88,16 @@ pub const Index = struct {
                 if (self.entries.contains(path)) {
                     return;
                 }
-                // get the stats
-                const ctime = meta.created() orelse 0;
-                const mtime = meta.modified();
                 // write the object
                 var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
                 try object.writeObject(self.allocator, cwd, path, null, &oid);
                 // add the entry
+                const times = getTimes(meta);
                 const entry = Index.Entry{
-                    .ctime_secs = @truncate(i32, @divTrunc(ctime, std.time.ns_per_s)),
-                    .ctime_nsecs = @truncate(i32, @mod(ctime, std.time.ns_per_s)),
-                    .mtime_secs = @truncate(i32, @divTrunc(mtime, std.time.ns_per_s)),
-                    .mtime_nsecs = @truncate(i32, @mod(mtime, std.time.ns_per_s)),
+                    .ctime_secs = times.ctime_secs,
+                    .ctime_nsecs = times.ctime_nsecs,
+                    .mtime_secs = times.mtime_secs,
+                    .mtime_nsecs = times.mtime_nsecs,
                     .dev = 0,
                     .ino = 0,
                     .mode = getMode(meta),
@@ -169,6 +167,24 @@ pub fn getMode(meta: std.fs.File.Metadata) u32 {
         else => meta.permissions().inner.unixHas(std.fs.File.PermissionsUnix.Class.user, .execute),
     };
     return if (is_executable) 100755 else 100644;
+}
+
+pub const Times = struct {
+    ctime_secs: i32,
+    ctime_nsecs: i32,
+    mtime_secs: i32,
+    mtime_nsecs: i32,
+};
+
+pub fn getTimes(meta: std.fs.File.Metadata) Times {
+    const ctime = meta.created() orelse 0;
+    const mtime = meta.modified();
+    return Times{
+        .ctime_secs = @truncate(i32, @divTrunc(ctime, std.time.ns_per_s)),
+        .ctime_nsecs = @truncate(i32, @mod(ctime, std.time.ns_per_s)),
+        .mtime_secs = @truncate(i32, @divTrunc(mtime, std.time.ns_per_s)),
+        .mtime_nsecs = @truncate(i32, @mod(mtime, std.time.ns_per_s)),
+    };
 }
 
 pub const ReadIndexError = error{
