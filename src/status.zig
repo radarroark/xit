@@ -11,6 +11,7 @@ const idx = @import("./index.zig");
 
 pub const Status = struct {
     untracked: std.ArrayList(Entry),
+    modified: std.ArrayList(Entry),
     arena: std.heap.ArenaAllocator,
 
     pub const Entry = struct {
@@ -22,33 +23,42 @@ pub const Status = struct {
         var untracked = std.ArrayList(Entry).init(allocator);
         errdefer untracked.deinit();
 
+        var modified = std.ArrayList(Entry).init(allocator);
+        errdefer modified.deinit();
+
         var arena = std.heap.ArenaAllocator.init(allocator);
         errdefer arena.deinit();
 
         var index = try idx.readIndex(allocator, git_dir);
         defer index.deinit();
 
-        _ = try addEntries(arena.allocator(), &untracked, index, repo_dir, ".");
+        _ = try addEntries(arena.allocator(), &untracked, &modified, index, repo_dir, ".");
 
         return Status{
             .untracked = untracked,
+            .modified = modified,
             .arena = arena,
         };
     }
 
     pub fn deinit(self: *Status) void {
         self.untracked.deinit();
+        self.modified.deinit();
         self.arena.deinit();
     }
 };
 
-fn addEntries(allocator: std.mem.Allocator, untracked: *std.ArrayList(Status.Entry), index: idx.Index, repo_dir: std.fs.Dir, path: []const u8) !bool {
+fn addEntries(allocator: std.mem.Allocator, untracked: *std.ArrayList(Status.Entry), modified: *std.ArrayList(Status.Entry), index: idx.Index, repo_dir: std.fs.Dir, path: []const u8) !bool {
     const file = try repo_dir.openFile(path, .{ .mode = .read_only });
     defer file.close();
     const meta = try file.metadata();
     switch (meta.kind()) {
         std.fs.File.Kind.File => {
-            if (!index.entries.contains(path)) {
+            if (index.entries.get(path)) |entry| {
+                if (entry.file_size != meta.size()) {
+                    try modified.append(Status.Entry{ .path = path, .meta = meta });
+                }
+            } else {
                 try untracked.append(Status.Entry{ .path = path, .meta = meta });
             }
             return true;
@@ -78,7 +88,7 @@ fn addEntries(allocator: std.mem.Allocator, untracked: *std.ArrayList(Status.Ent
                 var grandchild_untracked = std.ArrayList(Status.Entry).init(allocator);
                 defer grandchild_untracked.deinit();
 
-                const is_file = try addEntries(allocator, &grandchild_untracked, index, repo_dir, subpath);
+                const is_file = try addEntries(allocator, &grandchild_untracked, modified, index, repo_dir, subpath);
                 contains_file = contains_file or is_file;
                 if (is_file and is_untracked) break; // no need to continue because child_untracked will be discarded anyway
 

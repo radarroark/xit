@@ -100,10 +100,16 @@ pub fn zitMain(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8)) !
         cmd.CommandData.status => {
             var git_dir = try cwd.openDir(".git", .{});
             defer git_dir.close();
+
             var status = try stat.Status.init(allocator, cwd, git_dir);
             defer status.deinit();
+
             for (status.untracked.items) |entry| {
                 try stdout.print("?? {s}\n", .{entry.path});
+            }
+
+            for (status.modified.items) |entry| {
+                try stdout.print(" M {s}\n", .{entry.path});
             }
         },
     }

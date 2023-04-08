@@ -295,6 +295,11 @@ test "end to end" {
         defer farewell_txt.close();
         try farewell_txt.pwriteAll("Farewell", 0);
 
+        // modify indexed file
+        const hello_txt = try repo_dir.openFile("hello.txt", .{ .mode = .read_write });
+        defer hello_txt.close();
+        try hello_txt.pwriteAll("hello, world again!", 0);
+
         // get status
         // we're calling the command directly so we can look at the entries.
         // if we call it via zitMain it will just print to stdout...
@@ -302,15 +307,24 @@ test "end to end" {
         var status = try stat.Status.init(allocator, repo_dir, git_dir);
         defer status.deinit();
         try expectEqual(2, status.untracked.items.len);
+        try expectEqual(1, status.modified.items.len);
 
         // check the untracked entries
-        var entryMap = std.StringHashMap(void).init(allocator);
-        defer entryMap.deinit();
+        var untrackedMap = std.StringHashMap(void).init(allocator);
+        defer untrackedMap.deinit();
         for (status.untracked.items) |entry| {
-            try entryMap.put(entry.path, {});
+            try untrackedMap.put(entry.path, {});
         }
-        try std.testing.expect(entryMap.contains("a"));
-        try std.testing.expect(entryMap.contains("goodbye.txt"));
+        try std.testing.expect(untrackedMap.contains("a"));
+        try std.testing.expect(untrackedMap.contains("goodbye.txt"));
+
+        // check the modified entries
+        var modifiedMap = std.StringHashMap(void).init(allocator);
+        defer modifiedMap.deinit();
+        for (status.modified.items) |entry| {
+            try modifiedMap.put(entry.path, {});
+        }
+        try std.testing.expect(modifiedMap.contains("hello.txt"));
 
         // get status with libgit
         {
