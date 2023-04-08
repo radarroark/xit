@@ -8,6 +8,7 @@
 
 const std = @import("std");
 const idx = @import("./index.zig");
+const hash = @import("./hash.zig");
 
 pub const Status = struct {
     untracked: std.ArrayList(Entry),
@@ -57,6 +58,12 @@ fn addEntries(allocator: std.mem.Allocator, untracked: *std.ArrayList(Status.Ent
             if (index.entries.get(path)) |entry| {
                 if (entry.file_size != meta.size() or entry.mode != idx.getMode(meta)) {
                     try modified.append(Status.Entry{ .path = path, .meta = meta });
+                } else {
+                    var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+                    try hash.sha1_file(file, &oid);
+                    if (!std.mem.eql(u8, &entry.oid, &oid)) {
+                        try modified.append(Status.Entry{ .path = path, .meta = meta });
+                    }
                 }
             } else {
                 try untracked.append(Status.Entry{ .path = path, .meta = meta });

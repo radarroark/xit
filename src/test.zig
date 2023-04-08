@@ -295,10 +295,16 @@ test "end to end" {
         defer farewell_txt.close();
         try farewell_txt.pwriteAll("Farewell", 0);
 
-        // modify indexed file
-        const hello_txt = try repo_dir.openFile("hello.txt", .{ .mode = .read_write });
-        defer hello_txt.close();
-        try hello_txt.pwriteAll("hello, world again!", 0);
+        // modify indexed files
+        {
+            const hello_txt = try repo_dir.openFile("hello.txt", .{ .mode = .read_write });
+            defer hello_txt.close();
+            try hello_txt.pwriteAll("hello, world again!", 0);
+
+            const readme = try repo_dir.openFile("README", .{ .mode = .read_write });
+            defer readme.close();
+            try readme.pwriteAll("My code project", 0); // size doesn't change
+        }
 
         // get status
         // we're calling the command directly so we can look at the entries.
@@ -307,7 +313,7 @@ test "end to end" {
         var status = try stat.Status.init(allocator, repo_dir, git_dir);
         defer status.deinit();
         try expectEqual(2, status.untracked.items.len);
-        try expectEqual(1, status.modified.items.len);
+        try expectEqual(2, status.modified.items.len);
 
         // check the untracked entries
         var untrackedMap = std.StringHashMap(void).init(allocator);
@@ -325,6 +331,7 @@ test "end to end" {
             try modifiedMap.put(entry.path, {});
         }
         try std.testing.expect(modifiedMap.contains("hello.txt"));
+        try std.testing.expect(modifiedMap.contains("README"));
 
         // get status with libgit
         {
