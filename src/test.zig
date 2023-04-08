@@ -304,6 +304,12 @@ test "end to end" {
             const readme = try repo_dir.openFile("README", .{ .mode = .read_write });
             defer readme.close();
             try readme.pwriteAll("My code project", 0); // size doesn't change
+
+            var src_dir = try repo_dir.openDir("src", .{});
+            defer src_dir.close();
+            var zig_dir = try src_dir.openDir("zig", .{});
+            defer zig_dir.close();
+            try zig_dir.deleteFile("main.zig");
         }
 
         // get status
@@ -314,6 +320,7 @@ test "end to end" {
         defer status.deinit();
         try expectEqual(2, status.untracked.items.len);
         try expectEqual(2, status.modified.items.len);
+        try expectEqual(1, status.deleted.items.len);
 
         // check the untracked entries
         var untrackedMap = std.StringHashMap(void).init(allocator);
@@ -332,6 +339,14 @@ test "end to end" {
         }
         try std.testing.expect(modifiedMap.contains("hello.txt"));
         try std.testing.expect(modifiedMap.contains("README"));
+
+        // check the deleted entries
+        var deletedMap = std.StringHashMap(void).init(allocator);
+        defer deletedMap.deinit();
+        for (status.deleted.items) |path| {
+            try deletedMap.put(path, {});
+        }
+        try std.testing.expect(deletedMap.contains("src/zig/main.zig"));
 
         // get status with libgit
         {

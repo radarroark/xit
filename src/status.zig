@@ -13,6 +13,8 @@ const hash = @import("./hash.zig");
 pub const Status = struct {
     untracked: std.ArrayList(Entry),
     modified: std.ArrayList(Entry),
+    deleted: std.ArrayList([]const u8),
+    index: idx.Index,
     arena: std.heap.ArenaAllocator,
 
     pub const Entry = struct {
@@ -27,17 +29,31 @@ pub const Status = struct {
         var modified = std.ArrayList(Entry).init(allocator);
         errdefer modified.deinit();
 
+        var deleted = std.ArrayList([]const u8).init(allocator);
+        errdefer deleted.deinit();
+
         var arena = std.heap.ArenaAllocator.init(allocator);
         errdefer arena.deinit();
 
         var index = try idx.readIndex(allocator, git_dir);
-        defer index.deinit();
+        errdefer index.deinit();
 
-        _ = try addEntries(arena.allocator(), &untracked, &modified, index, repo_dir, ".");
+        var index_bools = try allocator.alloc(bool, index.entries.count());
+        defer allocator.free(index_bools);
+
+        _ = try addEntries(arena.allocator(), &untracked, &modified, index, &index_bools, repo_dir, ".");
+
+        for (index_bools, 0..) |exists, i| {
+            if (!exists) {
+                try deleted.append(index.entries.keys()[i]);
+            }
+        }
 
         return Status{
             .untracked = untracked,
             .modified = modified,
+            .deleted = deleted,
+            .index = index,
             .arena = arena,
         };
     }
@@ -45,17 +61,23 @@ pub const Status = struct {
     pub fn deinit(self: *Status) void {
         self.untracked.deinit();
         self.modified.deinit();
+        self.deleted.deinit();
+        self.index.deinit();
         self.arena.deinit();
     }
 };
 
-fn addEntries(allocator: std.mem.Allocator, untracked: *std.ArrayList(Status.Entry), modified: *std.ArrayList(Status.Entry), index: idx.Index, repo_dir: std.fs.Dir, path: []const u8) !bool {
+fn addEntries(allocator: std.mem.Allocator, untracked: *std.ArrayList(Status.Entry), modified: *std.ArrayList(Status.Entry), index: idx.Index, index_bools: *[]bool, repo_dir: std.fs.Dir, path: []const u8) !bool {
     const file = try repo_dir.openFile(path, .{ .mode = .read_only });
     defer file.close();
     const meta = try file.metadata();
     switch (meta.kind()) {
         std.fs.File.Kind.File => {
             if (index.entries.get(path)) |entry| {
+                if (index.entries.getIndex(path)) |entry_index| {
+                    index_bools.*[entry_index] = true;
+                }
+
                 if (meta.size() != entry.file_size or idx.getMode(meta) != entry.mode) {
                     try modified.append(Status.Entry{ .path = path, .meta = meta });
                 } else {
@@ -102,7 +124,7 @@ fn addEntries(allocator: std.mem.Allocator, untracked: *std.ArrayList(Status.Ent
                 var grandchild_untracked = std.ArrayList(Status.Entry).init(allocator);
                 defer grandchild_untracked.deinit();
 
-                const is_file = try addEntries(allocator, &grandchild_untracked, modified, index, repo_dir, subpath);
+                const is_file = try addEntries(allocator, &grandchild_untracked, modified, index, index_bools, repo_dir, subpath);
                 contains_file = contains_file or is_file;
                 if (is_file and is_untracked) break; // no need to continue because child_untracked will be discarded anyway
 

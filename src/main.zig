@@ -111,6 +111,10 @@ pub fn zitMain(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8)) !
             for (status.modified.items) |entry| {
                 try stdout.print(" M {s}\n", .{entry.path});
             }
+
+            for (status.deleted.items) |path| {
+                try stdout.print(" D {s}\n", .{path});
+            }
         },
     }
 }
