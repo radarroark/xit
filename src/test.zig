@@ -301,12 +301,12 @@ test "end to end" {
         // great for humans, not for unit tests.
         var status = try stat.Status.init(allocator, repo_dir, git_dir);
         defer status.deinit();
-        try expectEqual(2, status.entries.items.len);
+        try expectEqual(2, status.untracked.items.len);
 
-        // check the entries
+        // check the untracked entries
         var entryMap = std.StringHashMap(void).init(allocator);
         defer entryMap.deinit();
-        for (status.entries.items) |entry| {
+        for (status.untracked.items) |entry| {
             try entryMap.put(entry.path, {});
         }
         try std.testing.expect(entryMap.contains("a"));
