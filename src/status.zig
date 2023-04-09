@@ -73,11 +73,10 @@ fn addEntries(allocator: std.mem.Allocator, untracked: *std.ArrayList(Status.Ent
     const meta = try file.metadata();
     switch (meta.kind()) {
         std.fs.File.Kind.File => {
-            if (index.entries.get(path)) |entry| {
-                if (index.entries.getIndex(path)) |entry_index| {
-                    index_bools.*[entry_index] = true;
-                }
+            if (index.entries.getIndex(path)) |entry_index| {
+                index_bools.*[entry_index] = true;
 
+                const entry = index.entries.values()[entry_index];
                 if (meta.size() != entry.file_size or idx.getMode(meta) != entry.mode) {
                     try modified.append(Status.Entry{ .path = path, .meta = meta });
                 } else {
