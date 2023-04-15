@@ -69,7 +69,7 @@ pub fn compress(in: std.fs.File, out: std.fs.File, allocator: std.mem.Allocator)
     try writer.writeIntBig(u32, hasher.final());
 }
 
-pub fn decompress(in: std.fs.File, out: std.fs.File, allocator: std.mem.Allocator) !void {
+pub fn decompress(allocator: std.mem.Allocator, in: std.fs.File, out: std.fs.File) !void {
     // read the in file into memory
     var read_buffer = [_]u8{0} ** MAX_FILE_SIZE_BYTES;
     const in_size = try in.pread(&read_buffer, 0);
@@ -87,6 +87,30 @@ pub fn decompress(in: std.fs.File, out: std.fs.File, allocator: std.mem.Allocato
     // write the result to the out file
     _ = try out.write(buf);
 }
+
+// does the same thing as decompress, except it remains completely
+// in memory and can clean itself up via deinit.
+pub const Decompressed = struct {
+    stream: std.compress.zlib.ZlibStream(std.io.Reader(*std.io.FixedBufferStream([]u8), std.io.FixedBufferStream([]u8).ReadError, std.io.FixedBufferStream([]u8).read)),
+
+    pub fn init(allocator: std.mem.Allocator, in: std.fs.File) !Decompressed {
+        // read the in file into memory
+        var read_buffer = [_]u8{0} ** MAX_FILE_SIZE_BYTES;
+        const in_size = try in.pread(&read_buffer, 0);
+        if (in_size == MAX_FILE_SIZE_BYTES) {
+            return CompressError.FileTooLarge;
+        }
+        var fixed_buffer = std.io.fixedBufferStream(read_buffer[0..in_size]);
+
+        return Decompressed{
+            .stream = try zlib.zlibStream(allocator, fixed_buffer.reader()),
+        };
+    }
+
+    pub fn deinit(self: *Decompressed) void {
+        defer self.stream.deinit();
+    }
+};
 
 test "compress and decompress" {
     const temp_dir_name = "temp-test-compress";
@@ -120,10 +144,17 @@ test "compress and decompress" {
     // decompress it so we know it works
     var out_decompressed = try temp_dir.createFile("out_decompressed", .{ .read = true });
     defer out_decompressed.close();
-    try decompress(out_compressed, out_decompressed, allocator);
+    try decompress(allocator, out_compressed, out_decompressed);
 
     // read the decompressed file into memory and check that it's the same
     var read_buffer = [_]u8{0} ** MAX_FILE_SIZE_BYTES;
     const size = try out_decompressed.pread(&read_buffer, 0);
     try std.testing.expect(std.mem.eql(u8, hello_txt_content, read_buffer[0..size]));
+
+    // decompress purely in memory
+    var decompressed = try Decompressed.init(allocator, out_compressed);
+    defer decompressed.deinit();
+    const buf = try decompressed.stream.reader().readAllAlloc(allocator, std.math.maxInt(usize));
+    defer allocator.free(buf);
+    try std.testing.expect(std.mem.eql(u8, hello_txt_content, buf));
 }

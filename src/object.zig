@@ -11,7 +11,7 @@ const idx = @import("./index.zig");
 
 const MAX_FILE_READ_SIZE: comptime_int = 1000; // FIXME: this is arbitrary...
 
-pub const ObjectError = error{
+pub const ObjectWriteError = error{
     ObjectAlreadyExists,
 };
 
@@ -356,3 +356,156 @@ pub fn writeCommit(allocator: std.mem.Allocator, cwd: std.fs.Dir, command: cmd.C
     }
     try git_dir.rename("HEAD.lock", "HEAD");
 }
+
+pub const ObjectKind = enum {
+    blob,
+    tree,
+    commit,
+};
+
+pub const ObjectContent = union(ObjectKind) {
+    blob,
+    tree,
+    commit: struct {
+        tree: []const u8,
+        parent: ?[]const u8,
+        author: ?[]const u8,
+        committer: ?[]const u8,
+        message: []const u8,
+    },
+};
+
+pub const ObjectReadError = error{
+    InvalidObjectKind,
+    InvalidCommitTreeHash,
+    InvalidCommitParentHash,
+};
+
+pub const Object = struct {
+    allocator: std.mem.Allocator,
+    content: ObjectContent,
+
+    pub fn init(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, oid: [hash.SHA1_HEX_LEN]u8) !Object {
+        // open the internal dirs
+        var git_dir = try repo_dir.openDir(".git", .{});
+        defer git_dir.close();
+        var objects_dir = try git_dir.openDir("objects", .{});
+        defer objects_dir.close();
+
+        // open the object file
+        var commit_hash_prefix_dir = try objects_dir.openDir(oid[0..2], .{});
+        defer commit_hash_prefix_dir.close();
+        var commit_hash_suffix_file = try commit_hash_prefix_dir.openFile(oid[2..], .{ .mode = .read_only });
+        defer commit_hash_suffix_file.close();
+
+        // decompress the object file
+        var decompressed = try compress.Decompressed.init(allocator, commit_hash_suffix_file);
+        defer decompressed.deinit();
+        const reader = decompressed.stream.reader();
+
+        // read the object kind
+        const object_kind = try reader.readUntilDelimiterAlloc(allocator, ' ', MAX_FILE_READ_SIZE);
+        defer allocator.free(object_kind);
+
+        if (std.mem.eql(u8, "commit", object_kind)) {
+            // read the length (currently unused)
+            const object_len = try reader.readUntilDelimiterAlloc(allocator, 0, MAX_FILE_READ_SIZE);
+            defer allocator.free(object_len);
+            _ = try std.fmt.parseInt(usize, object_len, 10);
+
+            // read the content kind
+            const content_kind = try reader.readUntilDelimiterAlloc(allocator, ' ', MAX_FILE_READ_SIZE);
+            defer allocator.free(content_kind);
+            if (!std.mem.eql(u8, "tree", content_kind)) {
+                return error.InvalidCommitContentKind;
+            }
+
+            // read the tree hash
+            const tree_hash = try reader.readUntilDelimiterAlloc(allocator, '\n', MAX_FILE_READ_SIZE);
+            errdefer allocator.free(tree_hash);
+            if (tree_hash.len != hash.SHA1_HEX_LEN) {
+                return error.InvalidCommitTreeHash;
+            }
+
+            // init the object
+            var object = Object{
+                .allocator = allocator,
+                .content = ObjectContent{
+                    .commit = .{
+                        .tree = tree_hash,
+                        .parent = null,
+                        .author = null,
+                        .committer = null,
+                        .message = undefined,
+                    },
+                },
+            };
+
+            // read the metadata
+            var metadata = std.StringHashMap([]const u8).init(allocator);
+            defer {
+                var iter = metadata.valueIterator();
+                while (iter.next()) |value| {
+                    allocator.free(value.*);
+                }
+                metadata.deinit();
+            }
+            while (true) {
+                const line = try reader.readUntilDelimiterAlloc(allocator, '\n', MAX_FILE_READ_SIZE);
+                defer allocator.free(line);
+                if (line.len == 0) {
+                    break;
+                }
+                if (std.mem.indexOf(u8, line, " ")) |line_idx| {
+                    if (line_idx == line.len) {
+                        break;
+                    }
+                    const key = line[0..line_idx];
+                    const value = line[line_idx + 1 ..];
+                    var value_copy = try allocator.alloc(u8, value.len);
+                    std.mem.copy(u8, value_copy, value);
+                    try metadata.put(key, value_copy);
+                }
+            }
+
+            // read the message
+            object.content.commit.message = try reader.readAllAlloc(allocator, MAX_FILE_READ_SIZE);
+            errdefer allocator.free(object.content.commit.message);
+
+            // set metadata fields
+            if (metadata.fetchRemove("parent")) |parent| {
+                object.content.commit.parent = parent.value;
+            }
+            if (metadata.fetchRemove("author")) |author| {
+                object.content.commit.author = author.value;
+            }
+            if (metadata.fetchRemove("committer")) |committer| {
+                object.content.commit.committer = committer.value;
+            }
+
+            return object;
+        } else {
+            return error.InvalidObjectKind;
+        }
+    }
+
+    pub fn deinit(self: *Object) void {
+        switch (self.content) {
+            .blob => {},
+            .tree => {},
+            .commit => {
+                self.allocator.free(self.content.commit.tree);
+                if (self.content.commit.parent) |parent| {
+                    self.allocator.free(parent);
+                }
+                if (self.content.commit.parent) |author| {
+                    self.allocator.free(author);
+                }
+                if (self.content.commit.committer) |committer| {
+                    self.allocator.free(committer);
+                }
+                self.allocator.free(self.content.commit.message);
+            },
+        }
+    }
+};

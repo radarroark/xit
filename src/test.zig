@@ -3,6 +3,7 @@ const main = @import("./main.zig");
 const hash = @import("./hash.zig");
 const idx = @import("./index.zig");
 const stat = @import("./status.zig");
+const obj = @import("./object.zig");
 
 const c = @cImport({
     @cInclude("git2.h");
@@ -364,5 +365,21 @@ test "end to end" {
             // because the repo itself is not completely valid right now
             try expectEqual(5, c.git_status_list_entrycount(status_list));
         }
+    }
+
+    // parse objects
+    {
+        // get HEAD contents
+        var head_file_buffer = [_]u8{0} ** MAX_FILE_READ_SIZE;
+        const head_file_size = try readContents(git_dir, "HEAD", &head_file_buffer);
+        try expectEqual(hash.SHA1_HEX_LEN, head_file_size);
+        const head_file_slice = head_file_buffer[0..head_file_size];
+
+        // read commit
+        var head_oid = [_]u8{0} ** hash.SHA1_HEX_LEN;
+        std.mem.copy(u8, &head_oid, head_file_slice);
+        var object = try obj.Object.init(allocator, repo_dir, head_oid);
+        defer object.deinit();
+        try std.testing.expectEqualStrings("second commit", object.content.commit.message);
     }
 }
