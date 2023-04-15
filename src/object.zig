@@ -180,7 +180,7 @@ fn writeTree(objects_dir: std.fs.Dir, allocator: std.mem.Allocator, entries: *st
 
 /// writes the file/dir at the given path into the .git dir.
 /// if it's a dir, all of its contents will be added too.
-/// entries can be null when first called and sha1_hex_buffer
+/// entries can be null when first called and sha1_bytes_buffer
 /// will have the oid when it's done. on windows files are
 /// never marked as executable because apparently i can't
 /// even check if they are...maybe i'll figure that out later.
