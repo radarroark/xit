@@ -376,10 +376,12 @@ test "end to end" {
         const head_file_slice = head_file_buffer[0..head_file_size];
 
         // read commit
-        var head_oid = [_]u8{0} ** hash.SHA1_HEX_LEN;
-        std.mem.copy(u8, &head_oid, head_file_slice);
-        var object = try obj.Object.init(allocator, repo_dir, head_oid);
-        defer object.deinit();
-        try std.testing.expectEqualStrings("second commit", object.content.commit.message);
+        var commit_object = try obj.Object.init(allocator, repo_dir, head_file_slice);
+        defer commit_object.deinit();
+        try std.testing.expectEqualStrings("second commit", commit_object.content.commit.message);
+
+        // read tree
+        var tree_object = try obj.Object.init(allocator, repo_dir, commit_object.content.commit.tree);
+        defer tree_object.deinit();
     }
 }

@@ -376,6 +376,7 @@ pub const ObjectContent = union(ObjectKind) {
 };
 
 pub const ObjectReadError = error{
+    InvalidObjectHash,
     InvalidObjectKind,
     InvalidCommitTreeHash,
     InvalidCommitParentHash,
@@ -385,7 +386,11 @@ pub const Object = struct {
     allocator: std.mem.Allocator,
     content: ObjectContent,
 
-    pub fn init(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, oid: [hash.SHA1_HEX_LEN]u8) !Object {
+    pub fn init(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, oid: []const u8) !Object {
+        if (oid.len != hash.SHA1_HEX_LEN) {
+            return error.InvalidObjectHash;
+        }
+
         // open the internal dirs
         var git_dir = try repo_dir.openDir(".git", .{});
         defer git_dir.close();
@@ -407,12 +412,22 @@ pub const Object = struct {
         const object_kind = try reader.readUntilDelimiterAlloc(allocator, ' ', MAX_FILE_READ_SIZE);
         defer allocator.free(object_kind);
 
-        if (std.mem.eql(u8, "commit", object_kind)) {
-            // read the length (currently unused)
-            const object_len = try reader.readUntilDelimiterAlloc(allocator, 0, MAX_FILE_READ_SIZE);
-            defer allocator.free(object_len);
-            _ = try std.fmt.parseInt(usize, object_len, 10);
+        // read the length (currently unused)
+        const object_len = try reader.readUntilDelimiterAlloc(allocator, 0, MAX_FILE_READ_SIZE);
+        defer allocator.free(object_len);
+        _ = try std.fmt.parseInt(usize, object_len, 10);
 
+        if (std.mem.eql(u8, "blob", object_kind)) {
+            return Object{
+                .allocator = allocator,
+                .content = ObjectContent{ .blob = {} },
+            };
+        } else if (std.mem.eql(u8, "tree", object_kind)) {
+            return Object{
+                .allocator = allocator,
+                .content = ObjectContent{ .tree = {} },
+            };
+        } else if (std.mem.eql(u8, "commit", object_kind)) {
             // read the content kind
             const content_kind = try reader.readUntilDelimiterAlloc(allocator, ' ', MAX_FILE_READ_SIZE);
             defer allocator.free(content_kind);
