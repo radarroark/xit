@@ -489,6 +489,9 @@ pub const Object = struct {
 
             // set metadata fields
             if (metadata.fetchRemove("parent")) |parent| {
+                if (parent.value.len != hash.SHA1_HEX_LEN) {
+                    return error.InvalidCommitParentHash;
+                }
                 object.content.commit.parent = parent.value;
             }
             if (metadata.fetchRemove("author")) |author| {
