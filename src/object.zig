@@ -363,9 +363,16 @@ pub const ObjectKind = enum {
     commit,
 };
 
+pub const TreeEntry = struct {
+    oid: [hash.SHA1_BYTES_LEN]u8,
+    mode: u32,
+};
+
 pub const ObjectContent = union(ObjectKind) {
     blob,
-    tree,
+    tree: struct {
+        entries: std.StringArrayHashMap(TreeEntry),
+    },
     commit: struct {
         tree: []const u8,
         parent: ?[]const u8,
@@ -423,9 +430,35 @@ pub const Object = struct {
                 .content = ObjectContent{ .blob = {} },
             };
         } else if (std.mem.eql(u8, "tree", object_kind)) {
+            var entries = std.StringArrayHashMap(TreeEntry).init(allocator);
+            errdefer {
+                for (entries.keys()) |key| {
+                    allocator.free(key);
+                }
+                entries.deinit();
+            }
+
+            while (true) {
+                const entry_mode = reader.readUntilDelimiterAlloc(allocator, ' ', MAX_FILE_READ_SIZE) catch |err| {
+                    switch (err) {
+                        error.EndOfStream => break,
+                        else => return err,
+                    }
+                };
+                defer allocator.free(entry_mode);
+                const entry_mode_num = try std.fmt.parseInt(u32, entry_mode, 10);
+
+                const entry_path = try reader.readUntilDelimiterAlloc(allocator, 0, MAX_FILE_READ_SIZE);
+                errdefer allocator.free(entry_path);
+
+                const entry_oid = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
+
+                try entries.put(entry_path, TreeEntry{ .oid = entry_oid, .mode = entry_mode_num });
+            }
+
             return Object{
                 .allocator = allocator,
-                .content = ObjectContent{ .tree = {} },
+                .content = ObjectContent{ .tree = .{ .entries = entries } },
             };
         } else if (std.mem.eql(u8, "commit", object_kind)) {
             // read the content kind
@@ -510,7 +543,12 @@ pub const Object = struct {
     pub fn deinit(self: *Object) void {
         switch (self.content) {
             .blob => {},
-            .tree => {},
+            .tree => {
+                for (self.content.tree.entries.keys()) |key| {
+                    self.allocator.free(key);
+                }
+                self.content.tree.entries.deinit();
+            },
             .commit => {
                 self.allocator.free(self.content.commit.tree);
                 if (self.content.commit.parent) |parent| {

@@ -383,5 +383,6 @@ test "end to end" {
         // read tree
         var tree_object = try obj.Object.init(allocator, repo_dir, commit_object.content.commit.tree);
         defer tree_object.deinit();
+        try expectEqual(3, tree_object.content.tree.entries.count());
     }
 }
