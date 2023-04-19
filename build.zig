@@ -15,9 +15,9 @@ pub fn build(b: *std.build.Builder) !void {
         .target = target,
         .optimize = optimize,
     });
-    exe.install();
+    b.installArtifact(exe);
 
-    const run_cmd = exe.run();
+    const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
         run_cmd.addArgs(args);
@@ -36,14 +36,15 @@ pub fn build(b: *std.build.Builder) !void {
     tls.link(git2.step);
     z.link(git2.step, .{});
 
-    const exe_tests = b.addTest(.{
+    const unit_tests = b.addTest(.{
         .root_source_file = .{ .path = "src/test.zig" },
         .optimize = optimize,
     });
-    exe_tests.linkLibC();
-    exe_tests.addIncludePath("src/test/deps/libgit2/include");
-    exe_tests.linkLibrary(git2.step);
+    unit_tests.linkLibC();
+    unit_tests.addIncludePath("src/test/deps/libgit2/include");
+    unit_tests.linkLibrary(git2.step);
 
+    const run_unit_tests = b.addRunArtifact(unit_tests);
     const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&exe_tests.step);
+    test_step.dependOn(&run_unit_tests.step);
 }
