@@ -156,7 +156,12 @@ pub const HeadTree = struct {
 
     pub fn init(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, git_dir: std.fs.Dir) !HeadTree {
         var objects = std.ArrayList(obj.Object).init(allocator);
-        errdefer objects.deinit();
+        errdefer {
+            for (objects.items) |*object| {
+                object.deinit();
+            }
+            objects.deinit();
+        }
 
         var entries = std.StringHashMap(obj.TreeEntry).init(allocator);
         errdefer entries.deinit();
