@@ -9,18 +9,6 @@ const c = @cImport({
     @cInclude("git2.h");
 });
 
-const MAX_FILE_READ_SIZE: comptime_int = 1000; // FIXME: this is arbitrary...
-
-fn readContents(dir: std.fs.Dir, path: []const u8, out: *[MAX_FILE_READ_SIZE]u8) !usize {
-    var file_size: usize = 0;
-    {
-        const file = try dir.openFile(path, .{ .mode = .read_only });
-        defer file.close();
-        file_size = try file.pread(out, 0);
-    }
-    return file_size;
-}
-
 pub fn expectEqual(expected: anytype, actual: anytype) !void {
     try std.testing.expectEqual(@as(@TypeOf(actual), expected), actual);
 }
@@ -98,17 +86,17 @@ test "end to end" {
 
         {
             // get HEAD contents
-            var head_file_buffer = [_]u8{0} ** MAX_FILE_READ_SIZE;
-            const head_file_size = try readContents(git_dir, "HEAD", &head_file_buffer);
-            try expectEqual(hash.SHA1_HEX_LEN, head_file_size);
-            const head_file_slice = head_file_buffer[0..head_file_size];
+            var head_file_buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
+            const head_file = try git_dir.openFile("HEAD", .{ .mode = .read_only });
+            defer head_file.close();
+            try head_file.reader().readNoEof(&head_file_buffer);
 
             // check that the commit object was created
             var objects_dir = try git_dir.openDir("objects", .{});
             defer objects_dir.close();
-            var hash_prefix_dir = try objects_dir.openDir(head_file_slice[0..2], .{});
+            var hash_prefix_dir = try objects_dir.openDir(head_file_buffer[0..2], .{});
             defer hash_prefix_dir.close();
-            var hash_suffix_file = try hash_prefix_dir.openFile(head_file_slice[2..], .{});
+            var hash_suffix_file = try hash_prefix_dir.openFile(head_file_buffer[2..], .{});
             defer hash_suffix_file.close();
         }
 
@@ -164,17 +152,17 @@ test "end to end" {
 
         {
             // get HEAD contents
-            var head_file_buffer = [_]u8{0} ** MAX_FILE_READ_SIZE;
-            const head_file_size = try readContents(git_dir, "HEAD", &head_file_buffer);
-            try expectEqual(hash.SHA1_HEX_LEN, head_file_size);
-            const head_file_slice = head_file_buffer[0..head_file_size];
+            var head_file_buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
+            const head_file = try git_dir.openFile("HEAD", .{ .mode = .read_only });
+            defer head_file.close();
+            try head_file.reader().readNoEof(&head_file_buffer);
 
             // check that the commit object was created
             var objects_dir = try git_dir.openDir("objects", .{});
             defer objects_dir.close();
-            var hash_prefix_dir = try objects_dir.openDir(head_file_slice[0..2], .{});
+            var hash_prefix_dir = try objects_dir.openDir(head_file_buffer[0..2], .{});
             defer hash_prefix_dir.close();
-            var hash_suffix_file = try hash_prefix_dir.openFile(head_file_slice[2..], .{});
+            var hash_suffix_file = try hash_prefix_dir.openFile(head_file_buffer[2..], .{});
             defer hash_suffix_file.close();
         }
 
@@ -365,18 +353,22 @@ test "end to end" {
             // because the repo itself is not completely valid right now
             try expectEqual(5, c.git_status_list_entrycount(status_list));
         }
+
+        // make file in dir
+        var four_txt = try a_dir.createFile("4.txt", .{});
+        defer four_txt.close();
     }
 
     // parse objects
     {
         // get HEAD contents
-        var head_file_buffer = [_]u8{0} ** MAX_FILE_READ_SIZE;
-        const head_file_size = try readContents(git_dir, "HEAD", &head_file_buffer);
-        try expectEqual(hash.SHA1_HEX_LEN, head_file_size);
-        const head_file_slice = head_file_buffer[0..head_file_size];
+        var head_file_buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
+        const head_file = try git_dir.openFile("HEAD", .{ .mode = .read_only });
+        defer head_file.close();
+        try head_file.reader().readNoEof(&head_file_buffer);
 
         // read commit
-        var commit_object = try obj.Object.init(allocator, repo_dir, head_file_slice);
+        var commit_object = try obj.Object.init(allocator, repo_dir, &head_file_buffer);
         defer commit_object.deinit();
         try std.testing.expectEqualStrings("second commit", commit_object.content.commit.message);
 
