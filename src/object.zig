@@ -368,6 +368,10 @@ pub const TreeEntry = struct {
     mode: u32,
 };
 
+pub fn isTree(entry: TreeEntry) bool {
+    return entry.mode == 40000;
+}
+
 pub const ObjectContent = union(ObjectKind) {
     blob,
     tree: struct {

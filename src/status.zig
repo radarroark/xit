@@ -9,6 +9,7 @@
 const std = @import("std");
 const idx = @import("./index.zig");
 const hash = @import("./hash.zig");
+const obj = @import("./object.zig");
 
 pub const Status = struct {
     untracked: std.ArrayList(Entry),
@@ -40,6 +41,9 @@ pub const Status = struct {
 
         var index_bools = try allocator.alloc(bool, index.entries.count());
         defer allocator.free(index_bools);
+
+        var tree = try HeadTree.init(allocator, repo_dir, git_dir);
+        defer tree.deinit();
 
         _ = try addEntries(arena.allocator(), &untracked, &modified, index, &index_bools, repo_dir, ".");
 
@@ -145,3 +149,63 @@ fn addEntries(allocator: std.mem.Allocator, untracked: *std.ArrayList(Status.Ent
     }
     return false;
 }
+
+pub const HeadTree = struct {
+    objects: std.ArrayList(obj.Object),
+    entries: std.StringHashMap(obj.TreeEntry),
+
+    pub fn init(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, git_dir: std.fs.Dir) !HeadTree {
+        var objects = std.ArrayList(obj.Object).init(allocator);
+        errdefer objects.deinit();
+
+        var entries = std.StringHashMap(obj.TreeEntry).init(allocator);
+        errdefer entries.deinit();
+
+        // get HEAD contents
+        var head_file_buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
+        const head_file = try git_dir.openFile("HEAD", .{ .mode = .read_only });
+        defer head_file.close();
+        try head_file.reader().readNoEof(&head_file_buffer);
+
+        // read commit
+        var commit_object = try obj.Object.init(allocator, repo_dir, &head_file_buffer);
+        defer commit_object.deinit();
+
+        var tree = HeadTree{
+            .objects = objects,
+            .entries = entries,
+        };
+
+        try tree.read(allocator, repo_dir, commit_object.content.commit.tree);
+
+        return tree;
+    }
+
+    pub fn deinit(self: *HeadTree) void {
+        for (self.objects.items) |*object| {
+            object.deinit();
+        }
+        self.objects.deinit();
+        self.entries.deinit();
+    }
+
+    fn read(self: *HeadTree, allocator: std.mem.Allocator, repo_dir: std.fs.Dir, oid: []const u8) !void {
+        var object = try obj.Object.init(allocator, repo_dir, oid);
+        try self.objects.append(object);
+
+        switch (object.content) {
+            .blob => {},
+            .tree => {
+                var iter = object.content.tree.entries.iterator();
+                while (iter.next()) |entry| {
+                    if (obj.isTree(entry.value_ptr.*)) {
+                        try self.read(allocator, repo_dir, &entry.value_ptr.*.oid);
+                    } else {
+                        try self.entries.put(entry.key_ptr.*, entry.value_ptr.*);
+                    }
+                }
+            },
+            .commit => {},
+        }
+    }
+};
