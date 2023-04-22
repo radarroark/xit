@@ -105,15 +105,19 @@ pub fn zitMain(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8)) !
             defer status.deinit();
 
             for (status.untracked.items) |entry| {
-                try stdout.print("?? {s}\n", .{entry.path});
+                try stdout.print("? {s}\n", .{entry.path});
             }
 
             for (status.modified.items) |entry| {
-                try stdout.print("M  {s}\n", .{entry.path});
+                try stdout.print("M {s}\n", .{entry.path});
+            }
+
+            for (status.added.items) |path| {
+                try stdout.print("A {s}\n", .{path});
             }
 
             for (status.deleted.items) |path| {
-                try stdout.print("D  {s}\n", .{path});
+                try stdout.print("D {s}\n", .{path});
             }
         },
     }

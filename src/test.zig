@@ -278,6 +278,8 @@ test "end to end" {
         defer a_dir.close();
         var b_dir = try repo_dir.makeOpenPath("b", .{});
         defer b_dir.close();
+        var c_dir = try repo_dir.makeOpenPath("c", .{});
+        defer c_dir.close();
 
         // make file in dir
         var farewell_txt = try a_dir.createFile("farewell.txt", .{});
@@ -301,6 +303,16 @@ test "end to end" {
             try zig_dir.deleteFile("main.zig");
         }
 
+        // make file in dir
+        var d_txt = try c_dir.createFile("d.txt", .{});
+        defer d_txt.close();
+
+        // add the file
+        args.clearAndFree();
+        try args.append("add");
+        try args.append("c/d.txt");
+        try main.zitMain(allocator, &args);
+
         // get status
         // we're calling the command directly so we can look at the entries.
         // if we call it via zitMain it will just print to stdout...
@@ -314,6 +326,7 @@ test "end to end" {
         // check the untracked entries
         var untrackedMap = std.StringHashMap(void).init(allocator);
         defer untrackedMap.deinit();
+        try expectEqual(2, status.untracked.items.len);
         for (status.untracked.items) |entry| {
             try untrackedMap.put(entry.path, {});
         }
@@ -323,15 +336,26 @@ test "end to end" {
         // check the modified entries
         var modifiedMap = std.StringHashMap(void).init(allocator);
         defer modifiedMap.deinit();
+        try expectEqual(2, status.modified.items.len);
         for (status.modified.items) |entry| {
             try modifiedMap.put(entry.path, {});
         }
         try std.testing.expect(modifiedMap.contains("hello.txt"));
         try std.testing.expect(modifiedMap.contains("README"));
 
+        // check the added entries
+        var addedMap = std.StringHashMap(void).init(allocator);
+        defer addedMap.deinit();
+        try expectEqual(1, status.added.items.len);
+        for (status.added.items) |path| {
+            try addedMap.put(path, {});
+        }
+        try std.testing.expect(addedMap.contains("c/d.txt"));
+
         // check the deleted entries
         var deletedMap = std.StringHashMap(void).init(allocator);
         defer deletedMap.deinit();
+        try expectEqual(1, status.deleted.items.len);
         for (status.deleted.items) |path| {
             try deletedMap.put(path, {});
         }
@@ -351,12 +375,8 @@ test "end to end" {
             defer c.git_status_list_free(status_list);
             // libgit is currently including indexed files, most likely
             // because the repo itself is not completely valid right now
-            try expectEqual(5, c.git_status_list_entrycount(status_list));
+            try expectEqual(6, c.git_status_list_entrycount(status_list));
         }
-
-        // make file in dir
-        var four_txt = try a_dir.createFile("4.txt", .{});
-        defer four_txt.close();
     }
 
     // parse objects
