@@ -320,46 +320,55 @@ test "end to end" {
         var status = try stat.Status.init(allocator, repo_dir, git_dir);
         defer status.deinit();
         try expectEqual(2, status.untracked.items.len);
-        try expectEqual(2, status.modified.items.len);
-        try expectEqual(1, status.deleted.items.len);
+        try expectEqual(2, status.workspace_modified.items.len);
+        try expectEqual(1, status.workspace_deleted.items.len);
 
         // check the untracked entries
-        var untrackedMap = std.StringHashMap(void).init(allocator);
-        defer untrackedMap.deinit();
+        var untracked_map = std.StringHashMap(void).init(allocator);
+        defer untracked_map.deinit();
         try expectEqual(2, status.untracked.items.len);
         for (status.untracked.items) |entry| {
-            try untrackedMap.put(entry.path, {});
+            try untracked_map.put(entry.path, {});
         }
-        try std.testing.expect(untrackedMap.contains("a"));
-        try std.testing.expect(untrackedMap.contains("goodbye.txt"));
+        try std.testing.expect(untracked_map.contains("a"));
+        try std.testing.expect(untracked_map.contains("goodbye.txt"));
 
-        // check the modified entries
-        var modifiedMap = std.StringHashMap(void).init(allocator);
-        defer modifiedMap.deinit();
-        try expectEqual(2, status.modified.items.len);
-        for (status.modified.items) |entry| {
-            try modifiedMap.put(entry.path, {});
+        // check the workspace_modified entries
+        var workspace_modified_map = std.StringHashMap(void).init(allocator);
+        defer workspace_modified_map.deinit();
+        try expectEqual(2, status.workspace_modified.items.len);
+        for (status.workspace_modified.items) |entry| {
+            try workspace_modified_map.put(entry.path, {});
         }
-        try std.testing.expect(modifiedMap.contains("hello.txt"));
-        try std.testing.expect(modifiedMap.contains("README"));
+        try std.testing.expect(workspace_modified_map.contains("hello.txt"));
+        try std.testing.expect(workspace_modified_map.contains("README"));
 
-        // check the added entries
-        var addedMap = std.StringHashMap(void).init(allocator);
-        defer addedMap.deinit();
-        try expectEqual(1, status.added.items.len);
-        for (status.added.items) |path| {
-            try addedMap.put(path, {});
+        // check the workspace_deleted entries
+        var workspace_deleted_map = std.StringHashMap(void).init(allocator);
+        defer workspace_deleted_map.deinit();
+        try expectEqual(1, status.workspace_deleted.items.len);
+        for (status.workspace_deleted.items) |path| {
+            try workspace_deleted_map.put(path, {});
         }
-        try std.testing.expect(addedMap.contains("c/d.txt"));
+        try std.testing.expect(workspace_deleted_map.contains("src/zig/main.zig"));
 
-        // check the deleted entries
-        var deletedMap = std.StringHashMap(void).init(allocator);
-        defer deletedMap.deinit();
-        try expectEqual(1, status.deleted.items.len);
-        for (status.deleted.items) |path| {
-            try deletedMap.put(path, {});
+        // check the index_added entries
+        var index_added_map = std.StringHashMap(void).init(allocator);
+        defer index_added_map.deinit();
+        try expectEqual(1, status.index_added.items.len);
+        for (status.index_added.items) |path| {
+            try index_added_map.put(path, {});
         }
-        try std.testing.expect(deletedMap.contains("src/zig/main.zig"));
+        try std.testing.expect(index_added_map.contains("c/d.txt"));
+
+        // check the index_modified entries
+        var index_modified_map = std.StringHashMap(void).init(allocator);
+        defer index_modified_map.deinit();
+        try expectEqual(1, status.index_modified.items.len);
+        for (status.index_modified.items) |path| {
+            try index_modified_map.put(path, {});
+        }
+        try std.testing.expect(index_modified_map.contains("hello.txt"));
 
         // get status with libgit
         {

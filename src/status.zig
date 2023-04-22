@@ -13,9 +13,10 @@ const obj = @import("./object.zig");
 
 pub const Status = struct {
     untracked: std.ArrayList(Entry),
-    modified: std.ArrayList(Entry),
-    added: std.ArrayList([]const u8),
-    deleted: std.ArrayList([]const u8),
+    workspace_modified: std.ArrayList(Entry),
+    workspace_deleted: std.ArrayList([]const u8),
+    index_added: std.ArrayList([]const u8),
+    index_modified: std.ArrayList([]const u8),
     index: idx.Index,
     arena: std.heap.ArenaAllocator,
 
@@ -28,14 +29,17 @@ pub const Status = struct {
         var untracked = std.ArrayList(Entry).init(allocator);
         errdefer untracked.deinit();
 
-        var modified = std.ArrayList(Entry).init(allocator);
-        errdefer modified.deinit();
+        var workspace_modified = std.ArrayList(Entry).init(allocator);
+        errdefer workspace_modified.deinit();
 
-        var added = std.ArrayList([]const u8).init(allocator);
-        errdefer added.deinit();
+        var index_added = std.ArrayList([]const u8).init(allocator);
+        errdefer index_added.deinit();
 
-        var deleted = std.ArrayList([]const u8).init(allocator);
-        errdefer deleted.deinit();
+        var index_modified = std.ArrayList([]const u8).init(allocator);
+        errdefer index_modified.deinit();
+
+        var workspace_deleted = std.ArrayList([]const u8).init(allocator);
+        errdefer workspace_deleted.deinit();
 
         var arena = std.heap.ArenaAllocator.init(allocator);
         errdefer arena.deinit();
@@ -46,28 +50,33 @@ pub const Status = struct {
         var index_bools = try allocator.alloc(bool, index.entries.count());
         defer allocator.free(index_bools);
 
-        _ = try addEntries(arena.allocator(), &untracked, &modified, index, &index_bools, repo_dir, ".");
+        _ = try addEntries(arena.allocator(), &untracked, &workspace_modified, index, &index_bools, repo_dir, ".");
 
         for (index_bools, 0..) |exists, i| {
             if (!exists) {
-                try deleted.append(index.entries.keys()[i]);
+                try workspace_deleted.append(index.entries.keys()[i]);
             }
         }
 
         var head_tree = try HeadTree.init(allocator, repo_dir, git_dir);
         defer head_tree.deinit();
 
-        for (index.entries.values()) |entry| {
-            if (!head_tree.entries.contains(entry.path)) {
-                try added.append(entry.path);
+        for (index.entries.values()) |index_entry| {
+            if (head_tree.entries.get(index_entry.path)) |head_entry| {
+                if (index_entry.mode != head_entry.mode or !std.mem.eql(u8, &index_entry.oid, &head_entry.oid)) {
+                    try index_modified.append(index_entry.path);
+                }
+            } else {
+                try index_added.append(index_entry.path);
             }
         }
 
         return Status{
             .untracked = untracked,
-            .modified = modified,
-            .added = added,
-            .deleted = deleted,
+            .workspace_modified = workspace_modified,
+            .workspace_deleted = workspace_deleted,
+            .index_added = index_added,
+            .index_modified = index_modified,
             .index = index,
             .arena = arena,
         };
@@ -75,9 +84,10 @@ pub const Status = struct {
 
     pub fn deinit(self: *Status) void {
         self.untracked.deinit();
-        self.modified.deinit();
-        self.deleted.deinit();
-        self.added.deinit();
+        self.workspace_modified.deinit();
+        self.workspace_deleted.deinit();
+        self.index_added.deinit();
+        self.index_modified.deinit();
         self.index.deinit();
         self.arena.deinit();
     }
