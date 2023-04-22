@@ -17,7 +17,9 @@ pub const Status = struct {
     workspace_deleted: std.ArrayList([]const u8),
     index_added: std.ArrayList([]const u8),
     index_modified: std.ArrayList([]const u8),
+    index_deleted: std.ArrayList([]const u8),
     index: idx.Index,
+    head_tree: HeadTree,
     arena: std.heap.ArenaAllocator,
 
     pub const Entry = struct {
@@ -32,14 +34,17 @@ pub const Status = struct {
         var workspace_modified = std.ArrayList(Entry).init(allocator);
         errdefer workspace_modified.deinit();
 
+        var workspace_deleted = std.ArrayList([]const u8).init(allocator);
+        errdefer workspace_deleted.deinit();
+
         var index_added = std.ArrayList([]const u8).init(allocator);
         errdefer index_added.deinit();
 
         var index_modified = std.ArrayList([]const u8).init(allocator);
         errdefer index_modified.deinit();
 
-        var workspace_deleted = std.ArrayList([]const u8).init(allocator);
-        errdefer workspace_deleted.deinit();
+        var index_deleted = std.ArrayList([]const u8).init(allocator);
+        errdefer index_deleted.deinit();
 
         var arena = std.heap.ArenaAllocator.init(allocator);
         errdefer arena.deinit();
@@ -59,7 +64,7 @@ pub const Status = struct {
         }
 
         var head_tree = try HeadTree.init(allocator, repo_dir, git_dir);
-        defer head_tree.deinit();
+        errdefer head_tree.deinit();
 
         for (index.entries.values()) |index_entry| {
             if (head_tree.entries.get(index_entry.path)) |head_entry| {
@@ -71,13 +76,22 @@ pub const Status = struct {
             }
         }
 
+        var iter = head_tree.entries.keyIterator();
+        while (iter.next()) |path| {
+            if (!index.entries.contains(path.*)) {
+                try index_deleted.append(path.*);
+            }
+        }
+
         return Status{
             .untracked = untracked,
             .workspace_modified = workspace_modified,
             .workspace_deleted = workspace_deleted,
             .index_added = index_added,
             .index_modified = index_modified,
+            .index_deleted = index_deleted,
             .index = index,
+            .head_tree = head_tree,
             .arena = arena,
         };
     }
@@ -88,7 +102,9 @@ pub const Status = struct {
         self.workspace_deleted.deinit();
         self.index_added.deinit();
         self.index_modified.deinit();
+        self.index_deleted.deinit();
         self.index.deinit();
+        self.head_tree.deinit();
         self.arena.deinit();
     }
 };

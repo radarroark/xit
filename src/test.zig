@@ -303,72 +303,41 @@ test "end to end" {
             try zig_dir.deleteFile("main.zig");
         }
 
-        // make file in dir
-        var d_txt = try c_dir.createFile("d.txt", .{});
-        defer d_txt.close();
+        // workspace changes
+        {
+            // get status
+            var status = try stat.Status.init(allocator, repo_dir, git_dir);
+            defer status.deinit();
 
-        // add the file
-        args.clearAndFree();
-        try args.append("add");
-        try args.append("c/d.txt");
-        try main.zitMain(allocator, &args);
+            // check the untracked entries
+            var untracked_map = std.StringHashMap(void).init(allocator);
+            defer untracked_map.deinit();
+            try expectEqual(2, status.untracked.items.len);
+            for (status.untracked.items) |entry| {
+                try untracked_map.put(entry.path, {});
+            }
+            try std.testing.expect(untracked_map.contains("a"));
+            try std.testing.expect(untracked_map.contains("goodbye.txt"));
 
-        // get status
-        // we're calling the command directly so we can look at the entries.
-        // if we call it via zitMain it will just print to stdout...
-        // great for humans, not for unit tests.
-        var status = try stat.Status.init(allocator, repo_dir, git_dir);
-        defer status.deinit();
-        try expectEqual(2, status.untracked.items.len);
-        try expectEqual(2, status.workspace_modified.items.len);
-        try expectEqual(1, status.workspace_deleted.items.len);
+            // check the workspace_modified entries
+            var workspace_modified_map = std.StringHashMap(void).init(allocator);
+            defer workspace_modified_map.deinit();
+            try expectEqual(2, status.workspace_modified.items.len);
+            for (status.workspace_modified.items) |entry| {
+                try workspace_modified_map.put(entry.path, {});
+            }
+            try std.testing.expect(workspace_modified_map.contains("hello.txt"));
+            try std.testing.expect(workspace_modified_map.contains("README"));
 
-        // check the untracked entries
-        var untracked_map = std.StringHashMap(void).init(allocator);
-        defer untracked_map.deinit();
-        try expectEqual(2, status.untracked.items.len);
-        for (status.untracked.items) |entry| {
-            try untracked_map.put(entry.path, {});
+            // check the workspace_deleted entries
+            var workspace_deleted_map = std.StringHashMap(void).init(allocator);
+            defer workspace_deleted_map.deinit();
+            try expectEqual(1, status.workspace_deleted.items.len);
+            for (status.workspace_deleted.items) |path| {
+                try workspace_deleted_map.put(path, {});
+            }
+            try std.testing.expect(workspace_deleted_map.contains("src/zig/main.zig"));
         }
-        try std.testing.expect(untracked_map.contains("a"));
-        try std.testing.expect(untracked_map.contains("goodbye.txt"));
-
-        // check the workspace_modified entries
-        var workspace_modified_map = std.StringHashMap(void).init(allocator);
-        defer workspace_modified_map.deinit();
-        try expectEqual(2, status.workspace_modified.items.len);
-        for (status.workspace_modified.items) |entry| {
-            try workspace_modified_map.put(entry.path, {});
-        }
-        try std.testing.expect(workspace_modified_map.contains("hello.txt"));
-        try std.testing.expect(workspace_modified_map.contains("README"));
-
-        // check the workspace_deleted entries
-        var workspace_deleted_map = std.StringHashMap(void).init(allocator);
-        defer workspace_deleted_map.deinit();
-        try expectEqual(1, status.workspace_deleted.items.len);
-        for (status.workspace_deleted.items) |path| {
-            try workspace_deleted_map.put(path, {});
-        }
-        try std.testing.expect(workspace_deleted_map.contains("src/zig/main.zig"));
-
-        // check the index_added entries
-        var index_added_map = std.StringHashMap(void).init(allocator);
-        defer index_added_map.deinit();
-        try expectEqual(1, status.index_added.items.len);
-        for (status.index_added.items) |path| {
-            try index_added_map.put(path, {});
-        }
-        try std.testing.expect(index_added_map.contains("c/d.txt"));
-
-        // check the index_modified entries
-        var index_modified_map = std.StringHashMap(void).init(allocator);
-        defer index_modified_map.deinit();
-        try expectEqual(1, status.index_modified.items.len);
-        for (status.index_modified.items) |path| {
-            try index_modified_map.put(path, {});
-        }
-        try std.testing.expect(index_modified_map.contains("hello.txt"));
 
         // get status with libgit
         {
@@ -384,7 +353,54 @@ test "end to end" {
             defer c.git_status_list_free(status_list);
             // libgit is currently including indexed files, most likely
             // because the repo itself is not completely valid right now
-            try expectEqual(6, c.git_status_list_entrycount(status_list));
+            try expectEqual(5, c.git_status_list_entrycount(status_list));
+        }
+
+        // index changes
+        {
+            // add file to index
+            var d_txt = try c_dir.createFile("d.txt", .{});
+            defer d_txt.close();
+            args.clearAndFree();
+            try args.append("add");
+            try args.append("c/d.txt");
+            try main.zitMain(allocator, &args);
+
+            // remove file from index
+            args.clearAndFree();
+            try args.append("add");
+            try args.append("src/zig/main.zig");
+            try main.zitMain(allocator, &args);
+
+            // get status
+            var status = try stat.Status.init(allocator, repo_dir, git_dir);
+            defer status.deinit();
+
+            // check the index_added entries
+            var index_added_map = std.StringHashMap(void).init(allocator);
+            defer index_added_map.deinit();
+            try expectEqual(1, status.index_added.items.len);
+            for (status.index_added.items) |path| {
+                try index_added_map.put(path, {});
+            }
+            try std.testing.expect(index_added_map.contains("c/d.txt"));
+
+            // check the index_modified entries
+            var index_modified_map = std.StringHashMap(void).init(allocator);
+            defer index_modified_map.deinit();
+            try expectEqual(1, status.index_modified.items.len);
+            for (status.index_modified.items) |path| {
+                try index_modified_map.put(path, {});
+            }
+            try std.testing.expect(index_modified_map.contains("hello.txt"));
+
+            // check the index_deleted entries
+            var index_deleted_map = std.StringHashMap(void).init(allocator);
+            defer index_deleted_map.deinit();
+            try expectEqual(1, status.index_deleted.items.len);
+            for (status.index_deleted.items) |path| {
+                try index_deleted_map.put(path, {});
+            }
         }
     }
 

@@ -119,6 +119,14 @@ pub fn zitMain(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8)) !
             for (status.index_added.items) |path| {
                 try stdout.print("A  {s}\n", .{path});
             }
+
+            for (status.index_modified.items) |path| {
+                try stdout.print("M  {s}\n", .{path});
+            }
+
+            for (status.index_deleted.items) |path| {
+                try stdout.print("D  {s}\n", .{path});
+            }
         },
     }
 }

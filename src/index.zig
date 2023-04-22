@@ -280,6 +280,15 @@ pub fn writeIndex(allocator: std.mem.Allocator, cwd: std.fs.Dir, paths: std.Arra
 
     // read all the new entries
     for (paths.items) |path| {
+        const file = cwd.openFile(path, .{ .mode = .read_only }) catch |err| {
+            if (err == error.FileNotFound and index.entries.contains(path)) {
+                index.removeEntry(path);
+                continue;
+            } else {
+                return err;
+            }
+        };
+        defer file.close();
         try index.putPath(cwd, path);
     }
 
