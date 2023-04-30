@@ -10,6 +10,7 @@ const std = @import("std");
 const idx = @import("./index.zig");
 const hash = @import("./hash.zig");
 const obj = @import("./object.zig");
+const ref = @import("./ref.zig");
 
 pub const Status = struct {
     untracked: std.ArrayList(Entry),
@@ -205,13 +206,11 @@ pub const HeadTree = struct {
         errdefer entries.deinit();
 
         // get HEAD contents
-        var head_file_buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
-        const head_file = try git_dir.openFile("HEAD", .{ .mode = .read_only });
-        defer head_file.close();
-        try head_file.reader().readNoEof(&head_file_buffer);
+        const head_file_buffer = try ref.readHead(allocator, git_dir);
+        defer allocator.free(head_file_buffer);
 
         // read commit
-        var commit_object = try obj.Object.init(allocator, repo_dir, &head_file_buffer);
+        var commit_object = try obj.Object.init(allocator, repo_dir, head_file_buffer);
         defer commit_object.deinit();
 
         var tree = HeadTree{

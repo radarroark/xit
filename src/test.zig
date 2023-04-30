@@ -4,6 +4,7 @@ const hash = @import("./hash.zig");
 const idx = @import("./index.zig");
 const stat = @import("./status.zig");
 const obj = @import("./object.zig");
+const ref = @import("./ref.zig");
 
 const c = @cImport({
     @cInclude("git2.h");
@@ -84,14 +85,10 @@ test "end to end" {
         try args.append("first commit");
         try main.zitMain(allocator, &args);
 
+        // check that the commit object was created
         {
-            // get HEAD contents
-            var head_file_buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
-            const head_file = try git_dir.openFile("HEAD", .{ .mode = .read_only });
-            defer head_file.close();
-            try head_file.reader().readNoEof(&head_file_buffer);
-
-            // check that the commit object was created
+            const head_file_buffer = try ref.readHead(allocator, git_dir);
+            defer allocator.free(head_file_buffer);
             var objects_dir = try git_dir.openDir("objects", .{});
             defer objects_dir.close();
             var hash_prefix_dir = try objects_dir.openDir(head_file_buffer[0..2], .{});
@@ -150,14 +147,10 @@ test "end to end" {
         try args.append("second commit");
         try main.zitMain(allocator, &args);
 
+        // check that the commit object was created
         {
-            // get HEAD contents
-            var head_file_buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
-            const head_file = try git_dir.openFile("HEAD", .{ .mode = .read_only });
-            defer head_file.close();
-            try head_file.reader().readNoEof(&head_file_buffer);
-
-            // check that the commit object was created
+            const head_file_buffer = try ref.readHead(allocator, git_dir);
+            defer allocator.free(head_file_buffer);
             var objects_dir = try git_dir.openDir("objects", .{});
             defer objects_dir.close();
             var hash_prefix_dir = try objects_dir.openDir(head_file_buffer[0..2], .{});
@@ -407,13 +400,11 @@ test "end to end" {
     // parse objects
     {
         // get HEAD contents
-        var head_file_buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
-        const head_file = try git_dir.openFile("HEAD", .{ .mode = .read_only });
-        defer head_file.close();
-        try head_file.reader().readNoEof(&head_file_buffer);
+        const head_file_buffer = try ref.readHead(allocator, git_dir);
+        defer allocator.free(head_file_buffer);
 
         // read commit
-        var commit_object = try obj.Object.init(allocator, repo_dir, &head_file_buffer);
+        var commit_object = try obj.Object.init(allocator, repo_dir, head_file_buffer);
         defer commit_object.deinit();
         try std.testing.expectEqualStrings("second commit", commit_object.content.commit.message);
 
