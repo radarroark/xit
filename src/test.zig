@@ -419,4 +419,20 @@ test "end to end" {
     try args.append("branch");
     try args.append("stuff");
     try main.zitMain(allocator, &args);
+
+    // update HEAD
+    // have to do this manually for now until we implement checkout
+    try ref.writeHead(git_dir, "ref: refs/heads/stuff");
+
+    // check branch with libgit
+    {
+        try expectEqual(0, c.git_repository_open(&repo, repo_path));
+        defer c.git_repository_free(repo);
+
+        var head: ?*c.git_reference = null;
+        try expectEqual(0, c.git_repository_head(&head, repo));
+        defer c.git_reference_free(head);
+        const branch_name = c.git_reference_shorthand(head);
+        try std.testing.expectEqualStrings("stuff", std.mem.sliceTo(branch_name, 0));
+    }
 }

@@ -8,6 +8,7 @@ const hash = @import("./hash.zig");
 const compress = @import("./compress.zig");
 const cmd = @import("./command.zig");
 const idx = @import("./index.zig");
+const ref = @import("./ref.zig");
 
 const MAX_FILE_READ_SIZE: comptime_int = 1000; // FIXME: this is arbitrary...
 
@@ -348,14 +349,7 @@ pub fn writeCommit(allocator: std.mem.Allocator, cwd: std.fs.Dir, command: cmd.C
     try std.fs.rename(commit_hash_prefix_dir, commit_comp_tmp_file_name, commit_hash_prefix_dir, commit_hash_suffix);
 
     // write commit id to HEAD
-    // first write to a lock file and then rename it to HEAD for safety
-    const head_file = try git_dir.createFile("HEAD.lock", .{ .exclusive = true, .lock = .Exclusive });
-    errdefer git_dir.deleteFile("HEAD.lock") catch {};
-    {
-        defer head_file.close();
-        try head_file.writeAll(commit_sha1_hex);
-    }
-    try git_dir.rename("HEAD.lock", "HEAD");
+    try ref.writeHead(git_dir, commit_sha1_hex);
 }
 
 pub const ObjectKind = enum {

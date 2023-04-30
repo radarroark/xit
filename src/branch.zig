@@ -31,9 +31,6 @@ pub fn create(allocator: std.mem.Allocator, name: []const u8, repo_dir: std.fs.D
     const lock_name = try std.fmt.allocPrint(allocator, "{s}.lock", .{name});
     defer allocator.free(lock_name);
 
-    const path = try std.fmt.allocPrint(allocator, "refs/heads/{s}", .{name});
-    defer allocator.free(path);
-
     // create branch ref
     const branch_file = try heads_dir.createFile(lock_name, .{ .exclusive = true, .lock = .Exclusive });
     errdefer heads_dir.deleteFile(lock_name) catch {};
