@@ -422,4 +422,10 @@ test "end to end" {
         defer tree_object.deinit();
         try expectEqual(3, tree_object.content.tree.entries.count());
     }
+
+    // create a branch
+    args.clearAndFree();
+    try args.append("branch");
+    try args.append("stuff");
+    try main.zitMain(allocator, &args);
 }

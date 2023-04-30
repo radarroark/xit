@@ -9,6 +9,7 @@ pub const CommandKind = enum {
     add,
     commit,
     status,
+    branch,
 };
 
 pub const CommandData = union(CommandKind) {
@@ -26,6 +27,9 @@ pub const CommandData = union(CommandKind) {
         message: ?[]const u8,
     },
     status,
+    branch: struct {
+        name: ?[]const u8,
+    },
 };
 
 pub const CommandError = error{
@@ -88,6 +92,8 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8))
             return CommandData{ .commit = .{ .message = message } };
         } else if (std.mem.eql(u8, args.items[0], "status")) {
             return CommandData{ .status = {} };
+        } else if (std.mem.eql(u8, args.items[0], "branch")) {
+            return CommandData{ .branch = .{ .name = if (pos_args.items.len == 0) null else pos_args.items[0] } };
         } else {
             return CommandData{ .invalid = .{ .name = args.items[0] } };
         }

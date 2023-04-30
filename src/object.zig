@@ -349,10 +349,11 @@ pub fn writeCommit(allocator: std.mem.Allocator, cwd: std.fs.Dir, command: cmd.C
 
     // write commit id to HEAD
     // first write to a lock file and then rename it to HEAD for safety
+    const head_file = try git_dir.createFile("HEAD.lock", .{ .exclusive = true, .lock = .Exclusive });
+    errdefer git_dir.deleteFile("HEAD.lock") catch {};
     {
-        const head_file = try git_dir.createFile("HEAD.lock", .{ .exclusive = true, .lock = .Exclusive });
         defer head_file.close();
-        try head_file.pwriteAll(commit_sha1_hex, 0);
+        try head_file.writeAll(commit_sha1_hex);
     }
     try git_dir.rename("HEAD.lock", "HEAD");
 }

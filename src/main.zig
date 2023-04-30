@@ -14,6 +14,7 @@ const object = @import("./object.zig");
 const cmd = @import("./command.zig");
 const idx = @import("./index.zig");
 const stat = @import("./status.zig");
+const branch = @import("./branch.zig");
 
 /// takes the args passed to this program and puts them
 /// in an arraylist. do we need to do this? i don't know,
@@ -69,13 +70,13 @@ pub fn zitMain(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8)) !
             // should just be the current working directory (cwd). if a path was
             // given, it should either append it to the cwd or, if it is absolute,
             // it should just use that path alone. IT'S MAGIC!
-            var root_dir = try std.fs.cwd().makeOpenPath(command.data.init.dir, .{});
-            defer root_dir.close();
+            var repo_dir = try std.fs.cwd().makeOpenPath(command.data.init.dir, .{});
+            defer repo_dir.close();
 
             // make the .git dir. right now we're throwing an error if it already
             // exists. in git it says "Reinitialized existing Git repository" so
             // we'll need to do that eventually.
-            root_dir.makeDir(".git") catch |err| {
+            repo_dir.makeDir(".git") catch |err| {
                 switch (err) {
                     error.PathAlreadyExists => {
                         try stderr.print("{s} is already a repository\n", .{command.data.init.dir});
@@ -86,7 +87,7 @@ pub fn zitMain(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8)) !
             };
 
             // make a few dirs inside of .git
-            var git_dir = try root_dir.openDir(".git", .{});
+            var git_dir = try repo_dir.openDir(".git", .{});
             defer git_dir.close();
             try git_dir.makeDir("objects");
             try git_dir.makeDir("refs");
@@ -126,6 +127,13 @@ pub fn zitMain(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8)) !
 
             for (status.index_deleted.items) |path| {
                 try stdout.print("D  {s}\n", .{path});
+            }
+        },
+        cmd.CommandData.branch => {
+            if (command.data.branch.name) |name| {
+                var repo_dir = try cwd.openDir(".", .{});
+                defer repo_dir.close();
+                try branch.create(allocator, name, repo_dir);
             }
         },
     }
