@@ -319,23 +319,22 @@ pub fn writeIndex(allocator: std.mem.Allocator, cwd: std.fs.Dir, paths: std.Arra
     for (index.entries.values()) |entry| {
         var entry_buffer = std.ArrayList(u8).init(allocator);
         defer entry_buffer.deinit();
-        try entry_buffer.writer().print("{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}{s}\x00", .{
-            std.mem.asBytes(&std.mem.nativeToBig(i32, entry.ctime_secs)),
-            std.mem.asBytes(&std.mem.nativeToBig(i32, entry.ctime_nsecs)),
-            std.mem.asBytes(&std.mem.nativeToBig(i32, entry.mtime_secs)),
-            std.mem.asBytes(&std.mem.nativeToBig(i32, entry.mtime_nsecs)),
-            std.mem.asBytes(&std.mem.nativeToBig(u32, entry.dev)),
-            std.mem.asBytes(&std.mem.nativeToBig(u32, entry.ino)),
-            std.mem.asBytes(&std.mem.nativeToBig(u32, entry.mode)),
-            std.mem.asBytes(&std.mem.nativeToBig(u32, entry.uid)),
-            std.mem.asBytes(&std.mem.nativeToBig(u32, entry.gid)),
-            std.mem.asBytes(&std.mem.nativeToBig(u32, entry.file_size)),
-            entry.oid,
-            std.mem.asBytes(&std.mem.nativeToBig(u16, entry.path_size)),
-            entry.path,
-        });
+        const writer = entry_buffer.writer();
+        try writer.writeIntBig(i32, entry.ctime_secs);
+        try writer.writeIntBig(i32, entry.ctime_nsecs);
+        try writer.writeIntBig(i32, entry.mtime_secs);
+        try writer.writeIntBig(i32, entry.mtime_nsecs);
+        try writer.writeIntBig(u32, entry.dev);
+        try writer.writeIntBig(u32, entry.ino);
+        try writer.writeIntBig(u32, entry.mode);
+        try writer.writeIntBig(u32, entry.uid);
+        try writer.writeIntBig(u32, entry.gid);
+        try writer.writeIntBig(u32, entry.file_size);
+        try writer.writeAll(&entry.oid);
+        try writer.writeIntBig(u16, entry.path_size);
+        try writer.writeAll(entry.path);
         while (entry_buffer.items.len % 8 != 0) {
-            try entry_buffer.writer().print("\x00", .{});
+            try writer.print("\x00", .{});
         }
         try index_lock_file.writeAll(entry_buffer.items);
         h.update(entry_buffer.items);
