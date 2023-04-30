@@ -43,13 +43,4 @@ pub fn create(allocator: std.mem.Allocator, name: []const u8, repo_dir: std.fs.D
         try branch_file.writeAll("\n");
     }
     try heads_dir.rename(lock_name, name);
-
-    // update HEAD
-    const head_file = try git_dir.createFile("HEAD.lock", .{ .exclusive = true, .lock = .Exclusive });
-    errdefer git_dir.deleteFile("HEAD.lock") catch {};
-    {
-        defer head_file.close();
-        try head_file.writeAll(path);
-    }
-    try git_dir.rename("HEAD.lock", "HEAD");
 }
