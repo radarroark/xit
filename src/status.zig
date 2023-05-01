@@ -190,18 +190,10 @@ fn addEntries(allocator: std.mem.Allocator, untracked: *std.ArrayList(Status.Ent
 }
 
 pub const HeadTree = struct {
-    objects: std.ArrayList(obj.Object),
     entries: std.StringHashMap(obj.TreeEntry),
+    arena: std.heap.ArenaAllocator,
 
     pub fn init(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, git_dir: std.fs.Dir) !HeadTree {
-        var objects = std.ArrayList(obj.Object).init(allocator);
-        errdefer {
-            for (objects.items) |*object| {
-                object.deinit();
-            }
-            objects.deinit();
-        }
-
         var entries = std.StringHashMap(obj.TreeEntry).init(allocator);
         errdefer entries.deinit();
 
@@ -214,36 +206,35 @@ pub const HeadTree = struct {
         defer commit_object.deinit();
 
         var tree = HeadTree{
-            .objects = objects,
             .entries = entries,
+            .arena = std.heap.ArenaAllocator.init(allocator),
         };
 
-        try tree.read(allocator, repo_dir, commit_object.content.commit.tree);
+        try tree.read(repo_dir, "", commit_object.content.commit.tree);
 
         return tree;
     }
 
     pub fn deinit(self: *HeadTree) void {
-        for (self.objects.items) |*object| {
-            object.deinit();
-        }
-        self.objects.deinit();
         self.entries.deinit();
+        self.arena.deinit();
     }
 
-    fn read(self: *HeadTree, allocator: std.mem.Allocator, repo_dir: std.fs.Dir, oid: []const u8) !void {
-        var object = try obj.Object.init(allocator, repo_dir, oid);
-        try self.objects.append(object);
+    fn read(self: *HeadTree, repo_dir: std.fs.Dir, prefix: []const u8, oid: []const u8) !void {
+        var object = try obj.Object.init(self.arena.allocator(), repo_dir, oid);
 
         switch (object.content) {
             .blob => {},
             .tree => {
                 var iter = object.content.tree.entries.iterator();
                 while (iter.next()) |entry| {
+                    const name = entry.key_ptr.*;
+                    const path = try std.fs.path.join(self.arena.allocator(), &[_][]const u8{ prefix, name });
                     if (obj.isTree(entry.value_ptr.*)) {
-                        try self.read(allocator, repo_dir, &entry.value_ptr.*.oid);
+                        const oid_hex = std.fmt.bytesToHex(entry.value_ptr.*.oid[0..hash.SHA1_BYTES_LEN], .lower);
+                        try self.read(repo_dir, path, &oid_hex);
                     } else {
-                        try self.entries.put(entry.key_ptr.*, entry.value_ptr.*);
+                        try self.entries.put(path, entry.value_ptr.*);
                     }
                 }
             },

@@ -14,6 +14,7 @@ const MAX_FILE_READ_SIZE: comptime_int = 1000; // FIXME: this is arbitrary...
 
 pub const ObjectWriteError = error{
     ObjectAlreadyExists,
+    ObjectEntryNotFound,
 };
 
 /// returns a single random character. just lower case for now.
@@ -52,14 +53,14 @@ pub const Tree = struct {
         self.entries.deinit();
     }
 
-    pub fn addBlobEntry(self: *Tree, mode: u32, path: []const u8, oid: []const u8) !void {
+    pub fn addBlobEntry(self: *Tree, mode: u32, name: []const u8, oid: []const u8) !void {
         const mode_str = if (mode == 100755) "100755" else "100644";
-        const entry = try std.fmt.allocPrint(self.allocator, "{s} {s}\x00{s}", .{ mode_str, path, oid });
+        const entry = try std.fmt.allocPrint(self.allocator, "{s} {s}\x00{s}", .{ mode_str, name, oid });
         try self.entries.append(entry);
     }
 
-    pub fn addTreeEntry(self: *Tree, path: []const u8, oid: []const u8) !void {
-        const entry = try std.fmt.allocPrint(self.allocator, "40000 {s}\x00{s}", .{ path, oid });
+    pub fn addTreeEntry(self: *Tree, name: []const u8, oid: []const u8) !void {
+        const entry = try std.fmt.allocPrint(self.allocator, "40000 {s}\x00{s}", .{ name, oid });
         try self.entries.append(entry);
     }
 };
@@ -122,6 +123,39 @@ fn writeBlob(file: std.fs.File, meta: std.fs.File.Metadata, objects_dir: std.fs.
     try std.fs.rename(hash_prefix_dir, compressed_tmp_file_name, hash_prefix_dir, hash_suffix);
 }
 
+/// writes the file at the given path into the .git dir.
+/// sha1_bytes_buffer will have the oid when it's done.
+/// on windows files are never marked as executable because
+/// apparently i can't even check if they are...
+/// maybe i'll figure that out later.
+pub fn writeBlobFromPath(allocator: std.mem.Allocator, cwd: std.fs.Dir, path: []const u8, sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8) !void {
+    // open the internal dirs
+    var git_dir = try cwd.openDir(".git", .{});
+    defer git_dir.close();
+    var objects_dir = try git_dir.openDir("objects", .{});
+    defer objects_dir.close();
+
+    // get absolute path of the file
+    var path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
+    const file_path = try cwd.realpath(path, &path_buffer);
+    var file = try std.fs.openFileAbsolute(file_path, .{ .mode = std.fs.File.OpenMode.read_only });
+    defer file.close();
+
+    // see if it's a file or dir
+    const meta = try file.metadata();
+    switch (meta.kind()) {
+        std.fs.File.Kind.File => {
+            writeBlob(file, meta, objects_dir, allocator, sha1_bytes_buffer) catch |err| {
+                switch (err) {
+                    error.ObjectAlreadyExists => {},
+                    else => return err,
+                }
+            };
+        },
+        else => return,
+    }
+}
+
 fn writeTree(objects_dir: std.fs.Dir, allocator: std.mem.Allocator, entries: *std.ArrayList([]const u8), sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8) !void {
     // create tree contents
     const tree_contents = try std.mem.join(allocator, "", entries.items);
@@ -177,74 +211,46 @@ fn writeTree(objects_dir: std.fs.Dir, allocator: std.mem.Allocator, entries: *st
     try std.fs.rename(tree_hash_prefix_dir, tree_comp_tmp_file_name, tree_hash_prefix_dir, tree_hash_suffix);
 }
 
-/// writes the file/dir at the given path into the .git dir.
-/// if it's a dir, all of its contents will be added too.
-/// entries can be null when first called and sha1_bytes_buffer
-/// will have the oid when it's done. on windows files are
-/// never marked as executable because apparently i can't
-/// even check if they are...maybe i'll figure that out later.
-pub fn writeObject(allocator: std.mem.Allocator, cwd: std.fs.Dir, path: []const u8, tree_maybe: ?*Tree, sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8) !void {
-    // open the internal dirs
-    var git_dir = try cwd.openDir(".git", .{});
-    defer git_dir.close();
-    var objects_dir = try git_dir.openDir("objects", .{});
-    defer objects_dir.close();
-
-    // get absolute path of the file
-    var path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
-    const file_path = try cwd.realpath(path, &path_buffer);
-    var file = try std.fs.openFileAbsolute(file_path, .{ .mode = std.fs.File.OpenMode.read_only });
-    defer file.close();
-
-    // see if it's a file or dir
-    const meta = try file.metadata();
-    switch (meta.kind()) {
-        std.fs.File.Kind.File => {
-            writeBlob(file, meta, objects_dir, allocator, sha1_bytes_buffer) catch |err| {
-                switch (err) {
-                    error.ObjectAlreadyExists => {},
-                    else => return err,
-                }
-            };
-
-            // add to entries if it's not null
-            if (tree_maybe) |tree| {
-                try tree.addBlobEntry(idx.getMode(meta), path, sha1_bytes_buffer);
-            }
-        },
-        std.fs.File.Kind.Directory => {
+// add each entry to the given tree.
+// if the entry is itself a tree, create a tree object
+// for it and add that as an entry to the original tree.
+fn addIndexEntries(objects_dir: std.fs.Dir, allocator: std.mem.Allocator, tree: *Tree, index: idx.Index, prefix: []const u8, entries: [][]const u8) !void {
+    for (entries) |name| {
+        const path = try std.fs.path.join(allocator, &[_][]const u8{ prefix, name });
+        defer allocator.free(path);
+        if (index.entries.get(path)) |entry| {
+            try tree.addBlobEntry(entry.mode, name, &entry.oid);
+        } else if (index.dir_to_children.get(path)) |children| {
             var subtree = Tree.init(allocator);
             defer subtree.deinit();
 
-            // iterate recursively
-            var subdir = try cwd.openIterableDir(path, .{});
-            defer subdir.close();
-            var iter = subdir.iterate();
-            while (try iter.next()) |entry| {
-                // don't traverse the .git dir
-                if (std.mem.eql(u8, entry.name, ".git")) {
-                    continue;
-                }
-
-                const subpath = try std.fs.path.join(allocator, &[_][]const u8{ path, entry.name });
-                defer allocator.free(subpath);
-                var sub_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-                try writeObject(allocator, cwd, subpath, &subtree, &sub_sha1_bytes_buffer);
+            var child_names = std.ArrayList([]const u8).init(allocator);
+            defer child_names.deinit();
+            for (children.keys()) |child| {
+                try child_names.append(child);
             }
 
-            writeTree(objects_dir, allocator, &subtree.entries, sha1_bytes_buffer) catch |err| {
+            try addIndexEntries(
+                objects_dir,
+                allocator,
+                &subtree,
+                index,
+                path,
+                child_names.items,
+            );
+
+            var tree_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+            writeTree(objects_dir, allocator, &subtree.entries, &tree_sha1_bytes_buffer) catch |err| {
                 switch (err) {
                     error.ObjectAlreadyExists => {},
                     else => return err,
                 }
             };
 
-            // add to entries if it's not null
-            if (tree_maybe) |tree| {
-                try tree.addTreeEntry(path, sha1_bytes_buffer);
-            }
-        },
-        else => return,
+            try tree.addTreeEntry(name, &tree_sha1_bytes_buffer);
+        } else {
+            return error.ObjectEntryNotFound;
+        }
     }
 }
 
@@ -259,18 +265,14 @@ pub fn writeCommit(allocator: std.mem.Allocator, cwd: std.fs.Dir, command: cmd.C
     var objects_dir = try git_dir.openDir("objects", .{});
     defer objects_dir.close();
 
-    // create tree
-    var tree = Tree.init(allocator);
-    defer tree.deinit();
-
     // read index
     var index = try idx.readIndex(allocator, git_dir);
     defer index.deinit();
 
-    // add index entries to tree
-    for (index.entries.values()) |entry| {
-        try tree.addBlobEntry(entry.mode, entry.path, &entry.oid);
-    }
+    // create tree and add index entries
+    var tree = Tree.init(allocator);
+    defer tree.deinit();
+    try addIndexEntries(objects_dir, allocator, &tree, index, "", index.root_children.keys());
 
     // write and hash tree
     var tree_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
@@ -447,12 +449,12 @@ pub const Object = struct {
                 defer allocator.free(entry_mode);
                 const entry_mode_num = try std.fmt.parseInt(u32, entry_mode, 10);
 
-                const entry_path = try reader.readUntilDelimiterAlloc(allocator, 0, MAX_FILE_READ_SIZE);
-                errdefer allocator.free(entry_path);
+                const entry_name = try reader.readUntilDelimiterAlloc(allocator, 0, MAX_FILE_READ_SIZE);
+                errdefer allocator.free(entry_name);
 
                 const entry_oid = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
 
-                try entries.put(entry_path, TreeEntry{ .oid = entry_oid, .mode = entry_mode_num });
+                try entries.put(entry_name, TreeEntry{ .oid = entry_oid, .mode = entry_mode_num });
             }
 
             return Object{
@@ -565,6 +567,10 @@ pub const Object = struct {
     }
 };
 
+pub const TreeDiffError = error{
+    InvalidTreeDiffHash,
+};
+
 pub const TreeDiff = struct {
     changes: std.StringHashMap(Change),
     arena: std.heap.ArenaAllocator,
@@ -601,7 +607,7 @@ pub const TreeDiff = struct {
                 if (!value1.eql(value2)) {
                     const value1_tree = isTree(value1);
                     const value2_tree = isTree(value2);
-                    try self.compare(repo_dir, if (value1_tree) &value1.oid else null, if (value2_tree) &value2.oid else null);
+                    try self.compare(repo_dir, if (value1_tree) &std.fmt.bytesToHex(&value1.oid, .lower) else null, if (value2_tree) &std.fmt.bytesToHex(&value2.oid, .lower) else null);
                     if (!value1_tree or !value2_tree) {
                         try self.changes.put(key1, Change{ .old_entry = if (value1_tree) null else value1, .new_entry = if (value2_tree) null else value2 });
                     }
@@ -614,6 +620,9 @@ pub const TreeDiff = struct {
 
     fn loadTree(self: *TreeDiff, repo_dir: std.fs.Dir, oid_maybe: ?[]const u8) !std.StringArrayHashMap(TreeEntry) {
         if (oid_maybe) |oid| {
+            if (oid.len != hash.SHA1_HEX_LEN) {
+                return error.InvalidTreeDiffHash;
+            }
             var obj = try Object.init(self.arena.allocator(), repo_dir, oid);
             return switch (obj.content) {
                 .blob => std.StringArrayHashMap(TreeEntry).init(self.arena.allocator()),

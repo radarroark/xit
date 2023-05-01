@@ -473,5 +473,4 @@ test "end to end" {
     var tree_diff = obj.TreeDiff.init(allocator);
     defer tree_diff.deinit();
     try tree_diff.compare(repo_dir, commit1, commit2);
-    std.debug.print("{}\n", .{tree_diff.changes.count()});
 }

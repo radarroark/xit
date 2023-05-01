@@ -10,6 +10,8 @@ pub const Index = struct {
     version: u32,
     entries: std.StringArrayHashMap(Entry),
     dir_to_paths: std.StringArrayHashMap(std.StringArrayHashMap(void)),
+    dir_to_children: std.StringArrayHashMap(std.StringArrayHashMap(void)),
+    root_children: std.StringArrayHashMap(void),
     allocator: std.mem.Allocator,
     arena: std.heap.ArenaAllocator,
 
@@ -34,6 +36,8 @@ pub const Index = struct {
             .version = 2,
             .entries = std.StringArrayHashMap(Index.Entry).init(allocator),
             .dir_to_paths = std.StringArrayHashMap(std.StringArrayHashMap(void)).init(allocator),
+            .dir_to_children = std.StringArrayHashMap(std.StringArrayHashMap(void)).init(allocator),
+            .root_children = std.StringArrayHashMap(void).init(allocator),
             .allocator = allocator,
             .arena = std.heap.ArenaAllocator.init(allocator),
         };
@@ -46,6 +50,11 @@ pub const Index = struct {
             paths.deinit();
         }
         self.dir_to_paths.deinit();
+        for (self.dir_to_children.values()) |*paths| {
+            paths.deinit();
+        }
+        self.dir_to_children.deinit();
+        self.root_children.deinit();
     }
 
     /// if path is a file, adds it as an entry to the index struct.
@@ -90,7 +99,7 @@ pub const Index = struct {
                 }
                 // write the object
                 var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-                try object.writeObject(self.allocator, cwd, path, null, &oid);
+                try object.writeBlobFromPath(self.allocator, cwd, path, &oid);
                 // add the entry
                 const times = getTimes(meta);
                 const entry = Index.Entry{
@@ -133,9 +142,24 @@ pub const Index = struct {
 
     fn putEntry(self: *Index, entry: Entry) !void {
         try self.entries.put(entry.path, entry);
-        // populate dir_to_paths
+
+        var child_maybe: ?[]const u8 = std.fs.path.basename(entry.path);
         var parent_path_maybe = std.fs.path.dirname(entry.path);
+
         while (parent_path_maybe) |parent_path| {
+            // populate dir_to_children
+            if (child_maybe) |child| {
+                var child_paths_maybe = self.dir_to_children.getEntry(parent_path);
+                if (child_paths_maybe) |child_paths| {
+                    try child_paths.value_ptr.*.put(child, {});
+                } else {
+                    var child_paths = std.StringArrayHashMap(void).init(self.allocator);
+                    try child_paths.put(child, {});
+                    try self.dir_to_children.put(parent_path, child_paths);
+                }
+            }
+
+            // populate dir_to_paths
             var child_paths_maybe = self.dir_to_paths.getEntry(parent_path);
             if (child_paths_maybe) |child_paths| {
                 try child_paths.value_ptr.*.put(entry.path, {});
@@ -144,7 +168,13 @@ pub const Index = struct {
                 try child_paths.put(entry.path, {});
                 try self.dir_to_paths.put(parent_path, child_paths);
             }
+
+            child_maybe = std.fs.path.basename(parent_path);
             parent_path_maybe = std.fs.path.dirname(parent_path);
+        }
+
+        if (child_maybe) |child| {
+            try self.root_children.put(child, {});
         }
     }
 
