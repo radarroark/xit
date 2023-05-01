@@ -563,8 +563,7 @@ pub const Object = struct {
 
 pub const TreeDiff = struct {
     changes: std.StringHashMap(Change),
-    objects: std.ArrayList(Object),
-    allocator: std.mem.Allocator,
+    arena: std.heap.ArenaAllocator,
 
     pub const Change = struct {
         old_entry: ?TreeEntry,
@@ -572,25 +571,15 @@ pub const TreeDiff = struct {
     };
 
     pub fn init(allocator: std.mem.Allocator) TreeDiff {
-        var changes = std.StringHashMap(Change).init(allocator);
-        errdefer changes.deinit();
-
-        var objects = std.ArrayList(Object).init(allocator);
-        errdefer objects.deinit();
-
         return TreeDiff{
-            .changes = changes,
-            .objects = objects,
-            .allocator = allocator,
+            .changes = std.StringHashMap(Change).init(allocator),
+            .arena = std.heap.ArenaAllocator.init(allocator),
         };
     }
 
     pub fn deinit(self: *TreeDiff) void {
+        self.arena.deinit();
         self.changes.deinit();
-        for (self.objects.items) |*object| {
-            object.deinit();
-        }
-        self.objects.deinit();
     }
 
     pub fn compare(self: *TreeDiff, repo_dir: std.fs.Dir, oid1_maybe: ?[]const u8, oid2_maybe: ?[]const u8) !void {
@@ -601,15 +590,14 @@ pub const TreeDiff = struct {
 
     fn loadTree(self: *TreeDiff, repo_dir: std.fs.Dir, oid_maybe: ?[]const u8) !std.StringArrayHashMap(TreeEntry) {
         if (oid_maybe) |oid| {
-            var obj = try Object.init(self.allocator, repo_dir, oid);
-            try self.objects.append(obj);
+            var obj = try Object.init(self.arena.allocator(), repo_dir, oid);
             return switch (obj.content) {
-                .blob => std.StringArrayHashMap(TreeEntry).init(self.allocator),
+                .blob => std.StringArrayHashMap(TreeEntry).init(self.arena.allocator()),
                 .tree => obj.content.tree.entries,
                 .commit => self.loadTree(repo_dir, obj.content.commit.tree),
             };
         } else {
-            return std.StringArrayHashMap(TreeEntry).init(self.allocator);
+            return std.StringArrayHashMap(TreeEntry).init(self.arena.allocator());
         }
     }
 };
