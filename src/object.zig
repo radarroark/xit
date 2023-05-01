@@ -67,8 +67,7 @@ pub const Tree = struct {
 fn writeBlob(file: std.fs.File, meta: std.fs.File.Metadata, objects_dir: std.fs.Dir, allocator: std.mem.Allocator, sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8) !void {
     // calc the sha1 of its contents
     try hash.sha1_file(file, sha1_bytes_buffer);
-    var sha1_hex_buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
-    const sha1_hex = try std.fmt.bufPrint(&sha1_hex_buffer, "{}", .{std.fmt.fmtSliceHexLower(sha1_bytes_buffer)});
+    const sha1_hex = std.fmt.bytesToHex(sha1_bytes_buffer, .lower);
 
     // make the two char dir
     var hash_prefix_dir = try objects_dir.makeOpenPath(sha1_hex[0..2], .{});
@@ -134,8 +133,7 @@ fn writeTree(objects_dir: std.fs.Dir, allocator: std.mem.Allocator, entries: *st
 
     // calc the sha1 of its contents
     try hash.sha1_buffer(tree, sha1_bytes_buffer);
-    var tree_sha1_hex_buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
-    const tree_sha1_hex = try std.fmt.bufPrint(&tree_sha1_hex_buffer, "{}", .{std.fmt.fmtSliceHexLower(sha1_bytes_buffer)});
+    const tree_sha1_hex = std.fmt.bytesToHex(sha1_bytes_buffer, .lower);
 
     // make the two char dir
     var tree_hash_prefix_dir = try objects_dir.makeOpenPath(tree_sha1_hex[0..2], .{});
@@ -277,8 +275,7 @@ pub fn writeCommit(allocator: std.mem.Allocator, cwd: std.fs.Dir, command: cmd.C
     // write and hash tree
     var tree_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
     try writeTree(objects_dir, allocator, &tree.entries, &tree_sha1_bytes_buffer);
-    var tree_sha1_hex_buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
-    const tree_sha1_hex = try std.fmt.bufPrint(&tree_sha1_hex_buffer, "{}", .{std.fmt.fmtSliceHexLower(&tree_sha1_bytes_buffer)});
+    const tree_sha1_hex = std.fmt.bytesToHex(tree_sha1_bytes_buffer, .lower);
 
     // read HEAD
     var head_file_buffer = [_]u8{0} ** MAX_FILE_READ_SIZE;
@@ -312,10 +309,9 @@ pub fn writeCommit(allocator: std.mem.Allocator, cwd: std.fs.Dir, command: cmd.C
     defer allocator.free(commit);
 
     // calc the sha1 of its contents
-    var commit_sha1_bytes = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-    try hash.sha1_buffer(commit, &commit_sha1_bytes);
-    var commit_sha1_hex_buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
-    const commit_sha1_hex = try std.fmt.bufPrint(&commit_sha1_hex_buffer, "{}", .{std.fmt.fmtSliceHexLower(&commit_sha1_bytes)});
+    var commit_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+    try hash.sha1_buffer(commit, &commit_sha1_bytes_buffer);
+    const commit_sha1_hex = std.fmt.bytesToHex(commit_sha1_bytes_buffer, .lower);
 
     // make the two char dir
     var commit_hash_prefix_dir = try objects_dir.makeOpenPath(commit_sha1_hex[0..2], .{});
@@ -349,7 +345,7 @@ pub fn writeCommit(allocator: std.mem.Allocator, cwd: std.fs.Dir, command: cmd.C
     try std.fs.rename(commit_hash_prefix_dir, commit_comp_tmp_file_name, commit_hash_prefix_dir, commit_hash_suffix);
 
     // write commit id to HEAD
-    try ref.writeHead(git_dir, commit_sha1_hex);
+    try ref.writeHead(git_dir, &commit_sha1_hex);
 }
 
 pub const ObjectKind = enum {
