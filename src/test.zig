@@ -67,10 +67,20 @@ test "end to end" {
         defer hello_txt.close();
         try hello_txt.pwriteAll("hello, world!", 0);
 
-        // make another file
+        // make file
         var readme = try repo_dir.createFile("README", .{});
         defer readme.close();
         try readme.pwriteAll("My cool project", 0);
+
+        // make file
+        var license = try repo_dir.createFile("LICENSE", .{});
+        defer license.close();
+        try license.pwriteAll("do whatever you want", 0);
+
+        // make file
+        var tests = try repo_dir.createFile("tests", .{});
+        defer tests.close();
+        try tests.pwriteAll("testing...", 0);
 
         // add the files
         args.clearAndFree();
@@ -120,9 +130,6 @@ test "end to end" {
 
     // make another commit
     {
-        const hello_txt = try repo_dir.openFile("hello.txt", .{ .mode = .read_write });
-        defer hello_txt.close();
-
         // can't commit again because nothing has changed
         args.clearAndFree();
         try args.append("commit");
@@ -130,7 +137,23 @@ test "end to end" {
         try args.append("pointless commit");
         try expectEqual(error.ObjectAlreadyExists, main.zitMain(allocator, &args));
 
-        // change the first file
+        // delete a file
+        try repo_dir.deleteFile("LICENSE");
+        args.clearAndFree();
+        try args.append("add");
+        try args.append("LICENSE");
+        try main.zitMain(allocator, &args);
+
+        // replace a file with a directory
+        try repo_dir.deleteFile("tests");
+        var tests_dir = try repo_dir.makeOpenPath("tests", .{});
+        defer tests_dir.close();
+        var main_test_zig = try tests_dir.createFile("main_test.zig", .{});
+        defer main_test_zig.close();
+
+        // change a file
+        const hello_txt = try repo_dir.openFile("hello.txt", .{ .mode = .read_write });
+        defer hello_txt.close();
         try hello_txt.pwriteAll("goodbye, world!", 0);
 
         // make a few dirs
@@ -204,7 +227,7 @@ test "end to end" {
         {
             var index = try idx.readIndex(allocator, git_dir);
             defer index.deinit();
-            try expectEqual(4, index.entries.count());
+            try expectEqual(5, index.entries.count());
             try std.testing.expect(index.entries.contains("README"));
             try std.testing.expect(index.entries.contains("src/zig/main.zig"));
             try std.testing.expect(index.entries.contains("hello.txt/nested.txt"));
@@ -219,7 +242,7 @@ test "end to end" {
             var index: ?*c.git_index = null;
             try expectEqual(0, c.git_repository_index(&index, repo));
             defer c.git_index_free(index);
-            try expectEqual(4, c.git_index_entrycount(index));
+            try expectEqual(5, c.git_index_entrycount(index));
         }
 
         // replace directory with file
@@ -239,7 +262,7 @@ test "end to end" {
         {
             var index = try idx.readIndex(allocator, git_dir);
             defer index.deinit();
-            try expectEqual(3, index.entries.count());
+            try expectEqual(4, index.entries.count());
             try std.testing.expect(index.entries.contains("README"));
             try std.testing.expect(index.entries.contains("src/zig/main.zig"));
             try std.testing.expect(index.entries.contains("hello.txt"));
@@ -253,7 +276,7 @@ test "end to end" {
             var index: ?*c.git_index = null;
             try expectEqual(0, c.git_repository_index(&index, repo));
             defer c.git_index_free(index);
-            try expectEqual(3, c.git_index_entrycount(index));
+            try expectEqual(4, c.git_index_entrycount(index));
         }
 
         // can't add a non-existent file
@@ -360,7 +383,7 @@ test "end to end" {
             defer c.git_status_list_free(status_list);
             // libgit is currently including indexed files, most likely
             // because the repo itself is not completely valid right now
-            try expectEqual(5, c.git_status_list_entrycount(status_list));
+            try expectEqual(6, c.git_status_list_entrycount(status_list));
         }
 
         // index changes
@@ -421,7 +444,7 @@ test "end to end" {
         // read tree
         var tree_object = try obj.Object.init(allocator, repo_dir, commit_object.content.commit.tree);
         defer tree_object.deinit();
-        try expectEqual(3, tree_object.content.tree.entries.count());
+        try expectEqual(4, tree_object.content.tree.entries.count());
     }
 
     // create a branch
@@ -450,4 +473,5 @@ test "end to end" {
     var tree_diff = obj.TreeDiff.init(allocator);
     defer tree_diff.deinit();
     try tree_diff.compare(repo_dir, commit1, commit2);
+    std.debug.print("{}\n", .{tree_diff.changes.count()});
 }

@@ -357,6 +357,10 @@ pub const ObjectKind = enum {
 pub const TreeEntry = struct {
     oid: [hash.SHA1_BYTES_LEN]u8,
     mode: u32,
+
+    pub fn eql(self: TreeEntry, other: TreeEntry) bool {
+        return std.mem.eql(u8, &self.oid, &other.oid) and self.mode == other.mode;
+    }
 };
 
 pub fn isTree(entry: TreeEntry) bool {
@@ -583,9 +587,29 @@ pub const TreeDiff = struct {
     }
 
     pub fn compare(self: *TreeDiff, repo_dir: std.fs.Dir, oid1_maybe: ?[]const u8, oid2_maybe: ?[]const u8) !void {
+        if (oid1_maybe == null and oid2_maybe == null) {
+            return;
+        }
         const entries1 = try self.loadTree(repo_dir, oid1_maybe);
         const entries2 = try self.loadTree(repo_dir, oid2_maybe);
-        std.debug.print("{} {}\n", .{ entries1.count(), entries2.count() });
+        // deletions
+        var iter1 = entries1.iterator();
+        while (iter1.next()) |entry1| {
+            const key1 = entry1.key_ptr.*;
+            const value1 = entry1.value_ptr.*;
+            if (entries2.get(key1)) |value2| {
+                if (!value1.eql(value2)) {
+                    const value1_tree = isTree(value1);
+                    const value2_tree = isTree(value2);
+                    try self.compare(repo_dir, if (value1_tree) &value1.oid else null, if (value2_tree) &value2.oid else null);
+                    if (!value1_tree or !value2_tree) {
+                        try self.changes.put(key1, Change{ .old_entry = if (value1_tree) null else value1, .new_entry = if (value2_tree) null else value2 });
+                    }
+                }
+            } else {
+                try self.changes.put(key1, Change{ .old_entry = value1, .new_entry = null });
+            }
+        }
     }
 
     fn loadTree(self: *TreeDiff, repo_dir: std.fs.Dir, oid_maybe: ?[]const u8) !std.StringArrayHashMap(TreeEntry) {
