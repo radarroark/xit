@@ -560,3 +560,56 @@ pub const Object = struct {
         }
     }
 };
+
+pub const TreeDiff = struct {
+    changes: std.StringHashMap(Change),
+    objects: std.ArrayList(Object),
+    allocator: std.mem.Allocator,
+
+    pub const Change = struct {
+        old_entry: ?TreeEntry,
+        new_entry: ?TreeEntry,
+    };
+
+    pub fn init(allocator: std.mem.Allocator) TreeDiff {
+        var changes = std.StringHashMap(Change).init(allocator);
+        errdefer changes.deinit();
+
+        var objects = std.ArrayList(Object).init(allocator);
+        errdefer objects.deinit();
+
+        return TreeDiff{
+            .changes = changes,
+            .objects = objects,
+            .allocator = allocator,
+        };
+    }
+
+    pub fn deinit(self: *TreeDiff) void {
+        self.changes.deinit();
+        for (self.objects.items) |*object| {
+            object.deinit();
+        }
+        self.objects.deinit();
+    }
+
+    pub fn compare(self: *TreeDiff, repo_dir: std.fs.Dir, oid1_maybe: ?[]const u8, oid2_maybe: ?[]const u8) !void {
+        const entries1 = try self.loadTree(repo_dir, oid1_maybe);
+        const entries2 = try self.loadTree(repo_dir, oid2_maybe);
+        std.debug.print("{} {}\n", .{ entries1.count(), entries2.count() });
+    }
+
+    fn loadTree(self: *TreeDiff, repo_dir: std.fs.Dir, oid_maybe: ?[]const u8) !std.StringArrayHashMap(TreeEntry) {
+        if (oid_maybe) |oid| {
+            var obj = try Object.init(self.allocator, repo_dir, oid);
+            try self.objects.append(obj);
+            return switch (obj.content) {
+                .blob => std.StringArrayHashMap(TreeEntry).init(self.allocator),
+                .tree => obj.content.tree.entries,
+                .commit => self.loadTree(repo_dir, obj.content.commit.tree),
+            };
+        } else {
+            return std.StringArrayHashMap(TreeEntry).init(self.allocator);
+        }
+    }
+};

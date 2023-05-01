@@ -112,6 +112,16 @@ test "end to end" {
             defer c.git_commit_free(commit);
             try std.testing.expectEqualStrings("first commit", std.mem.sliceTo(c.git_commit_message(commit), 0));
         }
+    }
+
+    // get HEAD contents
+    const commit1 = try ref.readHead(allocator, git_dir);
+    defer allocator.free(commit1);
+
+    // make another commit
+    {
+        const hello_txt = try repo_dir.openFile("hello.txt", .{ .mode = .read_write });
+        defer hello_txt.close();
 
         // can't commit again because nothing has changed
         args.clearAndFree();
@@ -259,6 +269,10 @@ test "end to end" {
         }
     }
 
+    // get HEAD contents
+    const commit2 = try ref.readHead(allocator, git_dir);
+    defer allocator.free(commit2);
+
     // status
     {
         // make file
@@ -399,12 +413,8 @@ test "end to end" {
 
     // parse objects
     {
-        // get HEAD contents
-        const head_file_buffer = try ref.readHead(allocator, git_dir);
-        defer allocator.free(head_file_buffer);
-
         // read commit
-        var commit_object = try obj.Object.init(allocator, repo_dir, head_file_buffer);
+        var commit_object = try obj.Object.init(allocator, repo_dir, commit2);
         defer commit_object.deinit();
         try std.testing.expectEqualStrings("second commit", commit_object.content.commit.message);
 
@@ -435,4 +445,9 @@ test "end to end" {
         const branch_name = c.git_reference_shorthand(head);
         try std.testing.expectEqualStrings("stuff", std.mem.sliceTo(branch_name, 0));
     }
+
+    // compare trees
+    var tree_diff = obj.TreeDiff.init(allocator);
+    defer tree_diff.deinit();
+    try tree_diff.compare(repo_dir, commit1, commit2);
 }
