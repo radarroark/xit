@@ -143,20 +143,18 @@ pub const Index = struct {
     fn putEntry(self: *Index, entry: Entry) !void {
         try self.entries.put(entry.path, entry);
 
-        var child_maybe: ?[]const u8 = std.fs.path.basename(entry.path);
+        var child = std.fs.path.basename(entry.path);
         var parent_path_maybe = std.fs.path.dirname(entry.path);
 
         while (parent_path_maybe) |parent_path| {
             // populate dir_to_children
-            if (child_maybe) |child| {
-                var child_paths_maybe = self.dir_to_children.getEntry(parent_path);
-                if (child_paths_maybe) |child_paths| {
-                    try child_paths.value_ptr.*.put(child, {});
-                } else {
-                    var child_paths = std.StringArrayHashMap(void).init(self.allocator);
-                    try child_paths.put(child, {});
-                    try self.dir_to_children.put(parent_path, child_paths);
-                }
+            var children_maybe = self.dir_to_children.getEntry(parent_path);
+            if (children_maybe) |children| {
+                try children.value_ptr.*.put(child, {});
+            } else {
+                var children = std.StringArrayHashMap(void).init(self.allocator);
+                try children.put(child, {});
+                try self.dir_to_children.put(parent_path, children);
             }
 
             // populate dir_to_paths
@@ -169,13 +167,11 @@ pub const Index = struct {
                 try self.dir_to_paths.put(parent_path, child_paths);
             }
 
-            child_maybe = std.fs.path.basename(parent_path);
+            child = std.fs.path.basename(parent_path);
             parent_path_maybe = std.fs.path.dirname(parent_path);
         }
 
-        if (child_maybe) |child| {
-            try self.root_children.put(child, {});
-        }
+        try self.root_children.put(child, {});
     }
 
     fn removeEntry(self: *Index, path: []const u8) void {
