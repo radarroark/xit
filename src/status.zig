@@ -198,8 +198,7 @@ pub const HeadTree = struct {
         errdefer entries.deinit();
 
         // get HEAD contents
-        const head_file_buffer = try ref.readHead(allocator, git_dir);
-        defer allocator.free(head_file_buffer);
+        const head_file_buffer = try ref.readHead(git_dir);
 
         // read commit
         var commit_object = try obj.Object.init(allocator, repo_dir, head_file_buffer);
@@ -221,7 +220,7 @@ pub const HeadTree = struct {
     }
 
     fn read(self: *HeadTree, repo_dir: std.fs.Dir, prefix: []const u8, oid: [hash.SHA1_HEX_LEN]u8) !void {
-        var object = try obj.Object.init(self.arena.allocator(), repo_dir, &oid);
+        var object = try obj.Object.init(self.arena.allocator(), repo_dir, oid);
 
         switch (object.content) {
             .blob => {},

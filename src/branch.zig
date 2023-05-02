@@ -25,8 +25,7 @@ pub fn create(allocator: std.mem.Allocator, name: []const u8, repo_dir: std.fs.D
     defer heads_dir.close();
 
     // get HEAD contents
-    const head_file_buffer = try ref.readHead(allocator, git_dir);
-    defer allocator.free(head_file_buffer);
+    const head_file_buffer = try ref.readHead(git_dir);
 
     const lock_name = try std.fmt.allocPrint(allocator, "{s}.lock", .{name});
     defer allocator.free(lock_name);
@@ -36,7 +35,7 @@ pub fn create(allocator: std.mem.Allocator, name: []const u8, repo_dir: std.fs.D
     errdefer heads_dir.deleteFile(lock_name) catch {};
     {
         defer branch_file.close();
-        try branch_file.writeAll(head_file_buffer);
+        try branch_file.writeAll(&head_file_buffer);
         try branch_file.writeAll("\n");
     }
     try heads_dir.rename(lock_name, name);

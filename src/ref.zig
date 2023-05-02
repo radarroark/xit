@@ -1,11 +1,20 @@
 const std = @import("std");
+const hash = @import("./hash.zig");
 
-const MAX_FILE_READ_SIZE = 1000; // FIXME: this is arbitrary...
+pub const RefError = error{
+    ReadHeadInvalidHash,
+};
 
-pub fn readHead(allocator: std.mem.Allocator, git_dir: std.fs.Dir) ![]u8 {
+pub fn readHead(git_dir: std.fs.Dir) ![hash.SHA1_HEX_LEN]u8 {
     const head_file = try git_dir.openFile("HEAD", .{ .mode = .read_only });
     defer head_file.close();
-    return try head_file.reader().readAllAlloc(allocator, MAX_FILE_READ_SIZE);
+    var buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
+    const size = try head_file.reader().readAll(&buffer);
+    if (size != hash.SHA1_HEX_LEN) {
+        // TODO: if not a hash, resolve it
+        return error.ReadHeadInvalidHash;
+    }
+    return buffer;
 }
 
 pub fn writeHead(git_dir: std.fs.Dir, content: []const u8) !void {

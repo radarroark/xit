@@ -384,7 +384,6 @@ pub const ObjectContent = union(ObjectKind) {
 };
 
 pub const ObjectReadError = error{
-    InvalidObjectHash,
     InvalidObjectKind,
     InvalidCommitTreeHash,
     InvalidCommitParentHash,
@@ -394,11 +393,7 @@ pub const Object = struct {
     allocator: std.mem.Allocator,
     content: ObjectContent,
 
-    pub fn init(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, oid: []const u8) !Object {
-        if (oid.len != hash.SHA1_HEX_LEN) {
-            return error.InvalidObjectHash;
-        }
-
+    pub fn init(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, oid: [hash.SHA1_HEX_LEN]u8) !Object {
         // open the internal dirs
         var git_dir = try repo_dir.openDir(".git", .{});
         defer git_dir.close();
@@ -489,7 +484,7 @@ pub const Object = struct {
                     },
                 },
             };
-            std.mem.copy(u8, &object.content.commit.tree, tree_hash[0..hash.SHA1_HEX_LEN]);
+            std.mem.copy(u8, &object.content.commit.tree, tree_hash_slice);
 
             // read the metadata
             var metadata = std.StringHashMap([]const u8).init(allocator);
@@ -567,10 +562,6 @@ pub const Object = struct {
     }
 };
 
-pub const TreeDiffError = error{
-    InvalidTreeDiffHash,
-};
-
 pub const TreeDiff = struct {
     changes: std.StringHashMap(Change),
     arena: std.heap.ArenaAllocator,
@@ -592,7 +583,7 @@ pub const TreeDiff = struct {
         self.changes.deinit();
     }
 
-    pub fn compare(self: *TreeDiff, repo_dir: std.fs.Dir, oid1_maybe: ?[]const u8, oid2_maybe: ?[]const u8) !void {
+    pub fn compare(self: *TreeDiff, repo_dir: std.fs.Dir, oid1_maybe: ?[hash.SHA1_HEX_LEN]u8, oid2_maybe: ?[hash.SHA1_HEX_LEN]u8) !void {
         if (oid1_maybe == null and oid2_maybe == null) {
             return;
         }
@@ -607,7 +598,7 @@ pub const TreeDiff = struct {
                 if (!value1.eql(value2)) {
                     const value1_tree = isTree(value1);
                     const value2_tree = isTree(value2);
-                    try self.compare(repo_dir, if (value1_tree) &std.fmt.bytesToHex(&value1.oid, .lower) else null, if (value2_tree) &std.fmt.bytesToHex(&value2.oid, .lower) else null);
+                    try self.compare(repo_dir, if (value1_tree) std.fmt.bytesToHex(&value1.oid, .lower) else null, if (value2_tree) std.fmt.bytesToHex(&value2.oid, .lower) else null);
                     if (!value1_tree or !value2_tree) {
                         try self.changes.put(key1, Change{ .old_entry = if (value1_tree) null else value1, .new_entry = if (value2_tree) null else value2 });
                     }
@@ -618,16 +609,13 @@ pub const TreeDiff = struct {
         }
     }
 
-    fn loadTree(self: *TreeDiff, repo_dir: std.fs.Dir, oid_maybe: ?[]const u8) !std.StringArrayHashMap(TreeEntry) {
+    fn loadTree(self: *TreeDiff, repo_dir: std.fs.Dir, oid_maybe: ?[hash.SHA1_HEX_LEN]u8) !std.StringArrayHashMap(TreeEntry) {
         if (oid_maybe) |oid| {
-            if (oid.len != hash.SHA1_HEX_LEN) {
-                return error.InvalidTreeDiffHash;
-            }
             var obj = try Object.init(self.arena.allocator(), repo_dir, oid);
             return switch (obj.content) {
                 .blob => std.StringArrayHashMap(TreeEntry).init(self.arena.allocator()),
                 .tree => obj.content.tree.entries,
-                .commit => self.loadTree(repo_dir, &obj.content.commit.tree),
+                .commit => self.loadTree(repo_dir, obj.content.commit.tree),
             };
         } else {
             return std.StringArrayHashMap(TreeEntry).init(self.arena.allocator());

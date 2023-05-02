@@ -97,8 +97,7 @@ test "end to end" {
 
         // check that the commit object was created
         {
-            const head_file_buffer = try ref.readHead(allocator, git_dir);
-            defer allocator.free(head_file_buffer);
+            const head_file_buffer = try ref.readHead(git_dir);
             var objects_dir = try git_dir.openDir("objects", .{});
             defer objects_dir.close();
             var hash_prefix_dir = try objects_dir.openDir(head_file_buffer[0..2], .{});
@@ -125,8 +124,7 @@ test "end to end" {
     }
 
     // get HEAD contents
-    const commit1 = try ref.readHead(allocator, git_dir);
-    defer allocator.free(commit1);
+    const commit1 = try ref.readHead(git_dir);
 
     // make another commit
     {
@@ -182,8 +180,7 @@ test "end to end" {
 
         // check that the commit object was created
         {
-            const head_file_buffer = try ref.readHead(allocator, git_dir);
-            defer allocator.free(head_file_buffer);
+            const head_file_buffer = try ref.readHead(git_dir);
             var objects_dir = try git_dir.openDir("objects", .{});
             defer objects_dir.close();
             var hash_prefix_dir = try objects_dir.openDir(head_file_buffer[0..2], .{});
@@ -293,8 +290,7 @@ test "end to end" {
     }
 
     // get HEAD contents
-    const commit2 = try ref.readHead(allocator, git_dir);
-    defer allocator.free(commit2);
+    const commit2 = try ref.readHead(git_dir);
 
     // status
     {
@@ -442,7 +438,7 @@ test "end to end" {
         try std.testing.expectEqualStrings("second commit", commit_object.content.commit.message);
 
         // read tree
-        var tree_object = try obj.Object.init(allocator, repo_dir, &commit_object.content.commit.tree);
+        var tree_object = try obj.Object.init(allocator, repo_dir, commit_object.content.commit.tree);
         defer tree_object.deinit();
         try expectEqual(4, tree_object.content.tree.entries.count());
     }
