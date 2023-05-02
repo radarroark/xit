@@ -375,7 +375,7 @@ pub const ObjectContent = union(ObjectKind) {
         entries: std.StringArrayHashMap(TreeEntry),
     },
     commit: struct {
-        tree: []const u8,
+        tree: [hash.SHA1_HEX_LEN]u8,
         parent: ?[]const u8,
         author: ?[]const u8,
         committer: ?[]const u8,
@@ -470,9 +470,9 @@ pub const Object = struct {
             }
 
             // read the tree hash
-            const tree_hash = try reader.readUntilDelimiterAlloc(allocator, '\n', MAX_FILE_READ_SIZE);
-            errdefer allocator.free(tree_hash);
-            if (tree_hash.len != hash.SHA1_HEX_LEN) {
+            var tree_hash = [_]u8{0} ** (hash.SHA1_HEX_LEN + 1);
+            const tree_hash_slice = try reader.readUntilDelimiter(&tree_hash, '\n');
+            if (tree_hash_slice.len != hash.SHA1_HEX_LEN) {
                 return error.InvalidCommitTreeHash;
             }
 
@@ -481,7 +481,7 @@ pub const Object = struct {
                 .allocator = allocator,
                 .content = ObjectContent{
                     .commit = .{
-                        .tree = tree_hash,
+                        .tree = undefined,
                         .parent = null,
                         .author = null,
                         .committer = null,
@@ -489,6 +489,7 @@ pub const Object = struct {
                     },
                 },
             };
+            std.mem.copy(u8, &object.content.commit.tree, tree_hash[0..hash.SHA1_HEX_LEN]);
 
             // read the metadata
             var metadata = std.StringHashMap([]const u8).init(allocator);
@@ -551,7 +552,6 @@ pub const Object = struct {
                 self.content.tree.entries.deinit();
             },
             .commit => {
-                self.allocator.free(self.content.commit.tree);
                 if (self.content.commit.parent) |parent| {
                     self.allocator.free(parent);
                 }
@@ -627,7 +627,7 @@ pub const TreeDiff = struct {
             return switch (obj.content) {
                 .blob => std.StringArrayHashMap(TreeEntry).init(self.arena.allocator()),
                 .tree => obj.content.tree.entries,
-                .commit => self.loadTree(repo_dir, obj.content.commit.tree),
+                .commit => self.loadTree(repo_dir, &obj.content.commit.tree),
             };
         } else {
             return std.StringArrayHashMap(TreeEntry).init(self.arena.allocator());

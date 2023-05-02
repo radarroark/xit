@@ -220,8 +220,8 @@ pub const HeadTree = struct {
         self.arena.deinit();
     }
 
-    fn read(self: *HeadTree, repo_dir: std.fs.Dir, prefix: []const u8, oid: []const u8) !void {
-        var object = try obj.Object.init(self.arena.allocator(), repo_dir, oid);
+    fn read(self: *HeadTree, repo_dir: std.fs.Dir, prefix: []const u8, oid: [hash.SHA1_HEX_LEN]u8) !void {
+        var object = try obj.Object.init(self.arena.allocator(), repo_dir, &oid);
 
         switch (object.content) {
             .blob => {},
@@ -232,7 +232,7 @@ pub const HeadTree = struct {
                     const path = try std.fs.path.join(self.arena.allocator(), &[_][]const u8{ prefix, name });
                     if (obj.isTree(entry.value_ptr.*)) {
                         const oid_hex = std.fmt.bytesToHex(entry.value_ptr.*.oid[0..hash.SHA1_BYTES_LEN], .lower);
-                        try self.read(repo_dir, path, &oid_hex);
+                        try self.read(repo_dir, path, oid_hex);
                     } else {
                         try self.entries.put(path, entry.value_ptr.*);
                     }

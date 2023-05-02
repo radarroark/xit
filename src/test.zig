@@ -442,7 +442,7 @@ test "end to end" {
         try std.testing.expectEqualStrings("second commit", commit_object.content.commit.message);
 
         // read tree
-        var tree_object = try obj.Object.init(allocator, repo_dir, commit_object.content.commit.tree);
+        var tree_object = try obj.Object.init(allocator, repo_dir, &commit_object.content.commit.tree);
         defer tree_object.deinit();
         try expectEqual(4, tree_object.content.tree.entries.count());
     }
