@@ -583,28 +583,51 @@ pub const TreeDiff = struct {
         self.changes.deinit();
     }
 
-    pub fn compare(self: *TreeDiff, repo_dir: std.fs.Dir, oid1_maybe: ?[hash.SHA1_HEX_LEN]u8, oid2_maybe: ?[hash.SHA1_HEX_LEN]u8) !void {
-        if (oid1_maybe == null and oid2_maybe == null) {
+    pub fn compare(self: *TreeDiff, repo_dir: std.fs.Dir, old_oid_maybe: ?[hash.SHA1_HEX_LEN]u8, new_oid_maybe: ?[hash.SHA1_HEX_LEN]u8, path_list_maybe: ?std.ArrayList([]const u8)) !void {
+        if (old_oid_maybe == null and new_oid_maybe == null) {
             return;
         }
-        const entries1 = try self.loadTree(repo_dir, oid1_maybe);
-        const entries2 = try self.loadTree(repo_dir, oid2_maybe);
-        // deletions
-        var iter1 = entries1.iterator();
-        while (iter1.next()) |entry1| {
-            const key1 = entry1.key_ptr.*;
-            const value1 = entry1.value_ptr.*;
-            if (entries2.get(key1)) |value2| {
-                if (!value1.eql(value2)) {
-                    const value1_tree = isTree(value1);
-                    const value2_tree = isTree(value2);
-                    try self.compare(repo_dir, if (value1_tree) std.fmt.bytesToHex(&value1.oid, .lower) else null, if (value2_tree) std.fmt.bytesToHex(&value2.oid, .lower) else null);
-                    if (!value1_tree or !value2_tree) {
-                        try self.changes.put(key1, Change{ .old_entry = if (value1_tree) null else value1, .new_entry = if (value2_tree) null else value2 });
+        const old_entries = try self.loadTree(repo_dir, old_oid_maybe);
+        const new_entries = try self.loadTree(repo_dir, new_oid_maybe);
+        // deletions and edits
+        {
+            var iter = old_entries.iterator();
+            while (iter.next()) |old_entry| {
+                const old_key = old_entry.key_ptr.*;
+                const old_value = old_entry.value_ptr.*;
+                var path_list = if (path_list_maybe) |path_list| try path_list.clone() else std.ArrayList([]const u8).init(self.arena.allocator());
+                try path_list.append(old_key);
+                const path = try std.fs.path.join(self.arena.allocator(), path_list.items);
+                if (new_entries.get(old_key)) |new_value| {
+                    if (!old_value.eql(new_value)) {
+                        const old_value_tree = isTree(old_value);
+                        const new_value_tree = isTree(new_value);
+                        try self.compare(repo_dir, if (old_value_tree) std.fmt.bytesToHex(&old_value.oid, .lower) else null, if (new_value_tree) std.fmt.bytesToHex(&new_value.oid, .lower) else null, path_list);
+                        if (!old_value_tree or !new_value_tree) {
+                            try self.changes.put(path, Change{ .old_entry = if (old_value_tree) null else old_value, .new_entry = if (new_value_tree) null else new_value });
+                        }
                     }
+                } else {
+                    try self.changes.put(path, Change{ .old_entry = old_value, .new_entry = null });
                 }
-            } else {
-                try self.changes.put(key1, Change{ .old_entry = value1, .new_entry = null });
+            }
+        }
+        // additions
+        {
+            var iter = new_entries.iterator();
+            while (iter.next()) |new_entry| {
+                const new_key = new_entry.key_ptr.*;
+                const new_value = new_entry.value_ptr.*;
+                var path_list = if (path_list_maybe) |path_list| try path_list.clone() else std.ArrayList([]const u8).init(self.arena.allocator());
+                try path_list.append(new_key);
+                const path = try std.fs.path.join(self.arena.allocator(), path_list.items);
+                if (old_entries.get(new_key)) |_| {
+                    continue;
+                } else if (isTree(new_value)) {
+                    try self.compare(repo_dir, null, std.fmt.bytesToHex(&new_value.oid, .lower), path_list);
+                } else {
+                    try self.changes.put(path, Change{ .old_entry = null, .new_entry = new_value });
+                }
             }
         }
     }

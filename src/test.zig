@@ -468,5 +468,9 @@ test "end to end" {
     // compare trees
     var tree_diff = obj.TreeDiff.init(allocator);
     defer tree_diff.deinit();
-    try tree_diff.compare(repo_dir, commit1, commit2);
+    try tree_diff.compare(repo_dir, commit1, commit2, null);
+    try std.testing.expect(tree_diff.changes.contains("tests"));
+    try std.testing.expect(tree_diff.changes.contains("LICENSE"));
+    try std.testing.expect(tree_diff.changes.contains("src/zig/main.zig"));
+    try std.testing.expect(tree_diff.changes.contains("tests/main_test.zig"));
 }
