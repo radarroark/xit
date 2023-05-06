@@ -567,8 +567,8 @@ pub const TreeDiff = struct {
     arena: std.heap.ArenaAllocator,
 
     pub const Change = struct {
-        old_entry: ?TreeEntry,
-        new_entry: ?TreeEntry,
+        old: ?TreeEntry,
+        new: ?TreeEntry,
     };
 
     pub fn init(allocator: std.mem.Allocator) TreeDiff {
@@ -604,11 +604,11 @@ pub const TreeDiff = struct {
                         const new_value_tree = isTree(new_value);
                         try self.compare(repo_dir, if (old_value_tree) std.fmt.bytesToHex(&old_value.oid, .lower) else null, if (new_value_tree) std.fmt.bytesToHex(&new_value.oid, .lower) else null, path_list);
                         if (!old_value_tree or !new_value_tree) {
-                            try self.changes.put(path, Change{ .old_entry = if (old_value_tree) null else old_value, .new_entry = if (new_value_tree) null else new_value });
+                            try self.changes.put(path, Change{ .old = if (old_value_tree) null else old_value, .new = if (new_value_tree) null else new_value });
                         }
                     }
                 } else {
-                    try self.changes.put(path, Change{ .old_entry = old_value, .new_entry = null });
+                    try self.changes.put(path, Change{ .old = old_value, .new = null });
                 }
             }
         }
@@ -626,7 +626,7 @@ pub const TreeDiff = struct {
                 } else if (isTree(new_value)) {
                     try self.compare(repo_dir, null, std.fmt.bytesToHex(&new_value.oid, .lower), path_list);
                 } else {
-                    try self.changes.put(path, Change{ .old_entry = null, .new_entry = new_value });
+                    try self.changes.put(path, Change{ .old = null, .new = new_value });
                 }
             }
         }

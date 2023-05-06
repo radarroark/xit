@@ -5,6 +5,7 @@ const idx = @import("./index.zig");
 const stat = @import("./status.zig");
 const obj = @import("./object.zig");
 const ref = @import("./ref.zig");
+const chk = @import("./checkout.zig");
 
 const c = @cImport({
     @cInclude("git2.h");
@@ -473,4 +474,6 @@ test "end to end" {
     try std.testing.expect(tree_diff.changes.contains("LICENSE"));
     try std.testing.expect(tree_diff.changes.contains("src/zig/main.zig"));
     try std.testing.expect(tree_diff.changes.contains("tests/main_test.zig"));
+
+    try chk.checkout(allocator, tree_diff);
 }
