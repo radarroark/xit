@@ -66,22 +66,29 @@ test "end to end" {
         // make file
         var hello_txt = try repo_dir.createFile("hello.txt", .{});
         defer hello_txt.close();
-        try hello_txt.pwriteAll("hello, world!", 0);
+        try hello_txt.writeAll("hello, world!");
 
         // make file
         var readme = try repo_dir.createFile("README", .{});
         defer readme.close();
-        try readme.pwriteAll("My cool project", 0);
+        try readme.writeAll("My cool project");
 
         // make file
         var license = try repo_dir.createFile("LICENSE", .{});
         defer license.close();
-        try license.pwriteAll("do whatever you want", 0);
+        try license.writeAll("do whatever you want");
 
         // make file
         var tests = try repo_dir.createFile("tests", .{});
         defer tests.close();
-        try tests.pwriteAll("testing...", 0);
+        try tests.writeAll("testing...");
+
+        // make file in a dir
+        var docs_dir = try repo_dir.makeOpenPath("docs", .{});
+        defer docs_dir.close();
+        var design_md = try docs_dir.createFile("design.md", .{});
+        defer design_md.close();
+        try design_md.writeAll("design stuff");
 
         // add the files
         args.clearAndFree();
@@ -143,6 +150,17 @@ test "end to end" {
         try args.append("LICENSE");
         try main.zitMain(allocator, &args);
 
+        // delete a file and dir
+        {
+            var docs_dir = try repo_dir.openDir("docs", .{});
+            defer docs_dir.close();
+            try docs_dir.deleteFile("design.md");
+            args.clearAndFree();
+            try args.append("add");
+            try args.append("docs/design.md");
+            try main.zitMain(allocator, &args);
+        }
+
         // replace a file with a directory
         try repo_dir.deleteFile("tests");
         var tests_dir = try repo_dir.makeOpenPath("tests", .{});
@@ -153,7 +171,7 @@ test "end to end" {
         // change a file
         const hello_txt = try repo_dir.openFile("hello.txt", .{ .mode = .read_write });
         defer hello_txt.close();
-        try hello_txt.pwriteAll("goodbye, world!", 0);
+        try hello_txt.writeAll("goodbye, world!");
 
         // make a few dirs
         var src_dir = try repo_dir.makeOpenPath("src", .{});
@@ -164,7 +182,7 @@ test "end to end" {
         // make a file in the dir
         var main_zig = try src_zig_dir.createFile("main.zig", .{});
         defer main_zig.close();
-        try main_zig.pwriteAll("pub fn main() !void {}", 0);
+        try main_zig.writeAll("pub fn main() !void {}");
 
         // add the files
         args.clearAndFree();
@@ -298,7 +316,7 @@ test "end to end" {
         // make file
         var goodbye_txt = try repo_dir.createFile("goodbye.txt", .{});
         defer goodbye_txt.close();
-        try goodbye_txt.pwriteAll("Goodbye", 0);
+        try goodbye_txt.writeAll("Goodbye");
 
         // make dirs
         var a_dir = try repo_dir.makeOpenPath("a", .{});
@@ -311,17 +329,17 @@ test "end to end" {
         // make file in dir
         var farewell_txt = try a_dir.createFile("farewell.txt", .{});
         defer farewell_txt.close();
-        try farewell_txt.pwriteAll("Farewell", 0);
+        try farewell_txt.writeAll("Farewell");
 
         // modify indexed files
         {
             const hello_txt = try repo_dir.openFile("hello.txt", .{ .mode = .read_write });
             defer hello_txt.close();
-            try hello_txt.pwriteAll("hello, world again!", 0);
+            try hello_txt.writeAll("hello, world again!");
 
             const readme = try repo_dir.openFile("README", .{ .mode = .read_write });
             defer readme.close();
-            try readme.pwriteAll("My code project", 0); // size doesn't change
+            try readme.writeAll("My code project"); // size doesn't change
 
             var src_dir = try repo_dir.openDir("src", .{});
             defer src_dir.close();
