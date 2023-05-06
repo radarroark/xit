@@ -608,7 +608,11 @@ pub const TreeDiff = struct {
                         }
                     }
                 } else {
-                    try self.changes.put(path, Change{ .old = old_value, .new = null });
+                    if (isTree(old_value)) {
+                        try self.compare(repo_dir, std.fmt.bytesToHex(&old_value.oid, .lower), null, path_list);
+                    } else {
+                        try self.changes.put(path, Change{ .old = old_value, .new = null });
+                    }
                 }
             }
         }

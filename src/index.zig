@@ -93,10 +93,6 @@ pub const Index = struct {
         const meta = try file.metadata();
         switch (meta.kind()) {
             std.fs.File.Kind.File => {
-                // exit early if this path is already in the index
-                if (self.entries.contains(path)) {
-                    return;
-                }
                 // write the object
                 var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
                 try object.writeBlobFromPath(self.allocator, cwd, path, &oid);

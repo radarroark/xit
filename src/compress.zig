@@ -69,7 +69,7 @@ pub fn compress(in: std.fs.File, out: std.fs.File, allocator: std.mem.Allocator)
     try writer.writeIntBig(u32, hasher.final());
 }
 
-pub fn decompress(allocator: std.mem.Allocator, in: std.fs.File, out: std.fs.File) !void {
+pub fn decompress(allocator: std.mem.Allocator, in: std.fs.File, out: std.fs.File, skip_header: bool) !void {
     // read the in file into memory
     var read_buffer = [_]u8{0} ** MAX_FILE_SIZE_BYTES;
     const in_size = try in.pread(&read_buffer, 0);
@@ -81,6 +81,9 @@ pub fn decompress(allocator: std.mem.Allocator, in: std.fs.File, out: std.fs.Fil
     // do the dirty work
     var zlib_stream = try zlib.zlibStream(allocator, fixed_buffer.reader());
     defer zlib_stream.deinit();
+    if (skip_header) {
+        try zlib_stream.reader().skipUntilDelimiterOrEof(0);
+    }
     const buf = try zlib_stream.reader().readAllAlloc(allocator, std.math.maxInt(usize));
     defer allocator.free(buf);
 
@@ -144,7 +147,7 @@ test "compress and decompress" {
     // decompress it so we know it works
     var out_decompressed = try temp_dir.createFile("out_decompressed", .{ .read = true });
     defer out_decompressed.close();
-    try decompress(allocator, out_compressed, out_decompressed);
+    try decompress(allocator, out_compressed, out_decompressed, false);
 
     // read the decompressed file into memory and check that it's the same
     var read_buffer = [_]u8{0} ** MAX_FILE_SIZE_BYTES;
