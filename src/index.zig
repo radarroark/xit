@@ -341,7 +341,7 @@ pub fn getTimes(meta: std.fs.File.Metadata) Times {
     };
 }
 
-pub fn writeIndexWithPaths(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, paths: std.ArrayList([]const u8)) !void {
+pub fn writeIndex(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, paths: std.ArrayList([]const u8)) !void {
     // open git dir
     var git_dir = try repo_dir.openDir(".git", .{});
     defer git_dir.close();

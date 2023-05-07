@@ -94,7 +94,7 @@ pub fn zitMain(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8)) !
             try git_dir.makeDir("refs");
         },
         cmd.CommandData.add => {
-            try idx.writeIndexWithPaths(allocator, cwd, command.data.add.paths);
+            try idx.writeIndex(allocator, cwd, command.data.add.paths);
         },
         cmd.CommandData.commit => {
             try obj.writeCommit(allocator, cwd, command.data);
