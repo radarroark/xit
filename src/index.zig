@@ -135,13 +135,13 @@ pub const Index = struct {
     /// if path is a file, adds it as an entry to the index struct.
     /// if path is a dir, adds its children recursively.
     /// ignoring symlinks for now but will add that later.
-    fn putPath(self: *Index, repo_dir: std.fs.Dir, path: []const u8) !void {
+    pub fn addPath(self: *Index, repo_dir: std.fs.Dir, path: []const u8) !void {
         // remove entries that are parents of this path (directory replaces file)
         {
             var parent_path_maybe = std.fs.path.dirname(path);
             while (parent_path_maybe) |parent_path| {
                 if (self.entries.contains(parent_path)) {
-                    self.removeEntry(parent_path);
+                    self.removePath(parent_path);
                 }
                 parent_path_maybe = std.fs.path.dirname(parent_path);
             }
@@ -190,7 +190,7 @@ pub const Index = struct {
                         try std.fmt.allocPrint(self.arena.allocator(), "{s}", .{entry.name})
                     else
                         try std.fs.path.join(self.arena.allocator(), &[_][]const u8{ path, entry.name });
-                    try self.putPath(repo_dir, subpath);
+                    try self.addPath(repo_dir, subpath);
                 }
             },
             else => return,
@@ -231,7 +231,7 @@ pub const Index = struct {
         try self.root_children.put(child, {});
     }
 
-    fn removeEntry(self: *Index, path: []const u8) void {
+    pub fn removePath(self: *Index, path: []const u8) void {
         _ = self.entries.orderedRemove(path);
         var parent_path_maybe = std.fs.path.dirname(path);
         while (parent_path_maybe) |parent_path| {
@@ -243,18 +243,18 @@ pub const Index = struct {
         }
     }
 
-    fn removeChildren(self: *Index, path: []const u8) !void {
+    pub fn removeChildren(self: *Index, path: []const u8) !void {
         var child_paths_maybe = self.dir_to_paths.getEntry(path);
         if (child_paths_maybe) |child_paths| {
             const child_paths_array = child_paths.value_ptr.*.keys();
-            // make a copy of the paths because removeEntry will modify it
+            // make a copy of the paths because removePath will modify it
             var child_paths_array_copy = std.ArrayList([]const u8).init(self.allocator);
             defer child_paths_array_copy.deinit();
             for (child_paths_array) |child_path| {
                 try child_paths_array_copy.append(child_path);
             }
             for (child_paths_array_copy.items) |child_path| {
-                self.removeEntry(child_path);
+                self.removePath(child_path);
             }
         }
     }
@@ -360,14 +360,14 @@ pub fn writeIndexWithPaths(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, p
     for (paths.items) |path| {
         const file = repo_dir.openFile(path, .{ .mode = .read_only }) catch |err| {
             if (err == error.FileNotFound and index.entries.contains(path)) {
-                index.removeEntry(path);
+                index.removePath(path);
                 continue;
             } else {
                 return err;
             }
         };
         defer file.close();
-        try index.putPath(repo_dir, path);
+        try index.addPath(repo_dir, path);
     }
 
     try index.write(allocator, index_lock_file);
