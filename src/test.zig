@@ -223,7 +223,49 @@ test "end to end" {
             defer c.git_commit_free(commit);
             try std.testing.expectEqualStrings("second commit", std.mem.sliceTo(c.git_commit_message(commit), 0));
         }
+    }
 
+    // get HEAD contents
+    const commit2 = try ref.readHead(git_dir);
+
+    // checkout first commit
+    args.clearAndFree();
+    try args.append("checkout");
+    try args.append(&commit1);
+    try main.zitMain(allocator, &args);
+
+    // the working tree was updated
+    {
+        const hello_txt = try repo_dir.openFile("hello.txt", .{ .mode = .read_only });
+        defer hello_txt.close();
+        const content = try hello_txt.readToEndAlloc(allocator, 1024);
+        defer allocator.free(content);
+        try std.testing.expectEqualStrings("hello, world!", content);
+
+        const license = try repo_dir.openFile("LICENSE", .{ .mode = .read_only });
+        defer license.close();
+    }
+
+    // checkout second commit
+    args.clearAndFree();
+    try args.append("checkout");
+    try args.append(&commit2);
+    try main.zitMain(allocator, &args);
+
+    // the working tree was updated
+    {
+        const hello_txt = try repo_dir.openFile("hello.txt", .{ .mode = .read_only });
+        defer hello_txt.close();
+        const content = try hello_txt.readToEndAlloc(allocator, 1024);
+        defer allocator.free(content);
+        try std.testing.expectEqualStrings("goodbye, world!", content);
+
+        const license_or_err = repo_dir.openFile("LICENSE", .{ .mode = .read_only });
+        try expectEqual(error.FileNotFound, license_or_err);
+    }
+
+    // replacing file with dir and dir with file
+    {
         // replace file with directory
         try repo_dir.deleteFile("hello.txt");
         var hello_txt_dir = try repo_dir.makeOpenPath("hello.txt", .{});
@@ -307,21 +349,6 @@ test "end to end" {
             try expectEqual(error.FileNotFound, lock_file_or_err);
         }
     }
-
-    // get HEAD contents
-    const commit2 = try ref.readHead(git_dir);
-
-    // checkout first commit
-    args.clearAndFree();
-    try args.append("checkout");
-    try args.append(&commit1);
-    try main.zitMain(allocator, &args);
-
-    // checkout second commit
-    args.clearAndFree();
-    try args.append("checkout");
-    try args.append(&commit2);
-    try main.zitMain(allocator, &args);
 
     // status
     {
