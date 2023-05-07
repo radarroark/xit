@@ -11,6 +11,7 @@ const hash = @import("./hash.zig");
 const compress = @import("./compress.zig");
 const obj = @import("./object.zig");
 const ref = @import("./ref.zig");
+const idx = @import("./index.zig");
 
 fn createFileFromObject(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, path: []const u8, tree_entry: obj.TreeEntry) !void {
     // open the internal dirs
@@ -35,7 +36,7 @@ fn createFileFromObject(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, path
     try compress.decompress(allocator, in_file, out_file, true);
 }
 
-pub fn migrate(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, tree_diff: obj.TreeDiff) !void {
+pub fn migrate(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, tree_diff: obj.TreeDiff, index: *idx.Index) !void {
     var add_files = std.StringHashMap(obj.TreeEntry).init(allocator);
     defer add_files.deinit();
     var edit_files = std.StringHashMap(obj.TreeEntry).init(allocator);
@@ -75,29 +76,46 @@ pub fn migrate(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, tree_diff: ob
 
     var remove_files_iter = remove_files.iterator();
     while (remove_files_iter.next()) |entry| {
+        // update working tree
         var path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
         const path = try repo_dir.realpath(entry.key_ptr.*, &path_buffer);
         try std.fs.deleteFileAbsolute(path);
+        // update index
+        index.removePath(entry.key_ptr.*);
+        try index.removeChildren(entry.key_ptr.*);
     }
 
     var remove_dirs_iter = remove_dirs.keyIterator();
     while (remove_dirs_iter.next()) |key| {
+        // update working tree
         try repo_dir.deleteTree(key.*);
+        // update index
+        index.removePath(key.*);
+        try index.removeChildren(key.*);
     }
 
     var add_dirs_iter = add_dirs.keyIterator();
     while (add_dirs_iter.next()) |key| {
+        // update working tree
         try repo_dir.makePath(key.*);
+        // update index
+        try index.addPath(repo_dir, key.*);
     }
 
     var add_files_iter = add_files.iterator();
     while (add_files_iter.next()) |entry| {
+        // update working tree
         try createFileFromObject(allocator, repo_dir, entry.key_ptr.*, entry.value_ptr.*);
+        // update index
+        try index.addPath(repo_dir, entry.key_ptr.*);
     }
 
     var edit_files_iter = edit_files.iterator();
     while (edit_files_iter.next()) |entry| {
+        // update working tree
         try createFileFromObject(allocator, repo_dir, entry.key_ptr.*, entry.value_ptr.*);
+        // update index
+        try index.addPath(repo_dir, entry.key_ptr.*);
     }
 }
 
@@ -105,13 +123,33 @@ pub fn checkout(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, oid_hex: [ha
     var git_dir = try repo_dir.openDir(".git", .{});
     defer git_dir.close();
 
+    // get the current commit
     const current_hash = try ref.readHead(git_dir);
 
+    // compare the commits
     var tree_diff = obj.TreeDiff.init(allocator);
     defer tree_diff.deinit();
     try tree_diff.compare(repo_dir, current_hash, oid_hex, null);
 
-    try migrate(allocator, repo_dir, tree_diff);
+    // open index
+    // first write to a lock file and then rename it to index for safety
+    const index_lock_file = try git_dir.createFile("index.lock", .{ .exclusive = true, .lock = .Exclusive });
+    defer index_lock_file.close();
+    errdefer git_dir.deleteFile("index.lock") catch {}; // make sure the lock file is deleted on error
 
+    // read index
+    var index = try idx.Index.init(allocator, git_dir);
+    defer index.deinit();
+
+    // update the working tree
+    try migrate(allocator, repo_dir, tree_diff, &index);
+
+    // update the index
+    try index.write(allocator, index_lock_file);
+
+    // rename lock file to index
+    try git_dir.rename("index.lock", "index");
+
+    // update HEAD
     try ref.writeHead(git_dir, &oid_hex);
 }
