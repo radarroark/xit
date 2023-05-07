@@ -247,7 +247,7 @@ pub fn readIndex(allocator: std.mem.Allocator, git_dir: std.fs.Dir) !Index {
     while (entry_count > 0) {
         entry_count -= 1;
         const start_pos = try reader.context.getPos();
-        const entry = Index.Entry{
+        var entry = Index.Entry{
             .ctime_secs = try reader.readIntBig(i32),
             .ctime_nsecs = try reader.readIntBig(i32),
             .mtime_secs = try reader.readIntBig(i32),
@@ -262,6 +262,9 @@ pub fn readIndex(allocator: std.mem.Allocator, git_dir: std.fs.Dir) !Index {
             .path_size = try reader.readIntBig(u16),
             .path = try reader.readUntilDelimiterAlloc(index.arena.allocator(), 0, std.fs.MAX_PATH_BYTES),
         };
+        if (entry.mode != 100755) { // ensure mode is valid
+            entry.mode = 100644;
+        }
         if (entry.path.len != entry.path_size) {
             return error.InvalidPathSize;
         }
