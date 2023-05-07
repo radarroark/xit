@@ -49,7 +49,7 @@ pub const Status = struct {
         var arena = std.heap.ArenaAllocator.init(allocator);
         errdefer arena.deinit();
 
-        var index = try idx.readIndex(allocator, git_dir);
+        var index = try idx.Index.init(allocator, git_dir);
         errdefer index.deinit();
 
         var index_bools = try allocator.alloc(bool, index.entries.count());

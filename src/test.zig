@@ -283,7 +283,7 @@ test "end to end" {
 
         // read index
         {
-            var index = try idx.readIndex(allocator, git_dir);
+            var index = try idx.Index.init(allocator, git_dir);
             defer index.deinit();
             try expectEqual(5, index.entries.count());
             try std.testing.expect(index.entries.contains("README"));
@@ -318,7 +318,7 @@ test "end to end" {
 
         // read index
         {
-            var index = try idx.readIndex(allocator, git_dir);
+            var index = try idx.Index.init(allocator, git_dir);
             defer index.deinit();
             try expectEqual(4, index.entries.count());
             try std.testing.expect(index.entries.contains("README"));

@@ -6,6 +6,13 @@ const builtin = @import("builtin");
 const object = @import("./object.zig");
 const hash = @import("./hash.zig");
 
+pub const ReadIndexError = error{
+    InvalidSignature,
+    InvalidVersion,
+    InvalidPathSize,
+    InvalidNullPadding,
+};
+
 pub const Index = struct {
     version: u32,
     entries: std.StringArrayHashMap(Entry),
@@ -31,8 +38,8 @@ pub const Index = struct {
         path: []const u8,
     };
 
-    pub fn init(allocator: std.mem.Allocator) Index {
-        return .{
+    pub fn init(allocator: std.mem.Allocator, git_dir: std.fs.Dir) !Index {
+        var index = Index{
             .version = 2,
             .entries = std.StringArrayHashMap(Index.Entry).init(allocator),
             .dir_to_paths = std.StringArrayHashMap(std.StringArrayHashMap(void)).init(allocator),
@@ -41,6 +48,74 @@ pub const Index = struct {
             .allocator = allocator,
             .arena = std.heap.ArenaAllocator.init(allocator),
         };
+        errdefer index.deinit();
+
+        // open index
+        const index_file = git_dir.openFile("index", .{ .mode = .read_only }) catch |err| {
+            switch (err) {
+                error.FileNotFound => return index,
+                else => return err,
+            }
+        };
+        defer index_file.close();
+
+        const reader = index_file.reader();
+        const signature = try reader.readBytesNoEof(4);
+
+        if (!std.mem.eql(u8, "DIRC", &signature)) {
+            return error.InvalidSignature;
+        }
+
+        // ignoring version 3 and 4 for now
+        index.version = try reader.readIntBig(u32);
+        if (index.version != 2) {
+            return error.InvalidVersion;
+        }
+
+        var entry_count = try reader.readIntBig(u32);
+
+        while (entry_count > 0) {
+            entry_count -= 1;
+            const start_pos = try reader.context.getPos();
+            var entry = Index.Entry{
+                .ctime_secs = try reader.readIntBig(i32),
+                .ctime_nsecs = try reader.readIntBig(i32),
+                .mtime_secs = try reader.readIntBig(i32),
+                .mtime_nsecs = try reader.readIntBig(i32),
+                .dev = try reader.readIntBig(u32),
+                .ino = try reader.readIntBig(u32),
+                .mode = try reader.readIntBig(u32),
+                .uid = try reader.readIntBig(u32),
+                .gid = try reader.readIntBig(u32),
+                .file_size = try reader.readIntBig(u32),
+                .oid = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN),
+                .path_size = try reader.readIntBig(u16),
+                .path = try reader.readUntilDelimiterAlloc(index.arena.allocator(), 0, std.fs.MAX_PATH_BYTES),
+            };
+            if (entry.mode != 100755) { // ensure mode is valid
+                entry.mode = 100644;
+            }
+            if (entry.path.len != entry.path_size) {
+                return error.InvalidPathSize;
+            }
+            var entry_size = try reader.context.getPos() - start_pos;
+            while (entry_size % 8 != 0) {
+                entry_size += 1;
+                const bytes = try reader.readBytesNoEof(1);
+                if (bytes[0] != 0) {
+                    return error.InvalidNullPadding;
+                }
+            }
+            try index.addEntry(entry);
+        }
+
+        // TODO: check the checksum
+        // skipping for now because it will probably require changing
+        // how i read the data above. i need access to the raw bytes
+        // (before the big endian and type conversions) to do the hashing.
+        _ = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
+
+        return index;
     }
 
     pub fn deinit(self: *Index) void {
@@ -60,7 +135,7 @@ pub const Index = struct {
     /// if path is a file, adds it as an entry to the index struct.
     /// if path is a dir, adds its children recursively.
     /// ignoring symlinks for now but will add that later.
-    fn putPath(self: *Index, cwd: std.fs.Dir, path: []const u8) !void {
+    fn putPath(self: *Index, repo_dir: std.fs.Dir, path: []const u8) !void {
         // remove entries that are parents of this path (directory replaces file)
         {
             var parent_path_maybe = std.fs.path.dirname(path);
@@ -72,30 +147,16 @@ pub const Index = struct {
             }
         }
         // remove entries that are children of this path (file replaces directory)
-        {
-            var child_paths_maybe = self.dir_to_paths.getEntry(path);
-            if (child_paths_maybe) |child_paths| {
-                const child_paths_array = child_paths.value_ptr.*.keys();
-                // make a copy of the paths because removeEntry will modify it
-                var child_paths_array_copy = std.ArrayList([]const u8).init(self.allocator);
-                defer child_paths_array_copy.deinit();
-                for (child_paths_array) |child_path| {
-                    try child_paths_array_copy.append(child_path);
-                }
-                for (child_paths_array_copy.items) |child_path| {
-                    self.removeEntry(child_path);
-                }
-            }
-        }
+        try self.removeChildren(path);
         // read the metadata
-        const file = try cwd.openFile(path, .{ .mode = .read_only });
+        const file = try repo_dir.openFile(path, .{ .mode = .read_only });
         defer file.close();
         const meta = try file.metadata();
         switch (meta.kind()) {
             std.fs.File.Kind.File => {
                 // write the object
                 var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-                try object.writeBlobFromPath(self.allocator, cwd, path, &oid);
+                try object.writeBlobFromPath(self.allocator, repo_dir, path, &oid);
                 // add the entry
                 const times = getTimes(meta);
                 const entry = Index.Entry{
@@ -113,10 +174,10 @@ pub const Index = struct {
                     .path_size = @truncate(u16, path.len),
                     .path = path,
                 };
-                try self.putEntry(entry);
+                try self.addEntry(entry);
             },
             std.fs.File.Kind.Directory => {
-                var dir = try cwd.openIterableDir(path, .{});
+                var dir = try repo_dir.openIterableDir(path, .{});
                 defer dir.close();
                 var iter = dir.iterate();
                 while (try iter.next()) |entry| {
@@ -129,14 +190,14 @@ pub const Index = struct {
                         try std.fmt.allocPrint(self.arena.allocator(), "{s}", .{entry.name})
                     else
                         try std.fs.path.join(self.arena.allocator(), &[_][]const u8{ path, entry.name });
-                    try self.putPath(cwd, subpath);
+                    try self.putPath(repo_dir, subpath);
                 }
             },
             else => return,
         }
     }
 
-    fn putEntry(self: *Index, entry: Entry) !void {
+    fn addEntry(self: *Index, entry: Entry) !void {
         try self.entries.put(entry.path, entry);
 
         var child = std.fs.path.basename(entry.path);
@@ -181,6 +242,22 @@ pub const Index = struct {
             parent_path_maybe = std.fs.path.dirname(parent_path);
         }
     }
+
+    fn removeChildren(self: *Index, path: []const u8) !void {
+        var child_paths_maybe = self.dir_to_paths.getEntry(path);
+        if (child_paths_maybe) |child_paths| {
+            const child_paths_array = child_paths.value_ptr.*.keys();
+            // make a copy of the paths because removeEntry will modify it
+            var child_paths_array_copy = std.ArrayList([]const u8).init(self.allocator);
+            defer child_paths_array_copy.deinit();
+            for (child_paths_array) |child_path| {
+                try child_paths_array_copy.append(child_path);
+            }
+            for (child_paths_array_copy.items) |child_path| {
+                self.removeEntry(child_path);
+            }
+        }
+    }
 };
 
 pub fn getMode(meta: std.fs.File.Metadata) u32 {
@@ -209,114 +286,7 @@ pub fn getTimes(meta: std.fs.File.Metadata) Times {
     };
 }
 
-pub const ReadIndexError = error{
-    InvalidSignature,
-    InvalidVersion,
-    InvalidPathSize,
-    InvalidNullPadding,
-};
-
-pub fn readIndex(allocator: std.mem.Allocator, git_dir: std.fs.Dir) !Index {
-    var index = Index.init(allocator);
-    errdefer index.deinit();
-
-    // open index
-    const index_file = git_dir.openFile("index", .{ .mode = .read_only }) catch |err| {
-        switch (err) {
-            error.FileNotFound => return index,
-            else => return err,
-        }
-    };
-    defer index_file.close();
-
-    const reader = index_file.reader();
-    const signature = try reader.readBytesNoEof(4);
-
-    if (!std.mem.eql(u8, "DIRC", &signature)) {
-        return error.InvalidSignature;
-    }
-
-    // ignoring version 3 and 4 for now
-    index.version = try reader.readIntBig(u32);
-    if (index.version != 2) {
-        return error.InvalidVersion;
-    }
-
-    var entry_count = try reader.readIntBig(u32);
-
-    while (entry_count > 0) {
-        entry_count -= 1;
-        const start_pos = try reader.context.getPos();
-        var entry = Index.Entry{
-            .ctime_secs = try reader.readIntBig(i32),
-            .ctime_nsecs = try reader.readIntBig(i32),
-            .mtime_secs = try reader.readIntBig(i32),
-            .mtime_nsecs = try reader.readIntBig(i32),
-            .dev = try reader.readIntBig(u32),
-            .ino = try reader.readIntBig(u32),
-            .mode = try reader.readIntBig(u32),
-            .uid = try reader.readIntBig(u32),
-            .gid = try reader.readIntBig(u32),
-            .file_size = try reader.readIntBig(u32),
-            .oid = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN),
-            .path_size = try reader.readIntBig(u16),
-            .path = try reader.readUntilDelimiterAlloc(index.arena.allocator(), 0, std.fs.MAX_PATH_BYTES),
-        };
-        if (entry.mode != 100755) { // ensure mode is valid
-            entry.mode = 100644;
-        }
-        if (entry.path.len != entry.path_size) {
-            return error.InvalidPathSize;
-        }
-        var entry_size = try reader.context.getPos() - start_pos;
-        while (entry_size % 8 != 0) {
-            entry_size += 1;
-            const bytes = try reader.readBytesNoEof(1);
-            if (bytes[0] != 0) {
-                return error.InvalidNullPadding;
-            }
-        }
-        try index.putEntry(entry);
-    }
-
-    // TODO: check the checksum
-    // skipping for now because it will probably require changing
-    // how i read the data above. i need access to the raw bytes
-    // (before the big endian and type conversions) to do the hashing.
-    _ = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
-
-    return index;
-}
-
-pub fn writeIndex(allocator: std.mem.Allocator, cwd: std.fs.Dir, paths: std.ArrayList([]const u8)) !void {
-    // open git dir
-    var git_dir = try cwd.openDir(".git", .{});
-    defer git_dir.close();
-
-    // open index
-    // first write to a lock file and then rename it to index for safety
-    const index_lock_file = try git_dir.createFile("index.lock", .{ .exclusive = true, .lock = .Exclusive });
-    defer index_lock_file.close();
-    errdefer git_dir.deleteFile("index.lock") catch {}; // make sure the lock file is deleted on error
-
-    // read index
-    var index = try readIndex(allocator, git_dir);
-    defer index.deinit();
-
-    // read all the new entries
-    for (paths.items) |path| {
-        const file = cwd.openFile(path, .{ .mode = .read_only }) catch |err| {
-            if (err == error.FileNotFound and index.entries.contains(path)) {
-                index.removeEntry(path);
-                continue;
-            } else {
-                return err;
-            }
-        };
-        defer file.close();
-        try index.putPath(cwd, path);
-    }
-
+pub fn writeIndex(allocator: std.mem.Allocator, index_lock_file: std.fs.File, index: *Index) !void {
     // sort the entries
     const SortCtx = struct {
         keys: [][]const u8,
@@ -369,6 +339,38 @@ pub fn writeIndex(allocator: std.mem.Allocator, cwd: std.fs.Dir, paths: std.Arra
     var overall_sha1_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
     h.final(&overall_sha1_buffer);
     try index_lock_file.writeAll(&overall_sha1_buffer);
+}
+
+pub fn writeIndexWithPaths(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, paths: std.ArrayList([]const u8)) !void {
+    // open git dir
+    var git_dir = try repo_dir.openDir(".git", .{});
+    defer git_dir.close();
+
+    // open index
+    // first write to a lock file and then rename it to index for safety
+    const index_lock_file = try git_dir.createFile("index.lock", .{ .exclusive = true, .lock = .Exclusive });
+    defer index_lock_file.close();
+    errdefer git_dir.deleteFile("index.lock") catch {}; // make sure the lock file is deleted on error
+
+    // read index
+    var index = try Index.init(allocator, git_dir);
+    defer index.deinit();
+
+    // read all the new entries
+    for (paths.items) |path| {
+        const file = repo_dir.openFile(path, .{ .mode = .read_only }) catch |err| {
+            if (err == error.FileNotFound and index.entries.contains(path)) {
+                index.removeEntry(path);
+                continue;
+            } else {
+                return err;
+            }
+        };
+        defer file.close();
+        try index.putPath(repo_dir, path);
+    }
+
+    try writeIndex(allocator, index_lock_file, &index);
 
     // rename lock file to index
     try git_dir.rename("index.lock", "index");

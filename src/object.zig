@@ -266,7 +266,7 @@ pub fn writeCommit(allocator: std.mem.Allocator, cwd: std.fs.Dir, command: cmd.C
     defer objects_dir.close();
 
     // read index
-    var index = try idx.readIndex(allocator, git_dir);
+    var index = try idx.Index.init(allocator, git_dir);
     defer index.deinit();
 
     // create tree and add index entries
