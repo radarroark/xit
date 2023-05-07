@@ -1,10 +1,9 @@
-//! the status of the files in the repo.
-//! this must be the command i personally run most
-//! often. it's the "tell me the state of this repo so
-//! i don't screw it up any further" command. the struct
+//! the status of the files in the repo. the struct
 //! mainly just builds a list of entries, which will be
-//! printed out in main.zig. maybe the printing should
-//! be done in here instead...
+//! printed out in main.zig. this module doesn't attempt
+//! to print anything out. i'm saving that for later, if
+//! i decide to implement the git CLI. for now, it just
+//! organizes the data so you can display it how you want.
 
 const std = @import("std");
 const idx = @import("./index.zig");

@@ -1,3 +1,11 @@
+//! restores files from a given commit to the working tree.
+//! the checkout command is pretty overloaded...switching
+//! branches and restoring files are very different from a
+//! user's perspective. i can see why they combined them,
+//! since they use the same functionality underneath, but
+//! it's one of those times when you have to set aside your
+//! engineer brain and think about it as a user. oh well.
+
 const std = @import("std");
 const hash = @import("./hash.zig");
 const compress = @import("./compress.zig");
