@@ -312,20 +312,16 @@ test "end to end" {
     const commit2 = try ref.readHead(git_dir);
 
     // checkout first commit
-    {
-        var tree_diff = obj.TreeDiff.init(allocator);
-        defer tree_diff.deinit();
-        try tree_diff.compare(repo_dir, commit2, commit1, null);
-        try chk.checkout(allocator, repo_dir, tree_diff);
-    }
+    args.clearAndFree();
+    try args.append("checkout");
+    try args.append(&commit1);
+    try main.zitMain(allocator, &args);
 
     // checkout second commit
-    {
-        var tree_diff = obj.TreeDiff.init(allocator);
-        defer tree_diff.deinit();
-        try tree_diff.compare(repo_dir, commit1, commit2, null);
-        try chk.checkout(allocator, repo_dir, tree_diff);
-    }
+    args.clearAndFree();
+    try args.append("checkout");
+    try args.append(&commit2);
+    try main.zitMain(allocator, &args);
 
     // status
     {

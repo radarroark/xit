@@ -10,6 +10,7 @@ pub const CommandKind = enum {
     commit,
     status,
     branch,
+    checkout,
 };
 
 pub const CommandData = union(CommandKind) {
@@ -30,11 +31,15 @@ pub const CommandData = union(CommandKind) {
     branch: struct {
         name: ?[]const u8,
     },
+    checkout: struct {
+        hash: []const u8,
+    },
 };
 
 pub const CommandError = error{
     AddPathsMissing,
     CommitMessageMissing,
+    CheckoutHashMissing,
 };
 
 /// returns the data from the process args in a nicer format.
@@ -94,6 +99,11 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8))
             return CommandData{ .status = {} };
         } else if (std.mem.eql(u8, args.items[0], "branch")) {
             return CommandData{ .branch = .{ .name = if (pos_args.items.len == 0) null else pos_args.items[0] } };
+        } else if (std.mem.eql(u8, args.items[0], "checkout")) {
+            if (pos_args.items.len == 0) {
+                return CommandError.CheckoutHashMissing;
+            }
+            return CommandData{ .checkout = .{ .hash = pos_args.items[0] } };
         } else {
             return CommandData{ .invalid = .{ .name = args.items[0] } };
         }

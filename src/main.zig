@@ -10,11 +10,12 @@
 const std = @import("std");
 const process = std.process;
 const hash = @import("./hash.zig");
-const object = @import("./object.zig");
+const obj = @import("./object.zig");
 const cmd = @import("./command.zig");
 const idx = @import("./index.zig");
 const stat = @import("./status.zig");
 const branch = @import("./branch.zig");
+const chk = @import("./checkout.zig");
 
 /// takes the args passed to this program and puts them
 /// in an arraylist. do we need to do this? i don't know,
@@ -96,7 +97,7 @@ pub fn zitMain(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8)) !
             try idx.writeIndex(allocator, cwd, command.data.add.paths);
         },
         cmd.CommandData.commit => {
-            try object.writeCommit(allocator, cwd, command.data);
+            try obj.writeCommit(allocator, cwd, command.data);
         },
         cmd.CommandData.status => {
             var git_dir = try cwd.openDir(".git", .{});
@@ -131,10 +132,12 @@ pub fn zitMain(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8)) !
         },
         cmd.CommandData.branch => {
             if (command.data.branch.name) |name| {
-                var repo_dir = try cwd.openDir(".", .{});
-                defer repo_dir.close();
-                try branch.create(allocator, name, repo_dir);
+                try branch.create(allocator, cwd, name);
             }
+        },
+        cmd.CommandData.checkout => {
+            const hash_hex = command.data.checkout.hash[0..hash.SHA1_HEX_LEN];
+            try chk.checkout(allocator, cwd, hash_hex.*);
         },
     }
 }

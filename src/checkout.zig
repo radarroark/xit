@@ -2,6 +2,7 @@ const std = @import("std");
 const hash = @import("./hash.zig");
 const compress = @import("./compress.zig");
 const obj = @import("./object.zig");
+const ref = @import("./ref.zig");
 
 fn createFileFromObject(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, path: []const u8, tree_entry: obj.TreeEntry) !void {
     // open the internal dirs
@@ -19,14 +20,14 @@ fn createFileFromObject(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, path
     defer in_file.close();
 
     // open the out file
-    const out_file = try repo_dir.createFile(path, .{}); // TODO: set mode
+    const out_file = try repo_dir.createFile(path, .{ .mode = tree_entry.mode });
     defer out_file.close();
 
     // create the file
     try compress.decompress(allocator, in_file, out_file, true);
 }
 
-pub fn checkout(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, tree_diff: obj.TreeDiff) !void {
+pub fn migrate(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, tree_diff: obj.TreeDiff) !void {
     var add_files = std.StringHashMap(obj.TreeEntry).init(allocator);
     defer add_files.deinit();
     var edit_files = std.StringHashMap(obj.TreeEntry).init(allocator);
@@ -90,4 +91,19 @@ pub fn checkout(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, tree_diff: o
     while (edit_files_iter.next()) |entry| {
         try createFileFromObject(allocator, repo_dir, entry.key_ptr.*, entry.value_ptr.*);
     }
+}
+
+pub fn checkout(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, oid_hex: [hash.SHA1_HEX_LEN]u8) !void {
+    var git_dir = try repo_dir.openDir(".git", .{});
+    defer git_dir.close();
+
+    const current_hash = try ref.readHead(git_dir);
+
+    var tree_diff = obj.TreeDiff.init(allocator);
+    defer tree_diff.deinit();
+    try tree_diff.compare(repo_dir, current_hash, oid_hex, null);
+
+    try migrate(allocator, repo_dir, tree_diff);
+
+    try ref.writeHead(git_dir, &oid_hex);
 }

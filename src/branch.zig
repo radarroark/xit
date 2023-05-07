@@ -5,7 +5,7 @@ pub const BranchError = error{
     InvalidBranchName,
 };
 
-pub fn create(allocator: std.mem.Allocator, name: []const u8, repo_dir: std.fs.Dir) !void {
+pub fn create(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, name: []const u8) !void {
     if (name.len == 0 or
         name[0] == '.' or
         name[0] == '/' or
