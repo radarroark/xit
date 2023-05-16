@@ -228,6 +228,41 @@ test "end to end" {
     // get HEAD contents
     const commit2 = try ref.readHead(git_dir);
 
+    // try to checkout first commit after making conflicting change
+    {
+        // make a new file that conflicts with one from commit1
+        {
+            var license = try repo_dir.createFile("LICENSE", .{});
+            defer license.close();
+            try license.writeAll("different license");
+            args.clearAndFree();
+            try args.append("add");
+            try args.append("LICENSE");
+            try main.zitMain(allocator, &args);
+        }
+
+        // check out commit1 and make sure the conflict is found
+        var result = chk.CheckoutResult.init();
+        defer result.deinit();
+        chk.checkout(allocator, repo_dir, commit1, &result) catch |err| {
+            switch (err) {
+                error.CheckoutConflict => {},
+                else => return err,
+            }
+        };
+        try std.testing.expect(result.data == .conflict);
+        try expectEqual(1, result.data.conflict.stale_files.count());
+
+        // delete the file so the subsequent checkout will succeed
+        {
+            try repo_dir.deleteFile("LICENSE");
+            args.clearAndFree();
+            try args.append("add");
+            try args.append("LICENSE");
+            try main.zitMain(allocator, &args);
+        }
+    }
+
     // checkout first commit
     args.clearAndFree();
     try args.append("checkout");

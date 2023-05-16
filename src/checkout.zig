@@ -13,6 +13,58 @@ const obj = @import("./object.zig");
 const ref = @import("./ref.zig");
 const idx = @import("./index.zig");
 
+pub const CheckoutError = error{
+    CheckoutConflict,
+};
+
+pub const CheckoutResultKind = enum {
+    success,
+    conflict,
+};
+
+pub const CheckoutResultData = union(CheckoutResultKind) {
+    success,
+    conflict: struct {
+        stale_files: std.StringHashMap(void),
+        stale_dirs: std.StringHashMap(void),
+        untracked_overwritten: std.StringHashMap(void),
+        untracked_removed: std.StringHashMap(void),
+    },
+};
+
+pub const CheckoutResult = struct {
+    data: CheckoutResultData,
+
+    pub fn init() CheckoutResult {
+        return CheckoutResult{ .data = CheckoutResultData{ .success = {} } };
+    }
+
+    pub fn deinit(self: *CheckoutResult) void {
+        switch (self.data) {
+            .success => {},
+            .conflict => {
+                self.data.conflict.stale_files.deinit();
+                self.data.conflict.stale_dirs.deinit();
+                self.data.conflict.untracked_overwritten.deinit();
+                self.data.conflict.untracked_removed.deinit();
+            },
+        }
+    }
+
+    pub fn conflict(self: *CheckoutResult, allocator: std.mem.Allocator) void {
+        if (self.data != .conflict) {
+            self.data = CheckoutResultData{
+                .conflict = .{
+                    .stale_files = std.StringHashMap(void).init(allocator),
+                    .stale_dirs = std.StringHashMap(void).init(allocator),
+                    .untracked_overwritten = std.StringHashMap(void).init(allocator),
+                    .untracked_removed = std.StringHashMap(void).init(allocator),
+                },
+            };
+        }
+    }
+};
+
 fn createFileFromObject(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, path: []const u8, tree_entry: obj.TreeEntry) !void {
     // open the internal dirs
     var git_dir = try repo_dir.openDir(".git", .{});
@@ -36,7 +88,34 @@ fn createFileFromObject(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, path
     try compress.decompress(allocator, in_file, out_file, true);
 }
 
-pub fn migrate(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, tree_diff: obj.TreeDiff, index: *idx.Index) !void {
+pub const Change = enum {
+    none,
+    added,
+    deleted,
+    modified,
+};
+
+fn compareTreeAndIndex(item_maybe: ?obj.TreeEntry, entry_maybe: ?idx.Index.Entry) Change {
+    if (item_maybe) |item| {
+        if (entry_maybe) |entry| {
+            if (entry.mode != item.mode or !std.mem.eql(u8, &entry.oid, &item.oid)) {
+                return .modified;
+            } else {
+                return .none;
+            }
+        } else {
+            return .deleted;
+        }
+    } else {
+        if (entry_maybe) |_| {
+            return .added;
+        } else {
+            return .none;
+        }
+    }
+}
+
+pub fn migrate(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, tree_diff: obj.TreeDiff, index: *idx.Index, result: *CheckoutResult) !void {
     var add_files = std.StringHashMap(obj.TreeEntry).init(allocator);
     defer add_files.deinit();
     var edit_files = std.StringHashMap(obj.TreeEntry).init(allocator);
@@ -75,6 +154,31 @@ pub fn migrate(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, tree_diff: ob
                 }
             }
         }
+        // check for conflicts
+        const entry_maybe = index.entries.get(path);
+        if (compareTreeAndIndex(change.old, entry_maybe) != .none and compareTreeAndIndex(change.new, entry_maybe) != .none) {
+            result.conflict(allocator);
+            try result.data.conflict.stale_files.put(path, {});
+        } else {
+            // TODO
+            const file = repo_dir.openFile(path, .{ .mode = .read_only }) catch |err| {
+                switch (err) {
+                    error.FileNotFound, error.NotDir => continue,
+                    else => return err,
+                }
+            };
+            defer file.close();
+            const meta = try file.metadata();
+            switch (meta.kind()) {
+                std.fs.File.Kind.File => {},
+                std.fs.File.Kind.Directory => {},
+                else => {},
+            }
+        }
+    }
+
+    if (result.data == .conflict) {
+        return error.CheckoutConflict;
     }
 
     var remove_files_iter = remove_files.iterator();
@@ -122,7 +226,7 @@ pub fn migrate(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, tree_diff: ob
     }
 }
 
-pub fn checkout(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, oid_hex: [hash.SHA1_HEX_LEN]u8) !void {
+pub fn checkout(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, oid_hex: [hash.SHA1_HEX_LEN]u8, result: *CheckoutResult) !void {
     var git_dir = try repo_dir.openDir(".git", .{});
     defer git_dir.close();
 
@@ -145,7 +249,7 @@ pub fn checkout(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, oid_hex: [ha
     defer index.deinit();
 
     // update the working tree
-    try migrate(allocator, repo_dir, tree_diff, &index);
+    try migrate(allocator, repo_dir, tree_diff, &index, result);
 
     // update the index
     try index.write(allocator, index_lock_file);
