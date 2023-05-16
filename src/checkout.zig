@@ -53,6 +53,7 @@ pub fn migrate(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, tree_diff: ob
         const path = entry.key_ptr.*;
         const change = entry.value_ptr.*;
         if (change.old == null) {
+            // if the old change doesn't exist and the new change does, it's an added file
             if (change.new) |new| {
                 try add_files.put(path, new);
                 if (std.fs.path.dirname(path)) |parent_path| {
@@ -60,11 +61,13 @@ pub fn migrate(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, tree_diff: ob
                 }
             }
         } else if (change.new == null) {
+            // if the new change doesn't exist, it's a removed file
             try remove_files.put(path, {});
             if (std.fs.path.dirname(path)) |parent_path| {
                 try remove_dirs.put(parent_path, {});
             }
         } else {
+            // otherwise, it's an edited file
             if (change.new) |new| {
                 try edit_files.put(path, new);
                 if (std.fs.path.dirname(path)) |parent_path| {
