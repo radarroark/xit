@@ -88,14 +88,37 @@ fn createFileFromObject(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, path
     try compress.decompress(allocator, in_file, out_file, true);
 }
 
-pub const Change = enum {
+pub const TreeToWorkspaceChange = enum {
+    none,
+    untracked,
+    deleted,
+    modified,
+};
+
+fn compareIndexToWorkspace(entry_maybe: ?idx.Index.Entry, file_maybe: ?std.fs.File) !TreeToWorkspaceChange {
+    if (entry_maybe) |entry| {
+        if (file_maybe) |file| {
+            if (try idx.indexDiffersFromWorkspace(entry, file, try file.metadata())) {
+                return .modified;
+            } else {
+                return .none;
+            }
+        } else {
+            return .deleted;
+        }
+    } else {
+        return .untracked;
+    }
+}
+
+pub const TreeToIndexChange = enum {
     none,
     added,
     deleted,
     modified,
 };
 
-fn compareTreeAndIndex(item_maybe: ?obj.TreeEntry, entry_maybe: ?idx.Index.Entry) Change {
+fn compareTreeToIndex(item_maybe: ?obj.TreeEntry, entry_maybe: ?idx.Index.Entry) TreeToIndexChange {
     if (item_maybe) |item| {
         if (entry_maybe) |entry| {
             if (entry.mode != item.mode or !std.mem.eql(u8, &entry.oid, &item.oid)) {
@@ -173,7 +196,7 @@ pub fn migrate(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, tree_diff: ob
         }
         // check for conflicts
         const entry_maybe = index.entries.get(path);
-        if (compareTreeAndIndex(change.old, entry_maybe) != .none and compareTreeAndIndex(change.new, entry_maybe) != .none) {
+        if (compareTreeToIndex(change.old, entry_maybe) != .none and compareTreeToIndex(change.new, entry_maybe) != .none) {
             result.conflict(allocator);
             try result.data.conflict.stale_files.put(path, {});
         } else {
@@ -200,7 +223,19 @@ pub fn migrate(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, tree_diff: ob
             defer file.close();
             const meta = try file.metadata();
             switch (meta.kind()) {
-                std.fs.File.Kind.File => {},
+                std.fs.File.Kind.File => {
+                    // if the path is a file that differs from the index
+                    if (try compareIndexToWorkspace(entry_maybe, file) != .none) {
+                        result.conflict(allocator);
+                        if (entry_maybe) |_| {
+                            try result.data.conflict.stale_files.put(path, {});
+                        } else if (change.new) |_| {
+                            try result.data.conflict.untracked_overwritten.put(path, {});
+                        } else {
+                            try result.data.conflict.untracked_removed.put(path, {});
+                        }
+                    }
+                },
                 std.fs.File.Kind.Directory => {},
                 else => {},
             }

@@ -315,7 +315,7 @@ pub const Index = struct {
     }
 };
 
-pub fn getMode(meta: std.fs.File.Metadata) u32 {
+fn getMode(meta: std.fs.File.Metadata) u32 {
     const is_executable = switch (builtin.os.tag) {
         .windows => false,
         else => meta.permissions().inner.unixHas(std.fs.File.PermissionsUnix.Class.user, .execute),
@@ -323,14 +323,14 @@ pub fn getMode(meta: std.fs.File.Metadata) u32 {
     return if (is_executable) 100755 else 100644;
 }
 
-pub const Times = struct {
+const Times = struct {
     ctime_secs: i32,
     ctime_nsecs: i32,
     mtime_secs: i32,
     mtime_nsecs: i32,
 };
 
-pub fn getTimes(meta: std.fs.File.Metadata) Times {
+fn getTimes(meta: std.fs.File.Metadata) Times {
     const ctime = meta.created() orelse 0;
     const mtime = meta.modified();
     return Times{
@@ -339,6 +339,26 @@ pub fn getTimes(meta: std.fs.File.Metadata) Times {
         .mtime_secs = @truncate(i32, @divTrunc(mtime, std.time.ns_per_s)),
         .mtime_nsecs = @truncate(i32, @mod(mtime, std.time.ns_per_s)),
     };
+}
+
+pub fn indexDiffersFromWorkspace(entry: Index.Entry, file: std.fs.File, meta: std.fs.File.Metadata) !bool {
+    if (meta.size() != entry.file_size or getMode(meta) != entry.mode) {
+        return true;
+    } else {
+        const times = getTimes(meta);
+        if (times.ctime_secs != entry.ctime_secs or
+            times.ctime_nsecs != entry.ctime_nsecs or
+            times.mtime_secs != entry.mtime_secs or
+            times.mtime_nsecs != entry.mtime_nsecs)
+        {
+            var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+            try hash.sha1_file(file, &oid);
+            if (!std.mem.eql(u8, &entry.oid, &oid)) {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 pub fn writeIndex(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, paths: std.ArrayList([]const u8)) !void {

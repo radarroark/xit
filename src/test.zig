@@ -170,6 +170,7 @@ test "end to end" {
         const hello_txt = try repo_dir.openFile("hello.txt", .{ .mode = .read_write });
         defer hello_txt.close();
         try hello_txt.writeAll("goodbye, world!");
+        try hello_txt.setEndPos(try hello_txt.getPos());
 
         // make a few dirs
         var src_dir = try repo_dir.makeOpenPath("src", .{});
@@ -228,62 +229,98 @@ test "end to end" {
 
     // try to checkout first commit after making conflicting change
     {
-        // make a new file (and add it to the index) that conflicts with one from commit1
         {
-            var license = try repo_dir.createFile("LICENSE", .{});
-            defer license.close();
-            try license.writeAll("different license");
-            args.clearAndFree();
-            try args.append("add");
-            try args.append("LICENSE");
-            try main.zitMain(allocator, &args);
+            // make a new file (and add it to the index) that conflicts with one from commit1
+            {
+                var license = try repo_dir.createFile("LICENSE", .{});
+                defer license.close();
+                try license.writeAll("different license");
+                args.clearAndFree();
+                try args.append("add");
+                try args.append("LICENSE");
+                try main.zitMain(allocator, &args);
+            }
+
+            // check out commit1 and make sure the conflict is found
+            {
+                var result = chk.CheckoutResult.init();
+                defer result.deinit();
+                chk.checkout(allocator, repo_dir, commit1, &result) catch |err| {
+                    switch (err) {
+                        error.CheckoutConflict => {},
+                        else => return err,
+                    }
+                };
+                try std.testing.expect(result.data == .conflict);
+                try expectEqual(1, result.data.conflict.stale_files.count());
+            }
+
+            // delete the file
+            {
+                try repo_dir.deleteFile("LICENSE");
+                args.clearAndFree();
+                try args.append("add");
+                try args.append("LICENSE");
+                try main.zitMain(allocator, &args);
+            }
         }
 
-        // check out commit1 and make sure the conflict is found
         {
-            var result = chk.CheckoutResult.init();
-            defer result.deinit();
-            chk.checkout(allocator, repo_dir, commit1, &result) catch |err| {
-                switch (err) {
-                    error.CheckoutConflict => {},
-                    else => return err,
-                }
-            };
-            try std.testing.expect(result.data == .conflict);
-            try expectEqual(1, result.data.conflict.stale_files.count());
+            // make a new file (only in the working dir) that conflicts with the descendent of a file from commit1
+            {
+                var docs = try repo_dir.createFile("docs", .{});
+                defer docs.close();
+                try docs.writeAll("i conflict with the docs dir in the first commit");
+            }
+
+            // check out commit1 and make sure the conflict is found
+            {
+                var result = chk.CheckoutResult.init();
+                defer result.deinit();
+                chk.checkout(allocator, repo_dir, commit1, &result) catch |err| {
+                    switch (err) {
+                        error.CheckoutConflict => {},
+                        else => return err,
+                    }
+                };
+                try std.testing.expect(result.data == .conflict);
+            }
+
+            // delete the file
+            try repo_dir.deleteFile("docs");
         }
 
-        // delete the file so the subsequent checkout will succeed
         {
-            try repo_dir.deleteFile("LICENSE");
-            args.clearAndFree();
-            try args.append("add");
-            try args.append("LICENSE");
-            try main.zitMain(allocator, &args);
-        }
+            // change a file so it conflicts with the one in commit1
+            {
+                const hello_txt = try repo_dir.openFile("hello.txt", .{ .mode = .read_write });
+                defer hello_txt.close();
+                try hello_txt.writeAll("howdy, world!");
+                try hello_txt.setEndPos(try hello_txt.getPos());
+            }
 
-        // make a new file (only in the working dir) that conflicts with the descendent of a file from commit1
-        {
-            var docs = try repo_dir.createFile("docs", .{});
-            defer docs.close();
-            try docs.writeAll("i conflict with the docs dir in the first commit");
-        }
+            // check out commit1 and make sure the conflict is found
+            {
+                var result = chk.CheckoutResult.init();
+                defer result.deinit();
+                chk.checkout(allocator, repo_dir, commit1, &result) catch |err| {
+                    switch (err) {
+                        error.CheckoutConflict => {},
+                        else => return err,
+                    }
+                };
+                try std.testing.expect(result.data == .conflict);
+                try expectEqual(1, result.data.conflict.stale_files.count());
+            }
 
-        // check out commit1 and make sure the conflict is found
-        {
-            var result = chk.CheckoutResult.init();
-            defer result.deinit();
-            chk.checkout(allocator, repo_dir, commit1, &result) catch |err| {
-                switch (err) {
-                    error.CheckoutConflict => {},
-                    else => return err,
-                }
-            };
-            try std.testing.expect(result.data == .conflict);
+            // change the file back so the subsequent checkout will succeed
+            {
+                const hello_txt = try repo_dir.openFile("hello.txt", .{ .mode = .read_write });
+                defer hello_txt.close();
+                try hello_txt.writeAll("goodbye, world!");
+                try hello_txt.setEndPos(try hello_txt.getPos());
+            }
         }
-
-        // delete the file so the subsequent checkout will succeed
-        try repo_dir.deleteFile("docs");
     }
 
     // checkout first commit

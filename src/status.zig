@@ -117,23 +117,9 @@ fn addEntries(allocator: std.mem.Allocator, untracked: *std.ArrayList(Status.Ent
         std.fs.File.Kind.File => {
             if (index.entries.getIndex(path)) |entry_index| {
                 index_bools.*[entry_index] = true;
-
                 const entry = index.entries.values()[entry_index];
-                if (meta.size() != entry.file_size or idx.getMode(meta) != entry.mode) {
+                if (try idx.indexDiffersFromWorkspace(entry, file, meta)) {
                     try modified.append(Status.Entry{ .path = path, .meta = meta });
-                } else {
-                    const times = idx.getTimes(meta);
-                    if (times.ctime_secs != entry.ctime_secs or
-                        times.ctime_nsecs != entry.ctime_nsecs or
-                        times.mtime_secs != entry.mtime_secs or
-                        times.mtime_nsecs != entry.mtime_nsecs)
-                    {
-                        var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-                        try hash.sha1_file(file, &oid);
-                        if (!std.mem.eql(u8, &entry.oid, &oid)) {
-                            try modified.append(Status.Entry{ .path = path, .meta = meta });
-                        }
-                    }
                 }
             } else {
                 try untracked.append(Status.Entry{ .path = path, .meta = meta });
