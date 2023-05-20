@@ -115,6 +115,23 @@ fn compareTreeAndIndex(item_maybe: ?obj.TreeEntry, entry_maybe: ?idx.Index.Entry
     }
 }
 
+// returns any parent of the given path that is a file and isn't
+// tracked by the index, so it cannot be safely removed by checkout.
+fn untrackedParent(repo_dir: std.fs.Dir, path: []const u8, index: idx.Index) ?[]const u8 {
+    var parent = path;
+    while (std.fs.path.dirname(parent)) |next_parent| {
+        parent = next_parent;
+        const file = repo_dir.openFile(next_parent, .{ .mode = .read_only }) catch continue;
+        defer file.close();
+        const meta = file.metadata() catch continue;
+        if (meta.kind() != std.fs.File.Kind.File) continue;
+        if (!index.entries.contains(next_parent)) {
+            return next_parent;
+        }
+    }
+    return null;
+}
+
 pub fn migrate(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, tree_diff: obj.TreeDiff, index: *idx.Index, result: *CheckoutResult) !void {
     var add_files = std.StringHashMap(obj.TreeEntry).init(allocator);
     defer add_files.deinit();
@@ -160,10 +177,23 @@ pub fn migrate(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, tree_diff: ob
             result.conflict(allocator);
             try result.data.conflict.stale_files.put(path, {});
         } else {
-            // TODO
             const file = repo_dir.openFile(path, .{ .mode = .read_only }) catch |err| {
                 switch (err) {
-                    error.FileNotFound, error.NotDir => continue,
+                    error.FileNotFound, error.NotDir => {
+                        // if the path doesn't exist in the workspace,
+                        // but one of its parents *does* exist and isn't tracked
+                        if (untrackedParent(repo_dir, path, index.*)) |_| {
+                            result.conflict(allocator);
+                            if (entry_maybe) |_| {
+                                try result.data.conflict.stale_files.put(path, {});
+                            } else if (change.new) |_| {
+                                try result.data.conflict.untracked_overwritten.put(path, {});
+                            } else {
+                                try result.data.conflict.untracked_removed.put(path, {});
+                            }
+                        }
+                        continue;
+                    },
                     else => return err,
                 }
             };
