@@ -313,13 +313,41 @@ test "end to end" {
                 try expectEqual(1, result.data.conflict.stale_files.count());
             }
 
-            // change the file back so the subsequent checkout will succeed
+            // change the file back
             {
                 const hello_txt = try repo_dir.openFile("hello.txt", .{ .mode = .read_write });
                 defer hello_txt.close();
                 try hello_txt.writeAll("goodbye, world!");
                 try hello_txt.setEndPos(try hello_txt.getPos());
             }
+        }
+
+        {
+            // create a dir with a file that conflicts with one in commit1
+            {
+                var license_dir = try repo_dir.makeOpenPath("LICENSE", .{});
+                defer license_dir.close();
+                const foo_txt = try license_dir.createFile("foo.txt", .{});
+                defer foo_txt.close();
+                try foo_txt.writeAll("foo");
+            }
+
+            // check out commit1 and make sure the conflict is found
+            {
+                var result = chk.CheckoutResult.init();
+                defer result.deinit();
+                chk.checkout(allocator, repo_dir, commit1, &result) catch |err| {
+                    switch (err) {
+                        error.CheckoutConflict => {},
+                        else => return err,
+                    }
+                };
+                try std.testing.expect(result.data == .conflict);
+                try expectEqual(1, result.data.conflict.stale_dirs.count());
+            }
+
+            // delete the dir
+            try repo_dir.deleteTree("LICENSE");
         }
     }
 

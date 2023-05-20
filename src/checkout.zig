@@ -155,6 +155,32 @@ fn untrackedParent(repo_dir: std.fs.Dir, path: []const u8, index: idx.Index) ?[]
     return null;
 }
 
+// returns true if the given file or one of its descendents (if a dir)
+// isn't tracked by the index, so it cannot be safely removed by checkout
+fn untrackedFile(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, path: []const u8, index: idx.Index) !bool {
+    const file = try repo_dir.openFile(path, .{ .mode = .read_only });
+    const meta = try file.metadata();
+    switch (meta.kind()) {
+        std.fs.File.Kind.File => {
+            return !index.entries.contains(path);
+        },
+        std.fs.File.Kind.Directory => {
+            var dir = try repo_dir.openIterableDir(path, .{});
+            defer dir.close();
+            var iter = dir.iterate();
+            while (try iter.next()) |dir_entry| {
+                const subpath = try std.fs.path.join(allocator, &[_][]const u8{ path, dir_entry.name });
+                defer allocator.free(subpath);
+                if (try untrackedFile(allocator, repo_dir, subpath, index)) {
+                    return true;
+                }
+            }
+            return false;
+        },
+        else => return false,
+    }
+}
+
 pub fn migrate(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, tree_diff: obj.TreeDiff, index: *idx.Index, result: *CheckoutResult) !void {
     var add_files = std.StringHashMap(obj.TreeEntry).init(allocator);
     defer add_files.deinit();
@@ -236,7 +262,17 @@ pub fn migrate(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, tree_diff: ob
                         }
                     }
                 },
-                std.fs.File.Kind.Directory => {},
+                std.fs.File.Kind.Directory => {
+                    // if the path is a dir with a descendent that isn't in the index
+                    if (try untrackedFile(allocator, repo_dir, path, index.*)) {
+                        result.conflict(allocator);
+                        if (entry_maybe) |_| {
+                            try result.data.conflict.stale_files.put(path, {});
+                        } else {
+                            try result.data.conflict.stale_dirs.put(path, {});
+                        }
+                    }
+                },
                 else => {},
             }
         }
