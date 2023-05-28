@@ -136,10 +136,9 @@ pub fn zitMain(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8)) !
             }
         },
         cmd.CommandData.checkout => {
-            const hash_hex = command.data.checkout.hash[0..hash.SHA1_HEX_LEN];
             var result = chk.CheckoutResult.init();
             defer result.deinit();
-            chk.checkout(allocator, cwd, hash_hex.*, &result) catch |err| {
+            chk.checkout(allocator, cwd, command.data.checkout.target, &result) catch |err| {
                 switch (err) {
                     error.CheckoutConflict => {},
                     else => return err,

@@ -327,12 +327,13 @@ pub fn migrate(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, tree_diff: ob
     }
 }
 
-pub fn checkout(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, oid_hex: [hash.SHA1_HEX_LEN]u8, result: *CheckoutResult) !void {
+pub fn checkout(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, target: []const u8, result: *CheckoutResult) !void {
     var git_dir = try repo_dir.openDir(".git", .{});
     defer git_dir.close();
 
-    // get the current commit
+    // get the current commit and target oid
     const current_hash = try ref.readHead(git_dir);
+    const oid_hex = try ref.resolve(git_dir, target);
 
     // compare the commits
     var tree_diff = obj.TreeDiff.init(allocator);

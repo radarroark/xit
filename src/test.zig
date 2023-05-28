@@ -245,7 +245,7 @@ test "end to end" {
             {
                 var result = chk.CheckoutResult.init();
                 defer result.deinit();
-                chk.checkout(allocator, repo_dir, commit1, &result) catch |err| {
+                chk.checkout(allocator, repo_dir, &commit1, &result) catch |err| {
                     switch (err) {
                         error.CheckoutConflict => {},
                         else => return err,
@@ -277,7 +277,7 @@ test "end to end" {
             {
                 var result = chk.CheckoutResult.init();
                 defer result.deinit();
-                chk.checkout(allocator, repo_dir, commit1, &result) catch |err| {
+                chk.checkout(allocator, repo_dir, &commit1, &result) catch |err| {
                     switch (err) {
                         error.CheckoutConflict => {},
                         else => return err,
@@ -303,7 +303,7 @@ test "end to end" {
             {
                 var result = chk.CheckoutResult.init();
                 defer result.deinit();
-                chk.checkout(allocator, repo_dir, commit1, &result) catch |err| {
+                chk.checkout(allocator, repo_dir, &commit1, &result) catch |err| {
                     switch (err) {
                         error.CheckoutConflict => {},
                         else => return err,
@@ -336,7 +336,7 @@ test "end to end" {
             {
                 var result = chk.CheckoutResult.init();
                 defer result.deinit();
-                chk.checkout(allocator, repo_dir, commit1, &result) catch |err| {
+                chk.checkout(allocator, repo_dir, &commit1, &result) catch |err| {
                     switch (err) {
                         error.CheckoutConflict => {},
                         else => return err,
@@ -631,8 +631,10 @@ test "end to end" {
     try main.zitMain(allocator, &args);
 
     // update HEAD
-    // have to do this manually for now until we implement checkout
+    // have to do this manually for now
     try ref.writeHead(git_dir, "ref: refs/heads/stuff");
+    try expectEqual(commit2, try ref.readHead(git_dir));
+    try expectEqual(commit2, try ref.resolve(git_dir, "stuff"));
 
     // check branch with libgit
     {
