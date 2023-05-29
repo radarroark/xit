@@ -5,6 +5,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const object = @import("./object.zig");
 const hash = @import("./hash.zig");
+const io = @import("./io.zig");
 
 pub const ReadIndexError = error{
     InvalidSignature,
@@ -366,11 +367,9 @@ pub fn writeIndex(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, paths: std
     var git_dir = try repo_dir.openDir(".git", .{});
     defer git_dir.close();
 
-    // open index
-    // first write to a lock file and then rename it to index for safety
-    const index_lock_file = try git_dir.createFile("index.lock", .{ .exclusive = true, .lock = .Exclusive });
-    defer index_lock_file.close();
-    errdefer git_dir.deleteFile("index.lock") catch {}; // make sure the lock file is deleted on error
+    // create lock file
+    var lock = try io.LockFile.init(allocator, git_dir, "index");
+    errdefer lock.fail();
 
     // read index
     var index = try Index.init(allocator, git_dir);
@@ -390,8 +389,7 @@ pub fn writeIndex(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, paths: std
         try index.addPath(repo_dir, path);
     }
 
-    try index.write(allocator, index_lock_file);
+    try index.write(allocator, lock.lock_file);
 
-    // rename lock file to index
-    try git_dir.rename("index.lock", "index");
+    try lock.succeed();
 }

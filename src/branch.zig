@@ -1,5 +1,6 @@
 const std = @import("std");
 const ref = @import("./ref.zig");
+const io = @import("./io.zig");
 
 pub const BranchError = error{
     InvalidBranchName,
@@ -24,19 +25,17 @@ pub fn create(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, name: []const 
     var heads_dir = try refs_dir.makeOpenPath("heads", .{});
     defer heads_dir.close();
 
+    // create lock file
+    var lock = try io.LockFile.init(allocator, heads_dir, name);
+    errdefer lock.fail();
+
     // get HEAD contents
     const head_file_buffer = try ref.readHead(git_dir);
 
-    const lock_name = try std.fmt.allocPrint(allocator, "{s}.lock", .{name});
-    defer allocator.free(lock_name);
+    // write to lock file
+    try lock.lock_file.writeAll(&head_file_buffer);
+    try lock.lock_file.writeAll("\n");
 
-    // create branch ref
-    const branch_file = try heads_dir.createFile(lock_name, .{ .exclusive = true, .lock = .Exclusive });
-    errdefer heads_dir.deleteFile(lock_name) catch {};
-    {
-        defer branch_file.close();
-        try branch_file.writeAll(&head_file_buffer);
-        try branch_file.writeAll("\n");
-    }
-    try heads_dir.rename(lock_name, name);
+    // finish lock
+    try lock.succeed();
 }
