@@ -651,4 +651,28 @@ test "end to end" {
         const branch_name = c.git_reference_shorthand(head);
         try std.testing.expectEqualStrings("stuff", std.mem.sliceTo(branch_name, 0));
     }
+
+    // modify file and commit
+    {
+        const hello_txt = try repo_dir.openFile("hello.txt", .{ .mode = .read_write });
+        defer hello_txt.close();
+        try hello_txt.writeAll("hello, world once again!");
+
+        // add the files
+        args.clearAndFree();
+        try args.append("add");
+        try args.append("hello.txt");
+        try main.zitMain(allocator, &args);
+
+        // make a commit
+        args.clearAndFree();
+        try args.append("commit");
+        try args.append("-m");
+        try args.append("third commit");
+        try main.zitMain(allocator, &args);
+    }
+
+    // get HEAD contents
+    const commit3 = try ref.readHead(git_dir);
+    try expectEqual(commit3, try ref.resolve(git_dir, "stuff"));
 }

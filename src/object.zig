@@ -347,7 +347,7 @@ pub fn writeCommit(allocator: std.mem.Allocator, cwd: std.fs.Dir, command: cmd.C
     try std.fs.rename(commit_hash_prefix_dir, commit_comp_tmp_file_name, commit_hash_prefix_dir, commit_hash_suffix);
 
     // write commit id to HEAD
-    try ref.advanceHead(git_dir, commit_sha1_hex);
+    try ref.update(allocator, git_dir, "HEAD", commit_sha1_hex);
 }
 
 pub const ObjectKind = enum {

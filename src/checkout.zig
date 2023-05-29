@@ -138,8 +138,8 @@ fn compareTreeToIndex(item_maybe: ?obj.TreeEntry, entry_maybe: ?idx.Index.Entry)
     }
 }
 
-// returns any parent of the given path that is a file and isn't
-// tracked by the index, so it cannot be safely removed by checkout.
+/// returns any parent of the given path that is a file and isn't
+/// tracked by the index, so it cannot be safely removed by checkout.
 fn untrackedParent(repo_dir: std.fs.Dir, path: []const u8, index: idx.Index) ?[]const u8 {
     var parent = path;
     while (std.fs.path.dirname(parent)) |next_parent| {
@@ -155,8 +155,8 @@ fn untrackedParent(repo_dir: std.fs.Dir, path: []const u8, index: idx.Index) ?[]
     return null;
 }
 
-// returns true if the given file or one of its descendents (if a dir)
-// isn't tracked by the index, so it cannot be safely removed by checkout
+/// returns true if the given file or one of its descendents (if a dir)
+/// isn't tracked by the index, so it cannot be safely removed by checkout
 fn untrackedFile(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, path: []const u8, index: idx.Index) !bool {
     const file = try repo_dir.openFile(path, .{ .mode = .read_only });
     const meta = try file.metadata();
@@ -360,5 +360,5 @@ pub fn checkout(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, target: []co
     try git_dir.rename("index.lock", "index");
 
     // update HEAD
-    try ref.writeHead(git_dir, oid_hex, target);
+    try ref.writeHead(allocator, git_dir, target, oid_hex);
 }
