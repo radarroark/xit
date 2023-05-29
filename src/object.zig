@@ -280,24 +280,13 @@ pub fn writeCommit(allocator: std.mem.Allocator, cwd: std.fs.Dir, command: cmd.C
     const tree_sha1_hex = std.fmt.bytesToHex(tree_sha1_bytes_buffer, .lower);
 
     // read HEAD
-    var head_file_buffer = [_]u8{0} ** MAX_FILE_READ_SIZE;
-    var head_file_size: usize = 0;
-    {
-        const head_file_or_err = git_dir.openFile("HEAD", .{ .mode = .read_only });
-        const head_file = try if (head_file_or_err == error.FileNotFound)
-            git_dir.createFile("HEAD", .{ .read = true })
-        else
-            head_file_or_err;
-        defer head_file.close();
-        head_file_size = try head_file.pread(&head_file_buffer, 0);
-    }
-    const head_file_slice = head_file_buffer[0..head_file_size];
+    const head_oid_maybe = try ref.readHeadMaybe(git_dir);
 
     // metadata
     const author = "radar <radar@foo.com> 1512325222 +0000";
     const message = command.commit.message orelse "";
-    const parent = if (head_file_size > 0)
-        try std.fmt.allocPrint(allocator, "parent {s}\n", .{head_file_slice})
+    const parent = if (head_oid_maybe) |head_oid|
+        try std.fmt.allocPrint(allocator, "parent {s}\n", .{head_oid})
     else
         try std.fmt.allocPrint(allocator, "", .{});
     defer allocator.free(parent);

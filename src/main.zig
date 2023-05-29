@@ -16,6 +16,7 @@ const idx = @import("./index.zig");
 const stat = @import("./status.zig");
 const branch = @import("./branch.zig");
 const chk = @import("./checkout.zig");
+const ref = @import("./ref.zig");
 
 /// takes the args passed to this program and puts them
 /// in an arraylist. do we need to do this? i don't know,
@@ -90,8 +91,15 @@ pub fn zitMain(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8)) !
             // make a few dirs inside of .git
             var git_dir = try repo_dir.openDir(".git", .{});
             defer git_dir.close();
-            try git_dir.makeDir("objects");
-            try git_dir.makeDir("refs");
+            var objects_dir = try git_dir.makeOpenPath("objects", .{});
+            defer objects_dir.close();
+            var refs_dir = try git_dir.makeOpenPath("refs", .{});
+            defer refs_dir.close();
+            var heads_dir = try refs_dir.makeOpenPath("heads", .{});
+            defer heads_dir.close();
+
+            // update HEAD
+            try ref.writeHead(allocator, git_dir, "master", null);
         },
         cmd.CommandData.add => {
             try idx.writeIndex(allocator, cwd, command.data.add.paths);
