@@ -630,9 +630,13 @@ test "end to end" {
     try args.append("stuff");
     try main.zitMain(allocator, &args);
 
-    // update HEAD
-    // have to do this manually for now
-    try ref.writeHead(git_dir, "ref: refs/heads/stuff");
+    // checkout the branch
+    args.clearAndFree();
+    try args.append("checkout");
+    try args.append("stuff");
+    try main.zitMain(allocator, &args);
+
+    // check the refs
     try expectEqual(commit2, try ref.readHead(git_dir));
     try expectEqual(commit2, try ref.resolve(git_dir, "stuff"));
 

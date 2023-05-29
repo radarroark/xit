@@ -360,5 +360,5 @@ pub fn checkout(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, target: []co
     try git_dir.rename("index.lock", "index");
 
     // update HEAD
-    try ref.writeHead(git_dir, &oid_hex);
+    try ref.writeHead(git_dir, oid_hex, target);
 }
