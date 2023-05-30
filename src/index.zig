@@ -369,6 +369,7 @@ pub fn writeIndex(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, paths: std
 
     // create lock file
     var lock = try io.LockFile.init(allocator, git_dir, "index");
+    defer lock.deinit();
     errdefer lock.fail();
 
     // read index

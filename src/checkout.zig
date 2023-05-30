@@ -343,6 +343,7 @@ pub fn checkout(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, target: []co
 
     // create lock file
     var lock = try io.LockFile.init(allocator, git_dir, "index");
+    defer lock.deinit();
     errdefer lock.fail();
 
     // read index

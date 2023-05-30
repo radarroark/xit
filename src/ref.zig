@@ -58,6 +58,7 @@ pub fn readHead(git_dir: std.fs.Dir) ![hash.SHA1_HEX_LEN]u8 {
 
 pub fn writeHead(allocator: std.mem.Allocator, git_dir: std.fs.Dir, target: []const u8, oid_maybe: ?[hash.SHA1_HEX_LEN]u8) !void {
     var lock = try io.LockFile.init(allocator, git_dir, "HEAD");
+    defer lock.deinit();
     errdefer lock.fail();
     // if the target is a ref, just update HEAD to point to it
     var refs_dir = try git_dir.openDir("refs", .{});
@@ -96,6 +97,7 @@ pub fn writeHead(allocator: std.mem.Allocator, git_dir: std.fs.Dir, target: []co
 /// used after a commit is made.
 pub fn update(allocator: std.mem.Allocator, dir: std.fs.Dir, file_name: []const u8, oid: [hash.SHA1_HEX_LEN]u8) !void {
     var lock = try io.LockFile.init(allocator, dir, file_name);
+    defer lock.deinit();
     errdefer lock.fail();
 
     // read file and get ref name if necessary

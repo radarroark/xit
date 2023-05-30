@@ -21,15 +21,16 @@ pub const LockFile = struct {
         };
     }
 
-    pub fn succeed(self: *LockFile) !void {
+    pub fn deinit(self: *LockFile) void {
         self.lock_file.close();
-        try self.dir.rename(self.lock_name, self.file_name);
         self.allocator.free(self.lock_name);
     }
 
+    pub fn succeed(self: *LockFile) !void {
+        try self.dir.rename(self.lock_name, self.file_name);
+    }
+
     pub fn fail(self: *LockFile) void {
-        self.lock_file.close();
         self.dir.deleteFile(self.lock_name) catch {};
-        self.allocator.free(self.lock_name);
     }
 };

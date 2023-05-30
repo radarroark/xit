@@ -27,6 +27,7 @@ pub fn create(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, name: []const 
 
     // create lock file
     var lock = try io.LockFile.init(allocator, heads_dir, name);
+    defer lock.deinit();
     errdefer lock.fail();
 
     // get HEAD contents
