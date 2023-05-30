@@ -59,7 +59,7 @@ pub fn readHead(git_dir: std.fs.Dir) ![hash.SHA1_HEX_LEN]u8 {
 pub fn writeHead(allocator: std.mem.Allocator, git_dir: std.fs.Dir, target: []const u8, oid_maybe: ?[hash.SHA1_HEX_LEN]u8) !void {
     var lock = try io.LockFile.init(allocator, git_dir, "HEAD");
     defer lock.deinit();
-    errdefer lock.fail();
+
     // if the target is a ref, just update HEAD to point to it
     var refs_dir = try git_dir.openDir("refs", .{});
     defer refs_dir.close();
@@ -71,25 +71,25 @@ pub fn writeHead(allocator: std.mem.Allocator, git_dir: std.fs.Dir, target: []co
                 if (oid_maybe) |oid| {
                     // the HEAD is detached, so just update it with the oid
                     try lock.lock_file.writeAll(&oid);
-                    try lock.succeed();
                 } else {
                     // point HEAD at the ref, even though the ref doesn't exist
                     var write_buffer = [_]u8{0} ** MAX_READ_BYTES;
                     const content = try std.fmt.bufPrint(&write_buffer, "ref: refs/heads/{s}", .{target});
                     try lock.lock_file.writeAll(content);
-                    try lock.succeed();
                 }
+                lock.success = true;
                 return;
             },
             else => return err,
         }
     };
     defer ref_file.close();
+
     // point HEAD at the ref
     var write_buffer = [_]u8{0} ** MAX_READ_BYTES;
     const content = try std.fmt.bufPrint(&write_buffer, "ref: refs/heads/{s}", .{target});
     try lock.lock_file.writeAll(content);
-    try lock.succeed();
+    lock.success = true;
 }
 
 /// update the given file with the given oid,
@@ -98,7 +98,6 @@ pub fn writeHead(allocator: std.mem.Allocator, git_dir: std.fs.Dir, target: []co
 pub fn update(allocator: std.mem.Allocator, dir: std.fs.Dir, file_name: []const u8, oid: [hash.SHA1_HEX_LEN]u8) !void {
     var lock = try io.LockFile.init(allocator, dir, file_name);
     defer lock.deinit();
-    errdefer lock.fail();
 
     // read file and get ref name if necessary
     var buffer = [_]u8{0} ** MAX_READ_BYTES;
@@ -123,12 +122,11 @@ pub fn update(allocator: std.mem.Allocator, dir: std.fs.Dir, file_name: []const 
         var heads_dir = try refs_dir.openDir("heads", .{});
         defer heads_dir.close();
         try update(allocator, heads_dir, ref_name, oid);
-        lock.fail();
     }
     // otherwise, update it with the oid
     else {
         try lock.lock_file.writeAll(&oid);
         try lock.lock_file.writeAll("\n");
-        try lock.succeed();
+        lock.success = true;
     }
 }
