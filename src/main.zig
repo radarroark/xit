@@ -8,7 +8,6 @@
 //!  Let this be our first!" -- Lunar: Silver Star Story
 
 const std = @import("std");
-const process = std.process;
 const hash = @import("./hash.zig");
 const obj = @import("./object.zig");
 const cmd = @import("./command.zig");
@@ -23,7 +22,7 @@ const ref = @import("./ref.zig");
 /// but i'd rather have it in an arraylist so it's easier
 /// to look at. so yeah, i do need it. fight me.
 fn appendArgs(out: *std.ArrayList([]const u8)) !void {
-    var arg_it = process.args();
+    var arg_it = std.process.args();
     _ = arg_it.skip();
 
     while (true) {

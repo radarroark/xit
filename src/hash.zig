@@ -10,14 +10,13 @@
 //! the course of writing this comment.
 
 const std = @import("std");
-const hash = std.crypto.hash;
 
 const MAX_READ_BYTES = 1024;
-pub const SHA1_BYTES_LEN = hash.Sha1.digest_length;
+pub const SHA1_BYTES_LEN = std.crypto.hash.Sha1.digest_length;
 pub const SHA1_HEX_LEN = SHA1_BYTES_LEN * 2;
 
 pub fn sha1_file(file: std.fs.File, out: *[SHA1_BYTES_LEN]u8) !void {
-    var h = hash.Sha1.init(.{});
+    var h = std.crypto.hash.Sha1.init(.{});
     var buffer = [_]u8{0} ** MAX_READ_BYTES;
     var offset: u64 = 0;
     while (true) {
@@ -32,7 +31,7 @@ pub fn sha1_file(file: std.fs.File, out: *[SHA1_BYTES_LEN]u8) !void {
 }
 
 pub fn sha1_buffer(buffer: []const u8, out: *[SHA1_BYTES_LEN]u8) !void {
-    var h = hash.Sha1.init(.{});
+    var h = std.crypto.hash.Sha1.init(.{});
     h.update(buffer);
     h.final(out);
 }
