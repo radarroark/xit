@@ -34,12 +34,12 @@ fn appendArgs(out: *std.ArrayList([]const u8)) !void {
     }
 }
 
-/// this is meant to be the main entry point if you wanted to use zit
+/// this is meant to be the main entry point if you wanted to use xit
 /// as a library. there will definitely be more specialized functions
 /// you can call as well, but if you just want to pass the CLI args and
 /// have it behave just like the standalone git client than this is
 /// where it's at, homie.
-pub fn zitMain(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8)) !void {
+pub fn xitMain(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8)) !void {
     var command = try cmd.Command.init(allocator, args);
     defer command.deinit();
 
@@ -59,7 +59,7 @@ pub fn zitMain(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8)) !
         },
         cmd.CommandData.usage => {
             try stdout.print(
-                \\usage: zit
+                \\usage: xit
                 \\
                 \\start a working area:
                 \\   init
@@ -155,7 +155,7 @@ pub fn zitMain(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8)) !
     }
 }
 
-/// this is the main "main". it's even mainier than zitMain.
+/// this is the main "main". it's even mainier than xitMain.
 /// this is the real deal. there is no main more main than this.
 /// at least, not that i know of. i guess internally zig probably
 /// has an earlier entrypoint which is even mainier than this.
@@ -168,5 +168,5 @@ pub fn main() !void {
     defer args.deinit();
 
     try appendArgs(&args);
-    try zitMain(allocator, &args);
+    try xitMain(allocator, &args);
 }

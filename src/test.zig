@@ -44,7 +44,7 @@ test "end to end" {
     args.clearAndFree();
     try args.append("init");
     try args.append(temp_dir_name ++ "/repo");
-    try main.zitMain(allocator, &args);
+    try main.xitMain(allocator, &args);
 
     // make sure the dirs were created
     var repo_dir = try temp_dir.openDir("repo", .{});
@@ -94,14 +94,14 @@ test "end to end" {
         args.clearAndFree();
         try args.append("add");
         try args.append(".");
-        try main.zitMain(allocator, &args);
+        try main.xitMain(allocator, &args);
 
         // make a commit
         args.clearAndFree();
         try args.append("commit");
         try args.append("-m");
         try args.append("first commit");
-        try main.zitMain(allocator, &args);
+        try main.xitMain(allocator, &args);
 
         // check that the commit object was created
         {
@@ -141,14 +141,14 @@ test "end to end" {
         try args.append("commit");
         try args.append("-m");
         try args.append("pointless commit");
-        try expectEqual(error.ObjectAlreadyExists, main.zitMain(allocator, &args));
+        try expectEqual(error.ObjectAlreadyExists, main.xitMain(allocator, &args));
 
         // delete a file
         try repo_dir.deleteFile("LICENSE");
         args.clearAndFree();
         try args.append("add");
         try args.append("LICENSE");
-        try main.zitMain(allocator, &args);
+        try main.xitMain(allocator, &args);
 
         // delete a file and dir
         {
@@ -156,7 +156,7 @@ test "end to end" {
             args.clearAndFree();
             try args.append("add");
             try args.append("docs/design.md");
-            try main.zitMain(allocator, &args);
+            try main.xitMain(allocator, &args);
         }
 
         // replace a file with a directory
@@ -187,14 +187,14 @@ test "end to end" {
         args.clearAndFree();
         try args.append("add");
         try args.append(".");
-        try main.zitMain(allocator, &args);
+        try main.xitMain(allocator, &args);
 
         // make another commit
         args.clearAndFree();
         try args.append("commit");
         try args.append("-m");
         try args.append("second commit");
-        try main.zitMain(allocator, &args);
+        try main.xitMain(allocator, &args);
 
         // check that the commit object was created
         {
@@ -238,7 +238,7 @@ test "end to end" {
                 args.clearAndFree();
                 try args.append("add");
                 try args.append("LICENSE");
-                try main.zitMain(allocator, &args);
+                try main.xitMain(allocator, &args);
             }
 
             // check out commit1 and make sure the conflict is found
@@ -261,7 +261,7 @@ test "end to end" {
                 args.clearAndFree();
                 try args.append("add");
                 try args.append("LICENSE");
-                try main.zitMain(allocator, &args);
+                try main.xitMain(allocator, &args);
             }
         }
 
@@ -355,7 +355,7 @@ test "end to end" {
     args.clearAndFree();
     try args.append("checkout");
     try args.append(&commit1);
-    try main.zitMain(allocator, &args);
+    try main.xitMain(allocator, &args);
 
     // the working tree was updated
     {
@@ -373,7 +373,7 @@ test "end to end" {
     args.clearAndFree();
     try args.append("checkout");
     try args.append(&commit2);
-    try main.zitMain(allocator, &args);
+    try main.xitMain(allocator, &args);
 
     // the working tree was updated
     {
@@ -402,7 +402,7 @@ test "end to end" {
         args.clearAndFree();
         try args.append("add");
         try args.append(".");
-        try main.zitMain(allocator, &args);
+        try main.xitMain(allocator, &args);
 
         // read index
         {
@@ -437,7 +437,7 @@ test "end to end" {
         args.clearAndFree();
         try args.append("add");
         try args.append(".");
-        try main.zitMain(allocator, &args);
+        try main.xitMain(allocator, &args);
 
         // read index
         {
@@ -464,7 +464,7 @@ test "end to end" {
         args.clearAndFree();
         try args.append("add");
         try args.append("no-such-file");
-        try expectEqual(error.FileNotFound, main.zitMain(allocator, &args));
+        try expectEqual(error.FileNotFound, main.xitMain(allocator, &args));
 
         // a stale index lock file isn't hanging around
         {
@@ -571,13 +571,13 @@ test "end to end" {
             args.clearAndFree();
             try args.append("add");
             try args.append("c/d.txt");
-            try main.zitMain(allocator, &args);
+            try main.xitMain(allocator, &args);
 
             // remove file from index
             args.clearAndFree();
             try args.append("add");
             try args.append("src/zig/main.zig");
-            try main.zitMain(allocator, &args);
+            try main.xitMain(allocator, &args);
 
             // get status
             var status = try stat.Status.init(allocator, repo_dir, git_dir);
@@ -628,13 +628,13 @@ test "end to end" {
     args.clearAndFree();
     try args.append("branch");
     try args.append("stuff");
-    try main.zitMain(allocator, &args);
+    try main.xitMain(allocator, &args);
 
     // checkout the branch
     args.clearAndFree();
     try args.append("checkout");
     try args.append("stuff");
-    try main.zitMain(allocator, &args);
+    try main.xitMain(allocator, &args);
 
     // check the refs
     try expectEqual(commit2, try ref.readHead(git_dir));
@@ -662,14 +662,14 @@ test "end to end" {
         args.clearAndFree();
         try args.append("add");
         try args.append("hello.txt");
-        try main.zitMain(allocator, &args);
+        try main.xitMain(allocator, &args);
 
         // make a commit
         args.clearAndFree();
         try args.append("commit");
         try args.append("-m");
         try args.append("third commit");
-        try main.zitMain(allocator, &args);
+        try main.xitMain(allocator, &args);
     }
 
     // get HEAD contents

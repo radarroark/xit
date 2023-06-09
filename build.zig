@@ -10,7 +10,7 @@ pub fn build(b: *std.build.Builder) !void {
     const optimize = b.standardOptimizeOption(.{});
 
     const exe = b.addExecutable(.{
-        .name = "zit",
+        .name = "xit",
         .root_source_file = .{ .path = "src/main.zig" },
         .target = target,
         .optimize = optimize,
