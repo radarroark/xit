@@ -148,7 +148,7 @@ fn untrackedParent(repo_dir: std.fs.Dir, path: []const u8, index: idx.Index) ?[]
         const file = repo_dir.openFile(next_parent, .{ .mode = .read_only }) catch continue;
         defer file.close();
         const meta = file.metadata() catch continue;
-        if (meta.kind() != std.fs.File.Kind.File) continue;
+        if (meta.kind() != std.fs.File.Kind.file) continue;
         if (!index.entries.contains(next_parent)) {
             return next_parent;
         }
@@ -162,10 +162,10 @@ fn untrackedFile(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, path: []con
     const file = try repo_dir.openFile(path, .{ .mode = .read_only });
     const meta = try file.metadata();
     switch (meta.kind()) {
-        std.fs.File.Kind.File => {
+        std.fs.File.Kind.file => {
             return !index.entries.contains(path);
         },
-        std.fs.File.Kind.Directory => {
+        std.fs.File.Kind.directory => {
             var dir = try repo_dir.openIterableDir(path, .{});
             defer dir.close();
             var iter = dir.iterate();
@@ -250,7 +250,7 @@ pub fn migrate(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, tree_diff: ob
             defer file.close();
             const meta = try file.metadata();
             switch (meta.kind()) {
-                std.fs.File.Kind.File => {
+                std.fs.File.Kind.file => {
                     // if the path is a file that differs from the index
                     if (try compareIndexToWorkspace(entry_maybe, file) != .none) {
                         result.conflict(allocator);
@@ -263,7 +263,7 @@ pub fn migrate(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, tree_diff: ob
                         }
                     }
                 },
-                std.fs.File.Kind.Directory => {
+                std.fs.File.Kind.directory => {
                     // if the path is a dir with a descendent that isn't in the index
                     if (try untrackedFile(allocator, repo_dir, path, index.*)) {
                         result.conflict(allocator);

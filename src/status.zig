@@ -114,7 +114,7 @@ fn addEntries(allocator: std.mem.Allocator, untracked: *std.ArrayList(Status.Ent
     defer file.close();
     const meta = try file.metadata();
     switch (meta.kind()) {
-        std.fs.File.Kind.File => {
+        std.fs.File.Kind.file => {
             if (index.entries.getIndex(path)) |entry_index| {
                 index_bools.*[entry_index] = true;
                 const entry = index.entries.values()[entry_index];
@@ -126,7 +126,7 @@ fn addEntries(allocator: std.mem.Allocator, untracked: *std.ArrayList(Status.Ent
             }
             return true;
         },
-        std.fs.File.Kind.Directory => {
+        std.fs.File.Kind.directory => {
             const is_untracked = !(std.mem.eql(u8, path, ".") or index.dir_to_paths.contains(path) or index.entries.contains(path));
 
             var dir = try repo_dir.openIterableDir(path, .{});

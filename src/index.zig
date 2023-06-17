@@ -154,7 +154,7 @@ pub const Index = struct {
         defer file.close();
         const meta = try file.metadata();
         switch (meta.kind()) {
-            std.fs.File.Kind.File => {
+            std.fs.File.Kind.file => {
                 // write the object
                 var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
                 try object.writeBlobFromPath(self.allocator, repo_dir, path, &oid);
@@ -177,7 +177,7 @@ pub const Index = struct {
                 };
                 try self.addEntry(entry);
             },
-            std.fs.File.Kind.Directory => {
+            std.fs.File.Kind.directory => {
                 var dir = try repo_dir.openIterableDir(path, .{});
                 defer dir.close();
                 var iter = dir.iterate();

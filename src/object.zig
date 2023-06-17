@@ -144,7 +144,7 @@ pub fn writeBlobFromPath(allocator: std.mem.Allocator, cwd: std.fs.Dir, path: []
     // see if it's a file or dir
     const meta = try file.metadata();
     switch (meta.kind()) {
-        std.fs.File.Kind.File => {
+        std.fs.File.Kind.file => {
             writeBlob(file, meta, objects_dir, allocator, sha1_bytes_buffer) catch |err| {
                 switch (err) {
                     error.ObjectAlreadyExists => {},

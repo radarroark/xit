@@ -47,7 +47,7 @@ pub fn create(
         "-fno-sanitize=all",
     });
 
-    if (64 == target.getCpuArch().ptrBitWidth())
+    if (64 == target.toTarget().ptrBitWidth())
         try flags.append("-DGIT_ARCH_64=1");
 
     ret.addCSourceFiles(srcs, flags.items);
