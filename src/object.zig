@@ -114,7 +114,7 @@ fn writeBlob(file: std.fs.File, meta: std.fs.File.Metadata, objects_dir: std.fs.
     const compressed_tmp_file_name = tmp_file_name ++ ".compressed";
     const compressed_tmp_file = try hash_prefix_dir.createFile(compressed_tmp_file_name, .{});
     defer compressed_tmp_file.close();
-    try compress.compress(tmp_file, compressed_tmp_file, allocator);
+    try compress.compress(allocator, tmp_file, compressed_tmp_file);
 
     // delete uncompressed temp file
     try hash_prefix_dir.deleteFile(tmp_file_name);
@@ -202,7 +202,7 @@ fn writeTree(objects_dir: std.fs.Dir, allocator: std.mem.Allocator, entries: *st
     defer tree_comp_tmp_file.close();
 
     // compress the file
-    try compress.compress(tree_tmp_file, tree_comp_tmp_file, allocator);
+    try compress.compress(allocator, tree_tmp_file, tree_comp_tmp_file);
 
     // delete first temp file
     try tree_hash_prefix_dir.deleteFile(tree_tmp_file_name);
@@ -327,7 +327,7 @@ pub fn writeCommit(allocator: std.mem.Allocator, cwd: std.fs.Dir, command: cmd.C
     defer commit_comp_tmp_file.close();
 
     // compress the file
-    try compress.compress(commit_tmp_file, commit_comp_tmp_file, allocator);
+    try compress.compress(allocator, commit_tmp_file, commit_comp_tmp_file);
 
     // delete first temp file
     try commit_hash_prefix_dir.deleteFile(commit_tmp_file_name);

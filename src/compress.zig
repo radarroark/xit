@@ -7,57 +7,23 @@ const zlib = std.compress.zlib;
 
 const MAX_FILE_READ_BYTES = 1024;
 
-/// zig doesn't have a zlib compressor in the stdlib yet, so this one is implemented
-/// manually. once it arrives, this code is getting tossed to the curb.
-pub fn compress(in: std.fs.File, out: std.fs.File, allocator: std.mem.Allocator) !void {
-    // define compression level
-    const Level = enum(u2) {
-        fastest = 0,
-        fast = 1,
-        default = 2,
-        maximum = 3,
-    };
-    const zlib_level = Level.default;
-    const deflate_level: deflate.Compression = switch (zlib_level) {
-        .fastest => .no_compression,
-        .fast => .best_speed,
-        .default => .default_compression,
-        .maximum => .best_compression,
-    };
+pub fn compress(allocator: std.mem.Allocator, in: std.fs.File, out: std.fs.File) !void {
+    // init stream from input file
+    var zlib_stream = try zlib.compressStream(allocator, out.writer(), .{ .level = .default });
+    defer zlib_stream.deinit();
 
-    // init the compressor
-    const writer = out.writer();
-    var comp = try deflate.compressor(allocator, writer, .{ .level = deflate_level });
-    defer comp.deinit();
-
-    // write the header
-    const CM: u4 = 8;
-    const CINFO: u4 = 7;
-    const CMF: u8 = (@as(u8, CINFO) << 4) | CM;
-    const FLEVEL: u2 = @intFromEnum(zlib_level);
-    const FDICT: u1 = 0;
-    const FLG_temp = (@as(u8, FLEVEL) << 6) | (@as(u8, FDICT) << 5);
-    const FCHECK: u5 = 31 - ((@as(u16, CMF) * 256 + FLG_temp) % 31);
-    const FLG = FLG_temp | FCHECK;
-    try writer.writeAll(&.{ CMF, FLG });
-
-    // do the dirty work
+    // write the compressed data to the output file
     try in.seekTo(0);
     const reader = in.reader();
-    var hasher = std.hash.Adler32.init();
     var buf = [_]u8{0} ** MAX_FILE_READ_BYTES;
     while (true) {
         // read from file
         const size = try reader.read(&buf);
         if (size == 0) break;
-        // update hash
-        hasher.update(buf[0..size]);
         // compress
-        _ = try comp.write(buf[0..size]);
+        _ = try zlib_stream.write(buf[0..size]);
     }
-    try comp.close();
-    // write the hash
-    try writer.writeIntBig(u32, hasher.final());
+    try zlib_stream.finish();
 }
 
 pub fn decompress(allocator: std.mem.Allocator, in: std.fs.File, out: std.fs.File, skip_header: bool) !void {
@@ -65,9 +31,9 @@ pub fn decompress(allocator: std.mem.Allocator, in: std.fs.File, out: std.fs.Fil
     try in.seekTo(0);
     var zlib_stream = try zlib.decompressStream(allocator, in.reader());
     defer zlib_stream.deinit();
-    const reader = zlib_stream.reader();
     if (skip_header) {
-        try reader.skipUntilDelimiterOrEof(0);
+        // skip section in beginning of file which is not compressed
+        try zlib_stream.reader().skipUntilDelimiterOrEof(0);
     }
 
     // write the decompressed data to the output file
@@ -75,7 +41,7 @@ pub fn decompress(allocator: std.mem.Allocator, in: std.fs.File, out: std.fs.Fil
     var buf = [_]u8{0} ** MAX_FILE_READ_BYTES;
     while (true) {
         // read from file
-        const size = try reader.read(&buf);
+        const size = try zlib_stream.read(&buf);
         if (size == 0) break;
         // decompress
         _ = try writer.write(buf[0..size]);
@@ -89,20 +55,26 @@ const CompressError = error{
     FileTooLarge,
 };
 pub const Decompressed = struct {
+    buffer: [MAX_FILE_SIZE_BYTES]u8,
     stream: std.compress.zlib.DecompressStream(std.io.Reader(*std.io.FixedBufferStream([]u8), std.io.FixedBufferStream([]u8).ReadError, std.io.FixedBufferStream([]u8).read)),
 
     pub fn init(allocator: std.mem.Allocator, in: std.fs.File) !Decompressed {
+        var decompressed = Decompressed{
+            .buffer = [_]u8{0} ** MAX_FILE_SIZE_BYTES,
+            .stream = undefined,
+        };
+
         // read the in file into memory
-        var read_buffer = [_]u8{0} ** MAX_FILE_SIZE_BYTES;
-        const in_size = try in.pread(&read_buffer, 0);
+        const in_size = try in.pread(&decompressed.buffer, 0);
         if (in_size == MAX_FILE_SIZE_BYTES) {
             return CompressError.FileTooLarge;
         }
-        var fixed_buffer = std.io.fixedBufferStream(read_buffer[0..in_size]);
 
-        return Decompressed{
-            .stream = try zlib.decompressStream(allocator, fixed_buffer.reader()),
-        };
+        // create the stream
+        var fixed_buffer = std.io.fixedBufferStream(decompressed.buffer[0..in_size]);
+        decompressed.stream = try zlib.decompressStream(allocator, fixed_buffer.reader());
+
+        return decompressed;
     }
 
     pub fn deinit(self: *Decompressed) void {
@@ -137,7 +109,7 @@ test "compress and decompress" {
     // compress the file
     var out_compressed = try temp_dir.createFile("hello.txt.compressed", .{ .read = true });
     defer out_compressed.close();
-    try compress(hello_txt, out_compressed, allocator);
+    try compress(allocator, hello_txt, out_compressed);
 
     // decompress it so we know it works
     var out_decompressed = try temp_dir.createFile("out_decompressed", .{ .read = true });
