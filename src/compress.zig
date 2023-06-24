@@ -34,7 +34,7 @@ pub fn compress(in: std.fs.File, out: std.fs.File, allocator: std.mem.Allocator)
     const CM: u4 = 8;
     const CINFO: u4 = 7;
     const CMF: u8 = (@as(u8, CINFO) << 4) | CM;
-    const FLEVEL: u2 = @enumToInt(zlib_level);
+    const FLEVEL: u2 = @intFromEnum(zlib_level);
     const FDICT: u1 = 0;
     const FLG_temp = (@as(u8, FLEVEL) << 6) | (@as(u8, FDICT) << 5);
     const FCHECK: u5 = 31 - ((@as(u16, CMF) * 256 + FLG_temp) % 31);
@@ -63,7 +63,7 @@ pub fn compress(in: std.fs.File, out: std.fs.File, allocator: std.mem.Allocator)
 pub fn decompress(allocator: std.mem.Allocator, in: std.fs.File, out: std.fs.File, skip_header: bool) !void {
     // init stream from input file
     try in.seekTo(0);
-    var zlib_stream = try zlib.zlibStream(allocator, in.reader());
+    var zlib_stream = try zlib.decompressStream(allocator, in.reader());
     defer zlib_stream.deinit();
     const reader = zlib_stream.reader();
     if (skip_header) {
@@ -89,7 +89,7 @@ const CompressError = error{
     FileTooLarge,
 };
 pub const Decompressed = struct {
-    stream: std.compress.zlib.ZlibStream(std.io.Reader(*std.io.FixedBufferStream([]u8), std.io.FixedBufferStream([]u8).ReadError, std.io.FixedBufferStream([]u8).read)),
+    stream: std.compress.zlib.DecompressStream(std.io.Reader(*std.io.FixedBufferStream([]u8), std.io.FixedBufferStream([]u8).ReadError, std.io.FixedBufferStream([]u8).read)),
 
     pub fn init(allocator: std.mem.Allocator, in: std.fs.File) !Decompressed {
         // read the in file into memory
@@ -101,7 +101,7 @@ pub const Decompressed = struct {
         var fixed_buffer = std.io.fixedBufferStream(read_buffer[0..in_size]);
 
         return Decompressed{
-            .stream = try zlib.zlibStream(allocator, fixed_buffer.reader()),
+            .stream = try zlib.decompressStream(allocator, fixed_buffer.reader()),
         };
     }
 
