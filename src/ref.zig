@@ -9,6 +9,95 @@ pub const RefError = error{
     RefInvalidHash,
 };
 
+pub const Ref = struct {
+    allocator: std.mem.Allocator,
+    name: []const u8,
+    oid: ?[hash.SHA1_HEX_LEN]u8,
+
+    pub fn init(allocator: std.mem.Allocator, git_dir: std.fs.Dir, dir_name: []const u8, entry_name: []const u8) !Ref {
+        var name = try allocator.alloc(u8, entry_name.len);
+        errdefer allocator.free(name);
+        @memcpy(name, entry_name);
+
+        const path = try std.fs.path.join(allocator, &[_][]const u8{ "refs", dir_name, entry_name });
+        defer allocator.free(path);
+        const content = try std.fmt.allocPrint(allocator, "ref: {s}", .{path});
+        defer allocator.free(content);
+
+        return .{
+            .allocator = allocator,
+            .name = name,
+            .oid = try resolve(git_dir, content),
+        };
+    }
+
+    pub fn initWithPath(allocator: std.mem.Allocator, git_dir: std.fs.Dir, path: []const u8) !?Ref {
+        var buffer = [_]u8{0} ** MAX_READ_BYTES;
+        const content = try read(git_dir, path, &buffer);
+
+        if (std.mem.startsWith(u8, content, REF_START_STR) and content.len > REF_START_STR.len) {
+            const name_len = content.len - REF_START_STR.len;
+            var name = try allocator.alloc(u8, name_len);
+            errdefer allocator.free(name);
+            @memcpy(name, content[REF_START_STR.len..]);
+
+            return .{
+                .allocator = allocator,
+                .name = name,
+                .oid = try resolve(git_dir, content),
+            };
+        } else {
+            return null;
+        }
+    }
+
+    pub fn deinit(self: *Ref) void {
+        self.allocator.free(self.name);
+    }
+};
+
+pub const RefList = struct {
+    refs: std.ArrayList(Ref),
+
+    pub fn init(allocator: std.mem.Allocator, git_dir: std.fs.Dir, dir_name: []const u8) !RefList {
+        var refs = std.ArrayList(Ref).init(allocator);
+        errdefer {
+            for (refs.items) |*ref| {
+                ref.deinit();
+            }
+            refs.deinit();
+        }
+
+        var refs_dir = try git_dir.openDir("refs", .{});
+        defer refs_dir.close();
+        var dir = try refs_dir.openIterableDir(dir_name, .{});
+        defer dir.close();
+        var iter = dir.iterate();
+
+        while (try iter.next()) |entry| {
+            switch (entry.kind) {
+                .file => {
+                    var ref = try Ref.init(allocator, git_dir, dir_name, entry.name);
+                    errdefer ref.deinit();
+                    try refs.append(ref);
+                },
+                else => {},
+            }
+        }
+
+        return .{
+            .refs = refs,
+        };
+    }
+
+    pub fn deinit(self: *RefList) void {
+        for (self.refs.items) |*ref| {
+            ref.deinit();
+        }
+        self.refs.deinit();
+    }
+};
+
 pub fn resolve(git_dir: std.fs.Dir, content: []const u8) !?[hash.SHA1_HEX_LEN]u8 {
     if (std.mem.startsWith(u8, content, REF_START_STR) and content.len > REF_START_STR.len) {
         return try resolve(git_dir, content[REF_START_STR.len..]);
@@ -36,8 +125,8 @@ pub fn resolve(git_dir: std.fs.Dir, content: []const u8) !?[hash.SHA1_HEX_LEN]u8
     }
 }
 
-pub fn read(git_dir: std.fs.Dir, file_name: []const u8, buffer: *[MAX_READ_BYTES]u8) ![]u8 {
-    const head_file = try git_dir.openFile(file_name, .{ .mode = .read_only });
+pub fn read(git_dir: std.fs.Dir, path: []const u8, buffer: *[MAX_READ_BYTES]u8) ![]u8 {
+    const head_file = try git_dir.openFile(path, .{ .mode = .read_only });
     defer head_file.close();
     const size = try head_file.reader().readAll(buffer);
     return buffer[0..size];
@@ -130,67 +219,3 @@ pub fn update(allocator: std.mem.Allocator, dir: std.fs.Dir, file_name: []const 
         lock.success = true;
     }
 }
-
-pub const Ref = struct {
-    allocator: std.mem.Allocator,
-    path: []const u8,
-    name: []const u8,
-
-    pub fn init(allocator: std.mem.Allocator, dir_name: []const u8, entry_name: []const u8) !Ref {
-        const path = try std.fs.path.join(allocator, &[_][]const u8{ dir_name, entry_name });
-        errdefer allocator.free(path);
-        var name = try allocator.alloc(u8, entry_name.len);
-        errdefer allocator.free(name);
-        @memcpy(name, entry_name);
-        return .{
-            .allocator = allocator,
-            .path = path,
-            .name = name,
-        };
-    }
-
-    pub fn deinit(self: *Ref) void {
-        self.allocator.free(self.path);
-        self.allocator.free(self.name);
-    }
-};
-
-pub const RefList = struct {
-    refs: std.ArrayList(Ref),
-
-    pub fn init(allocator: std.mem.Allocator, git_dir: std.fs.Dir, path: []const u8) !RefList {
-        var refs = std.ArrayList(Ref).init(allocator);
-        errdefer {
-            for (refs.items) |*ref| {
-                ref.deinit();
-            }
-            refs.deinit();
-        }
-
-        var dir = try git_dir.openIterableDir(path, .{});
-        defer dir.close();
-        var iter = dir.iterate();
-
-        while (try iter.next()) |entry| {
-            switch (entry.kind) {
-                .file => {
-                    var ref = try Ref.init(allocator, path, entry.name);
-                    errdefer ref.deinit();
-                    try refs.append(ref);
-                },
-                else => {},
-            }
-        }
-
-        return .{
-            .refs = refs,
-        };
-    }
-
-    pub fn deinit(self: *RefList) void {
-        for (self.refs.items) |*ref| {
-            ref.deinit();
-        }
-        self.refs.deinit();
-    }
-};

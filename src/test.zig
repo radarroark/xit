@@ -640,7 +640,17 @@ test "end to end" {
     try expectEqual(commit2, try ref.readHead(git_dir));
     try expectEqual(commit2, try ref.resolve(git_dir, "stuff"));
 
-    // check branch with libgit
+    // list all branches
+    var ref_list = try ref.RefList.init(allocator, git_dir, "heads");
+    defer ref_list.deinit();
+    try expectEqual(2, ref_list.refs.items.len);
+
+    // get the current branch
+    var current_branch_maybe = try ref.Ref.initWithPath(allocator, git_dir, "HEAD");
+    defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
+    try std.testing.expectEqualStrings("stuff", current_branch_maybe.?.name);
+
+    // get the current branch with libgit
     {
         try expectEqual(0, c.git_repository_open(&repo, repo_path));
         defer c.git_repository_free(repo);
@@ -675,8 +685,4 @@ test "end to end" {
     // get HEAD contents
     const commit3 = try ref.readHead(git_dir);
     try expectEqual(commit3, try ref.resolve(git_dir, "stuff"));
-
-    var ref_list = try ref.RefList.init(allocator, git_dir, "refs/heads");
-    defer ref_list.deinit();
-    try expectEqual(2, ref_list.refs.items.len);
 }

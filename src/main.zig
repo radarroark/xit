@@ -140,6 +140,23 @@ pub fn xitMain(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8)) !
         cmd.CommandData.branch => {
             if (command.data.branch.name) |name| {
                 try branch.create(allocator, cwd, name);
+            } else {
+                var git_dir = try cwd.openDir(".git", .{});
+                defer git_dir.close();
+
+                var current_branch_maybe = try ref.Ref.initWithPath(allocator, git_dir, "HEAD");
+                defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
+
+                var ref_list = try ref.RefList.init(allocator, git_dir, "heads");
+                defer ref_list.deinit();
+
+                for (ref_list.refs.items) |r| {
+                    const is_current_branch = if (current_branch_maybe) |current_branch|
+                        std.mem.eql(u8, current_branch.name, r.name)
+                    else
+                        false;
+                    try stdout.print("{s} {s}\n", .{ if (is_current_branch) "*" else " ", r.name });
+                }
             }
         },
         cmd.CommandData.checkout => {
