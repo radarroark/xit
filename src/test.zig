@@ -663,9 +663,30 @@ test "end to end" {
         try std.testing.expectEqualStrings("stuff", std.mem.sliceTo(branch_name, 0));
     }
 
-    // delete a branch
+    // can't delete current branch
     try expectEqual(error.CannotDeleteCurrentBranch, branch.delete(allocator, git_dir, "stuff"));
-    try branch.delete(allocator, git_dir, "master");
+
+    // create a branch with slashes
+    args.clearAndFree();
+    try args.append("branch");
+    try args.append("a/b/c");
+    try main.xitMain(allocator, &args);
+
+    // make sure the ref is created with subdirs
+    {
+        const ref_file = try git_dir.openFile("refs/heads/a/b/c", .{});
+        defer ref_file.close();
+    }
+
+    // delete the branch
+    try branch.delete(allocator, git_dir, "a/b/c");
+
+    // make sure the subdirs are deleted
+    {
+        try expectEqual(error.FileNotFound, git_dir.openFile("refs/heads/a/b/c", .{}));
+        try expectEqual(error.FileNotFound, git_dir.openDir("refs/heads/a/b", .{}));
+        try expectEqual(error.FileNotFound, git_dir.openDir("refs/heads/a", .{}));
+    }
 
     // modify file and commit
     {
