@@ -6,6 +6,7 @@ const stat = @import("./status.zig");
 const obj = @import("./object.zig");
 const ref = @import("./ref.zig");
 const chk = @import("./checkout.zig");
+const branch = @import("./branch.zig");
 
 const c = @cImport({
     @cInclude("git2.h");
@@ -661,6 +662,10 @@ test "end to end" {
         const branch_name = c.git_reference_shorthand(head);
         try std.testing.expectEqualStrings("stuff", std.mem.sliceTo(branch_name, 0));
     }
+
+    // delete a branch
+    try expectEqual(error.CannotDeleteCurrentBranch, branch.delete(allocator, git_dir, "stuff"));
+    try branch.delete(allocator, git_dir, "master");
 
     // modify file and commit
     {

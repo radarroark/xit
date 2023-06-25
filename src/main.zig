@@ -138,12 +138,12 @@ pub fn xitMain(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8)) !
             }
         },
         cmd.CommandData.branch => {
-            if (command.data.branch.name) |name| {
-                try branch.create(allocator, cwd, name);
-            } else {
-                var git_dir = try cwd.openDir(".git", .{});
-                defer git_dir.close();
+            var git_dir = try cwd.openDir(".git", .{});
+            defer git_dir.close();
 
+            if (command.data.branch.name) |name| {
+                try branch.create(allocator, git_dir, name);
+            } else {
                 var current_branch_maybe = try ref.Ref.initWithPath(allocator, git_dir, "HEAD");
                 defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
 
