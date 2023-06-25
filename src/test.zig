@@ -675,4 +675,8 @@ test "end to end" {
     // get HEAD contents
     const commit3 = try ref.readHead(git_dir);
     try expectEqual(commit3, try ref.resolve(git_dir, "stuff"));
+
+    var ref_list = try ref.RefList.init(allocator, git_dir, "refs/heads");
+    defer ref_list.deinit();
+    try expectEqual(2, ref_list.refs.items.len);
 }

@@ -130,3 +130,67 @@ pub fn update(allocator: std.mem.Allocator, dir: std.fs.Dir, file_name: []const 
         lock.success = true;
     }
 }
+
+pub const Ref = struct {
+    allocator: std.mem.Allocator,
+    path: []const u8,
+    name: []const u8,
+
+    pub fn init(allocator: std.mem.Allocator, dir_name: []const u8, entry_name: []const u8) !Ref {
+        const path = try std.fs.path.join(allocator, &[_][]const u8{ dir_name, entry_name });
+        errdefer allocator.free(path);
+        var name = try allocator.alloc(u8, entry_name.len);
+        errdefer allocator.free(name);
+        @memcpy(name, entry_name);
+        return .{
+            .allocator = allocator,
+            .path = path,
+            .name = name,
+        };
+    }
+
+    pub fn deinit(self: *Ref) void {
+        self.allocator.free(self.path);
+        self.allocator.free(self.name);
+    }
+};
+
+pub const RefList = struct {
+    refs: std.ArrayList(Ref),
+
+    pub fn init(allocator: std.mem.Allocator, git_dir: std.fs.Dir, path: []const u8) !RefList {
+        var refs = std.ArrayList(Ref).init(allocator);
+        errdefer {
+            for (refs.items) |*ref| {
+                ref.deinit();
+            }
+            refs.deinit();
+        }
+
+        var dir = try git_dir.openIterableDir(path, .{});
+        defer dir.close();
+        var iter = dir.iterate();
+
+        while (try iter.next()) |entry| {
+            switch (entry.kind) {
+                .file => {
+                    var ref = try Ref.init(allocator, path, entry.name);
+                    errdefer ref.deinit();
+                    try refs.append(ref);
+                },
+                else => {},
+            }
+        }
+
+        return .{
+            .refs = refs,
+        };
+    }
+
+    pub fn deinit(self: *RefList) void {
+        for (self.refs.items) |*ref| {
+            ref.deinit();
+        }
+        self.refs.deinit();
+    }
+};
