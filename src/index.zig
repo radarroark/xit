@@ -170,9 +170,9 @@ pub const Index = struct {
                     .mode = getMode(meta),
                     .uid = 0,
                     .gid = 0,
-                    .file_size = @truncate(u32, meta.size()),
+                    .file_size = @truncate(meta.size()),
                     .oid = oid,
-                    .path_size = @truncate(u16, path.len),
+                    .path_size = @truncate(path.len),
                     .path = path,
                 };
                 try self.addEntry(entry);
@@ -275,7 +275,7 @@ pub const Index = struct {
 
         // write the header
         const version: u32 = 2;
-        const entry_count: u32 = @truncate(u32, self.entries.count());
+        const entry_count: u32 = @truncate(self.entries.count());
         const header = try std.fmt.allocPrint(allocator, "DIRC{s}{s}", .{
             std.mem.asBytes(&std.mem.nativeToBig(u32, version)),
             std.mem.asBytes(&std.mem.nativeToBig(u32, entry_count)),
@@ -335,10 +335,10 @@ fn getTimes(meta: std.fs.File.Metadata) Times {
     const ctime = meta.created() orelse 0;
     const mtime = meta.modified();
     return Times{
-        .ctime_secs = @truncate(i32, @divTrunc(ctime, std.time.ns_per_s)),
-        .ctime_nsecs = @truncate(i32, @mod(ctime, std.time.ns_per_s)),
-        .mtime_secs = @truncate(i32, @divTrunc(mtime, std.time.ns_per_s)),
-        .mtime_nsecs = @truncate(i32, @mod(mtime, std.time.ns_per_s)),
+        .ctime_secs = @truncate(@divTrunc(ctime, std.time.ns_per_s)),
+        .ctime_nsecs = @truncate(@mod(ctime, std.time.ns_per_s)),
+        .mtime_secs = @truncate(@divTrunc(mtime, std.time.ns_per_s)),
+        .mtime_nsecs = @truncate(@mod(mtime, std.time.ns_per_s)),
     };
 }
 

@@ -59,7 +59,7 @@ test "end to end" {
 
     // get repo path for libgit
     var repo_path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
-    const repo_path = @ptrCast([*c]const u8, try repo_dir.realpath(".", &repo_path_buffer));
+    const repo_path: [*c]const u8 = @ptrCast(try repo_dir.realpath(".", &repo_path_buffer));
     var repo: ?*c.git_repository = null;
 
     // add and commit

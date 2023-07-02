@@ -22,10 +22,10 @@ pub const ObjectWriteError = error{
 fn randChar() !u8 {
     var rand_int: u8 = 0;
     try std.os.getrandom(std.mem.asBytes(&rand_int));
-    var rand_float: f32 = (@floatFromInt(f32, rand_int) / @floatFromInt(f32, std.math.maxInt(u8)));
+    var rand_float: f32 = @as(f32, @floatFromInt(rand_int)) / @as(f32, @floatFromInt(std.math.maxInt(u8)));
     const min = 'a';
     const max = 'z';
-    return @intFromFloat(u8, rand_float * (max - min)) + min;
+    return @as(u8, @intFromFloat(rand_float * (max - min))) + min;
 }
 
 /// fills the given buffer with random chars.
