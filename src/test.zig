@@ -642,9 +642,11 @@ test "end to end" {
     try expectEqual(commit2, try ref.resolve(git_dir, "stuff"));
 
     // list all branches
-    var ref_list = try ref.RefList.init(allocator, git_dir, "heads");
-    defer ref_list.deinit();
-    try expectEqual(2, ref_list.refs.items.len);
+    {
+        var ref_list = try ref.RefList.init(allocator, git_dir, "heads");
+        defer ref_list.deinit();
+        try expectEqual(2, ref_list.refs.items.len);
+    }
 
     // get the current branch
     var current_branch_maybe = try ref.Ref.initWithPath(allocator, git_dir, "HEAD");
@@ -676,6 +678,21 @@ test "end to end" {
     {
         const ref_file = try git_dir.openFile("refs/heads/a/b/c", .{});
         defer ref_file.close();
+    }
+
+    // list all branches
+    {
+        var ref_list = try ref.RefList.init(allocator, git_dir, "heads");
+        defer ref_list.deinit();
+        try expectEqual(3, ref_list.refs.items.len);
+        var ref_map = std.StringHashMap(void).init(allocator);
+        defer ref_map.deinit();
+        for (ref_list.refs.items) |r| {
+            try ref_map.put(r.name, {});
+        }
+        try std.testing.expect(ref_map.contains("a/b/c"));
+        try std.testing.expect(ref_map.contains("stuff"));
+        try std.testing.expect(ref_map.contains("master"));
     }
 
     // delete the branch

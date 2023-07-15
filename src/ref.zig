@@ -14,12 +14,11 @@ pub const Ref = struct {
     name: []const u8,
     oid: ?[hash.SHA1_HEX_LEN]u8,
 
-    pub fn init(allocator: std.mem.Allocator, git_dir: std.fs.Dir, dir_name: []const u8, entry_name: []const u8) !Ref {
-        var name = try allocator.alloc(u8, entry_name.len);
+    pub fn init(allocator: std.mem.Allocator, git_dir: std.fs.Dir, dir_name: []const u8, relative_path: []const []const u8) !Ref {
+        const name = try std.mem.join(allocator, "/", relative_path);
         errdefer allocator.free(name);
-        @memcpy(name, entry_name);
 
-        const path = try std.fs.path.join(allocator, &[_][]const u8{ "refs", dir_name, entry_name });
+        const path = try std.fs.path.join(allocator, &[_][]const u8{ "refs", dir_name, name });
         defer allocator.free(path);
         const content = try std.fmt.allocPrint(allocator, "ref: {s}", .{path});
         defer allocator.free(content);
@@ -56,6 +55,30 @@ pub const Ref = struct {
     }
 };
 
+fn addRefs(allocator: std.mem.Allocator, git_dir: std.fs.Dir, dir_name: []const u8, dir: std.fs.Dir, refs: *std.ArrayList(Ref), path: *std.ArrayList([]const u8)) !void {
+    var iter_dir = try dir.openIterableDir(".", .{});
+    defer iter_dir.close();
+    var iter = iter_dir.iterate();
+    while (try iter.next()) |entry| {
+        var next_path = try path.clone();
+        defer next_path.deinit();
+        try next_path.append(entry.name);
+        switch (entry.kind) {
+            .file => {
+                var ref = try Ref.init(allocator, git_dir, dir_name, next_path.items);
+                errdefer ref.deinit();
+                try refs.append(ref);
+            },
+            .directory => {
+                var next_dir = try dir.openDir(entry.name, .{});
+                defer next_dir.close();
+                try addRefs(allocator, git_dir, dir_name, next_dir, refs, &next_path);
+            },
+            else => {},
+        }
+    }
+}
+
 pub const RefList = struct {
     refs: std.ArrayList(Ref),
 
@@ -70,20 +93,12 @@ pub const RefList = struct {
 
         var refs_dir = try git_dir.openDir("refs", .{});
         defer refs_dir.close();
-        var dir = try refs_dir.openIterableDir(dir_name, .{});
-        defer dir.close();
-        var iter = dir.iterate();
+        var heads_dir = try refs_dir.openDir("heads", .{});
+        defer heads_dir.close();
 
-        while (try iter.next()) |entry| {
-            switch (entry.kind) {
-                .file => {
-                    var ref = try Ref.init(allocator, git_dir, dir_name, entry.name);
-                    errdefer ref.deinit();
-                    try refs.append(ref);
-                },
-                else => {},
-            }
-        }
+        var path = std.ArrayList([]const u8).init(allocator);
+        defer path.deinit();
+        try addRefs(allocator, git_dir, dir_name, heads_dir, &refs, &path);
 
         return .{
             .refs = refs,
