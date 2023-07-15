@@ -1,8 +1,20 @@
 //! you're looking at radar's hopeless attempt to implement
-//! git in zig. one day, it will be the fastest git in the world,
-//! with extra features for rewriting history like in BFG.
-//! right now, though, it just makes a couple dirs and prints
-//! messages out...which already makes it more usable than git.
+//! the successor to git. key features planned for xit:
+//!
+//! 1. xitlets: small programs that live inside the repo and
+//! whose data is versioned just like files are. changes to
+//! their data will happen exclusively via CRDTs, so they
+//! can be merged cleanly. this will allow building things
+//! like issue trackers that are part of the repo, an idea
+//! pioneered by fossil (though in a hard-coded form).
+//! 2. patch-based changes and first-class conflicts, an
+//! idea pioneered by pijul.
+//! 3. git compatibility, most likely implemented by keeping
+//! two different commit histories (a git-compatible one and
+//! a patch-based one).
+//!
+//! this will be a stupid amount of work with no guarantee
+//! of success, but good ol' radar has nothing better to do.
 //!
 //! "C'mon Alex! You always dreamt about going on a big adventure!
 //!  Let this be our first!" -- Lunar: Silver Star Story
