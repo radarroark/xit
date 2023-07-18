@@ -370,10 +370,10 @@ test "end to end" {
         defer license.close();
     }
 
-    // checkout second commit
+    // checkout master
     args.clearAndFree();
     try args.append("checkout");
-    try args.append(&commit2);
+    try args.append("master");
     try main.xitMain(allocator, &args);
 
     // the working tree was updated
