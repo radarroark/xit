@@ -412,6 +412,7 @@ test "end to end" {
             try expectEqual(5, index.entries.count());
             try std.testing.expect(index.entries.contains("README"));
             try std.testing.expect(index.entries.contains("src/zig/main.zig"));
+            try std.testing.expect(index.entries.contains("tests/main_test.zig"));
             try std.testing.expect(index.entries.contains("hello.txt/nested.txt"));
             try std.testing.expect(index.entries.contains("hello.txt/nested2.txt"));
         }
@@ -447,6 +448,7 @@ test "end to end" {
             try expectEqual(4, index.entries.count());
             try std.testing.expect(index.entries.contains("README"));
             try std.testing.expect(index.entries.contains("src/zig/main.zig"));
+            try std.testing.expect(index.entries.contains("tests/main_test.zig"));
             try std.testing.expect(index.entries.contains("hello.txt"));
         }
 
