@@ -24,6 +24,20 @@ pub const Index = struct {
     arena: std.heap.ArenaAllocator,
 
     pub const Entry = struct {
+        pub const Flags = packed struct {
+            name_length: u12,
+            stage: u2,
+            extended: bool,
+            assume_valid: bool,
+        };
+
+        pub const ExtendedFlags = packed struct {
+            unused: u13,
+            intent_to_add: bool,
+            skip_worktree: bool,
+            reserved: bool,
+        };
+
         ctime_secs: i32,
         ctime_nsecs: i32,
         mtime_secs: i32,
@@ -35,7 +49,8 @@ pub const Index = struct {
         gid: u32,
         file_size: u32,
         oid: [hash.SHA1_BYTES_LEN]u8,
-        path_size: u16,
+        flags: Flags,
+        extended_flags: ?ExtendedFlags,
         path: []const u8,
     };
 
@@ -90,13 +105,14 @@ pub const Index = struct {
                 .gid = try reader.readIntBig(u32),
                 .file_size = try reader.readIntBig(u32),
                 .oid = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN),
-                .path_size = try reader.readIntBig(u16),
+                .flags = @bitCast(try reader.readIntBig(u16)),
+                .extended_flags = null, // TODO: read this if necessary
                 .path = try reader.readUntilDelimiterAlloc(index.arena.allocator(), 0, std.fs.MAX_PATH_BYTES),
             };
             if (entry.mode != 100755) { // ensure mode is valid
                 entry.mode = 100644;
             }
-            if (entry.path.len != entry.path_size) {
+            if (entry.path.len != entry.flags.name_length) {
                 return error.InvalidPathSize;
             }
             var entry_size = try reader.context.getPos() - start_pos;
@@ -172,7 +188,13 @@ pub const Index = struct {
                     .gid = 0,
                     .file_size = @truncate(meta.size()),
                     .oid = oid,
-                    .path_size = @truncate(path.len),
+                    .flags = .{
+                        .name_length = @truncate(path.len),
+                        .stage = 0,
+                        .extended = false,
+                        .assume_valid = false,
+                    },
+                    .extended_flags = null,
                     .path = path,
                 };
                 try self.addEntry(entry);
@@ -300,7 +322,7 @@ pub const Index = struct {
             try writer.writeIntBig(u32, entry.gid);
             try writer.writeIntBig(u32, entry.file_size);
             try writer.writeAll(&entry.oid);
-            try writer.writeIntBig(u16, entry.path_size);
+            try writer.writeIntBig(u16, @as(u16, @bitCast(entry.flags)));
             try writer.writeAll(entry.path);
             while (entry_buffer.items.len % 8 != 0) {
                 try writer.print("\x00", .{});
