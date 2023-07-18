@@ -176,16 +176,17 @@ pub const Index = struct {
                 try object.writeBlobFromPath(self.allocator, repo_dir, path, &oid);
                 // add the entry
                 const times = getTimes(meta);
+                const stat = try getStat(file);
                 const entry = Index.Entry{
                     .ctime_secs = times.ctime_secs,
                     .ctime_nsecs = times.ctime_nsecs,
                     .mtime_secs = times.mtime_secs,
                     .mtime_nsecs = times.mtime_nsecs,
-                    .dev = 0,
-                    .ino = 0,
+                    .dev = stat.dev,
+                    .ino = stat.ino,
                     .mode = getMode(meta),
-                    .uid = 0,
-                    .gid = 0,
+                    .uid = stat.uid,
+                    .gid = stat.gid,
                     .file_size = @truncate(meta.size()),
                     .oid = oid,
                     .flags = .{
@@ -362,6 +363,33 @@ fn getTimes(meta: std.fs.File.Metadata) Times {
         .mtime_secs = @truncate(@divTrunc(mtime, std.time.ns_per_s)),
         .mtime_nsecs = @truncate(@mod(mtime, std.time.ns_per_s)),
     };
+}
+
+const Stat = struct {
+    dev: u32,
+    ino: u32,
+    uid: u32,
+    gid: u32,
+};
+
+fn getStat(file: std.fs.File) !Stat {
+    switch (builtin.os.tag) {
+        .windows => return .{
+            .dev = 0,
+            .ino = 0,
+            .uid = 0,
+            .gid = 0,
+        },
+        else => {
+            const stat = try std.os.fstat(file.handle);
+            return .{
+                .dev = @intCast(stat.dev),
+                .ino = @intCast(stat.ino),
+                .uid = stat.uid,
+                .gid = stat.gid,
+            };
+        },
+    }
 }
 
 pub fn indexDiffersFromWorkspace(entry: Index.Entry, file: std.fs.File, meta: std.fs.File.Metadata) !bool {
