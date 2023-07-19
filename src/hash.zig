@@ -15,13 +15,14 @@ const MAX_READ_BYTES = 1024;
 pub const SHA1_BYTES_LEN = std.crypto.hash.Sha1.digest_length;
 pub const SHA1_HEX_LEN = SHA1_BYTES_LEN * 2;
 
-pub fn sha1_file(file: std.fs.File, out: *[SHA1_BYTES_LEN]u8) !void {
+pub fn sha1_file(file: std.fs.File, header_maybe: ?[]const u8, out: *[SHA1_BYTES_LEN]u8) !void {
     var h = std.crypto.hash.Sha1.init(.{});
     var buffer = [_]u8{0} ** MAX_READ_BYTES;
-    var offset: u64 = 0;
+    if (header_maybe) |header| {
+        h.update(header);
+    }
     while (true) {
-        const size = try file.pread(&buffer, offset);
-        offset += size;
+        const size = try file.read(&buffer);
         if (size == 0) {
             break;
         }

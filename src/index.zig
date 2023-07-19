@@ -348,8 +348,13 @@ pub fn indexDiffersFromWorkspace(entry: Index.Entry, file: std.fs.File, meta: st
             times.mtime_secs != entry.mtime_secs or
             times.mtime_nsecs != entry.mtime_nsecs)
         {
+            // create blob header
+            const file_size = meta.size();
+            var header_buffer = [_]u8{0} ** 256; // should be plenty of space
+            const header = try std.fmt.bufPrint(&header_buffer, "blob {}\x00", .{file_size});
+
             var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-            try hash.sha1_file(file, &oid);
+            try hash.sha1_file(file, header, &oid);
             if (!std.mem.eql(u8, &entry.oid, &oid)) {
                 return true;
             }

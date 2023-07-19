@@ -67,8 +67,13 @@ pub const Tree = struct {
 };
 
 fn writeBlob(file: std.fs.File, meta: std.fs.File.Metadata, objects_dir: std.fs.Dir, allocator: std.mem.Allocator, sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8) !void {
+    // create blob header
+    const file_size = meta.size();
+    const header = try std.fmt.allocPrint(allocator, "blob {}\x00", .{file_size});
+    defer allocator.free(header);
+
     // calc the sha1 of its contents
-    try hash.sha1_file(file, sha1_bytes_buffer);
+    try hash.sha1_file(file, header, sha1_bytes_buffer);
     const sha1_hex = std.fmt.bytesToHex(sha1_bytes_buffer, .lower);
 
     // make the two char dir
@@ -92,12 +97,7 @@ fn writeBlob(file: std.fs.File, meta: std.fs.File.Metadata, objects_dir: std.fs.
     const tmp_file_name = "tmp_obj_" ++ rand_chars;
     const tmp_file = try hash_prefix_dir.createFile(tmp_file_name, .{ .read = true });
     defer tmp_file.close();
-
-    // create blob header
-    const file_size = meta.size();
-    const blob = try std.fmt.allocPrint(allocator, "blob {}\x00", .{file_size});
-    defer allocator.free(blob);
-    try tmp_file.writeAll(blob);
+    try tmp_file.writeAll(header);
 
     // copy file into temp file
     var read_buffer = [_]u8{0} ** MAX_FILE_READ_SIZE;

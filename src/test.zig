@@ -132,6 +132,27 @@ test "end to end" {
         }
     }
 
+    // make sure we are hashing files the same way git does
+    {
+        const readme = try repo_dir.openFile("README", .{});
+        defer readme.close();
+        const meta = try readme.metadata();
+        const file_size = meta.size();
+        const header = try std.fmt.allocPrint(allocator, "blob {}\x00", .{file_size});
+        defer allocator.free(header);
+
+        var sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+        try hash.sha1_file(readme, header, &sha1_bytes_buffer);
+        const sha1_hex = std.fmt.bytesToHex(&sha1_bytes_buffer, .lower);
+
+        var oid: c.git_oid = undefined;
+        try expectEqual(0, c.git_odb_hashfile(&oid, "README", c.GIT_OBJECT_BLOB));
+        var oid_str = c.git_oid_tostr_s(&oid);
+        try std.testing.expect(oid_str != null);
+
+        try std.testing.expectEqualStrings(&sha1_hex, std.mem.sliceTo(oid_str, 0));
+    }
+
     // get HEAD contents
     const commit1 = try ref.readHead(git_dir);
 
@@ -561,9 +582,7 @@ test "end to end" {
             status_options.flags = c.GIT_STATUS_OPT_INCLUDE_UNTRACKED;
             try expectEqual(0, c.git_status_list_new(&status_list, repo, &status_options));
             defer c.git_status_list_free(status_list);
-            // libgit is currently including indexed files, most likely
-            // because the repo itself is not completely valid right now
-            try expectEqual(6, c.git_status_list_entrycount(status_list));
+            try expectEqual(5, c.git_status_list_entrycount(status_list));
         }
 
         // index changes
