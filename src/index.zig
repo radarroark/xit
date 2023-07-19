@@ -187,10 +187,10 @@ pub const Index = struct {
                     .mode = getMode(meta),
                     .uid = stat.uid,
                     .gid = stat.gid,
-                    .file_size = @truncate(meta.size()),
+                    .file_size = @intCast(meta.size()),
                     .oid = oid,
                     .flags = .{
-                        .name_length = @truncate(path.len),
+                        .name_length = @intCast(path.len),
                         .stage = 0,
                         .extended = false,
                         .assume_valid = false,
@@ -298,7 +298,7 @@ pub const Index = struct {
 
         // write the header
         const version: u32 = 2;
-        const entry_count: u32 = @truncate(self.entries.count());
+        const entry_count: u32 = @intCast(self.entries.count());
         const header = try std.fmt.allocPrint(allocator, "DIRC{s}{s}", .{
             std.mem.asBytes(&std.mem.nativeToBig(u32, version)),
             std.mem.asBytes(&std.mem.nativeToBig(u32, entry_count)),
@@ -358,10 +358,10 @@ fn getTimes(meta: std.fs.File.Metadata) Times {
     const ctime = meta.created() orelse 0;
     const mtime = meta.modified();
     return Times{
-        .ctime_secs = @truncate(@divTrunc(ctime, std.time.ns_per_s)),
-        .ctime_nsecs = @truncate(@mod(ctime, std.time.ns_per_s)),
-        .mtime_secs = @truncate(@divTrunc(mtime, std.time.ns_per_s)),
-        .mtime_nsecs = @truncate(@mod(mtime, std.time.ns_per_s)),
+        .ctime_secs = @intCast(@divTrunc(ctime, std.time.ns_per_s)),
+        .ctime_nsecs = @intCast(@mod(ctime, std.time.ns_per_s)),
+        .mtime_secs = @intCast(@divTrunc(mtime, std.time.ns_per_s)),
+        .mtime_nsecs = @intCast(@mod(mtime, std.time.ns_per_s)),
     };
 }
 
