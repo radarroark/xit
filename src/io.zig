@@ -68,10 +68,10 @@ pub fn modeEquals(m1: Mode, m2: Mode) bool {
 }
 
 pub const Times = struct {
-    ctime_secs: i32,
-    ctime_nsecs: i32,
-    mtime_secs: i32,
-    mtime_nsecs: i32,
+    ctime_secs: u32,
+    ctime_nsecs: u32,
+    mtime_secs: u32,
+    mtime_nsecs: u32,
 };
 
 pub fn getTimes(meta: std.fs.File.Metadata) Times {

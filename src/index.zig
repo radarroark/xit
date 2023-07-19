@@ -37,10 +37,10 @@ pub const Index = struct {
             reserved: bool,
         };
 
-        ctime_secs: i32,
-        ctime_nsecs: i32,
-        mtime_secs: i32,
-        mtime_nsecs: i32,
+        ctime_secs: u32,
+        ctime_nsecs: u32,
+        mtime_secs: u32,
+        mtime_nsecs: u32,
         dev: u32,
         ino: u32,
         mode: io.Mode,
@@ -93,10 +93,10 @@ pub const Index = struct {
             entry_count -= 1;
             const start_pos = try reader.context.getPos();
             var entry = Index.Entry{
-                .ctime_secs = try reader.readIntBig(i32),
-                .ctime_nsecs = try reader.readIntBig(i32),
-                .mtime_secs = try reader.readIntBig(i32),
-                .mtime_nsecs = try reader.readIntBig(i32),
+                .ctime_secs = try reader.readIntBig(u32),
+                .ctime_nsecs = try reader.readIntBig(u32),
+                .mtime_secs = try reader.readIntBig(u32),
+                .mtime_nsecs = try reader.readIntBig(u32),
                 .dev = try reader.readIntBig(u32),
                 .ino = try reader.readIntBig(u32),
                 .mode = @bitCast(try reader.readIntBig(u32)),
@@ -311,10 +311,10 @@ pub const Index = struct {
             var entry_buffer = std.ArrayList(u8).init(allocator);
             defer entry_buffer.deinit();
             const writer = entry_buffer.writer();
-            try writer.writeIntBig(i32, entry.ctime_secs);
-            try writer.writeIntBig(i32, entry.ctime_nsecs);
-            try writer.writeIntBig(i32, entry.mtime_secs);
-            try writer.writeIntBig(i32, entry.mtime_nsecs);
+            try writer.writeIntBig(u32, entry.ctime_secs);
+            try writer.writeIntBig(u32, entry.ctime_nsecs);
+            try writer.writeIntBig(u32, entry.mtime_secs);
+            try writer.writeIntBig(u32, entry.mtime_nsecs);
             try writer.writeIntBig(u32, entry.dev);
             try writer.writeIntBig(u32, entry.ino);
             try writer.writeIntBig(u32, @as(u32, @bitCast(entry.mode)));
