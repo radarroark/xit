@@ -82,7 +82,7 @@ fn createFileFromObject(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, path
     defer in_file.close();
 
     // open the out file
-    const out_file = try repo_dir.createFile(path, .{ .mode = tree_entry.mode });
+    const out_file = try repo_dir.createFile(path, .{ .mode = @as(u32, @bitCast(tree_entry.mode)) });
     defer out_file.close();
 
     // create the file
@@ -122,7 +122,7 @@ pub const TreeToIndexChange = enum {
 fn compareTreeToIndex(item_maybe: ?obj.TreeEntry, entry_maybe: ?idx.Index.Entry) TreeToIndexChange {
     if (item_maybe) |item| {
         if (entry_maybe) |entry| {
-            if (entry.mode != item.mode or !std.mem.eql(u8, &entry.oid, &item.oid)) {
+            if (!io.modeEquals(entry.mode, item.mode) or !std.mem.eql(u8, &entry.oid, &item.oid)) {
                 return .modified;
             } else {
                 return .none;

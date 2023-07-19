@@ -10,6 +10,7 @@ const idx = @import("./index.zig");
 const hash = @import("./hash.zig");
 const obj = @import("./object.zig");
 const ref = @import("./ref.zig");
+const io = @import("./io.zig");
 
 pub const Status = struct {
     untracked: std.ArrayList(Entry),
@@ -68,7 +69,7 @@ pub const Status = struct {
 
         for (index.entries.values()) |index_entry| {
             if (head_tree.entries.get(index_entry.path)) |head_entry| {
-                if (index_entry.mode != head_entry.mode or !std.mem.eql(u8, &index_entry.oid, &head_entry.oid)) {
+                if (!io.modeEquals(index_entry.mode, head_entry.mode) or !std.mem.eql(u8, &index_entry.oid, &head_entry.oid)) {
                     try index_modified.append(index_entry.path);
                 }
             } else {

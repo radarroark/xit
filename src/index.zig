@@ -2,7 +2,6 @@
 //! command will use this when creating the tree.
 
 const std = @import("std");
-const builtin = @import("builtin");
 const object = @import("./object.zig");
 const hash = @import("./hash.zig");
 const io = @import("./io.zig");
@@ -24,14 +23,14 @@ pub const Index = struct {
     arena: std.heap.ArenaAllocator,
 
     pub const Entry = struct {
-        pub const Flags = packed struct {
+        pub const Flags = packed struct(u16) {
             name_length: u12,
             stage: u2,
             extended: bool,
             assume_valid: bool,
         };
 
-        pub const ExtendedFlags = packed struct {
+        pub const ExtendedFlags = packed struct(u16) {
             unused: u13,
             intent_to_add: bool,
             skip_worktree: bool,
@@ -44,7 +43,7 @@ pub const Index = struct {
         mtime_nsecs: i32,
         dev: u32,
         ino: u32,
-        mode: u32,
+        mode: io.Mode,
         uid: u32,
         gid: u32,
         file_size: u32,
@@ -100,7 +99,7 @@ pub const Index = struct {
                 .mtime_nsecs = try reader.readIntBig(i32),
                 .dev = try reader.readIntBig(u32),
                 .ino = try reader.readIntBig(u32),
-                .mode = try reader.readIntBig(u32),
+                .mode = @bitCast(try reader.readIntBig(u32)),
                 .uid = try reader.readIntBig(u32),
                 .gid = try reader.readIntBig(u32),
                 .file_size = try reader.readIntBig(u32),
@@ -109,8 +108,8 @@ pub const Index = struct {
                 .extended_flags = null, // TODO: read this if necessary
                 .path = try reader.readUntilDelimiterAlloc(index.arena.allocator(), 0, std.fs.MAX_PATH_BYTES),
             };
-            if (entry.mode != 100755) { // ensure mode is valid
-                entry.mode = 100644;
+            if (entry.mode.unix_permission != 0o755) { // ensure mode is valid
+                entry.mode.unix_permission = 0o644;
             }
             if (entry.path.len != entry.flags.name_length) {
                 return error.InvalidPathSize;
@@ -175,8 +174,8 @@ pub const Index = struct {
                 var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
                 try object.writeBlobFromPath(self.allocator, repo_dir, path, &oid);
                 // add the entry
-                const times = getTimes(meta);
-                const stat = try getStat(file);
+                const times = io.getTimes(meta);
+                const stat = try io.getStat(file);
                 const entry = Index.Entry{
                     .ctime_secs = times.ctime_secs,
                     .ctime_nsecs = times.ctime_nsecs,
@@ -184,7 +183,7 @@ pub const Index = struct {
                     .mtime_nsecs = times.mtime_nsecs,
                     .dev = stat.dev,
                     .ino = stat.ino,
-                    .mode = getMode(meta),
+                    .mode = io.getMode(meta),
                     .uid = stat.uid,
                     .gid = stat.gid,
                     .file_size = @intCast(meta.size()),
@@ -318,7 +317,7 @@ pub const Index = struct {
             try writer.writeIntBig(i32, entry.mtime_nsecs);
             try writer.writeIntBig(u32, entry.dev);
             try writer.writeIntBig(u32, entry.ino);
-            try writer.writeIntBig(u32, entry.mode);
+            try writer.writeIntBig(u32, @as(u32, @bitCast(entry.mode)));
             try writer.writeIntBig(u32, entry.uid);
             try writer.writeIntBig(u32, entry.gid);
             try writer.writeIntBig(u32, entry.file_size);
@@ -339,64 +338,11 @@ pub const Index = struct {
     }
 };
 
-fn getMode(meta: std.fs.File.Metadata) u32 {
-    const is_executable = switch (builtin.os.tag) {
-        .windows => false,
-        else => meta.permissions().inner.unixHas(std.fs.File.PermissionsUnix.Class.user, .execute),
-    };
-    return if (is_executable) 100755 else 100644;
-}
-
-const Times = struct {
-    ctime_secs: i32,
-    ctime_nsecs: i32,
-    mtime_secs: i32,
-    mtime_nsecs: i32,
-};
-
-fn getTimes(meta: std.fs.File.Metadata) Times {
-    const ctime = meta.created() orelse 0;
-    const mtime = meta.modified();
-    return Times{
-        .ctime_secs = @intCast(@divTrunc(ctime, std.time.ns_per_s)),
-        .ctime_nsecs = @intCast(@mod(ctime, std.time.ns_per_s)),
-        .mtime_secs = @intCast(@divTrunc(mtime, std.time.ns_per_s)),
-        .mtime_nsecs = @intCast(@mod(mtime, std.time.ns_per_s)),
-    };
-}
-
-const Stat = struct {
-    dev: u32,
-    ino: u32,
-    uid: u32,
-    gid: u32,
-};
-
-fn getStat(file: std.fs.File) !Stat {
-    switch (builtin.os.tag) {
-        .windows => return .{
-            .dev = 0,
-            .ino = 0,
-            .uid = 0,
-            .gid = 0,
-        },
-        else => {
-            const stat = try std.os.fstat(file.handle);
-            return .{
-                .dev = @intCast(stat.dev),
-                .ino = @intCast(stat.ino),
-                .uid = stat.uid,
-                .gid = stat.gid,
-            };
-        },
-    }
-}
-
 pub fn indexDiffersFromWorkspace(entry: Index.Entry, file: std.fs.File, meta: std.fs.File.Metadata) !bool {
-    if (meta.size() != entry.file_size or getMode(meta) != entry.mode) {
+    if (meta.size() != entry.file_size or !io.modeEquals(io.getMode(meta), entry.mode)) {
         return true;
     } else {
-        const times = getTimes(meta);
+        const times = io.getTimes(meta);
         if (times.ctime_secs != entry.ctime_secs or
             times.ctime_nsecs != entry.ctime_nsecs or
             times.mtime_secs != entry.mtime_secs or

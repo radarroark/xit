@@ -9,6 +9,7 @@ const compress = @import("./compress.zig");
 const cmd = @import("./command.zig");
 const idx = @import("./index.zig");
 const ref = @import("./ref.zig");
+const io = @import("./io.zig");
 
 const MAX_FILE_READ_SIZE: comptime_int = 1000; // FIXME: this is arbitrary...
 
@@ -53,8 +54,8 @@ pub const Tree = struct {
         self.entries.deinit();
     }
 
-    pub fn addBlobEntry(self: *Tree, mode: u32, name: []const u8, oid: []const u8) !void {
-        const mode_str = if (mode == 100755) "100755" else "100644";
+    pub fn addBlobEntry(self: *Tree, mode: io.Mode, name: []const u8, oid: []const u8) !void {
+        const mode_str = if (mode.unix_permission == 0o755) "100755" else "100644";
         const entry = try std.fmt.allocPrint(self.allocator, "{s} {s}\x00{s}", .{ mode_str, name, oid });
         try self.entries.append(entry);
     }
@@ -347,15 +348,15 @@ pub const ObjectKind = enum {
 
 pub const TreeEntry = struct {
     oid: [hash.SHA1_BYTES_LEN]u8,
-    mode: u32,
+    mode: io.Mode,
 
     pub fn eql(self: TreeEntry, other: TreeEntry) bool {
-        return std.mem.eql(u8, &self.oid, &other.oid) and self.mode == other.mode;
+        return std.mem.eql(u8, &self.oid, &other.oid) and io.modeEquals(self.mode, other.mode);
     }
 };
 
 pub fn isTree(entry: TreeEntry) bool {
-    return entry.mode == 40000;
+    return entry.mode.object_type == .tree;
 }
 
 pub const ObjectContent = union(ObjectKind) {
@@ -424,21 +425,21 @@ pub const Object = struct {
             }
 
             while (true) {
-                const entry_mode = reader.readUntilDelimiterAlloc(allocator, ' ', MAX_FILE_READ_SIZE) catch |err| {
+                const entry_mode_str = reader.readUntilDelimiterAlloc(allocator, ' ', MAX_FILE_READ_SIZE) catch |err| {
                     switch (err) {
                         error.EndOfStream => break,
                         else => return err,
                     }
                 };
-                defer allocator.free(entry_mode);
-                const entry_mode_num = try std.fmt.parseInt(u32, entry_mode, 10);
+                defer allocator.free(entry_mode_str);
+                const entry_mode: io.Mode = @bitCast(try std.fmt.parseInt(u32, entry_mode_str, 8));
 
                 const entry_name = try reader.readUntilDelimiterAlloc(allocator, 0, MAX_FILE_READ_SIZE);
                 errdefer allocator.free(entry_name);
 
                 const entry_oid = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
 
-                try entries.put(entry_name, TreeEntry{ .oid = entry_oid, .mode = entry_mode_num });
+                try entries.put(entry_name, TreeEntry{ .oid = entry_oid, .mode = entry_mode });
             }
 
             return Object{
