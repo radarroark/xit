@@ -381,6 +381,7 @@ pub const ObjectReadError = error{
 
 pub const Object = struct {
     allocator: std.mem.Allocator,
+    arena: std.heap.ArenaAllocator,
     content: ObjectContent,
 
     pub fn init(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, oid: [hash.SHA1_HEX_LEN]u8) !Object {
@@ -413,37 +414,31 @@ pub const Object = struct {
         if (std.mem.eql(u8, "blob", object_kind)) {
             return Object{
                 .allocator = allocator,
+                .arena = std.heap.ArenaAllocator.init(allocator),
                 .content = ObjectContent{ .blob = {} },
             };
         } else if (std.mem.eql(u8, "tree", object_kind)) {
-            var entries = std.StringArrayHashMap(TreeEntry).init(allocator);
-            errdefer {
-                for (entries.keys()) |key| {
-                    allocator.free(key);
-                }
-                entries.deinit();
-            }
+            var arena = std.heap.ArenaAllocator.init(allocator);
+            errdefer arena.deinit();
+
+            var entries = std.StringArrayHashMap(TreeEntry).init(arena.allocator());
 
             while (true) {
-                const entry_mode_str = reader.readUntilDelimiterAlloc(allocator, ' ', MAX_FILE_READ_SIZE) catch |err| {
+                const entry_mode_str = reader.readUntilDelimiterAlloc(arena.allocator(), ' ', MAX_FILE_READ_SIZE) catch |err| {
                     switch (err) {
                         error.EndOfStream => break,
                         else => return err,
                     }
                 };
-                defer allocator.free(entry_mode_str);
                 const entry_mode: io.Mode = @bitCast(try std.fmt.parseInt(u32, entry_mode_str, 8));
-
-                const entry_name = try reader.readUntilDelimiterAlloc(allocator, 0, MAX_FILE_READ_SIZE);
-                errdefer allocator.free(entry_name);
-
+                const entry_name = try reader.readUntilDelimiterAlloc(arena.allocator(), 0, MAX_FILE_READ_SIZE);
                 const entry_oid = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
-
                 try entries.put(entry_name, TreeEntry{ .oid = entry_oid, .mode = entry_mode });
             }
 
             return Object{
                 .allocator = allocator,
+                .arena = arena,
                 .content = ObjectContent{ .tree = .{ .entries = entries } },
             };
         } else if (std.mem.eql(u8, "commit", object_kind)) {
@@ -464,6 +459,7 @@ pub const Object = struct {
             // init the object
             var object = Object{
                 .allocator = allocator,
+                .arena = std.heap.ArenaAllocator.init(allocator),
                 .content = ObjectContent{
                     .commit = .{
                         .tree = undefined,
@@ -474,20 +470,14 @@ pub const Object = struct {
                     },
                 },
             };
+            errdefer object.arena.deinit();
             std.mem.copy(u8, &object.content.commit.tree, tree_hash_slice);
 
             // read the metadata
             var metadata = std.StringHashMap([]const u8).init(allocator);
-            defer {
-                var iter = metadata.valueIterator();
-                while (iter.next()) |value| {
-                    allocator.free(value.*);
-                }
-                metadata.deinit();
-            }
+            defer metadata.deinit();
             while (true) {
-                const line = try reader.readUntilDelimiterAlloc(allocator, '\n', MAX_FILE_READ_SIZE);
-                defer allocator.free(line);
+                const line = try reader.readUntilDelimiterAlloc(object.arena.allocator(), '\n', MAX_FILE_READ_SIZE);
                 if (line.len == 0) {
                     break;
                 }
@@ -497,15 +487,12 @@ pub const Object = struct {
                     }
                     const key = line[0..line_idx];
                     const value = line[line_idx + 1 ..];
-                    var value_copy = try allocator.alloc(u8, value.len);
-                    std.mem.copy(u8, value_copy, value);
-                    try metadata.put(key, value_copy);
+                    try metadata.put(key, value);
                 }
             }
 
             // read the message
-            object.content.commit.message = try reader.readAllAlloc(allocator, MAX_FILE_READ_SIZE);
-            errdefer allocator.free(object.content.commit.message);
+            object.content.commit.message = try reader.readAllAlloc(object.arena.allocator(), MAX_FILE_READ_SIZE);
 
             // set metadata fields
             if (metadata.fetchRemove("parent")) |parent| {
@@ -528,27 +515,7 @@ pub const Object = struct {
     }
 
     pub fn deinit(self: *Object) void {
-        switch (self.content) {
-            .blob => {},
-            .tree => {
-                for (self.content.tree.entries.keys()) |key| {
-                    self.allocator.free(key);
-                }
-                self.content.tree.entries.deinit();
-            },
-            .commit => {
-                if (self.content.commit.parent) |parent| {
-                    self.allocator.free(parent);
-                }
-                if (self.content.commit.parent) |author| {
-                    self.allocator.free(author);
-                }
-                if (self.content.commit.committer) |committer| {
-                    self.allocator.free(committer);
-                }
-                self.allocator.free(self.content.commit.message);
-            },
-        }
+        self.arena.deinit();
     }
 };
 
