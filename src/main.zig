@@ -21,13 +21,8 @@
 
 const std = @import("std");
 const hash = @import("./hash.zig");
-const obj = @import("./object.zig");
 const cmd = @import("./command.zig");
-const idx = @import("./index.zig");
-const stat = @import("./status.zig");
-const branch = @import("./branch.zig");
-const chk = @import("./checkout.zig");
-const ref = @import("./ref.zig");
+const Repo = @import("./repo.zig").Repo;
 
 /// takes the args passed to this program and puts them
 /// in an arraylist. do we need to do this? i don't know,
@@ -49,14 +44,11 @@ fn appendArgs(out: *std.ArrayList([]const u8)) !void {
 /// this is meant to be the main entry point if you wanted to use xit
 /// as a library. there will definitely be more specialized functions
 /// you can call as well, but if you just want to pass the CLI args and
-/// have it behave just like the standalone git client than this is
+/// have it behave just like the standalone xit client than this is
 /// where it's at, homie.
 pub fn xitMain(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8)) !void {
     var command = try cmd.Command.init(allocator, args);
     defer command.deinit();
-
-    const stdout = std.io.getStdOut().writer();
-    const stderr = std.io.getStdErr().writer();
 
     // get the cwd path
     var cwd_path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
@@ -64,124 +56,11 @@ pub fn xitMain(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8)) !
     var cwd = try std.fs.openDirAbsolute(cwd_path, .{});
     defer cwd.close();
 
-    switch (command.data) {
-        cmd.CommandData.invalid => {
-            try stderr.print("\"{s}\" is not a valid command\n", .{command.data.invalid.name});
-            return;
-        },
-        cmd.CommandData.usage => {
-            try stdout.print(
-                \\usage: xit
-                \\
-                \\start a working area:
-                \\   init
-                \\
-            , .{});
-        },
-        cmd.CommandData.init => {
-            // get the root dir. no path was given to the init command, this
-            // should just be the current working directory (cwd). if a path was
-            // given, it should either append it to the cwd or, if it is absolute,
-            // it should just use that path alone. IT'S MAGIC!
-            var repo_dir = try std.fs.cwd().makeOpenPath(command.data.init.dir, .{});
-            defer repo_dir.close();
-
-            // make the .git dir. right now we're throwing an error if it already
-            // exists. in git it says "Reinitialized existing Git repository" so
-            // we'll need to do that eventually.
-            repo_dir.makeDir(".git") catch |err| {
-                switch (err) {
-                    error.PathAlreadyExists => {
-                        try stderr.print("{s} is already a repository\n", .{command.data.init.dir});
-                        return;
-                    },
-                    else => return err,
-                }
-            };
-
-            // make a few dirs inside of .git
-            var git_dir = try repo_dir.openDir(".git", .{});
-            defer git_dir.close();
-            var objects_dir = try git_dir.makeOpenPath("objects", .{});
-            defer objects_dir.close();
-            var refs_dir = try git_dir.makeOpenPath("refs", .{});
-            defer refs_dir.close();
-            var heads_dir = try refs_dir.makeOpenPath("heads", .{});
-            defer heads_dir.close();
-
-            // update HEAD
-            try ref.writeHead(allocator, git_dir, "master", null);
-        },
-        cmd.CommandData.add => {
-            try idx.writeIndex(allocator, cwd, command.data.add.paths);
-        },
-        cmd.CommandData.commit => {
-            try obj.writeCommit(allocator, cwd, command.data);
-        },
-        cmd.CommandData.status => {
-            var git_dir = try cwd.openDir(".git", .{});
-            defer git_dir.close();
-
-            var status = try stat.Status.init(allocator, cwd, git_dir);
-            defer status.deinit();
-
-            for (status.untracked.items) |entry| {
-                try stdout.print("?? {s}\n", .{entry.path});
-            }
-
-            for (status.workspace_modified.items) |entry| {
-                try stdout.print(" M {s}\n", .{entry.path});
-            }
-
-            for (status.workspace_deleted.items) |path| {
-                try stdout.print(" D {s}\n", .{path});
-            }
-
-            for (status.index_added.items) |path| {
-                try stdout.print("A  {s}\n", .{path});
-            }
-
-            for (status.index_modified.items) |path| {
-                try stdout.print("M  {s}\n", .{path});
-            }
-
-            for (status.index_deleted.items) |path| {
-                try stdout.print("D  {s}\n", .{path});
-            }
-        },
-        cmd.CommandData.branch => {
-            var git_dir = try cwd.openDir(".git", .{});
-            defer git_dir.close();
-
-            if (command.data.branch.name) |name| {
-                try branch.create(allocator, git_dir, name);
-            } else {
-                var current_branch_maybe = try ref.Ref.initWithPath(allocator, git_dir, "HEAD");
-                defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
-
-                var ref_list = try ref.RefList.init(allocator, git_dir, "heads");
-                defer ref_list.deinit();
-
-                for (ref_list.refs.items) |r| {
-                    const is_current_branch = if (current_branch_maybe) |current_branch|
-                        std.mem.eql(u8, current_branch.name, r.name)
-                    else
-                        false;
-                    try stdout.print("{s} {s}\n", .{ if (is_current_branch) "*" else " ", r.name });
-                }
-            }
-        },
-        cmd.CommandData.checkout => {
-            var result = chk.CheckoutResult.init();
-            defer result.deinit();
-            chk.checkout(allocator, cwd, command.data.checkout.target, &result) catch |err| {
-                switch (err) {
-                    error.CheckoutConflict => {},
-                    else => return err,
-                }
-            };
-        },
-    }
+    var repo = Repo(.git).init(allocator, .{
+        .cwd = cwd,
+    });
+    defer repo.deinit();
+    try repo.command(command.data);
 }
 
 /// this is the main "main". it's even mainier than xitMain.
