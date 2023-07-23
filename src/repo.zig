@@ -34,17 +34,12 @@ pub fn Repo(comptime kind: RepoKind) type {
             },
         };
 
-        pub fn init(allocator: std.mem.Allocator, opts: InitOpts) !Repo(kind) {
+        pub fn init(allocator: std.mem.Allocator, opts: InitOpts) Repo(kind) {
             return .{
                 .allocator = allocator,
                 .core = switch (kind) {
                     .git => blk: {
-                        var git_dir_maybe: ?std.fs.Dir = opts.cwd.openDir(".git", .{}) catch |err| open_dir_blk: {
-                            switch (err) {
-                                error.FileNotFound => break :open_dir_blk null,
-                                else => return err,
-                            }
-                        };
+                        var git_dir_maybe = opts.cwd.openDir(".git", .{}) catch null;
                         defer if (git_dir_maybe) |*git_dir| git_dir.close();
                         break :blk .{
                             .repo_dir_maybe = if (git_dir_maybe == null) null else opts.cwd,
