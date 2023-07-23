@@ -13,6 +13,7 @@ pub const RepoKind = enum {
 
 pub const RepoErrors = error{
     NotARepo,
+    RepoAlreadyCreated,
 };
 
 pub fn Repo(comptime kind: RepoKind) type {
@@ -85,6 +86,10 @@ pub fn Repo(comptime kind: RepoKind) type {
                     , .{});
                 },
                 cmd.CommandData.init => {
+                    if (self.core.repo_dir_created) {
+                        return error.RepoAlreadyCreated;
+                    }
+
                     // get the root dir. no path was given to the init command, this
                     // should just be the current working directory (cwd). if a path was
                     // given, it should either append it to the cwd or, if it is absolute,
