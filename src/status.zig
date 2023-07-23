@@ -183,19 +183,17 @@ pub const HeadTree = struct {
         var entries = std.StringHashMap(obj.TreeEntry).init(allocator);
         errdefer entries.deinit();
 
-        // get HEAD contents
-        const head_file_buffer = try ref.readHead(git_dir);
-
-        // read commit
-        var commit_object = try obj.Object.init(allocator, repo_dir, head_file_buffer);
-        defer commit_object.deinit();
-
         var tree = HeadTree{
             .entries = entries,
             .arena = std.heap.ArenaAllocator.init(allocator),
         };
 
-        try tree.read(repo_dir, "", commit_object.content.commit.tree);
+        // if head points to a valid object, read it
+        if (try ref.readHeadMaybe(git_dir)) |head_file_buffer| {
+            var commit_object = try obj.Object.init(allocator, repo_dir, head_file_buffer);
+            defer commit_object.deinit();
+            try tree.read(repo_dir, "", commit_object.content.commit.tree);
+        }
 
         return tree;
     }

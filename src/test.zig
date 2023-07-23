@@ -62,6 +62,12 @@ test "end to end" {
     const repo_path: [*c]const u8 = @ptrCast(try repo_dir.realpath(".", &repo_path_buffer));
     var repo: ?*c.git_repository = null;
 
+    // make sure we can get status before first commit
+    {
+        var status = try stat.Status.init(allocator, repo_dir, git_dir);
+        defer status.deinit();
+    }
+
     // add and commit
     {
         // make file
