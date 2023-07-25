@@ -56,7 +56,7 @@ pub fn xitMain(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8)) !
     var cwd = try std.fs.openDirAbsolute(cwd_path, .{});
     defer cwd.close();
 
-    var repo = Repo(.git).init(allocator, .{
+    var repo = try Repo(.git).init(allocator, .{
         .cwd = cwd,
     });
     defer repo.deinit();

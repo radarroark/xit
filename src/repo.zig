@@ -24,7 +24,6 @@ pub fn Repo(comptime kind: RepoKind) type {
         pub const Core = switch (kind) {
             .git => struct {
                 repo_dir_maybe: ?std.fs.Dir,
-                repo_dir_created: bool,
             },
         };
 
@@ -34,7 +33,7 @@ pub fn Repo(comptime kind: RepoKind) type {
             },
         };
 
-        pub fn init(allocator: std.mem.Allocator, opts: InitOpts) Repo(kind) {
+        pub fn init(allocator: std.mem.Allocator, opts: InitOpts) !Repo(kind) {
             return .{
                 .allocator = allocator,
                 .core = switch (kind) {
@@ -42,8 +41,7 @@ pub fn Repo(comptime kind: RepoKind) type {
                         var git_dir_maybe = opts.cwd.openDir(".git", .{}) catch null;
                         defer if (git_dir_maybe) |*git_dir| git_dir.close();
                         break :blk .{
-                            .repo_dir_maybe = if (git_dir_maybe == null) null else opts.cwd,
-                            .repo_dir_created = false,
+                            .repo_dir_maybe = if (git_dir_maybe == null) null else try opts.cwd.openDir(".", .{}),
                         };
                     },
                 },
@@ -53,10 +51,9 @@ pub fn Repo(comptime kind: RepoKind) type {
         pub fn deinit(self: *Repo(kind)) void {
             switch (kind) {
                 .git => {
-                    if (self.core.repo_dir_created) {
-                        if (self.core.repo_dir_maybe) |*repo_dir| {
-                            repo_dir.close();
-                        }
+                    if (self.core.repo_dir_maybe) |*repo_dir| {
+                        repo_dir.close();
+                        self.core.repo_dir_maybe = null;
                     }
                 },
             }
@@ -81,9 +78,8 @@ pub fn Repo(comptime kind: RepoKind) type {
                     , .{});
                 },
                 cmd.CommandData.init => {
-                    if (self.core.repo_dir_created) {
-                        return error.RepoAlreadyCreated;
-                    }
+                    // release any existing resources because we are creating a new repo
+                    self.deinit();
 
                     // get the root dir. no path was given to the init command, this
                     // should just be the current working directory (cwd). if a path was
@@ -92,7 +88,6 @@ pub fn Repo(comptime kind: RepoKind) type {
                     var repo_dir = try std.fs.cwd().makeOpenPath(cmd_data.init.dir, .{});
                     errdefer repo_dir.close();
                     self.core.repo_dir_maybe = repo_dir;
-                    self.core.repo_dir_created = true;
 
                     // make the .git dir. right now we're throwing an error if it already
                     // exists. in git it says "Reinitialized existing Git repository" so
