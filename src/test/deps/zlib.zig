@@ -18,7 +18,7 @@ pub const Library = struct {
     step: *std.build.LibExeObjStep,
 
     pub fn link(self: Library, other: *std.build.LibExeObjStep, opts: Options) void {
-        other.addIncludePath(include_dir);
+        other.addIncludePath(.{ .cwd_relative = include_dir });
         other.linkLibrary(self.step);
 
         if (opts.import_name) |import_name|

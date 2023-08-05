@@ -8,7 +8,7 @@ pub const Library = struct {
     step: *CompileStep,
 
     pub fn link(self: Library, other: *CompileStep) void {
-        other.addIncludePath(include_dir);
+        other.addIncludePath(.{ .cwd_relative = include_dir });
         other.linkLibrary(self.step);
     }
 };
@@ -27,8 +27,8 @@ pub fn create(b: *Builder, target: std.zig.CrossTarget, optimize: std.builtin.Op
         .target = target,
         .optimize = optimize,
     });
-    ret.addIncludePath(include_dir);
-    ret.addIncludePath(library_include);
+    ret.addIncludePath(.{ .cwd_relative = include_dir });
+    ret.addIncludePath(.{ .cwd_relative = library_include });
 
     // not sure why, but mbedtls has runtime issues when it's not built as
     // release-small or with the -Os flag, definitely need to figure out what's

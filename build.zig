@@ -41,7 +41,7 @@ pub fn build(b: *std.build.Builder) !void {
         .optimize = optimize,
     });
     unit_tests.linkLibC();
-    unit_tests.addIncludePath("src/test/deps/libgit2/include");
+    unit_tests.addIncludePath(.{ .path = "src/test/deps/libgit2/include" });
     unit_tests.linkLibrary(git2.step);
 
     const run_unit_tests = b.addRunArtifact(unit_tests);

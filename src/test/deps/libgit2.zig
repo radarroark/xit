@@ -13,7 +13,7 @@ pub const Library = struct {
     step: *std.build.LibExeObjStep,
 
     pub fn link(self: Library, other: *std.build.LibExeObjStep) void {
-        other.addIncludePath(include_dir);
+        other.addIncludePath(.{ .cwd_relative = include_dir });
         other.linkLibrary(self.step);
     }
 };
@@ -84,11 +84,11 @@ pub fn create(
         "-DMAX_NAME_COUNT=10000",
     });
 
-    ret.addIncludePath(include_dir);
-    ret.addIncludePath(root_path ++ "libgit2/src/libgit2");
-    ret.addIncludePath(root_path ++ "libgit2/src/util");
-    ret.addIncludePath(root_path ++ "libgit2/deps/pcre");
-    ret.addIncludePath(root_path ++ "libgit2/deps/http-parser");
+    ret.addIncludePath(.{ .cwd_relative = include_dir });
+    ret.addIncludePath(.{ .cwd_relative = root_path ++ "libgit2/src/libgit2" });
+    ret.addIncludePath(.{ .cwd_relative = root_path ++ "libgit2/src/util" });
+    ret.addIncludePath(.{ .cwd_relative = root_path ++ "libgit2/deps/pcre" });
+    ret.addIncludePath(.{ .cwd_relative = root_path ++ "libgit2/deps/http-parser" });
     ret.linkLibC();
 
     return Library{ .step = ret };
