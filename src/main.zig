@@ -56,11 +56,8 @@ pub fn xitMain(comptime kind: rp.RepoKind, allocator: std.mem.Allocator, args: *
     var cwd = try std.fs.openDirAbsolute(cwd_path, .{});
     defer cwd.close();
 
-    var repo = try rp.Repo(kind).init(allocator, .{
-        .cwd = cwd,
-    });
+    var repo = try rp.Repo(kind).initWithCommand(allocator, .{ .cwd = cwd }, command.data);
     defer repo.deinit();
-    try repo.command(command.data);
 }
 
 /// this is the main "main". it's even mainier than xitMain.

@@ -86,10 +86,10 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
 
     // make sure we can get status before first commit
     {
-        var repo = try rp.Repo(kind).init(allocator, .{ .cwd = repo_dir });
+        var repo = (try rp.Repo(kind).init(allocator, .{ .cwd = repo_dir })).?;
         defer repo.deinit();
-        var stat = try repo.status();
-        defer stat.deinit();
+        var status = try repo.status();
+        defer status.deinit();
     }
 
     // add and commit
@@ -567,7 +567,7 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
         // workspace changes
         {
             // get status
-            var repo = try rp.Repo(kind).init(allocator, .{ .cwd = repo_dir });
+            var repo = (try rp.Repo(kind).init(allocator, .{ .cwd = repo_dir })).?;
             defer repo.deinit();
             var status = try repo.status();
             defer status.deinit();
@@ -634,7 +634,7 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
             try main.xitMain(kind, allocator, &args);
 
             // get status
-            var repo = try rp.Repo(kind).init(allocator, .{ .cwd = repo_dir });
+            var repo = (try rp.Repo(kind).init(allocator, .{ .cwd = repo_dir })).?;
             defer repo.deinit();
             var status = try repo.status();
             defer status.deinit();
