@@ -7,6 +7,7 @@ const obj = @import("./object.zig");
 const ref = @import("./ref.zig");
 const chk = @import("./checkout.zig");
 const branch = @import("./branch.zig");
+const rp = @import("./repo.zig");
 
 const c = @cImport({
     @cInclude("git2.h");
@@ -16,16 +17,15 @@ pub fn expectEqual(expected: anytype, actual: anytype) !void {
     try std.testing.expectEqual(@as(@TypeOf(actual), expected), actual);
 }
 
-test "end to end" {
+fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
     const temp_dir_name = "temp-test-end-to-end";
 
-    const allocator = std.testing.allocator;
     var args = std.ArrayList([]const u8).init(allocator);
     defer args.deinit();
 
     // start libgit
-    _ = c.git_libgit2_init();
-    defer _ = c.git_libgit2_shutdown();
+    if (kind == .git) _ = c.git_libgit2_init();
+    defer _ = if (kind == .git) c.git_libgit2_shutdown();
 
     // get the current working directory path.
     // we can't just call std.fs.cwd() all the time because we're
@@ -45,13 +45,35 @@ test "end to end" {
     args.clearAndFree();
     try args.append("init");
     try args.append(temp_dir_name ++ "/repo");
-    try main.xitMain(allocator, &args);
+    try main.xitMain(kind, allocator, &args);
 
-    // make sure the dirs were created
+    // get the main dir
     var repo_dir = try temp_dir.openDir("repo", .{});
     defer repo_dir.close();
-    var git_dir = try repo_dir.openDir(".git", .{});
-    defer git_dir.close();
+
+    // init kind-specific state
+    const Core = switch (kind) {
+        .git => struct {
+            git_dir: std.fs.Dir,
+            repo: ?*c.git_repository,
+        },
+        .xit => struct {
+            xit_file: std.fs.File,
+        },
+    };
+    var core: Core = switch (kind) {
+        .git => .{
+            .git_dir = try repo_dir.openDir(".git", .{}),
+            .repo = null,
+        },
+        .xit => .{
+            .xit_file = try repo_dir.openFile(".xit", .{}),
+        },
+    };
+    defer switch (kind) {
+        .git => core.git_dir.close(),
+        .xit => core.xit_file.close(),
+    };
 
     // change the cwd
     try repo_dir.setAsCwd();
@@ -60,11 +82,12 @@ test "end to end" {
     // get repo path for libgit
     var repo_path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
     const repo_path: [*c]const u8 = @ptrCast(try repo_dir.realpath(".", &repo_path_buffer));
-    var repo: ?*c.git_repository = null;
+
+    if (kind == .xit) return;
 
     // make sure we can get status before first commit
     {
-        var status = try stat.Status.init(allocator, repo_dir, git_dir);
+        var status = try stat.Status.init(allocator, repo_dir, core.git_dir);
         defer status.deinit();
     }
 
@@ -101,19 +124,19 @@ test "end to end" {
         args.clearAndFree();
         try args.append("add");
         try args.append(".");
-        try main.xitMain(allocator, &args);
+        try main.xitMain(kind, allocator, &args);
 
         // make a commit
         args.clearAndFree();
         try args.append("commit");
         try args.append("-m");
         try args.append("first commit");
-        try main.xitMain(allocator, &args);
+        try main.xitMain(kind, allocator, &args);
 
         // check that the commit object was created
         {
-            const head_file_buffer = try ref.readHead(git_dir);
-            var objects_dir = try git_dir.openDir("objects", .{});
+            const head_file_buffer = try ref.readHead(core.git_dir);
+            var objects_dir = try core.git_dir.openDir("objects", .{});
             defer objects_dir.close();
             var hash_prefix_dir = try objects_dir.openDir(head_file_buffer[0..2], .{});
             defer hash_prefix_dir.close();
@@ -123,16 +146,16 @@ test "end to end" {
 
         // read the commit with libgit
         {
-            try expectEqual(0, c.git_repository_open(&repo, repo_path));
-            defer c.git_repository_free(repo);
+            try expectEqual(0, c.git_repository_open(&core.repo, repo_path));
+            defer c.git_repository_free(core.repo);
 
             var head: ?*c.git_reference = null;
-            try expectEqual(0, c.git_repository_head(&head, repo));
+            try expectEqual(0, c.git_repository_head(&head, core.repo));
             defer c.git_reference_free(head);
             const oid = c.git_reference_target(head);
             try std.testing.expect(null != oid);
             var commit: ?*c.git_commit = null;
-            try expectEqual(0, c.git_commit_lookup(&commit, repo, oid));
+            try expectEqual(0, c.git_commit_lookup(&commit, core.repo, oid));
             defer c.git_commit_free(commit);
             try std.testing.expectEqualStrings("first commit", std.mem.sliceTo(c.git_commit_message(commit), 0));
         }
@@ -160,7 +183,7 @@ test "end to end" {
     }
 
     // get HEAD contents
-    const commit1 = try ref.readHead(git_dir);
+    const commit1 = try ref.readHead(core.git_dir);
 
     // make another commit
     {
@@ -169,14 +192,14 @@ test "end to end" {
         try args.append("commit");
         try args.append("-m");
         try args.append("pointless commit");
-        try expectEqual(error.ObjectAlreadyExists, main.xitMain(allocator, &args));
+        try expectEqual(error.ObjectAlreadyExists, main.xitMain(kind, allocator, &args));
 
         // delete a file
         try repo_dir.deleteFile("LICENSE");
         args.clearAndFree();
         try args.append("add");
         try args.append("LICENSE");
-        try main.xitMain(allocator, &args);
+        try main.xitMain(kind, allocator, &args);
 
         // delete a file and dir
         {
@@ -184,7 +207,7 @@ test "end to end" {
             args.clearAndFree();
             try args.append("add");
             try args.append("docs/design.md");
-            try main.xitMain(allocator, &args);
+            try main.xitMain(kind, allocator, &args);
         }
 
         // replace a file with a directory
@@ -215,19 +238,19 @@ test "end to end" {
         args.clearAndFree();
         try args.append("add");
         try args.append(".");
-        try main.xitMain(allocator, &args);
+        try main.xitMain(kind, allocator, &args);
 
         // make another commit
         args.clearAndFree();
         try args.append("commit");
         try args.append("-m");
         try args.append("second commit");
-        try main.xitMain(allocator, &args);
+        try main.xitMain(kind, allocator, &args);
 
         // check that the commit object was created
         {
-            const head_file_buffer = try ref.readHead(git_dir);
-            var objects_dir = try git_dir.openDir("objects", .{});
+            const head_file_buffer = try ref.readHead(core.git_dir);
+            var objects_dir = try core.git_dir.openDir("objects", .{});
             defer objects_dir.close();
             var hash_prefix_dir = try objects_dir.openDir(head_file_buffer[0..2], .{});
             defer hash_prefix_dir.close();
@@ -237,23 +260,23 @@ test "end to end" {
 
         // read the commit with libgit
         {
-            try expectEqual(0, c.git_repository_open(&repo, repo_path));
-            defer c.git_repository_free(repo);
+            try expectEqual(0, c.git_repository_open(&core.repo, repo_path));
+            defer c.git_repository_free(core.repo);
 
             var head: ?*c.git_reference = null;
-            try expectEqual(0, c.git_repository_head(&head, repo));
+            try expectEqual(0, c.git_repository_head(&head, core.repo));
             defer c.git_reference_free(head);
             const oid = c.git_reference_target(head);
             try std.testing.expect(null != oid);
             var commit: ?*c.git_commit = null;
-            try expectEqual(0, c.git_commit_lookup(&commit, repo, oid));
+            try expectEqual(0, c.git_commit_lookup(&commit, core.repo, oid));
             defer c.git_commit_free(commit);
             try std.testing.expectEqualStrings("second commit", std.mem.sliceTo(c.git_commit_message(commit), 0));
         }
     }
 
     // get HEAD contents
-    const commit2 = try ref.readHead(git_dir);
+    const commit2 = try ref.readHead(core.git_dir);
 
     // try to checkout first commit after making conflicting change
     {
@@ -266,7 +289,7 @@ test "end to end" {
                 args.clearAndFree();
                 try args.append("add");
                 try args.append("LICENSE");
-                try main.xitMain(allocator, &args);
+                try main.xitMain(kind, allocator, &args);
             }
 
             // check out commit1 and make sure the conflict is found
@@ -289,7 +312,7 @@ test "end to end" {
                 args.clearAndFree();
                 try args.append("add");
                 try args.append("LICENSE");
-                try main.xitMain(allocator, &args);
+                try main.xitMain(kind, allocator, &args);
             }
         }
 
@@ -383,7 +406,7 @@ test "end to end" {
     args.clearAndFree();
     try args.append("checkout");
     try args.append(&commit1);
-    try main.xitMain(allocator, &args);
+    try main.xitMain(kind, allocator, &args);
 
     // the working tree was updated
     {
@@ -401,7 +424,7 @@ test "end to end" {
     args.clearAndFree();
     try args.append("checkout");
     try args.append("master");
-    try main.xitMain(allocator, &args);
+    try main.xitMain(kind, allocator, &args);
 
     // the working tree was updated
     {
@@ -430,11 +453,11 @@ test "end to end" {
         args.clearAndFree();
         try args.append("add");
         try args.append(".");
-        try main.xitMain(allocator, &args);
+        try main.xitMain(kind, allocator, &args);
 
         // read index
         {
-            var index = try idx.Index.init(allocator, git_dir);
+            var index = try idx.Index.init(allocator, core.git_dir);
             defer index.deinit();
             try expectEqual(5, index.entries.count());
             try std.testing.expect(index.entries.contains("README"));
@@ -446,11 +469,11 @@ test "end to end" {
 
         // read index with libgit
         {
-            try expectEqual(0, c.git_repository_open(&repo, repo_path));
-            defer c.git_repository_free(repo);
+            try expectEqual(0, c.git_repository_open(&core.repo, repo_path));
+            defer c.git_repository_free(core.repo);
 
             var index: ?*c.git_index = null;
-            try expectEqual(0, c.git_repository_index(&index, repo));
+            try expectEqual(0, c.git_repository_index(&index, core.repo));
             defer c.git_index_free(index);
             try expectEqual(5, c.git_index_entrycount(index));
         }
@@ -466,11 +489,11 @@ test "end to end" {
         args.clearAndFree();
         try args.append("add");
         try args.append(".");
-        try main.xitMain(allocator, &args);
+        try main.xitMain(kind, allocator, &args);
 
         // read index
         {
-            var index = try idx.Index.init(allocator, git_dir);
+            var index = try idx.Index.init(allocator, core.git_dir);
             defer index.deinit();
             try expectEqual(4, index.entries.count());
             try std.testing.expect(index.entries.contains("README"));
@@ -481,11 +504,11 @@ test "end to end" {
 
         // read index with libgit
         {
-            try expectEqual(0, c.git_repository_open(&repo, repo_path));
-            defer c.git_repository_free(repo);
+            try expectEqual(0, c.git_repository_open(&core.repo, repo_path));
+            defer c.git_repository_free(core.repo);
 
             var index: ?*c.git_index = null;
-            try expectEqual(0, c.git_repository_index(&index, repo));
+            try expectEqual(0, c.git_repository_index(&index, core.repo));
             defer c.git_index_free(index);
             try expectEqual(4, c.git_index_entrycount(index));
         }
@@ -494,11 +517,11 @@ test "end to end" {
         args.clearAndFree();
         try args.append("add");
         try args.append("no-such-file");
-        try expectEqual(error.FileNotFound, main.xitMain(allocator, &args));
+        try expectEqual(error.FileNotFound, main.xitMain(kind, allocator, &args));
 
         // a stale index lock file isn't hanging around
         {
-            const lock_file_or_err = git_dir.openFile("index.lock", .{ .mode = .read_only });
+            const lock_file_or_err = core.git_dir.openFile("index.lock", .{ .mode = .read_only });
             try expectEqual(error.FileNotFound, lock_file_or_err);
         }
     }
@@ -543,7 +566,7 @@ test "end to end" {
         // workspace changes
         {
             // get status
-            var status = try stat.Status.init(allocator, repo_dir, git_dir);
+            var status = try stat.Status.init(allocator, repo_dir, core.git_dir);
             defer status.deinit();
 
             // check the untracked entries
@@ -578,15 +601,15 @@ test "end to end" {
 
         // get status with libgit
         {
-            try expectEqual(0, c.git_repository_open(&repo, repo_path));
-            defer c.git_repository_free(repo);
+            try expectEqual(0, c.git_repository_open(&core.repo, repo_path));
+            defer c.git_repository_free(core.repo);
 
             var status_list: ?*c.git_status_list = null;
             var status_options: c.git_status_options = undefined;
             try expectEqual(0, c.git_status_options_init(&status_options, c.GIT_STATUS_OPTIONS_VERSION));
             status_options.show = c.GIT_STATUS_SHOW_WORKDIR_ONLY;
             status_options.flags = c.GIT_STATUS_OPT_INCLUDE_UNTRACKED;
-            try expectEqual(0, c.git_status_list_new(&status_list, repo, &status_options));
+            try expectEqual(0, c.git_status_list_new(&status_list, core.repo, &status_options));
             defer c.git_status_list_free(status_list);
             try expectEqual(5, c.git_status_list_entrycount(status_list));
         }
@@ -599,16 +622,16 @@ test "end to end" {
             args.clearAndFree();
             try args.append("add");
             try args.append("c/d.txt");
-            try main.xitMain(allocator, &args);
+            try main.xitMain(kind, allocator, &args);
 
             // remove file from index
             args.clearAndFree();
             try args.append("add");
             try args.append("src/zig/main.zig");
-            try main.xitMain(allocator, &args);
+            try main.xitMain(kind, allocator, &args);
 
             // get status
-            var status = try stat.Status.init(allocator, repo_dir, git_dir);
+            var status = try stat.Status.init(allocator, repo_dir, core.git_dir);
             defer status.deinit();
 
             // check the index_added entries
@@ -656,60 +679,60 @@ test "end to end" {
     args.clearAndFree();
     try args.append("branch");
     try args.append("stuff");
-    try main.xitMain(allocator, &args);
+    try main.xitMain(kind, allocator, &args);
 
     // checkout the branch
     args.clearAndFree();
     try args.append("checkout");
     try args.append("stuff");
-    try main.xitMain(allocator, &args);
+    try main.xitMain(kind, allocator, &args);
 
     // check the refs
-    try expectEqual(commit2, try ref.readHead(git_dir));
-    try expectEqual(commit2, try ref.resolve(git_dir, "stuff"));
+    try expectEqual(commit2, try ref.readHead(core.git_dir));
+    try expectEqual(commit2, try ref.resolve(core.git_dir, "stuff"));
 
     // list all branches
     {
-        var ref_list = try ref.RefList.init(allocator, git_dir, "heads");
+        var ref_list = try ref.RefList.init(allocator, core.git_dir, "heads");
         defer ref_list.deinit();
         try expectEqual(2, ref_list.refs.items.len);
     }
 
     // get the current branch
-    var current_branch_maybe = try ref.Ref.initWithPath(allocator, git_dir, "HEAD");
+    var current_branch_maybe = try ref.Ref.initWithPath(allocator, core.git_dir, "HEAD");
     defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
     try std.testing.expectEqualStrings("stuff", current_branch_maybe.?.name);
 
     // get the current branch with libgit
     {
-        try expectEqual(0, c.git_repository_open(&repo, repo_path));
-        defer c.git_repository_free(repo);
+        try expectEqual(0, c.git_repository_open(&core.repo, repo_path));
+        defer c.git_repository_free(core.repo);
 
         var head: ?*c.git_reference = null;
-        try expectEqual(0, c.git_repository_head(&head, repo));
+        try expectEqual(0, c.git_repository_head(&head, core.repo));
         defer c.git_reference_free(head);
         const branch_name = c.git_reference_shorthand(head);
         try std.testing.expectEqualStrings("stuff", std.mem.sliceTo(branch_name, 0));
     }
 
     // can't delete current branch
-    try expectEqual(error.CannotDeleteCurrentBranch, branch.delete(allocator, git_dir, "stuff"));
+    try expectEqual(error.CannotDeleteCurrentBranch, branch.delete(allocator, core.git_dir, "stuff"));
 
     // create a branch with slashes
     args.clearAndFree();
     try args.append("branch");
     try args.append("a/b/c");
-    try main.xitMain(allocator, &args);
+    try main.xitMain(kind, allocator, &args);
 
     // make sure the ref is created with subdirs
     {
-        const ref_file = try git_dir.openFile("refs/heads/a/b/c", .{});
+        const ref_file = try core.git_dir.openFile("refs/heads/a/b/c", .{});
         defer ref_file.close();
     }
 
     // list all branches
     {
-        var ref_list = try ref.RefList.init(allocator, git_dir, "heads");
+        var ref_list = try ref.RefList.init(allocator, core.git_dir, "heads");
         defer ref_list.deinit();
         try expectEqual(3, ref_list.refs.items.len);
         var ref_map = std.StringHashMap(void).init(allocator);
@@ -723,13 +746,13 @@ test "end to end" {
     }
 
     // delete the branch
-    try branch.delete(allocator, git_dir, "a/b/c");
+    try branch.delete(allocator, core.git_dir, "a/b/c");
 
     // make sure the subdirs are deleted
     {
-        try expectEqual(error.FileNotFound, git_dir.openFile("refs/heads/a/b/c", .{}));
-        try expectEqual(error.FileNotFound, git_dir.openDir("refs/heads/a/b", .{}));
-        try expectEqual(error.FileNotFound, git_dir.openDir("refs/heads/a", .{}));
+        try expectEqual(error.FileNotFound, core.git_dir.openFile("refs/heads/a/b/c", .{}));
+        try expectEqual(error.FileNotFound, core.git_dir.openDir("refs/heads/a/b", .{}));
+        try expectEqual(error.FileNotFound, core.git_dir.openDir("refs/heads/a", .{}));
     }
 
     // modify file and commit
@@ -742,17 +765,23 @@ test "end to end" {
         args.clearAndFree();
         try args.append("add");
         try args.append("hello.txt");
-        try main.xitMain(allocator, &args);
+        try main.xitMain(kind, allocator, &args);
 
         // make a commit
         args.clearAndFree();
         try args.append("commit");
         try args.append("-m");
         try args.append("third commit");
-        try main.xitMain(allocator, &args);
+        try main.xitMain(kind, allocator, &args);
     }
 
     // get HEAD contents
-    const commit3 = try ref.readHead(git_dir);
-    try expectEqual(commit3, try ref.resolve(git_dir, "stuff"));
+    const commit3 = try ref.readHead(core.git_dir);
+    try expectEqual(commit3, try ref.resolve(core.git_dir, "stuff"));
+}
+
+test "end to end" {
+    const allocator = std.testing.allocator;
+    try testMain(allocator, .git);
+    try testMain(allocator, .xit);
 }

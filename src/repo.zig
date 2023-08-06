@@ -6,9 +6,11 @@ const stat = @import("./status.zig");
 const branch = @import("./branch.zig");
 const chk = @import("./checkout.zig");
 const ref = @import("./ref.zig");
+const xitdb = @import("xitdb");
 
 pub const RepoKind = enum {
     git,
+    xit,
 };
 
 pub const RepoErrors = error{
@@ -25,12 +27,14 @@ pub fn Repo(comptime kind: RepoKind) type {
             .git => struct {
                 repo_dir_maybe: ?std.fs.Dir,
             },
+            .xit => struct {
+                repo_dir_maybe: ?std.fs.Dir,
+                db_maybe: ?xitdb.Database(.file),
+            },
         };
 
-        pub const InitOpts = switch (kind) {
-            .git => struct {
-                cwd: std.fs.Dir,
-            },
+        pub const InitOpts = struct {
+            cwd: std.fs.Dir,
         };
 
         pub fn init(allocator: std.mem.Allocator, opts: InitOpts) !Repo(kind) {
@@ -40,9 +44,30 @@ pub fn Repo(comptime kind: RepoKind) type {
                     .git => blk: {
                         var git_dir_maybe = opts.cwd.openDir(".git", .{}) catch null;
                         defer if (git_dir_maybe) |*git_dir| git_dir.close();
+                        var repo_dir_maybe = if (git_dir_maybe == null) null else try opts.cwd.openDir(".", .{});
+                        errdefer if (repo_dir_maybe) |*repo_dir| repo_dir.close();
+
                         break :blk .{
-                            .repo_dir_maybe = if (git_dir_maybe == null) null else try opts.cwd.openDir(".", .{}),
+                            .repo_dir_maybe = repo_dir_maybe,
                         };
+                    },
+                    .xit => blk: {
+                        var xit_file_maybe = opts.cwd.openFile(".xit", .{}) catch null;
+                        errdefer if (xit_file_maybe) |*xit_file| xit_file.close();
+                        var repo_dir_maybe = if (xit_file_maybe == null) null else try opts.cwd.openDir(".", .{});
+                        errdefer if (repo_dir_maybe) |*repo_dir| repo_dir.close();
+
+                        if (xit_file_maybe) |xit_file| {
+                            break :blk .{
+                                .repo_dir_maybe = repo_dir_maybe,
+                                .db_maybe = try xitdb.Database(.file).init(allocator, .{ .file = xit_file }),
+                            };
+                        } else {
+                            break :blk .{
+                                .repo_dir_maybe = null,
+                                .db_maybe = null,
+                            };
+                        }
                     },
                 },
             };
@@ -54,6 +79,15 @@ pub fn Repo(comptime kind: RepoKind) type {
                     if (self.core.repo_dir_maybe) |*repo_dir| {
                         repo_dir.close();
                         self.core.repo_dir_maybe = null;
+                    }
+                },
+                .xit => {
+                    if (self.core.repo_dir_maybe) |*repo_dir| {
+                        repo_dir.close();
+                        self.core.repo_dir_maybe = null;
+                    }
+                    if (self.core.db_maybe) |*db| {
+                        db.deinit();
                     }
                 },
             }
@@ -89,31 +123,44 @@ pub fn Repo(comptime kind: RepoKind) type {
                     errdefer repo_dir.close();
                     self.core.repo_dir_maybe = repo_dir;
 
-                    // make the .git dir. right now we're throwing an error if it already
-                    // exists. in git it says "Reinitialized existing Git repository" so
-                    // we'll need to do that eventually.
-                    repo_dir.makeDir(".git") catch |err| {
-                        switch (err) {
-                            error.PathAlreadyExists => {
-                                try stderr.print("{s} is already a repository\n", .{cmd_data.init.dir});
-                                return;
-                            },
-                            else => return err,
-                        }
-                    };
+                    switch (kind) {
+                        .git => {
+                            // make the .git dir. right now we're throwing an error if it already
+                            // exists. in git it says "Reinitialized existing Git repository" so
+                            // we'll need to do that eventually.
+                            repo_dir.makeDir(".git") catch |err| {
+                                switch (err) {
+                                    error.PathAlreadyExists => {
+                                        try stderr.print("{s} is already a repository\n", .{cmd_data.init.dir});
+                                        return;
+                                    },
+                                    else => return err,
+                                }
+                            };
 
-                    // make a few dirs inside of .git
-                    var git_dir = try repo_dir.openDir(".git", .{});
-                    defer git_dir.close();
-                    var objects_dir = try git_dir.makeOpenPath("objects", .{});
-                    defer objects_dir.close();
-                    var refs_dir = try git_dir.makeOpenPath("refs", .{});
-                    defer refs_dir.close();
-                    var heads_dir = try refs_dir.makeOpenPath("heads", .{});
-                    defer heads_dir.close();
+                            // make a few dirs inside of .git
+                            var git_dir = try repo_dir.openDir(".git", .{});
+                            defer git_dir.close();
+                            var objects_dir = try git_dir.makeOpenPath("objects", .{});
+                            defer objects_dir.close();
+                            var refs_dir = try git_dir.makeOpenPath("refs", .{});
+                            defer refs_dir.close();
+                            var heads_dir = try refs_dir.makeOpenPath("heads", .{});
+                            defer heads_dir.close();
 
-                    // update HEAD
-                    try ref.writeHead(self.allocator, git_dir, "master", null);
+                            // update HEAD
+                            try ref.writeHead(self.allocator, git_dir, "master", null);
+                        },
+                        .xit => {
+                            const file_or_err = repo_dir.openFile(".xit", .{ .mode = .read_write, .lock = .exclusive });
+                            const file = try if (file_or_err == error.FileNotFound)
+                                repo_dir.createFile(".xit", .{ .read = true, .lock = .exclusive })
+                            else
+                                file_or_err;
+                            errdefer file.close();
+                            self.core.db_maybe = try xitdb.Database(.file).init(self.allocator, .{ .file = file });
+                        },
+                    }
                 },
                 cmd.CommandData.add => {
                     if (self.core.repo_dir_maybe) |repo_dir| {

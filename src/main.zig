@@ -22,7 +22,7 @@
 const std = @import("std");
 const hash = @import("./hash.zig");
 const cmd = @import("./command.zig");
-const Repo = @import("./repo.zig").Repo;
+const rp = @import("./repo.zig");
 
 /// takes the args passed to this program and puts them
 /// in an arraylist. do we need to do this? i don't know,
@@ -46,7 +46,7 @@ fn appendArgs(out: *std.ArrayList([]const u8)) !void {
 /// you can call as well, but if you just want to pass the CLI args and
 /// have it behave just like the standalone xit client than this is
 /// where it's at, homie.
-pub fn xitMain(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8)) !void {
+pub fn xitMain(comptime kind: rp.RepoKind, allocator: std.mem.Allocator, args: *std.ArrayList([]const u8)) !void {
     var command = try cmd.Command.init(allocator, args);
     defer command.deinit();
 
@@ -56,7 +56,7 @@ pub fn xitMain(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8)) !
     var cwd = try std.fs.openDirAbsolute(cwd_path, .{});
     defer cwd.close();
 
-    var repo = try Repo(.git).init(allocator, .{
+    var repo = try rp.Repo(kind).init(allocator, .{
         .cwd = cwd,
     });
     defer repo.deinit();
@@ -76,5 +76,5 @@ pub fn main() !void {
     defer args.deinit();
 
     try appendArgs(&args);
-    try xitMain(allocator, &args);
+    try xitMain(.git, allocator, &args);
 }

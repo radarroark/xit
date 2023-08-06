@@ -15,6 +15,9 @@ pub fn build(b: *std.build.Builder) !void {
         .target = target,
         .optimize = optimize,
     });
+    exe.addAnonymousModule("xitdb", .{
+        .source_file = .{ .path = "../xitdb/src/main.zig" },
+    });
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);
@@ -39,6 +42,9 @@ pub fn build(b: *std.build.Builder) !void {
     const unit_tests = b.addTest(.{
         .root_source_file = .{ .path = "src/test.zig" },
         .optimize = optimize,
+    });
+    unit_tests.addAnonymousModule("xitdb", .{
+        .source_file = .{ .path = "../xitdb/src/main.zig" },
     });
     unit_tests.linkLibC();
     unit_tests.addIncludePath(.{ .path = "src/test/deps/libgit2/include" });
