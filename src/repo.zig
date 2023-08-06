@@ -16,6 +16,7 @@ pub const RepoKind = enum {
 
 pub const RepoErrors = error{
     NotARepo,
+    RepoAlreadyExists,
 };
 
 pub fn Repo(comptime kind: RepoKind) type {
@@ -98,6 +99,64 @@ pub fn Repo(comptime kind: RepoKind) type {
             }
         }
 
+        pub fn initNew(allocator: std.mem.Allocator, dir: std.fs.Dir, sub_path: []const u8) !Repo(kind) {
+            // get the root dir. if no path was given to the init command, this
+            // should just be the current working directory (cwd). if a path was
+            // given, it should either append it to the cwd or, if it is absolute,
+            // it should just use that path alone. IT'S MAGIC!
+            var repo_dir = try dir.makeOpenPath(sub_path, .{});
+            errdefer repo_dir.close();
+
+            switch (kind) {
+                .git => {
+                    // make the .git dir
+                    repo_dir.makeDir(".git") catch |err| {
+                        switch (err) {
+                            error.PathAlreadyExists => return error.RepoAlreadyExists,
+                            else => return err,
+                        }
+                    };
+
+                    // make a few dirs inside of .git
+                    var git_dir = try repo_dir.openDir(".git", .{});
+                    defer git_dir.close();
+                    var objects_dir = try git_dir.makeOpenPath("objects", .{});
+                    defer objects_dir.close();
+                    var refs_dir = try git_dir.makeOpenPath("refs", .{});
+                    defer refs_dir.close();
+                    var heads_dir = try refs_dir.makeOpenPath("heads", .{});
+                    defer heads_dir.close();
+
+                    // update HEAD
+                    try ref.writeHead(allocator, git_dir, "master", null);
+
+                    return .{
+                        .allocator = allocator,
+                        .core = .{
+                            .repo_dir = repo_dir,
+                        },
+                    };
+                },
+                .xit => {
+                    const file = repo_dir.createFile(".xit", .{ .exclusive = true, .lock = .exclusive }) catch |err| {
+                        switch (err) {
+                            error.PathAlreadyExists => return error.RepoAlreadyExists,
+                            else => return err,
+                        }
+                    };
+                    errdefer file.close();
+
+                    return .{
+                        .allocator = allocator,
+                        .core = .{
+                            .repo_dir = repo_dir,
+                            .db = try xitdb.Database(.file).init(allocator, .{ .file = file }),
+                        },
+                    };
+                },
+            }
+        }
+
         pub fn deinit(self: *Repo(kind)) void {
             switch (kind) {
                 .git => {
@@ -129,55 +188,15 @@ pub fn Repo(comptime kind: RepoKind) type {
                     , .{});
                 },
                 cmd.CommandData.init => {
-                    // get the root dir. no path was given to the init command, this
-                    // should just be the current working directory (cwd). if a path was
-                    // given, it should either append it to the cwd or, if it is absolute,
-                    // it should just use that path alone. IT'S MAGIC!
-                    var repo_dir = try std.fs.cwd().makeOpenPath(cmd_data.init.dir, .{});
-                    errdefer repo_dir.close();
-
-                    switch (kind) {
-                        .git => {
-                            // make the .git dir. right now we're throwing an error if it already
-                            // exists. in git it says "Reinitialized existing Git repository" so
-                            // we'll need to do that eventually.
-                            repo_dir.makeDir(".git") catch |err| {
-                                switch (err) {
-                                    error.PathAlreadyExists => {
-                                        try stderr.print("{s} is already a repository\n", .{cmd_data.init.dir});
-                                        return;
-                                    },
-                                    else => return err,
-                                }
-                            };
-
-                            // make a few dirs inside of .git
-                            var git_dir = try repo_dir.openDir(".git", .{});
-                            defer git_dir.close();
-                            var objects_dir = try git_dir.makeOpenPath("objects", .{});
-                            defer objects_dir.close();
-                            var refs_dir = try git_dir.makeOpenPath("refs", .{});
-                            defer refs_dir.close();
-                            var heads_dir = try refs_dir.makeOpenPath("heads", .{});
-                            defer heads_dir.close();
-
-                            // update HEAD
-                            try ref.writeHead(self.allocator, git_dir, "master", null);
-
-                            self.core.repo_dir = repo_dir;
-                        },
-                        .xit => {
-                            const file_or_err = repo_dir.openFile(".xit", .{ .mode = .read_write, .lock = .exclusive });
-                            const file = try if (file_or_err == error.FileNotFound)
-                                repo_dir.createFile(".xit", .{ .read = true, .lock = .exclusive })
-                            else
-                                file_or_err;
-                            errdefer file.close();
-
-                            self.core.repo_dir = repo_dir;
-                            self.core.db = try xitdb.Database(.file).init(self.allocator, .{ .file = file });
-                        },
-                    }
+                    self.* = Repo(kind).initNew(self.allocator, std.fs.cwd(), cmd_data.init.dir) catch |err| {
+                        switch (err) {
+                            error.RepoAlreadyExists => {
+                                try stderr.print("{s} is already a repository\n", .{cmd_data.init.dir});
+                                return;
+                            },
+                            else => return err,
+                        }
+                    };
                 },
                 cmd.CommandData.add => {
                     try self.add(cmd_data.add.paths);
