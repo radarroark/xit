@@ -2,7 +2,6 @@ const std = @import("std");
 const main = @import("./main.zig");
 const hash = @import("./hash.zig");
 const idx = @import("./index.zig");
-const stat = @import("./status.zig");
 const obj = @import("./object.zig");
 const ref = @import("./ref.zig");
 const chk = @import("./checkout.zig");
@@ -87,8 +86,10 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
 
     // make sure we can get status before first commit
     {
-        var status = try stat.Status.init(allocator, repo_dir, core.git_dir);
-        defer status.deinit();
+        var repo = try rp.Repo(kind).init(allocator, .{ .cwd = repo_dir });
+        defer repo.deinit();
+        var stat = try repo.status();
+        defer stat.deinit();
     }
 
     // add and commit
@@ -566,7 +567,9 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
         // workspace changes
         {
             // get status
-            var status = try stat.Status.init(allocator, repo_dir, core.git_dir);
+            var repo = try rp.Repo(kind).init(allocator, .{ .cwd = repo_dir });
+            defer repo.deinit();
+            var status = try repo.status();
             defer status.deinit();
 
             // check the untracked entries
@@ -631,7 +634,9 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
             try main.xitMain(kind, allocator, &args);
 
             // get status
-            var status = try stat.Status.init(allocator, repo_dir, core.git_dir);
+            var repo = try rp.Repo(kind).init(allocator, .{ .cwd = repo_dir });
+            defer repo.deinit();
+            var status = try repo.status();
             defer status.deinit();
 
             // check the index_added entries

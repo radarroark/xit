@@ -2,7 +2,7 @@ const std = @import("std");
 const obj = @import("./object.zig");
 const cmd = @import("./command.zig");
 const idx = @import("./index.zig");
-const stat = @import("./status.zig");
+const st = @import("./status.zig");
 const branch = @import("./branch.zig");
 const chk = @import("./checkout.zig");
 const ref = @import("./ref.zig");
@@ -177,38 +177,31 @@ pub fn Repo(comptime kind: RepoKind) type {
                     }
                 },
                 cmd.CommandData.status => {
-                    if (self.core.repo_dir_maybe) |repo_dir| {
-                        var git_dir = try repo_dir.openDir(".git", .{});
-                        defer git_dir.close();
+                    var stat = try self.status();
+                    defer stat.deinit();
 
-                        var status = try stat.Status.init(self.allocator, repo_dir, git_dir);
-                        defer status.deinit();
+                    for (stat.untracked.items) |entry| {
+                        try stdout.print("?? {s}\n", .{entry.path});
+                    }
 
-                        for (status.untracked.items) |entry| {
-                            try stdout.print("?? {s}\n", .{entry.path});
-                        }
+                    for (stat.workspace_modified.items) |entry| {
+                        try stdout.print(" M {s}\n", .{entry.path});
+                    }
 
-                        for (status.workspace_modified.items) |entry| {
-                            try stdout.print(" M {s}\n", .{entry.path});
-                        }
+                    for (stat.workspace_deleted.items) |path| {
+                        try stdout.print(" D {s}\n", .{path});
+                    }
 
-                        for (status.workspace_deleted.items) |path| {
-                            try stdout.print(" D {s}\n", .{path});
-                        }
+                    for (stat.index_added.items) |path| {
+                        try stdout.print("A  {s}\n", .{path});
+                    }
 
-                        for (status.index_added.items) |path| {
-                            try stdout.print("A  {s}\n", .{path});
-                        }
+                    for (stat.index_modified.items) |path| {
+                        try stdout.print("M  {s}\n", .{path});
+                    }
 
-                        for (status.index_modified.items) |path| {
-                            try stdout.print("M  {s}\n", .{path});
-                        }
-
-                        for (status.index_deleted.items) |path| {
-                            try stdout.print("D  {s}\n", .{path});
-                        }
-                    } else {
-                        return error.NotARepo;
+                    for (stat.index_deleted.items) |path| {
+                        try stdout.print("D  {s}\n", .{path});
                     }
                 },
                 cmd.CommandData.branch => {
@@ -251,6 +244,24 @@ pub fn Repo(comptime kind: RepoKind) type {
                         return error.NotARepo;
                     }
                 },
+            }
+        }
+
+        pub fn status(self: *Repo(kind)) !st.Status {
+            if (self.core.repo_dir_maybe) |repo_dir| {
+                switch (kind) {
+                    .git => {
+                        var git_dir = try repo_dir.openDir(".git", .{});
+                        defer git_dir.close();
+
+                        return try st.Status.init(self.allocator, repo_dir, git_dir);
+                    },
+                    .xit => {
+                        return error.NotARepo;
+                    },
+                }
+            } else {
+                return error.NotARepo;
             }
         }
     };
