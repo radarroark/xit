@@ -27,6 +27,7 @@ pub fn Repo(comptime kind: RepoKind) type {
         pub const Core = switch (kind) {
             .git => struct {
                 repo_dir: std.fs.Dir,
+                git_dir: std.fs.Dir,
             },
             .xit => struct {
                 repo_dir: std.fs.Dir,
@@ -43,7 +44,7 @@ pub fn Repo(comptime kind: RepoKind) type {
                 .git => {
                     var git_dir_maybe = opts.cwd.openDir(".git", .{}) catch null;
                     if (git_dir_maybe) |*git_dir| {
-                        defer git_dir.close();
+                        errdefer git_dir.close();
 
                         var repo_dir = try opts.cwd.openDir(".", .{});
                         errdefer repo_dir.close();
@@ -52,6 +53,7 @@ pub fn Repo(comptime kind: RepoKind) type {
                             .allocator = allocator,
                             .core = .{
                                 .repo_dir = repo_dir,
+                                .git_dir = git_dir.*,
                             },
                         };
                     } else {
@@ -88,7 +90,7 @@ pub fn Repo(comptime kind: RepoKind) type {
             } else {
                 if (cmd_data == .init) {
                     var self = switch (kind) {
-                        .git => Repo(kind){ .allocator = allocator, .core = .{ .repo_dir = undefined } },
+                        .git => Repo(kind){ .allocator = allocator, .core = .{ .repo_dir = undefined, .git_dir = undefined } },
                         .xit => Repo(kind){ .allocator = allocator, .core = .{ .repo_dir = undefined, .db = undefined } },
                     };
                     try self.command(cmd_data);
@@ -119,7 +121,7 @@ pub fn Repo(comptime kind: RepoKind) type {
 
                     // make a few dirs inside of .git
                     var git_dir = try repo_dir.openDir(".git", .{});
-                    defer git_dir.close();
+                    errdefer git_dir.close();
                     var objects_dir = try git_dir.makeOpenPath("objects", .{});
                     defer objects_dir.close();
                     var refs_dir = try git_dir.makeOpenPath("refs", .{});
@@ -134,6 +136,7 @@ pub fn Repo(comptime kind: RepoKind) type {
                         .allocator = allocator,
                         .core = .{
                             .repo_dir = repo_dir,
+                            .git_dir = git_dir,
                         },
                     };
                 },
@@ -161,6 +164,7 @@ pub fn Repo(comptime kind: RepoKind) type {
             switch (kind) {
                 .git => {
                     self.core.repo_dir.close();
+                    self.core.git_dir.close();
                 },
                 .xit => {
                     self.core.repo_dir.close();
@@ -233,36 +237,43 @@ pub fn Repo(comptime kind: RepoKind) type {
                     }
                 },
                 cmd.CommandData.branch => {
-                    var git_dir = try self.core.repo_dir.openDir(".git", .{});
-                    defer git_dir.close();
+                    switch (kind) {
+                        .git => {
+                            if (cmd_data.branch.name) |name| {
+                                try branch.create(self.allocator, self.core.git_dir, name);
+                            } else {
+                                var current_branch_maybe = try ref.Ref.initWithPath(self.allocator, self.core.git_dir, "HEAD");
+                                defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
 
-                    if (cmd_data.branch.name) |name| {
-                        try branch.create(self.allocator, git_dir, name);
-                    } else {
-                        var current_branch_maybe = try ref.Ref.initWithPath(self.allocator, git_dir, "HEAD");
-                        defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
+                                var ref_list = try ref.RefList.init(self.allocator, self.core.git_dir, "heads");
+                                defer ref_list.deinit();
 
-                        var ref_list = try ref.RefList.init(self.allocator, git_dir, "heads");
-                        defer ref_list.deinit();
-
-                        for (ref_list.refs.items) |r| {
-                            const is_current_branch = if (current_branch_maybe) |current_branch|
-                                std.mem.eql(u8, current_branch.name, r.name)
-                            else
-                                false;
-                            try stdout.print("{s} {s}\n", .{ if (is_current_branch) "*" else " ", r.name });
-                        }
+                                for (ref_list.refs.items) |r| {
+                                    const is_current_branch = if (current_branch_maybe) |current_branch|
+                                        std.mem.eql(u8, current_branch.name, r.name)
+                                    else
+                                        false;
+                                    try stdout.print("{s} {s}\n", .{ if (is_current_branch) "*" else " ", r.name });
+                                }
+                            }
+                        },
+                        .xit => {},
                     }
                 },
                 cmd.CommandData.checkout => {
-                    var result = chk.CheckoutResult.init();
-                    defer result.deinit();
-                    chk.checkout(self.allocator, self.core.repo_dir, cmd_data.checkout.target, &result) catch |err| {
-                        switch (err) {
-                            error.CheckoutConflict => {},
-                            else => return err,
-                        }
-                    };
+                    switch (kind) {
+                        .git => {
+                            var result = chk.CheckoutResult.init();
+                            defer result.deinit();
+                            chk.checkout(self.allocator, self.core.repo_dir, cmd_data.checkout.target, &result) catch |err| {
+                                switch (err) {
+                                    error.CheckoutConflict => {},
+                                    else => return err,
+                                }
+                            };
+                        },
+                        .xit => {},
+                    }
                 },
             }
         }
@@ -270,10 +281,7 @@ pub fn Repo(comptime kind: RepoKind) type {
         pub fn status(self: *Repo(kind)) !st.Status {
             switch (kind) {
                 .git => {
-                    var git_dir = try self.core.repo_dir.openDir(".git", .{});
-                    defer git_dir.close();
-
-                    return try st.Status.init(self.allocator, self.core.repo_dir, git_dir);
+                    return try st.Status.init(self.allocator, self.core.repo_dir, self.core.git_dir);
                 },
                 .xit => {
                     return error.NotARepo;
@@ -284,16 +292,12 @@ pub fn Repo(comptime kind: RepoKind) type {
         pub fn add(self: *Repo(kind), paths: std.ArrayList([]const u8)) !void {
             switch (kind) {
                 .git => {
-                    // open git dir
-                    var git_dir = try self.core.repo_dir.openDir(".git", .{});
-                    defer git_dir.close();
-
                     // create lock file
-                    var lock = try io.LockFile.init(self.allocator, git_dir, "index");
+                    var lock = try io.LockFile.init(self.allocator, self.core.git_dir, "index");
                     defer lock.deinit();
 
                     // read index
-                    var index = try idx.Index.init(self.allocator, git_dir);
+                    var index = try idx.Index.init(self.allocator, self.core.git_dir);
                     defer index.deinit();
 
                     // read all the new entries
