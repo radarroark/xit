@@ -1,4 +1,5 @@
 const std = @import("std");
+const xitdb = @import("xitdb");
 const obj = @import("./object.zig");
 const cmd = @import("./command.zig");
 const idx = @import("./index.zig");
@@ -6,7 +7,7 @@ const st = @import("./status.zig");
 const branch = @import("./branch.zig");
 const chk = @import("./checkout.zig");
 const ref = @import("./ref.zig");
-const xitdb = @import("xitdb");
+const io = @import("./io.zig");
 
 pub const RepoKind = enum {
     git,
@@ -179,7 +180,7 @@ pub fn Repo(comptime kind: RepoKind) type {
                     }
                 },
                 cmd.CommandData.add => {
-                    try idx.writeIndex(self.allocator, self.core.repo_dir, cmd_data.add.paths);
+                    try self.add(cmd_data.add.paths);
                 },
                 cmd.CommandData.commit => {
                     try obj.writeCommit(self.allocator, self.core.repo_dir, cmd_data);
@@ -258,6 +259,43 @@ pub fn Repo(comptime kind: RepoKind) type {
                 .xit => {
                     return error.NotARepo;
                 },
+            }
+        }
+
+        pub fn add(self: *Repo(kind), paths: std.ArrayList([]const u8)) !void {
+            switch (kind) {
+                .git => {
+                    // open git dir
+                    var git_dir = try self.core.repo_dir.openDir(".git", .{});
+                    defer git_dir.close();
+
+                    // create lock file
+                    var lock = try io.LockFile.init(self.allocator, git_dir, "index");
+                    defer lock.deinit();
+
+                    // read index
+                    var index = try idx.Index.init(self.allocator, git_dir);
+                    defer index.deinit();
+
+                    // read all the new entries
+                    for (paths.items) |path| {
+                        const file = self.core.repo_dir.openFile(path, .{ .mode = .read_only }) catch |err| {
+                            if (err == error.FileNotFound and index.entries.contains(path)) {
+                                index.removePath(path);
+                                continue;
+                            } else {
+                                return err;
+                            }
+                        };
+                        defer file.close();
+                        try index.addPath(self.core.repo_dir, path);
+                    }
+
+                    try index.write(self.allocator, lock.lock_file);
+
+                    lock.success = true;
+                },
+                .xit => {},
             }
         }
     };

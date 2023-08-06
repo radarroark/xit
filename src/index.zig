@@ -362,35 +362,3 @@ pub fn indexDiffersFromWorkspace(entry: Index.Entry, file: std.fs.File, meta: st
     }
     return false;
 }
-
-pub fn writeIndex(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, paths: std.ArrayList([]const u8)) !void {
-    // open git dir
-    var git_dir = try repo_dir.openDir(".git", .{});
-    defer git_dir.close();
-
-    // create lock file
-    var lock = try io.LockFile.init(allocator, git_dir, "index");
-    defer lock.deinit();
-
-    // read index
-    var index = try Index.init(allocator, git_dir);
-    defer index.deinit();
-
-    // read all the new entries
-    for (paths.items) |path| {
-        const file = repo_dir.openFile(path, .{ .mode = .read_only }) catch |err| {
-            if (err == error.FileNotFound and index.entries.contains(path)) {
-                index.removePath(path);
-                continue;
-            } else {
-                return err;
-            }
-        };
-        defer file.close();
-        try index.addPath(repo_dir, path);
-    }
-
-    try index.write(allocator, lock.lock_file);
-
-    lock.success = true;
-}
