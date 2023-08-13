@@ -297,7 +297,7 @@ pub fn Repo(comptime kind: RepoKind) type {
                     defer lock.deinit();
 
                     // read index
-                    var index = try idx.Index.init(self.allocator, self.core.git_dir);
+                    var index = try idx.Index(.git).init(self.allocator, .{ .git_dir = self.core.git_dir });
                     defer index.deinit();
 
                     // read all the new entries

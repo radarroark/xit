@@ -82,7 +82,18 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
     var repo_path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
     const repo_path: [*c]const u8 = @ptrCast(try repo_dir.realpath(".", &repo_path_buffer));
 
-    if (kind == .xit) return;
+    // TEMPORARY
+    if (kind == .xit) {
+        var repo = (try rp.Repo(kind).init(allocator, .{ .cwd = repo_dir })).?;
+        defer repo.deinit();
+        const opts = switch (kind) {
+            .git => .{ .git_dir = core.git_dir },
+            .xit => .{ .db = &repo.core.db },
+        };
+        var index = try idx.Index(kind).init(allocator, opts);
+        defer index.deinit();
+        return;
+    }
 
     // make sure we can get status before first commit
     {
@@ -458,7 +469,13 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
 
         // read index
         {
-            var index = try idx.Index.init(allocator, core.git_dir);
+            var repo = (try rp.Repo(kind).init(allocator, .{ .cwd = repo_dir })).?;
+            defer repo.deinit();
+            const opts = switch (kind) {
+                .git => .{ .git_dir = core.git_dir },
+                .xit => .{ .db = &repo.core.db },
+            };
+            var index = try idx.Index(kind).init(allocator, opts);
             defer index.deinit();
             try expectEqual(5, index.entries.count());
             try std.testing.expect(index.entries.contains("README"));
@@ -494,7 +511,13 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
 
         // read index
         {
-            var index = try idx.Index.init(allocator, core.git_dir);
+            var repo = (try rp.Repo(kind).init(allocator, .{ .cwd = repo_dir })).?;
+            defer repo.deinit();
+            const opts = switch (kind) {
+                .git => .{ .git_dir = core.git_dir },
+                .xit => .{ .db = &repo.core.db },
+            };
+            var index = try idx.Index(kind).init(allocator, opts);
             defer index.deinit();
             try expectEqual(4, index.entries.count());
             try std.testing.expect(index.entries.contains("README"));

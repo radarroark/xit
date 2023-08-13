@@ -19,7 +19,7 @@ pub const Status = struct {
     index_added: std.ArrayList([]const u8),
     index_modified: std.ArrayList([]const u8),
     index_deleted: std.ArrayList([]const u8),
-    index: idx.Index,
+    index: idx.Index(.git),
     head_tree: HeadTree,
     arena: std.heap.ArenaAllocator,
 
@@ -50,7 +50,7 @@ pub const Status = struct {
         var arena = std.heap.ArenaAllocator.init(allocator);
         errdefer arena.deinit();
 
-        var index = try idx.Index.init(allocator, git_dir);
+        var index = try idx.Index(.git).init(allocator, .{ .git_dir = git_dir });
         errdefer index.deinit();
 
         var index_bools = try allocator.alloc(bool, index.entries.count());
@@ -110,7 +110,7 @@ pub const Status = struct {
     }
 };
 
-fn addEntries(allocator: std.mem.Allocator, untracked: *std.ArrayList(Status.Entry), modified: *std.ArrayList(Status.Entry), index: idx.Index, index_bools: *[]bool, repo_dir: std.fs.Dir, path: []const u8) !bool {
+fn addEntries(allocator: std.mem.Allocator, untracked: *std.ArrayList(Status.Entry), modified: *std.ArrayList(Status.Entry), index: idx.Index(.git), index_bools: *[]bool, repo_dir: std.fs.Dir, path: []const u8) !bool {
     const file = try repo_dir.openFile(path, .{ .mode = .read_only });
     defer file.close();
     const meta = try file.metadata();

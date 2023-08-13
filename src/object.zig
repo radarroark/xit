@@ -10,6 +10,7 @@ const cmd = @import("./command.zig");
 const idx = @import("./index.zig");
 const ref = @import("./ref.zig");
 const io = @import("./io.zig");
+const rp = @import("./repo.zig");
 
 const MAX_FILE_READ_SIZE: comptime_int = 1000; // FIXME: this is arbitrary...
 
@@ -215,7 +216,7 @@ fn writeTree(objects_dir: std.fs.Dir, allocator: std.mem.Allocator, entries: *st
 // add each entry to the given tree.
 // if the entry is itself a tree, create a tree object
 // for it and add that as an entry to the original tree.
-fn addIndexEntries(objects_dir: std.fs.Dir, allocator: std.mem.Allocator, tree: *Tree, index: idx.Index, prefix: []const u8, entries: [][]const u8) !void {
+fn addIndexEntries(comptime repo_kind: rp.RepoKind, objects_dir: std.fs.Dir, allocator: std.mem.Allocator, tree: *Tree, index: idx.Index(repo_kind), prefix: []const u8, entries: [][]const u8) !void {
     for (entries) |name| {
         const path = try std.fs.path.join(allocator, &[_][]const u8{ prefix, name });
         defer allocator.free(path);
@@ -232,6 +233,7 @@ fn addIndexEntries(objects_dir: std.fs.Dir, allocator: std.mem.Allocator, tree: 
             }
 
             try addIndexEntries(
+                repo_kind,
                 objects_dir,
                 allocator,
                 &subtree,
@@ -267,13 +269,13 @@ pub fn writeCommit(allocator: std.mem.Allocator, cwd: std.fs.Dir, command: cmd.C
     defer objects_dir.close();
 
     // read index
-    var index = try idx.Index.init(allocator, git_dir);
+    var index = try idx.Index(.git).init(allocator, .{ .git_dir = git_dir });
     defer index.deinit();
 
     // create tree and add index entries
     var tree = Tree.init(allocator);
     defer tree.deinit();
-    try addIndexEntries(objects_dir, allocator, &tree, index, "", index.root_children.keys());
+    try addIndexEntries(.git, objects_dir, allocator, &tree, index, "", index.root_children.keys());
 
     // write and hash tree
     var tree_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
