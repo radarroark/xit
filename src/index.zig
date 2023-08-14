@@ -318,59 +318,73 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
             }
         }
 
-        pub fn write(self: *Index(repo_kind), allocator: std.mem.Allocator, index_lock_file: std.fs.File) !void {
-            // sort the entries
-            const SortCtx = struct {
-                keys: [][]const u8,
-                pub fn lessThan(ctx: @This(), a_index: usize, b_index: usize) bool {
-                    return std.mem.lessThan(u8, ctx.keys[a_index], ctx.keys[b_index]);
-                }
-            };
-            self.entries.sort(SortCtx{ .keys = self.entries.keys() });
+        pub const WriteOpts = switch (repo_kind) {
+            .git => struct {
+                lock_file: std.fs.File,
+            },
+            .xit => struct {
+                db: *xitdb.Database(.file),
+            },
+        };
 
-            // start the checksum
-            var h = std.crypto.hash.Sha1.init(.{});
+        pub fn write(self: *Index(repo_kind), allocator: std.mem.Allocator, opts: WriteOpts) !void {
+            switch (repo_kind) {
+                .git => {
+                    // sort the entries
+                    const SortCtx = struct {
+                        keys: [][]const u8,
+                        pub fn lessThan(ctx: @This(), a_index: usize, b_index: usize) bool {
+                            return std.mem.lessThan(u8, ctx.keys[a_index], ctx.keys[b_index]);
+                        }
+                    };
+                    self.entries.sort(SortCtx{ .keys = self.entries.keys() });
 
-            // write the header
-            const version: u32 = 2;
-            const entry_count: u32 = @intCast(self.entries.count());
-            const header = try std.fmt.allocPrint(allocator, "DIRC{s}{s}", .{
-                std.mem.asBytes(&std.mem.nativeToBig(u32, version)),
-                std.mem.asBytes(&std.mem.nativeToBig(u32, entry_count)),
-            });
-            defer allocator.free(header);
-            try index_lock_file.writeAll(header);
-            h.update(header);
+                    // start the checksum
+                    var h = std.crypto.hash.Sha1.init(.{});
 
-            // write the entries
-            for (self.entries.values()) |entry| {
-                var entry_buffer = std.ArrayList(u8).init(allocator);
-                defer entry_buffer.deinit();
-                const writer = entry_buffer.writer();
-                try writer.writeIntBig(u32, entry.ctime_secs);
-                try writer.writeIntBig(u32, entry.ctime_nsecs);
-                try writer.writeIntBig(u32, entry.mtime_secs);
-                try writer.writeIntBig(u32, entry.mtime_nsecs);
-                try writer.writeIntBig(u32, entry.dev);
-                try writer.writeIntBig(u32, entry.ino);
-                try writer.writeIntBig(u32, @as(u32, @bitCast(entry.mode)));
-                try writer.writeIntBig(u32, entry.uid);
-                try writer.writeIntBig(u32, entry.gid);
-                try writer.writeIntBig(u32, entry.file_size);
-                try writer.writeAll(&entry.oid);
-                try writer.writeIntBig(u16, @as(u16, @bitCast(entry.flags)));
-                try writer.writeAll(entry.path);
-                while (entry_buffer.items.len % 8 != 0) {
-                    try writer.print("\x00", .{});
-                }
-                try index_lock_file.writeAll(entry_buffer.items);
-                h.update(entry_buffer.items);
+                    // write the header
+                    const version: u32 = 2;
+                    const entry_count: u32 = @intCast(self.entries.count());
+                    const header = try std.fmt.allocPrint(allocator, "DIRC{s}{s}", .{
+                        std.mem.asBytes(&std.mem.nativeToBig(u32, version)),
+                        std.mem.asBytes(&std.mem.nativeToBig(u32, entry_count)),
+                    });
+                    defer allocator.free(header);
+                    try opts.lock_file.writeAll(header);
+                    h.update(header);
+
+                    // write the entries
+                    for (self.entries.values()) |entry| {
+                        var entry_buffer = std.ArrayList(u8).init(allocator);
+                        defer entry_buffer.deinit();
+                        const writer = entry_buffer.writer();
+                        try writer.writeIntBig(u32, entry.ctime_secs);
+                        try writer.writeIntBig(u32, entry.ctime_nsecs);
+                        try writer.writeIntBig(u32, entry.mtime_secs);
+                        try writer.writeIntBig(u32, entry.mtime_nsecs);
+                        try writer.writeIntBig(u32, entry.dev);
+                        try writer.writeIntBig(u32, entry.ino);
+                        try writer.writeIntBig(u32, @as(u32, @bitCast(entry.mode)));
+                        try writer.writeIntBig(u32, entry.uid);
+                        try writer.writeIntBig(u32, entry.gid);
+                        try writer.writeIntBig(u32, entry.file_size);
+                        try writer.writeAll(&entry.oid);
+                        try writer.writeIntBig(u16, @as(u16, @bitCast(entry.flags)));
+                        try writer.writeAll(entry.path);
+                        while (entry_buffer.items.len % 8 != 0) {
+                            try writer.print("\x00", .{});
+                        }
+                        try opts.lock_file.writeAll(entry_buffer.items);
+                        h.update(entry_buffer.items);
+                    }
+
+                    // write the checksum
+                    var overall_sha1_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+                    h.final(&overall_sha1_buffer);
+                    try opts.lock_file.writeAll(&overall_sha1_buffer);
+                },
+                .xit => {},
             }
-
-            // write the checksum
-            var overall_sha1_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-            h.final(&overall_sha1_buffer);
-            try index_lock_file.writeAll(&overall_sha1_buffer);
         }
     };
 }

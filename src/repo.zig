@@ -314,11 +314,31 @@ pub fn Repo(comptime kind: RepoKind) type {
                         try index.addPath(self.core.repo_dir, path);
                     }
 
-                    try index.write(self.allocator, lock.lock_file);
+                    try index.write(self.allocator, .{ .lock_file = lock.lock_file });
 
                     lock.success = true;
                 },
-                .xit => {},
+                .xit => {
+                    // read index
+                    var index = try idx.Index(.xit).init(self.allocator, .{ .db = &self.core.db });
+                    defer index.deinit();
+
+                    // read all the new entries
+                    for (paths.items) |path| {
+                        const file = self.core.repo_dir.openFile(path, .{ .mode = .read_only }) catch |err| {
+                            if (err == error.FileNotFound and index.entries.contains(path)) {
+                                index.removePath(path);
+                                continue;
+                            } else {
+                                return err;
+                            }
+                        };
+                        defer file.close();
+                        try index.addPath(self.core.repo_dir, path);
+                    }
+
+                    try index.write(self.allocator, .{ .db = &self.core.db });
+                },
             }
         }
     };

@@ -353,7 +353,7 @@ pub fn checkout(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, target: []co
     try migrate(allocator, repo_dir, tree_diff, &index, result);
 
     // update the index
-    try index.write(allocator, lock.lock_file);
+    try index.write(allocator, .{ .lock_file = lock.lock_file });
 
     // update HEAD
     try ref.writeHead(allocator, git_dir, target, oid_hex);

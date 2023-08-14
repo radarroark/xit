@@ -84,14 +84,17 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
 
     // TEMPORARY
     if (kind == .xit) {
+        // make file
+        var hello_txt = try repo_dir.createFile("hello.txt", .{});
+        defer hello_txt.close();
+        try hello_txt.writeAll("hello, world!");
+
         var repo = (try rp.Repo(kind).init(allocator, .{ .cwd = repo_dir })).?;
         defer repo.deinit();
-        const opts = switch (kind) {
-            .git => .{ .git_dir = core.git_dir },
-            .xit => .{ .db = &repo.core.db },
-        };
-        var index = try idx.Index(kind).init(allocator, opts);
-        defer index.deinit();
+        var paths = std.ArrayList([]const u8).init(allocator);
+        defer paths.deinit();
+        try paths.append("hello.txt");
+        try repo.add(paths);
         return;
     }
 
