@@ -66,7 +66,7 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
             .repo = null,
         },
         .xit => .{
-            .xit_file = try repo_dir.openFile(".xit", .{}),
+            .xit_file = try repo_dir.openFile(".xit", .{ .mode = .read_write }),
         },
     };
     defer switch (kind) {
@@ -89,12 +89,21 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
         defer hello_txt.close();
         try hello_txt.writeAll("hello, world!");
 
-        var repo = (try rp.Repo(kind).init(allocator, .{ .cwd = repo_dir })).?;
-        defer repo.deinit();
         var paths = std.ArrayList([]const u8).init(allocator);
         defer paths.deinit();
         try paths.append("hello.txt");
-        try repo.add(paths);
+
+        {
+            var repo = (try rp.Repo(kind).init(allocator, .{ .cwd = repo_dir })).?;
+            defer repo.deinit();
+            try repo.add(paths);
+        }
+
+        {
+            var repo = (try rp.Repo(kind).init(allocator, .{ .cwd = repo_dir })).?;
+            defer repo.deinit();
+            try repo.add(paths);
+        }
         return;
     }
 

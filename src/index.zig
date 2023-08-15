@@ -79,10 +79,8 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
 
             switch (repo_kind) {
                 .git => {
-                    const git_dir = opts.git_dir;
-
                     // open index
-                    const index_file = git_dir.openFile("index", .{ .mode = .read_only }) catch |err| {
+                    const index_file = opts.git_dir.openFile("index", .{ .mode = .read_only }) catch |err| {
                         switch (err) {
                             error.FileNotFound => return index,
                             else => return err,
@@ -148,9 +146,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     _ = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
                 },
                 .xit => {
-                    const db = opts.db;
-
-                    if (try db.rootCursor().readCursor(&[_]xitdb.PathPart{
+                    if (try opts.db.rootCursor().readCursor(&[_]xitdb.PathPart{
                         .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
                         .{ .map_get = .{ .bytes = "index" } },
                     })) |cursor| {
@@ -159,7 +155,6 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                         while (try iter.next()) |*next_cursor| {
                             const value = (try next_cursor.readKeyBytes(allocator, &[_]xitdb.PathPart{})).?;
                             defer allocator.free(value);
-                            std.debug.print("{s}\n", .{value});
                         }
                     }
                 },
@@ -383,7 +378,58 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     h.final(&overall_sha1_buffer);
                     try opts.lock_file.writeAll(&overall_sha1_buffer);
                 },
-                .xit => {},
+                .xit => {
+                    var path_parts = std.ArrayList(xitdb.PathPart).init(allocator);
+                    defer path_parts.deinit();
+                    try path_parts.append(.{ .path = &[_]xitdb.PathPart{
+                        .{ .list_get = .append_copy },
+                    } });
+
+                    var arena = std.heap.ArenaAllocator.init(allocator);
+                    defer arena.deinit();
+                    for (self.entries.values()) |entry| {
+                        var entry_buffer = std.ArrayList(u8).init(arena.allocator());
+                        const writer = entry_buffer.writer();
+                        try writer.writeIntBig(u32, entry.ctime_secs);
+                        try writer.writeIntBig(u32, entry.ctime_nsecs);
+                        try writer.writeIntBig(u32, entry.mtime_secs);
+                        try writer.writeIntBig(u32, entry.mtime_nsecs);
+                        try writer.writeIntBig(u32, entry.dev);
+                        try writer.writeIntBig(u32, entry.ino);
+                        try writer.writeIntBig(u32, @as(u32, @bitCast(entry.mode)));
+                        try writer.writeIntBig(u32, entry.uid);
+                        try writer.writeIntBig(u32, entry.gid);
+                        try writer.writeIntBig(u32, entry.file_size);
+                        try writer.writeAll(&entry.oid);
+                        try writer.writeIntBig(u16, @as(u16, @bitCast(entry.flags)));
+                        try writer.writeAll(entry.path);
+                        while (entry_buffer.items.len % 8 != 0) {
+                            try writer.print("\x00", .{});
+                        }
+
+                        if (try opts.db.rootCursor().readBytes(allocator, &[_]xitdb.PathPart{
+                            .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
+                            .{ .map_get = .{ .bytes = "index" } },
+                            .{ .map_get = .{ .bytes = entry.path } },
+                        })) |existing_entry| {
+                            defer allocator.free(existing_entry);
+                            if (std.mem.eql(u8, entry_buffer.items, existing_entry)) {
+                                continue;
+                            }
+                        }
+
+                        try path_parts.append(.{ .path = &[_]xitdb.PathPart{
+                            .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
+                            .map_create,
+                            .{ .map_get = .{ .bytes = "index" } },
+                            .map_create,
+                            .{ .map_get = .{ .bytes = entry.path } },
+                            .{ .value = .{ .bytes = entry_buffer.items } },
+                        } });
+                    }
+
+                    try opts.db.rootCursor().writePath(path_parts.items);
+                },
             }
         }
     };

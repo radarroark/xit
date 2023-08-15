@@ -61,7 +61,7 @@ pub fn Repo(comptime kind: RepoKind) type {
                     }
                 },
                 .xit => {
-                    var xit_file_maybe = opts.cwd.openFile(".xit", .{}) catch null;
+                    var xit_file_maybe = opts.cwd.openFile(".xit", .{ .mode = .read_write, .lock = .exclusive }) catch null;
                     if (xit_file_maybe) |*xit_file| {
                         errdefer xit_file.close();
 
