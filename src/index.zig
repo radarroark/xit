@@ -155,6 +155,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                         while (try iter.next()) |*next_cursor| {
                             const buffer = (try next_cursor.readBytes(allocator, &[_]xitdb.PathPart{})).?;
                             defer allocator.free(buffer);
+                            const path = (try next_cursor.readKeyBytes(index.arena.allocator(), &[_]xitdb.PathPart{})).?;
                             var stream = std.io.fixedBufferStream(buffer);
                             var reader = stream.reader();
                             var entry = Index(repo_kind).Entry{
@@ -171,7 +172,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                 .oid = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN),
                                 .flags = @bitCast(try reader.readIntBig(u16)),
                                 .extended_flags = null, // TODO: read this if necessary
-                                .path = try reader.readUntilDelimiterAlloc(index.arena.allocator(), 0, std.fs.MAX_PATH_BYTES),
+                                .path = path,
                             };
                             if (entry.mode.unix_permission != 0o755) { // ensure mode is valid
                                 entry.mode.unix_permission = 0o644;
@@ -427,10 +428,6 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                         try writer.writeIntBig(u32, entry.file_size);
                         try writer.writeAll(&entry.oid);
                         try writer.writeIntBig(u16, @as(u16, @bitCast(entry.flags)));
-                        try writer.writeAll(entry.path);
-                        while (entry_buffer.items.len % 8 != 0) {
-                            try writer.print("\x00", .{});
-                        }
 
                         if (try opts.db.rootCursor().readBytes(allocator, &[_]xitdb.PathPart{
                             .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
