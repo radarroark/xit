@@ -153,8 +153,33 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                         var iter = try cursor.iter(.map);
                         defer iter.deinit();
                         while (try iter.next()) |*next_cursor| {
-                            const value = (try next_cursor.readKeyBytes(allocator, &[_]xitdb.PathPart{})).?;
-                            defer allocator.free(value);
+                            const buffer = (try next_cursor.readBytes(allocator, &[_]xitdb.PathPart{})).?;
+                            defer allocator.free(buffer);
+                            var stream = std.io.fixedBufferStream(buffer);
+                            var reader = stream.reader();
+                            var entry = Index(repo_kind).Entry{
+                                .ctime_secs = try reader.readIntBig(u32),
+                                .ctime_nsecs = try reader.readIntBig(u32),
+                                .mtime_secs = try reader.readIntBig(u32),
+                                .mtime_nsecs = try reader.readIntBig(u32),
+                                .dev = try reader.readIntBig(u32),
+                                .ino = try reader.readIntBig(u32),
+                                .mode = @bitCast(try reader.readIntBig(u32)),
+                                .uid = try reader.readIntBig(u32),
+                                .gid = try reader.readIntBig(u32),
+                                .file_size = try reader.readIntBig(u32),
+                                .oid = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN),
+                                .flags = @bitCast(try reader.readIntBig(u16)),
+                                .extended_flags = null, // TODO: read this if necessary
+                                .path = try reader.readUntilDelimiterAlloc(index.arena.allocator(), 0, std.fs.MAX_PATH_BYTES),
+                            };
+                            if (entry.mode.unix_permission != 0o755) { // ensure mode is valid
+                                entry.mode.unix_permission = 0o644;
+                            }
+                            if (entry.path.len != entry.flags.name_length) {
+                                return error.InvalidPathSize;
+                            }
+                            try index.addEntry(entry);
                         }
                     }
                 },
