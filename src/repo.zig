@@ -19,12 +19,23 @@ pub const RepoErrors = error{
     RepoAlreadyExists,
 };
 
-pub fn Repo(comptime kind: RepoKind) type {
+pub fn RepoOpts(comptime repo_kind: RepoKind) type {
+    return switch (repo_kind) {
+        .git => struct {
+            git_dir: std.fs.Dir,
+        },
+        .xit => struct {
+            db: *xitdb.Database(.file),
+        },
+    };
+}
+
+pub fn Repo(comptime repo_kind: RepoKind) type {
     return struct {
         allocator: std.mem.Allocator,
         core: Core,
 
-        pub const Core = switch (kind) {
+        pub const Core = switch (repo_kind) {
             .git => struct {
                 repo_dir: std.fs.Dir,
                 git_dir: std.fs.Dir,
@@ -39,8 +50,8 @@ pub fn Repo(comptime kind: RepoKind) type {
             cwd: std.fs.Dir,
         };
 
-        pub fn init(allocator: std.mem.Allocator, opts: InitOpts) !?Repo(kind) {
-            switch (kind) {
+        pub fn init(allocator: std.mem.Allocator, opts: InitOpts) !?Repo(repo_kind) {
+            switch (repo_kind) {
                 .git => {
                     var git_dir_maybe = opts.cwd.openDir(".git", .{}) catch null;
                     if (git_dir_maybe) |*git_dir| {
@@ -82,16 +93,16 @@ pub fn Repo(comptime kind: RepoKind) type {
             }
         }
 
-        pub fn initWithCommand(allocator: std.mem.Allocator, opts: InitOpts, cmd_data: cmd.CommandData) !Repo(kind) {
-            var self_maybe = try Repo(kind).init(allocator, opts);
+        pub fn initWithCommand(allocator: std.mem.Allocator, opts: InitOpts, cmd_data: cmd.CommandData) !Repo(repo_kind) {
+            var self_maybe = try Repo(repo_kind).init(allocator, opts);
             if (self_maybe) |*self| {
                 try self.command(cmd_data);
                 return self.*;
             } else {
                 if (cmd_data == .init) {
-                    var self = switch (kind) {
-                        .git => Repo(kind){ .allocator = allocator, .core = .{ .repo_dir = undefined, .git_dir = undefined } },
-                        .xit => Repo(kind){ .allocator = allocator, .core = .{ .repo_dir = undefined, .db = undefined } },
+                    var self = switch (repo_kind) {
+                        .git => Repo(repo_kind){ .allocator = allocator, .core = .{ .repo_dir = undefined, .git_dir = undefined } },
+                        .xit => Repo(repo_kind){ .allocator = allocator, .core = .{ .repo_dir = undefined, .db = undefined } },
                     };
                     try self.command(cmd_data);
                     return self;
@@ -101,7 +112,7 @@ pub fn Repo(comptime kind: RepoKind) type {
             }
         }
 
-        pub fn initNew(allocator: std.mem.Allocator, dir: std.fs.Dir, sub_path: []const u8) !Repo(kind) {
+        pub fn initNew(allocator: std.mem.Allocator, dir: std.fs.Dir, sub_path: []const u8) !Repo(repo_kind) {
             // get the root dir. if no path was given to the init command, this
             // should just be the current working directory (cwd). if a path was
             // given, it should either append it to the cwd or, if it is absolute,
@@ -109,7 +120,7 @@ pub fn Repo(comptime kind: RepoKind) type {
             var repo_dir = try dir.makeOpenPath(sub_path, .{});
             errdefer repo_dir.close();
 
-            switch (kind) {
+            switch (repo_kind) {
                 .git => {
                     // make the .git dir
                     repo_dir.makeDir(".git") catch |err| {
@@ -160,8 +171,8 @@ pub fn Repo(comptime kind: RepoKind) type {
             }
         }
 
-        pub fn deinit(self: *Repo(kind)) void {
-            switch (kind) {
+        pub fn deinit(self: *Repo(repo_kind)) void {
+            switch (repo_kind) {
                 .git => {
                     self.core.repo_dir.close();
                     self.core.git_dir.close();
@@ -173,7 +184,7 @@ pub fn Repo(comptime kind: RepoKind) type {
             }
         }
 
-        fn command(self: *Repo(kind), cmd_data: cmd.CommandData) !void {
+        fn command(self: *Repo(repo_kind), cmd_data: cmd.CommandData) !void {
             const stdout = std.io.getStdOut().writer();
             const stderr = std.io.getStdErr().writer();
 
@@ -192,7 +203,7 @@ pub fn Repo(comptime kind: RepoKind) type {
                     , .{});
                 },
                 cmd.CommandData.init => {
-                    self.* = Repo(kind).initNew(self.allocator, std.fs.cwd(), cmd_data.init.dir) catch |err| {
+                    self.* = Repo(repo_kind).initNew(self.allocator, std.fs.cwd(), cmd_data.init.dir) catch |err| {
                         switch (err) {
                             error.RepoAlreadyExists => {
                                 try stderr.print("{s} is already a repository\n", .{cmd_data.init.dir});
@@ -237,7 +248,7 @@ pub fn Repo(comptime kind: RepoKind) type {
                     }
                 },
                 cmd.CommandData.branch => {
-                    switch (kind) {
+                    switch (repo_kind) {
                         .git => {
                             if (cmd_data.branch.name) |name| {
                                 try branch.create(self.allocator, self.core.git_dir, name);
@@ -261,11 +272,11 @@ pub fn Repo(comptime kind: RepoKind) type {
                     }
                 },
                 cmd.CommandData.checkout => {
-                    switch (kind) {
+                    switch (repo_kind) {
                         .git => {
                             var result = chk.CheckoutResult.init();
                             defer result.deinit();
-                            chk.checkout(self.allocator, self.core.repo_dir, cmd_data.checkout.target, &result) catch |err| {
+                            chk.checkout(repo_kind, self.allocator, self.core.repo_dir, cmd_data.checkout.target, &result) catch |err| {
                                 switch (err) {
                                     error.CheckoutConflict => {},
                                     else => return err,
@@ -278,19 +289,19 @@ pub fn Repo(comptime kind: RepoKind) type {
             }
         }
 
-        pub fn status(self: *Repo(kind)) !st.Status {
-            switch (kind) {
+        pub fn status(self: *Repo(repo_kind)) !st.Status(repo_kind) {
+            switch (repo_kind) {
                 .git => {
-                    return try st.Status.init(self.allocator, self.core.repo_dir, self.core.git_dir);
+                    return try st.Status(repo_kind).init(self.allocator, self.core.repo_dir, .{ .git_dir = self.core.git_dir });
                 },
                 .xit => {
-                    return error.NotARepo;
+                    return try st.Status(repo_kind).init(self.allocator, self.core.repo_dir, .{ .db = &self.core.db });
                 },
             }
         }
 
-        pub fn add(self: *Repo(kind), paths: std.ArrayList([]const u8)) !void {
-            switch (kind) {
+        pub fn add(self: *Repo(repo_kind), paths: std.ArrayList([]const u8)) !void {
+            switch (repo_kind) {
                 .git => {
                     // create lock file
                     var lock = try io.LockFile.init(self.allocator, self.core.git_dir, "index");

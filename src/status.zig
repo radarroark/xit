@@ -6,111 +6,115 @@
 //! organizes the data so you can display it how you want.
 
 const std = @import("std");
+const xitdb = @import("xitdb");
 const idx = @import("./index.zig");
 const hash = @import("./hash.zig");
 const obj = @import("./object.zig");
 const ref = @import("./ref.zig");
 const io = @import("./io.zig");
+const rp = @import("./repo.zig");
 
-pub const Status = struct {
-    untracked: std.ArrayList(Entry),
-    workspace_modified: std.ArrayList(Entry),
-    workspace_deleted: std.ArrayList([]const u8),
-    index_added: std.ArrayList([]const u8),
-    index_modified: std.ArrayList([]const u8),
-    index_deleted: std.ArrayList([]const u8),
-    index: idx.Index(.git),
-    head_tree: HeadTree,
-    arena: std.heap.ArenaAllocator,
+pub fn Status(comptime repo_kind: rp.RepoKind) type {
+    return struct {
+        untracked: std.ArrayList(Entry),
+        workspace_modified: std.ArrayList(Entry),
+        workspace_deleted: std.ArrayList([]const u8),
+        index_added: std.ArrayList([]const u8),
+        index_modified: std.ArrayList([]const u8),
+        index_deleted: std.ArrayList([]const u8),
+        index: idx.Index(repo_kind),
+        head_tree: HeadTree,
+        arena: std.heap.ArenaAllocator,
 
-    pub const Entry = struct {
-        path: []const u8,
-        meta: std.fs.File.Metadata,
-    };
-
-    pub fn init(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, git_dir: std.fs.Dir) !Status {
-        var untracked = std.ArrayList(Entry).init(allocator);
-        errdefer untracked.deinit();
-
-        var workspace_modified = std.ArrayList(Entry).init(allocator);
-        errdefer workspace_modified.deinit();
-
-        var workspace_deleted = std.ArrayList([]const u8).init(allocator);
-        errdefer workspace_deleted.deinit();
-
-        var index_added = std.ArrayList([]const u8).init(allocator);
-        errdefer index_added.deinit();
-
-        var index_modified = std.ArrayList([]const u8).init(allocator);
-        errdefer index_modified.deinit();
-
-        var index_deleted = std.ArrayList([]const u8).init(allocator);
-        errdefer index_deleted.deinit();
-
-        var arena = std.heap.ArenaAllocator.init(allocator);
-        errdefer arena.deinit();
-
-        var index = try idx.Index(.git).init(allocator, .{ .git_dir = git_dir });
-        errdefer index.deinit();
-
-        var index_bools = try allocator.alloc(bool, index.entries.count());
-        defer allocator.free(index_bools);
-
-        _ = try addEntries(arena.allocator(), &untracked, &workspace_modified, index, &index_bools, repo_dir, ".");
-
-        for (index_bools, 0..) |exists, i| {
-            if (!exists) {
-                try workspace_deleted.append(index.entries.keys()[i]);
-            }
-        }
-
-        var head_tree = try HeadTree.init(allocator, repo_dir, git_dir);
-        errdefer head_tree.deinit();
-
-        for (index.entries.values()) |index_entry| {
-            if (head_tree.entries.get(index_entry.path)) |head_entry| {
-                if (!io.modeEquals(index_entry.mode, head_entry.mode) or !std.mem.eql(u8, &index_entry.oid, &head_entry.oid)) {
-                    try index_modified.append(index_entry.path);
-                }
-            } else {
-                try index_added.append(index_entry.path);
-            }
-        }
-
-        var iter = head_tree.entries.keyIterator();
-        while (iter.next()) |path| {
-            if (!index.entries.contains(path.*)) {
-                try index_deleted.append(path.*);
-            }
-        }
-
-        return Status{
-            .untracked = untracked,
-            .workspace_modified = workspace_modified,
-            .workspace_deleted = workspace_deleted,
-            .index_added = index_added,
-            .index_modified = index_modified,
-            .index_deleted = index_deleted,
-            .index = index,
-            .head_tree = head_tree,
-            .arena = arena,
+        pub const Entry = struct {
+            path: []const u8,
+            meta: std.fs.File.Metadata,
         };
-    }
 
-    pub fn deinit(self: *Status) void {
-        self.untracked.deinit();
-        self.workspace_modified.deinit();
-        self.workspace_deleted.deinit();
-        self.index_added.deinit();
-        self.index_modified.deinit();
-        self.index_deleted.deinit();
-        self.index.deinit();
-        self.head_tree.deinit();
-        self.arena.deinit();
-    }
-};
+        pub fn init(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, opts: rp.RepoOpts(repo_kind)) !Status(repo_kind) {
+            var untracked = std.ArrayList(Entry).init(allocator);
+            errdefer untracked.deinit();
 
-fn addEntries(allocator: std.mem.Allocator, untracked: *std.ArrayList(Status.Entry), modified: *std.ArrayList(Status.Entry), index: idx.Index(.git), index_bools: *[]bool, repo_dir: std.fs.Dir, path: []const u8) !bool {
+            var workspace_modified = std.ArrayList(Entry).init(allocator);
+            errdefer workspace_modified.deinit();
+
+            var workspace_deleted = std.ArrayList([]const u8).init(allocator);
+            errdefer workspace_deleted.deinit();
+
+            var index_added = std.ArrayList([]const u8).init(allocator);
+            errdefer index_added.deinit();
+
+            var index_modified = std.ArrayList([]const u8).init(allocator);
+            errdefer index_modified.deinit();
+
+            var index_deleted = std.ArrayList([]const u8).init(allocator);
+            errdefer index_deleted.deinit();
+
+            var arena = std.heap.ArenaAllocator.init(allocator);
+            errdefer arena.deinit();
+
+            var index = try idx.Index(repo_kind).init(allocator, opts);
+            errdefer index.deinit();
+
+            var index_bools = try allocator.alloc(bool, index.entries.count());
+            defer allocator.free(index_bools);
+
+            _ = try addEntries(repo_kind, arena.allocator(), &untracked, &workspace_modified, index, &index_bools, repo_dir, ".");
+
+            for (index_bools, 0..) |exists, i| {
+                if (!exists) {
+                    try workspace_deleted.append(index.entries.keys()[i]);
+                }
+            }
+
+            var head_tree = try HeadTree.init(repo_kind, allocator, repo_dir, opts);
+            errdefer head_tree.deinit();
+
+            for (index.entries.values()) |index_entry| {
+                if (head_tree.entries.get(index_entry.path)) |head_entry| {
+                    if (!io.modeEquals(index_entry.mode, head_entry.mode) or !std.mem.eql(u8, &index_entry.oid, &head_entry.oid)) {
+                        try index_modified.append(index_entry.path);
+                    }
+                } else {
+                    try index_added.append(index_entry.path);
+                }
+            }
+
+            var iter = head_tree.entries.keyIterator();
+            while (iter.next()) |path| {
+                if (!index.entries.contains(path.*)) {
+                    try index_deleted.append(path.*);
+                }
+            }
+
+            return Status(repo_kind){
+                .untracked = untracked,
+                .workspace_modified = workspace_modified,
+                .workspace_deleted = workspace_deleted,
+                .index_added = index_added,
+                .index_modified = index_modified,
+                .index_deleted = index_deleted,
+                .index = index,
+                .head_tree = head_tree,
+                .arena = arena,
+            };
+        }
+
+        pub fn deinit(self: *Status(repo_kind)) void {
+            self.untracked.deinit();
+            self.workspace_modified.deinit();
+            self.workspace_deleted.deinit();
+            self.index_added.deinit();
+            self.index_modified.deinit();
+            self.index_deleted.deinit();
+            self.index.deinit();
+            self.head_tree.deinit();
+            self.arena.deinit();
+        }
+    };
+}
+
+fn addEntries(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, untracked: *std.ArrayList(Status(repo_kind).Entry), modified: *std.ArrayList(Status(repo_kind).Entry), index: idx.Index(repo_kind), index_bools: *[]bool, repo_dir: std.fs.Dir, path: []const u8) !bool {
     const file = try repo_dir.openFile(path, .{ .mode = .read_only });
     defer file.close();
     const meta = try file.metadata();
@@ -119,11 +123,11 @@ fn addEntries(allocator: std.mem.Allocator, untracked: *std.ArrayList(Status.Ent
             if (index.entries.getIndex(path)) |entry_index| {
                 index_bools.*[entry_index] = true;
                 const entry = index.entries.values()[entry_index];
-                if (try idx.indexDiffersFromWorkspace(entry, file, meta)) {
-                    try modified.append(Status.Entry{ .path = path, .meta = meta });
+                if (try idx.indexDiffersFromWorkspace(repo_kind, entry, file, meta)) {
+                    try modified.append(Status(repo_kind).Entry{ .path = path, .meta = meta });
                 }
             } else {
-                try untracked.append(Status.Entry{ .path = path, .meta = meta });
+                try untracked.append(Status(repo_kind).Entry{ .path = path, .meta = meta });
             }
             return true;
         },
@@ -134,7 +138,7 @@ fn addEntries(allocator: std.mem.Allocator, untracked: *std.ArrayList(Status.Ent
             defer dir.close();
             var iter = dir.iterate();
 
-            var child_untracked = std.ArrayList(Status.Entry).init(allocator);
+            var child_untracked = std.ArrayList(Status(repo_kind).Entry).init(allocator);
             defer child_untracked.deinit();
             var contains_file = false;
 
@@ -149,10 +153,10 @@ fn addEntries(allocator: std.mem.Allocator, untracked: *std.ArrayList(Status.Ent
                 else
                     try std.fs.path.join(allocator, &[_][]const u8{ path, entry.name });
 
-                var grandchild_untracked = std.ArrayList(Status.Entry).init(allocator);
+                var grandchild_untracked = std.ArrayList(Status(repo_kind).Entry).init(allocator);
                 defer grandchild_untracked.deinit();
 
-                const is_file = try addEntries(allocator, &grandchild_untracked, modified, index, index_bools, repo_dir, subpath);
+                const is_file = try addEntries(repo_kind, allocator, &grandchild_untracked, modified, index, index_bools, repo_dir, subpath);
                 contains_file = contains_file or is_file;
                 if (is_file and is_untracked) break; // no need to continue because child_untracked will be discarded anyway
 
@@ -162,7 +166,7 @@ fn addEntries(allocator: std.mem.Allocator, untracked: *std.ArrayList(Status.Ent
             // add the dir if it isn't tracked and contains a file
             if (is_untracked) {
                 if (contains_file) {
-                    try untracked.append(Status.Entry{ .path = path, .meta = meta });
+                    try untracked.append(Status(repo_kind).Entry{ .path = path, .meta = meta });
                 }
             }
             // add its children
@@ -179,7 +183,7 @@ pub const HeadTree = struct {
     entries: std.StringHashMap(obj.TreeEntry),
     arena: std.heap.ArenaAllocator,
 
-    pub fn init(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, git_dir: std.fs.Dir) !HeadTree {
+    pub fn init(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, repo_dir: std.fs.Dir, opts: rp.RepoOpts(repo_kind)) !HeadTree {
         var entries = std.StringHashMap(obj.TreeEntry).init(allocator);
         errdefer entries.deinit();
 
@@ -189,10 +193,15 @@ pub const HeadTree = struct {
         };
 
         // if head points to a valid object, read it
-        if (try ref.readHeadMaybe(git_dir)) |head_file_buffer| {
-            var commit_object = try obj.Object.init(allocator, repo_dir, head_file_buffer);
-            defer commit_object.deinit();
-            try tree.read(repo_dir, "", commit_object.content.commit.tree);
+        switch (repo_kind) {
+            .git => {
+                if (try ref.readHeadMaybe(opts.git_dir)) |head_file_buffer| {
+                    var commit_object = try obj.Object.init(allocator, repo_dir, head_file_buffer);
+                    defer commit_object.deinit();
+                    try tree.read(repo_dir, "", commit_object.content.commit.tree);
+                }
+            },
+            .xit => {},
         }
 
         return tree;

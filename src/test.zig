@@ -16,15 +16,15 @@ pub fn expectEqual(expected: anytype, actual: anytype) !void {
     try std.testing.expectEqual(@as(@TypeOf(actual), expected), actual);
 }
 
-fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
+fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void {
     const temp_dir_name = "temp-test-end-to-end";
 
     var args = std.ArrayList([]const u8).init(allocator);
     defer args.deinit();
 
     // start libgit
-    if (kind == .git) _ = c.git_libgit2_init();
-    defer _ = if (kind == .git) c.git_libgit2_shutdown();
+    if (repo_kind == .git) _ = c.git_libgit2_init();
+    defer _ = if (repo_kind == .git) c.git_libgit2_shutdown();
 
     // get the current working directory path.
     // we can't just call std.fs.cwd() all the time because we're
@@ -44,14 +44,14 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
     args.clearAndFree();
     try args.append("init");
     try args.append(temp_dir_name ++ "/repo");
-    try main.xitMain(kind, allocator, &args);
+    try main.xitMain(repo_kind, allocator, &args);
 
     // get the main dir
     var repo_dir = try temp_dir.openDir("repo", .{});
     defer repo_dir.close();
 
-    // init kind-specific state
-    const Core = switch (kind) {
+    // init repo_kind-specific state
+    const Core = switch (repo_kind) {
         .git => struct {
             git_dir: std.fs.Dir,
             repo: ?*c.git_repository,
@@ -60,7 +60,7 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
             xit_file: std.fs.File,
         },
     };
-    var core: Core = switch (kind) {
+    var core: Core = switch (repo_kind) {
         .git => .{
             .git_dir = try repo_dir.openDir(".git", .{}),
             .repo = null,
@@ -69,7 +69,7 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
             .xit_file = try repo_dir.openFile(".xit", .{ .mode = .read_write }),
         },
     };
-    defer switch (kind) {
+    defer switch (repo_kind) {
         .git => core.git_dir.close(),
         .xit => core.xit_file.close(),
     };
@@ -83,7 +83,7 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
     const repo_path: [*c]const u8 = @ptrCast(try repo_dir.realpath(".", &repo_path_buffer));
 
     // TEMPORARY
-    if (kind == .xit) {
+    if (repo_kind == .xit) {
         // make file
         var hello_txt = try repo_dir.createFile("hello.txt", .{});
         defer hello_txt.close();
@@ -94,13 +94,13 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
         try paths.append("hello.txt");
 
         {
-            var repo = (try rp.Repo(kind).init(allocator, .{ .cwd = repo_dir })).?;
+            var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
             defer repo.deinit();
             try repo.add(paths);
         }
 
         {
-            var repo = (try rp.Repo(kind).init(allocator, .{ .cwd = repo_dir })).?;
+            var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
             defer repo.deinit();
             try repo.add(paths);
         }
@@ -109,7 +109,7 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
 
     // make sure we can get status before first commit
     {
-        var repo = (try rp.Repo(kind).init(allocator, .{ .cwd = repo_dir })).?;
+        var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
         defer repo.deinit();
         var status = try repo.status();
         defer status.deinit();
@@ -148,14 +148,14 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
         args.clearAndFree();
         try args.append("add");
         try args.append(".");
-        try main.xitMain(kind, allocator, &args);
+        try main.xitMain(repo_kind, allocator, &args);
 
         // make a commit
         args.clearAndFree();
         try args.append("commit");
         try args.append("-m");
         try args.append("first commit");
-        try main.xitMain(kind, allocator, &args);
+        try main.xitMain(repo_kind, allocator, &args);
 
         // check that the commit object was created
         {
@@ -216,14 +216,14 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
         try args.append("commit");
         try args.append("-m");
         try args.append("pointless commit");
-        try expectEqual(error.ObjectAlreadyExists, main.xitMain(kind, allocator, &args));
+        try expectEqual(error.ObjectAlreadyExists, main.xitMain(repo_kind, allocator, &args));
 
         // delete a file
         try repo_dir.deleteFile("LICENSE");
         args.clearAndFree();
         try args.append("add");
         try args.append("LICENSE");
-        try main.xitMain(kind, allocator, &args);
+        try main.xitMain(repo_kind, allocator, &args);
 
         // delete a file and dir
         {
@@ -231,7 +231,7 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
             args.clearAndFree();
             try args.append("add");
             try args.append("docs/design.md");
-            try main.xitMain(kind, allocator, &args);
+            try main.xitMain(repo_kind, allocator, &args);
         }
 
         // replace a file with a directory
@@ -262,14 +262,14 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
         args.clearAndFree();
         try args.append("add");
         try args.append(".");
-        try main.xitMain(kind, allocator, &args);
+        try main.xitMain(repo_kind, allocator, &args);
 
         // make another commit
         args.clearAndFree();
         try args.append("commit");
         try args.append("-m");
         try args.append("second commit");
-        try main.xitMain(kind, allocator, &args);
+        try main.xitMain(repo_kind, allocator, &args);
 
         // check that the commit object was created
         {
@@ -313,14 +313,14 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
                 args.clearAndFree();
                 try args.append("add");
                 try args.append("LICENSE");
-                try main.xitMain(kind, allocator, &args);
+                try main.xitMain(repo_kind, allocator, &args);
             }
 
             // check out commit1 and make sure the conflict is found
             {
                 var result = chk.CheckoutResult.init();
                 defer result.deinit();
-                chk.checkout(allocator, repo_dir, &commit1, &result) catch |err| {
+                chk.checkout(repo_kind, allocator, repo_dir, &commit1, &result) catch |err| {
                     switch (err) {
                         error.CheckoutConflict => {},
                         else => return err,
@@ -336,7 +336,7 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
                 args.clearAndFree();
                 try args.append("add");
                 try args.append("LICENSE");
-                try main.xitMain(kind, allocator, &args);
+                try main.xitMain(repo_kind, allocator, &args);
             }
         }
 
@@ -352,7 +352,7 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
             {
                 var result = chk.CheckoutResult.init();
                 defer result.deinit();
-                chk.checkout(allocator, repo_dir, &commit1, &result) catch |err| {
+                chk.checkout(repo_kind, allocator, repo_dir, &commit1, &result) catch |err| {
                     switch (err) {
                         error.CheckoutConflict => {},
                         else => return err,
@@ -378,7 +378,7 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
             {
                 var result = chk.CheckoutResult.init();
                 defer result.deinit();
-                chk.checkout(allocator, repo_dir, &commit1, &result) catch |err| {
+                chk.checkout(repo_kind, allocator, repo_dir, &commit1, &result) catch |err| {
                     switch (err) {
                         error.CheckoutConflict => {},
                         else => return err,
@@ -411,7 +411,7 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
             {
                 var result = chk.CheckoutResult.init();
                 defer result.deinit();
-                chk.checkout(allocator, repo_dir, &commit1, &result) catch |err| {
+                chk.checkout(repo_kind, allocator, repo_dir, &commit1, &result) catch |err| {
                     switch (err) {
                         error.CheckoutConflict => {},
                         else => return err,
@@ -430,7 +430,7 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
     args.clearAndFree();
     try args.append("checkout");
     try args.append(&commit1);
-    try main.xitMain(kind, allocator, &args);
+    try main.xitMain(repo_kind, allocator, &args);
 
     // the working tree was updated
     {
@@ -448,7 +448,7 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
     args.clearAndFree();
     try args.append("checkout");
     try args.append("master");
-    try main.xitMain(kind, allocator, &args);
+    try main.xitMain(repo_kind, allocator, &args);
 
     // the working tree was updated
     {
@@ -477,17 +477,17 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
         args.clearAndFree();
         try args.append("add");
         try args.append(".");
-        try main.xitMain(kind, allocator, &args);
+        try main.xitMain(repo_kind, allocator, &args);
 
         // read index
         {
-            var repo = (try rp.Repo(kind).init(allocator, .{ .cwd = repo_dir })).?;
+            var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
             defer repo.deinit();
-            const opts = switch (kind) {
+            const opts = switch (repo_kind) {
                 .git => .{ .git_dir = core.git_dir },
                 .xit => .{ .db = &repo.core.db },
             };
-            var index = try idx.Index(kind).init(allocator, opts);
+            var index = try idx.Index(repo_kind).init(allocator, opts);
             defer index.deinit();
             try expectEqual(5, index.entries.count());
             try std.testing.expect(index.entries.contains("README"));
@@ -519,17 +519,17 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
         args.clearAndFree();
         try args.append("add");
         try args.append(".");
-        try main.xitMain(kind, allocator, &args);
+        try main.xitMain(repo_kind, allocator, &args);
 
         // read index
         {
-            var repo = (try rp.Repo(kind).init(allocator, .{ .cwd = repo_dir })).?;
+            var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
             defer repo.deinit();
-            const opts = switch (kind) {
+            const opts = switch (repo_kind) {
                 .git => .{ .git_dir = core.git_dir },
                 .xit => .{ .db = &repo.core.db },
             };
-            var index = try idx.Index(kind).init(allocator, opts);
+            var index = try idx.Index(repo_kind).init(allocator, opts);
             defer index.deinit();
             try expectEqual(4, index.entries.count());
             try std.testing.expect(index.entries.contains("README"));
@@ -553,7 +553,7 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
         args.clearAndFree();
         try args.append("add");
         try args.append("no-such-file");
-        try expectEqual(error.FileNotFound, main.xitMain(kind, allocator, &args));
+        try expectEqual(error.FileNotFound, main.xitMain(repo_kind, allocator, &args));
 
         // a stale index lock file isn't hanging around
         {
@@ -602,7 +602,7 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
         // workspace changes
         {
             // get status
-            var repo = (try rp.Repo(kind).init(allocator, .{ .cwd = repo_dir })).?;
+            var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
             defer repo.deinit();
             var status = try repo.status();
             defer status.deinit();
@@ -660,16 +660,16 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
             args.clearAndFree();
             try args.append("add");
             try args.append("c/d.txt");
-            try main.xitMain(kind, allocator, &args);
+            try main.xitMain(repo_kind, allocator, &args);
 
             // remove file from index
             args.clearAndFree();
             try args.append("add");
             try args.append("src/zig/main.zig");
-            try main.xitMain(kind, allocator, &args);
+            try main.xitMain(repo_kind, allocator, &args);
 
             // get status
-            var repo = (try rp.Repo(kind).init(allocator, .{ .cwd = repo_dir })).?;
+            var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
             defer repo.deinit();
             var status = try repo.status();
             defer status.deinit();
@@ -719,13 +719,13 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
     args.clearAndFree();
     try args.append("branch");
     try args.append("stuff");
-    try main.xitMain(kind, allocator, &args);
+    try main.xitMain(repo_kind, allocator, &args);
 
     // checkout the branch
     args.clearAndFree();
     try args.append("checkout");
     try args.append("stuff");
-    try main.xitMain(kind, allocator, &args);
+    try main.xitMain(repo_kind, allocator, &args);
 
     // check the refs
     try expectEqual(commit2, try ref.readHead(core.git_dir));
@@ -762,7 +762,7 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
     args.clearAndFree();
     try args.append("branch");
     try args.append("a/b/c");
-    try main.xitMain(kind, allocator, &args);
+    try main.xitMain(repo_kind, allocator, &args);
 
     // make sure the ref is created with subdirs
     {
@@ -805,14 +805,14 @@ fn testMain(allocator: std.mem.Allocator, comptime kind: rp.RepoKind) !void {
         args.clearAndFree();
         try args.append("add");
         try args.append("hello.txt");
-        try main.xitMain(kind, allocator, &args);
+        try main.xitMain(repo_kind, allocator, &args);
 
         // make a commit
         args.clearAndFree();
         try args.append("commit");
         try args.append("-m");
         try args.append("third commit");
-        try main.xitMain(kind, allocator, &args);
+        try main.xitMain(repo_kind, allocator, &args);
     }
 
     // get HEAD contents

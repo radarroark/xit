@@ -13,6 +13,7 @@ const obj = @import("./object.zig");
 const ref = @import("./ref.zig");
 const idx = @import("./index.zig");
 const io = @import("./io.zig");
+const rp = @import("./repo.zig");
 
 pub const CheckoutError = error{
     CheckoutConflict,
@@ -96,10 +97,10 @@ pub const TreeToWorkspaceChange = enum {
     modified,
 };
 
-fn compareIndexToWorkspace(entry_maybe: ?idx.Index(.git).Entry, file_maybe: ?std.fs.File) !TreeToWorkspaceChange {
+fn compareIndexToWorkspace(comptime repo_kind: rp.RepoKind, entry_maybe: ?idx.Index(repo_kind).Entry, file_maybe: ?std.fs.File) !TreeToWorkspaceChange {
     if (entry_maybe) |entry| {
         if (file_maybe) |file| {
-            if (try idx.indexDiffersFromWorkspace(entry, file, try file.metadata())) {
+            if (try idx.indexDiffersFromWorkspace(repo_kind, entry, file, try file.metadata())) {
                 return .modified;
             } else {
                 return .none;
@@ -182,7 +183,7 @@ fn untrackedFile(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, path: []con
     }
 }
 
-pub fn migrate(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, tree_diff: obj.TreeDiff, index: *idx.Index(.git), result: *CheckoutResult) !void {
+pub fn migrate(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, repo_dir: std.fs.Dir, tree_diff: obj.TreeDiff, index: *idx.Index(.git), result: *CheckoutResult) !void {
     var add_files = std.StringHashMap(obj.TreeEntry).init(allocator);
     defer add_files.deinit();
     var edit_files = std.StringHashMap(obj.TreeEntry).init(allocator);
@@ -252,7 +253,7 @@ pub fn migrate(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, tree_diff: ob
             switch (meta.kind()) {
                 std.fs.File.Kind.file => {
                     // if the path is a file that differs from the index
-                    if (try compareIndexToWorkspace(entry_maybe, file) != .none) {
+                    if (try compareIndexToWorkspace(repo_kind, entry_maybe, file) != .none) {
                         result.conflict(allocator);
                         if (entry_maybe) |_| {
                             try result.data.conflict.stale_files.put(path, {});
@@ -328,7 +329,7 @@ pub fn migrate(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, tree_diff: ob
     }
 }
 
-pub fn checkout(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, target: []const u8, result: *CheckoutResult) !void {
+pub fn checkout(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, repo_dir: std.fs.Dir, target: []const u8, result: *CheckoutResult) !void {
     var git_dir = try repo_dir.openDir(".git", .{});
     defer git_dir.close();
 
@@ -350,7 +351,7 @@ pub fn checkout(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, target: []co
     defer index.deinit();
 
     // update the working tree
-    try migrate(allocator, repo_dir, tree_diff, &index, result);
+    try migrate(repo_kind, allocator, repo_dir, tree_diff, &index, result);
 
     // update the index
     try index.write(allocator, .{ .lock_file = lock.lock_file });

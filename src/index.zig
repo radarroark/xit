@@ -56,16 +56,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
             path: []const u8,
         };
 
-        pub const InitOpts = switch (repo_kind) {
-            .git => struct {
-                git_dir: std.fs.Dir,
-            },
-            .xit => struct {
-                db: *xitdb.Database(.file),
-            },
-        };
-
-        pub fn init(allocator: std.mem.Allocator, opts: InitOpts) !Index(repo_kind) {
+        pub fn init(allocator: std.mem.Allocator, opts: rp.RepoOpts(repo_kind)) !Index(repo_kind) {
             var index = Index(repo_kind){
                 .version = 2,
                 .entries = std.StringArrayHashMap(Index(repo_kind).Entry).init(allocator),
@@ -457,7 +448,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
     };
 }
 
-pub fn indexDiffersFromWorkspace(entry: Index(.git).Entry, file: std.fs.File, meta: std.fs.File.Metadata) !bool {
+pub fn indexDiffersFromWorkspace(comptime repo_kind: rp.RepoKind, entry: Index(repo_kind).Entry, file: std.fs.File, meta: std.fs.File.Metadata) !bool {
     if (meta.size() != entry.file_size or !io.modeEquals(io.getMode(meta), entry.mode)) {
         return true;
     } else {
