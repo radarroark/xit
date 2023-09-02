@@ -150,7 +150,10 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         }
                     };
 
-                    var db = try xitdb.Database(.file).init(allocator, .{ .file = file });
+                    var db = blk: {
+                        errdefer file.close();
+                        break :blk try xitdb.Database(.file).init(allocator, .{ .file = file });
+                    };
                     errdefer db.deinit();
 
                     var self: Repo(repo_kind) = .{
