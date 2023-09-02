@@ -145,7 +145,7 @@ pub fn resolve(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, 
         },
         .xit => {
             var db_buffer = [_]u8{0} ** MAX_READ_BYTES;
-            if (try core.db.rootCursor().readByteBuffer(&db_buffer, &[_]xitdb.PathPart{
+            if (try core.db.rootCursor().readBytes(&db_buffer, &[_]xitdb.PathPart{
                 .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
                 .{ .map_get = .{ .bytes = "refs" } },
                 .{ .map_get = .{ .bytes = "heads" } },
@@ -174,7 +174,7 @@ pub fn read(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, pat
             return buffer[0..size];
         },
         .xit => {
-            if (try core.db.rootCursor().readByteBuffer(buffer, &[_]xitdb.PathPart{
+            if (try core.db.rootCursor().readBytes(buffer, &[_]xitdb.PathPart{
                 .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
                 .{ .map_get = .{ .bytes = path } },
             })) |target_bytes| {
@@ -245,7 +245,7 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core
                 .{ .map_get = .{ .bytes = "HEAD" } },
             });
 
-            if (try core.db.rootCursor().readBytes(allocator, &[_]xitdb.PathPart{
+            if (try core.db.rootCursor().readBytesAlloc(allocator, &[_]xitdb.PathPart{
                 .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
                 .{ .map_get = .{ .bytes = "refs" } },
                 .{ .map_get = .{ .bytes = "heads" } },

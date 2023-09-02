@@ -144,9 +144,9 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                         var iter = try cursor.iter(.map);
                         defer iter.deinit();
                         while (try iter.next()) |*next_cursor| {
-                            const buffer = (try next_cursor.readBytes(allocator, &[_]xitdb.PathPart{})).?;
+                            const buffer = (try next_cursor.readBytesAlloc(allocator, &[_]xitdb.PathPart{})).?;
                             defer allocator.free(buffer);
-                            const path = (try next_cursor.readKeyBytes(index.arena.allocator(), &[_]xitdb.PathPart{})).?;
+                            const path = (try next_cursor.readKeyBytesAlloc(index.arena.allocator(), &[_]xitdb.PathPart{})).?;
                             var stream = std.io.fixedBufferStream(buffer);
                             var reader = stream.reader();
                             var entry = Index(repo_kind).Entry{
@@ -420,7 +420,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                         try writer.writeAll(&entry.oid);
                         try writer.writeIntBig(u16, @as(u16, @bitCast(entry.flags)));
 
-                        if (try opts.db.rootCursor().readBytes(allocator, &[_]xitdb.PathPart{
+                        if (try opts.db.rootCursor().readBytesAlloc(allocator, &[_]xitdb.PathPart{
                             .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
                             .{ .map_get = .{ .bytes = "index" } },
                             .{ .map_get = .{ .bytes = entry.path } },
