@@ -379,230 +379,232 @@ pub const ObjectReadError = error{
     InvalidCommitParentHash,
 };
 
-pub const Object = struct {
-    allocator: std.mem.Allocator,
-    arena: std.heap.ArenaAllocator,
-    content: ObjectContent,
+pub fn Object(comptime repo_kind: rp.RepoKind) type {
+    return struct {
+        allocator: std.mem.Allocator,
+        arena: std.heap.ArenaAllocator,
+        content: ObjectContent,
 
-    pub fn init(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, oid: [hash.SHA1_HEX_LEN]u8) !Object {
-        // open the internal dirs
-        var git_dir = try repo_dir.openDir(".git", .{});
-        defer git_dir.close();
-        var objects_dir = try git_dir.openDir("objects", .{});
-        defer objects_dir.close();
+        pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core, oid: [hash.SHA1_HEX_LEN]u8) !Object(repo_kind) {
+            // open the objects dir
+            var objects_dir = try core.git_dir.openDir("objects", .{});
+            defer objects_dir.close();
 
-        // open the object file
-        var commit_hash_prefix_dir = try objects_dir.openDir(oid[0..2], .{});
-        defer commit_hash_prefix_dir.close();
-        var commit_hash_suffix_file = try commit_hash_prefix_dir.openFile(oid[2..], .{ .mode = .read_only });
-        defer commit_hash_suffix_file.close();
+            // open the object file
+            var commit_hash_prefix_dir = try objects_dir.openDir(oid[0..2], .{});
+            defer commit_hash_prefix_dir.close();
+            var commit_hash_suffix_file = try commit_hash_prefix_dir.openFile(oid[2..], .{ .mode = .read_only });
+            defer commit_hash_suffix_file.close();
 
-        // decompress the object file
-        var decompressed = try compress.Decompressed.init(allocator, commit_hash_suffix_file);
-        defer decompressed.deinit();
-        const reader = decompressed.stream.reader();
+            // decompress the object file
+            var decompressed = try compress.Decompressed.init(allocator, commit_hash_suffix_file);
+            defer decompressed.deinit();
+            const reader = decompressed.stream.reader();
 
-        // read the object kind
-        const object_kind = try reader.readUntilDelimiterAlloc(allocator, ' ', MAX_FILE_READ_SIZE);
-        defer allocator.free(object_kind);
+            // read the object kind
+            const object_kind = try reader.readUntilDelimiterAlloc(allocator, ' ', MAX_FILE_READ_SIZE);
+            defer allocator.free(object_kind);
 
-        // read the length (currently unused)
-        const object_len = try reader.readUntilDelimiterAlloc(allocator, 0, MAX_FILE_READ_SIZE);
-        defer allocator.free(object_len);
-        _ = try std.fmt.parseInt(usize, object_len, 10);
+            // read the length (currently unused)
+            const object_len = try reader.readUntilDelimiterAlloc(allocator, 0, MAX_FILE_READ_SIZE);
+            defer allocator.free(object_len);
+            _ = try std.fmt.parseInt(usize, object_len, 10);
 
-        if (std.mem.eql(u8, "blob", object_kind)) {
-            return Object{
-                .allocator = allocator,
-                .arena = std.heap.ArenaAllocator.init(allocator),
-                .content = ObjectContent{ .blob = {} },
-            };
-        } else if (std.mem.eql(u8, "tree", object_kind)) {
-            var arena = std.heap.ArenaAllocator.init(allocator);
-            errdefer arena.deinit();
-
-            var entries = std.StringArrayHashMap(TreeEntry).init(arena.allocator());
-
-            while (true) {
-                const entry_mode_str = reader.readUntilDelimiterAlloc(arena.allocator(), ' ', MAX_FILE_READ_SIZE) catch |err| {
-                    switch (err) {
-                        error.EndOfStream => break,
-                        else => return err,
-                    }
+            if (std.mem.eql(u8, "blob", object_kind)) {
+                return Object(repo_kind){
+                    .allocator = allocator,
+                    .arena = std.heap.ArenaAllocator.init(allocator),
+                    .content = ObjectContent{ .blob = {} },
                 };
-                const entry_mode: io.Mode = @bitCast(try std.fmt.parseInt(u32, entry_mode_str, 8));
-                const entry_name = try reader.readUntilDelimiterAlloc(arena.allocator(), 0, MAX_FILE_READ_SIZE);
-                const entry_oid = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
-                try entries.put(entry_name, TreeEntry{ .oid = entry_oid, .mode = entry_mode });
-            }
+            } else if (std.mem.eql(u8, "tree", object_kind)) {
+                var arena = std.heap.ArenaAllocator.init(allocator);
+                errdefer arena.deinit();
 
-            return Object{
-                .allocator = allocator,
-                .arena = arena,
-                .content = ObjectContent{ .tree = .{ .entries = entries } },
-            };
-        } else if (std.mem.eql(u8, "commit", object_kind)) {
-            // read the content kind
-            const content_kind = try reader.readUntilDelimiterAlloc(allocator, ' ', MAX_FILE_READ_SIZE);
-            defer allocator.free(content_kind);
-            if (!std.mem.eql(u8, "tree", content_kind)) {
-                return error.InvalidCommitContentKind;
-            }
+                var entries = std.StringArrayHashMap(TreeEntry).init(arena.allocator());
 
-            // read the tree hash
-            var tree_hash = [_]u8{0} ** (hash.SHA1_HEX_LEN + 1);
-            const tree_hash_slice = try reader.readUntilDelimiter(&tree_hash, '\n');
-            if (tree_hash_slice.len != hash.SHA1_HEX_LEN) {
-                return error.InvalidCommitTreeHash;
-            }
-
-            // init the object
-            var object = Object{
-                .allocator = allocator,
-                .arena = std.heap.ArenaAllocator.init(allocator),
-                .content = ObjectContent{
-                    .commit = .{
-                        .tree = undefined,
-                        .parent = null,
-                        .author = null,
-                        .committer = null,
-                        .message = undefined,
-                    },
-                },
-            };
-            errdefer object.arena.deinit();
-            std.mem.copy(u8, &object.content.commit.tree, tree_hash_slice);
-
-            // read the metadata
-            var metadata = std.StringHashMap([]const u8).init(allocator);
-            defer metadata.deinit();
-            while (true) {
-                const line = try reader.readUntilDelimiterAlloc(object.arena.allocator(), '\n', MAX_FILE_READ_SIZE);
-                if (line.len == 0) {
-                    break;
+                while (true) {
+                    const entry_mode_str = reader.readUntilDelimiterAlloc(arena.allocator(), ' ', MAX_FILE_READ_SIZE) catch |err| {
+                        switch (err) {
+                            error.EndOfStream => break,
+                            else => return err,
+                        }
+                    };
+                    const entry_mode: io.Mode = @bitCast(try std.fmt.parseInt(u32, entry_mode_str, 8));
+                    const entry_name = try reader.readUntilDelimiterAlloc(arena.allocator(), 0, MAX_FILE_READ_SIZE);
+                    const entry_oid = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
+                    try entries.put(entry_name, TreeEntry{ .oid = entry_oid, .mode = entry_mode });
                 }
-                if (std.mem.indexOf(u8, line, " ")) |line_idx| {
-                    if (line_idx == line.len) {
+
+                return Object(repo_kind){
+                    .allocator = allocator,
+                    .arena = arena,
+                    .content = ObjectContent{ .tree = .{ .entries = entries } },
+                };
+            } else if (std.mem.eql(u8, "commit", object_kind)) {
+                // read the content kind
+                const content_kind = try reader.readUntilDelimiterAlloc(allocator, ' ', MAX_FILE_READ_SIZE);
+                defer allocator.free(content_kind);
+                if (!std.mem.eql(u8, "tree", content_kind)) {
+                    return error.InvalidCommitContentKind;
+                }
+
+                // read the tree hash
+                var tree_hash = [_]u8{0} ** (hash.SHA1_HEX_LEN + 1);
+                const tree_hash_slice = try reader.readUntilDelimiter(&tree_hash, '\n');
+                if (tree_hash_slice.len != hash.SHA1_HEX_LEN) {
+                    return error.InvalidCommitTreeHash;
+                }
+
+                // init the object
+                var object = Object(repo_kind){
+                    .allocator = allocator,
+                    .arena = std.heap.ArenaAllocator.init(allocator),
+                    .content = ObjectContent{
+                        .commit = .{
+                            .tree = undefined,
+                            .parent = null,
+                            .author = null,
+                            .committer = null,
+                            .message = undefined,
+                        },
+                    },
+                };
+                errdefer object.arena.deinit();
+                std.mem.copy(u8, &object.content.commit.tree, tree_hash_slice);
+
+                // read the metadata
+                var metadata = std.StringHashMap([]const u8).init(allocator);
+                defer metadata.deinit();
+                while (true) {
+                    const line = try reader.readUntilDelimiterAlloc(object.arena.allocator(), '\n', MAX_FILE_READ_SIZE);
+                    if (line.len == 0) {
                         break;
                     }
-                    const key = line[0..line_idx];
-                    const value = line[line_idx + 1 ..];
-                    try metadata.put(key, value);
+                    if (std.mem.indexOf(u8, line, " ")) |line_idx| {
+                        if (line_idx == line.len) {
+                            break;
+                        }
+                        const key = line[0..line_idx];
+                        const value = line[line_idx + 1 ..];
+                        try metadata.put(key, value);
+                    }
                 }
-            }
 
-            // read the message
-            object.content.commit.message = try reader.readAllAlloc(object.arena.allocator(), MAX_FILE_READ_SIZE);
+                // read the message
+                object.content.commit.message = try reader.readAllAlloc(object.arena.allocator(), MAX_FILE_READ_SIZE);
 
-            // set metadata fields
-            if (metadata.fetchRemove("parent")) |parent| {
-                if (parent.value.len != hash.SHA1_HEX_LEN) {
-                    return error.InvalidCommitParentHash;
+                // set metadata fields
+                if (metadata.fetchRemove("parent")) |parent| {
+                    if (parent.value.len != hash.SHA1_HEX_LEN) {
+                        return error.InvalidCommitParentHash;
+                    }
+                    object.content.commit.parent = parent.value;
                 }
-                object.content.commit.parent = parent.value;
-            }
-            if (metadata.fetchRemove("author")) |author| {
-                object.content.commit.author = author.value;
-            }
-            if (metadata.fetchRemove("committer")) |committer| {
-                object.content.commit.committer = committer.value;
-            }
+                if (metadata.fetchRemove("author")) |author| {
+                    object.content.commit.author = author.value;
+                }
+                if (metadata.fetchRemove("committer")) |committer| {
+                    object.content.commit.committer = committer.value;
+                }
 
-            return object;
-        } else {
-            return error.InvalidObjectKind;
+                return object;
+            } else {
+                return error.InvalidObjectKind;
+            }
         }
-    }
 
-    pub fn deinit(self: *Object) void {
-        self.arena.deinit();
-    }
-};
-
-pub const TreeDiff = struct {
-    changes: std.StringHashMap(Change),
-    arena: std.heap.ArenaAllocator,
-
-    pub const Change = struct {
-        old: ?TreeEntry,
-        new: ?TreeEntry,
+        pub fn deinit(self: *Object(repo_kind)) void {
+            self.arena.deinit();
+        }
     };
+}
 
-    pub fn init(allocator: std.mem.Allocator) TreeDiff {
-        return TreeDiff{
-            .changes = std.StringHashMap(Change).init(allocator),
-            .arena = std.heap.ArenaAllocator.init(allocator),
+pub fn TreeDiff(comptime repo_kind: rp.RepoKind) type {
+    return struct {
+        changes: std.StringHashMap(Change),
+        arena: std.heap.ArenaAllocator,
+
+        pub const Change = struct {
+            old: ?TreeEntry,
+            new: ?TreeEntry,
         };
-    }
 
-    pub fn deinit(self: *TreeDiff) void {
-        self.arena.deinit();
-        self.changes.deinit();
-    }
-
-    pub fn compare(self: *TreeDiff, repo_dir: std.fs.Dir, old_oid_maybe: ?[hash.SHA1_HEX_LEN]u8, new_oid_maybe: ?[hash.SHA1_HEX_LEN]u8, path_list_maybe: ?std.ArrayList([]const u8)) !void {
-        if (old_oid_maybe == null and new_oid_maybe == null) {
-            return;
+        pub fn init(allocator: std.mem.Allocator) TreeDiff(repo_kind) {
+            return TreeDiff(repo_kind){
+                .changes = std.StringHashMap(Change).init(allocator),
+                .arena = std.heap.ArenaAllocator.init(allocator),
+            };
         }
-        const old_entries = try self.loadTree(repo_dir, old_oid_maybe);
-        const new_entries = try self.loadTree(repo_dir, new_oid_maybe);
-        // deletions and edits
-        {
-            var iter = old_entries.iterator();
-            while (iter.next()) |old_entry| {
-                const old_key = old_entry.key_ptr.*;
-                const old_value = old_entry.value_ptr.*;
-                var path_list = if (path_list_maybe) |path_list| try path_list.clone() else std.ArrayList([]const u8).init(self.arena.allocator());
-                try path_list.append(old_key);
-                const path = try std.fs.path.join(self.arena.allocator(), path_list.items);
-                if (new_entries.get(old_key)) |new_value| {
-                    if (!old_value.eql(new_value)) {
-                        const old_value_tree = isTree(old_value);
-                        const new_value_tree = isTree(new_value);
-                        try self.compare(repo_dir, if (old_value_tree) std.fmt.bytesToHex(&old_value.oid, .lower) else null, if (new_value_tree) std.fmt.bytesToHex(&new_value.oid, .lower) else null, path_list);
-                        if (!old_value_tree or !new_value_tree) {
-                            try self.changes.put(path, Change{ .old = if (old_value_tree) null else old_value, .new = if (new_value_tree) null else new_value });
+
+        pub fn deinit(self: *TreeDiff(repo_kind)) void {
+            self.arena.deinit();
+            self.changes.deinit();
+        }
+
+        pub fn compare(self: *TreeDiff(repo_kind), core: *rp.Repo(repo_kind).Core, old_oid_maybe: ?[hash.SHA1_HEX_LEN]u8, new_oid_maybe: ?[hash.SHA1_HEX_LEN]u8, path_list_maybe: ?std.ArrayList([]const u8)) !void {
+            if (old_oid_maybe == null and new_oid_maybe == null) {
+                return;
+            }
+            const old_entries = try self.loadTree(core, old_oid_maybe);
+            const new_entries = try self.loadTree(core, new_oid_maybe);
+            // deletions and edits
+            {
+                var iter = old_entries.iterator();
+                while (iter.next()) |old_entry| {
+                    const old_key = old_entry.key_ptr.*;
+                    const old_value = old_entry.value_ptr.*;
+                    var path_list = if (path_list_maybe) |path_list| try path_list.clone() else std.ArrayList([]const u8).init(self.arena.allocator());
+                    try path_list.append(old_key);
+                    const path = try std.fs.path.join(self.arena.allocator(), path_list.items);
+                    if (new_entries.get(old_key)) |new_value| {
+                        if (!old_value.eql(new_value)) {
+                            const old_value_tree = isTree(old_value);
+                            const new_value_tree = isTree(new_value);
+                            try self.compare(core, if (old_value_tree) std.fmt.bytesToHex(&old_value.oid, .lower) else null, if (new_value_tree) std.fmt.bytesToHex(&new_value.oid, .lower) else null, path_list);
+                            if (!old_value_tree or !new_value_tree) {
+                                try self.changes.put(path, Change{ .old = if (old_value_tree) null else old_value, .new = if (new_value_tree) null else new_value });
+                            }
+                        }
+                    } else {
+                        if (isTree(old_value)) {
+                            try self.compare(core, std.fmt.bytesToHex(&old_value.oid, .lower), null, path_list);
+                        } else {
+                            try self.changes.put(path, Change{ .old = old_value, .new = null });
                         }
                     }
-                } else {
-                    if (isTree(old_value)) {
-                        try self.compare(repo_dir, std.fmt.bytesToHex(&old_value.oid, .lower), null, path_list);
+                }
+            }
+            // additions
+            {
+                var iter = new_entries.iterator();
+                while (iter.next()) |new_entry| {
+                    const new_key = new_entry.key_ptr.*;
+                    const new_value = new_entry.value_ptr.*;
+                    var path_list = if (path_list_maybe) |path_list| try path_list.clone() else std.ArrayList([]const u8).init(self.arena.allocator());
+                    try path_list.append(new_key);
+                    const path = try std.fs.path.join(self.arena.allocator(), path_list.items);
+                    if (old_entries.get(new_key)) |_| {
+                        continue;
+                    } else if (isTree(new_value)) {
+                        try self.compare(core, null, std.fmt.bytesToHex(&new_value.oid, .lower), path_list);
                     } else {
-                        try self.changes.put(path, Change{ .old = old_value, .new = null });
+                        try self.changes.put(path, Change{ .old = null, .new = new_value });
                     }
                 }
             }
         }
-        // additions
-        {
-            var iter = new_entries.iterator();
-            while (iter.next()) |new_entry| {
-                const new_key = new_entry.key_ptr.*;
-                const new_value = new_entry.value_ptr.*;
-                var path_list = if (path_list_maybe) |path_list| try path_list.clone() else std.ArrayList([]const u8).init(self.arena.allocator());
-                try path_list.append(new_key);
-                const path = try std.fs.path.join(self.arena.allocator(), path_list.items);
-                if (old_entries.get(new_key)) |_| {
-                    continue;
-                } else if (isTree(new_value)) {
-                    try self.compare(repo_dir, null, std.fmt.bytesToHex(&new_value.oid, .lower), path_list);
-                } else {
-                    try self.changes.put(path, Change{ .old = null, .new = new_value });
-                }
+
+        fn loadTree(self: *TreeDiff(repo_kind), core: *rp.Repo(repo_kind).Core, oid_maybe: ?[hash.SHA1_HEX_LEN]u8) !std.StringArrayHashMap(TreeEntry) {
+            if (oid_maybe) |oid| {
+                var obj = try Object(repo_kind).init(self.arena.allocator(), core, oid);
+                return switch (obj.content) {
+                    .blob => std.StringArrayHashMap(TreeEntry).init(self.arena.allocator()),
+                    .tree => obj.content.tree.entries,
+                    .commit => self.loadTree(core, obj.content.commit.tree),
+                };
+            } else {
+                return std.StringArrayHashMap(TreeEntry).init(self.arena.allocator());
             }
         }
-    }
-
-    fn loadTree(self: *TreeDiff, repo_dir: std.fs.Dir, oid_maybe: ?[hash.SHA1_HEX_LEN]u8) !std.StringArrayHashMap(TreeEntry) {
-        if (oid_maybe) |oid| {
-            var obj = try Object.init(self.arena.allocator(), repo_dir, oid);
-            return switch (obj.content) {
-                .blob => std.StringArrayHashMap(TreeEntry).init(self.arena.allocator()),
-                .tree => obj.content.tree.entries,
-                .commit => self.loadTree(repo_dir, obj.content.commit.tree),
-            };
-        } else {
-            return std.StringArrayHashMap(TreeEntry).init(self.arena.allocator());
-        }
-    }
-};
+    };
+}

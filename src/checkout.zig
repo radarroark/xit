@@ -183,7 +183,7 @@ fn untrackedFile(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, path: []con
     }
 }
 
-pub fn migrate(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, repo_dir: std.fs.Dir, tree_diff: obj.TreeDiff, index: *idx.Index(.git), result: *CheckoutResult) !void {
+pub fn migrate(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, repo_dir: std.fs.Dir, tree_diff: obj.TreeDiff(repo_kind), index: *idx.Index(.git), result: *CheckoutResult) !void {
     var add_files = std.StringHashMap(obj.TreeEntry).init(allocator);
     defer add_files.deinit();
     var edit_files = std.StringHashMap(obj.TreeEntry).init(allocator);
@@ -338,9 +338,9 @@ pub fn checkout(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core,
     const oid_hex = try ref.resolve(repo_kind, core, target);
 
     // compare the commits
-    var tree_diff = obj.TreeDiff.init(allocator);
+    var tree_diff = obj.TreeDiff(repo_kind).init(allocator);
     defer tree_diff.deinit();
-    try tree_diff.compare(core.repo_dir, current_hash, oid_hex, null);
+    try tree_diff.compare(core, current_hash, oid_hex, null);
 
     // create lock file
     var lock = try io.LockFile.init(allocator, git_dir, "index");

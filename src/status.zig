@@ -23,7 +23,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind) type {
         index_modified: std.ArrayList([]const u8),
         index_deleted: std.ArrayList([]const u8),
         index: idx.Index(repo_kind),
-        head_tree: HeadTree,
+        head_tree: HeadTree(repo_kind),
         arena: std.heap.ArenaAllocator,
 
         pub const Entry = struct {
@@ -67,7 +67,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind) type {
                 }
             }
 
-            var head_tree = try HeadTree.init(repo_kind, core, allocator);
+            var head_tree = try HeadTree(repo_kind).init(allocator, core);
             errdefer head_tree.deinit();
 
             for (index.entries.values()) |index_entry| {
@@ -179,58 +179,60 @@ fn addEntries(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, unt
     return false;
 }
 
-pub const HeadTree = struct {
-    entries: std.StringHashMap(obj.TreeEntry),
-    arena: std.heap.ArenaAllocator,
+pub fn HeadTree(comptime repo_kind: rp.RepoKind) type {
+    return struct {
+        entries: std.StringHashMap(obj.TreeEntry),
+        arena: std.heap.ArenaAllocator,
 
-    pub fn init(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator) !HeadTree {
-        var entries = std.StringHashMap(obj.TreeEntry).init(allocator);
-        errdefer entries.deinit();
+        pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core) !HeadTree(repo_kind) {
+            var entries = std.StringHashMap(obj.TreeEntry).init(allocator);
+            errdefer entries.deinit();
 
-        var tree = HeadTree{
-            .entries = entries,
-            .arena = std.heap.ArenaAllocator.init(allocator),
-        };
+            var tree = HeadTree(repo_kind){
+                .entries = entries,
+                .arena = std.heap.ArenaAllocator.init(allocator),
+            };
 
-        // if head points to a valid object, read it
-        switch (repo_kind) {
-            .git => {
-                if (try ref.readHeadMaybe(repo_kind, core)) |head_file_buffer| {
-                    var commit_object = try obj.Object.init(allocator, core.repo_dir, head_file_buffer);
-                    defer commit_object.deinit();
-                    try tree.read(core.repo_dir, "", commit_object.content.commit.tree);
-                }
-            },
-            .xit => {},
-        }
-
-        return tree;
-    }
-
-    pub fn deinit(self: *HeadTree) void {
-        self.entries.deinit();
-        self.arena.deinit();
-    }
-
-    fn read(self: *HeadTree, repo_dir: std.fs.Dir, prefix: []const u8, oid: [hash.SHA1_HEX_LEN]u8) !void {
-        var object = try obj.Object.init(self.arena.allocator(), repo_dir, oid);
-
-        switch (object.content) {
-            .blob => {},
-            .tree => {
-                var iter = object.content.tree.entries.iterator();
-                while (iter.next()) |entry| {
-                    const name = entry.key_ptr.*;
-                    const path = try std.fs.path.join(self.arena.allocator(), &[_][]const u8{ prefix, name });
-                    if (obj.isTree(entry.value_ptr.*)) {
-                        const oid_hex = std.fmt.bytesToHex(entry.value_ptr.*.oid[0..hash.SHA1_BYTES_LEN], .lower);
-                        try self.read(repo_dir, path, oid_hex);
-                    } else {
-                        try self.entries.put(path, entry.value_ptr.*);
+            // if head points to a valid object, read it
+            switch (repo_kind) {
+                .git => {
+                    if (try ref.readHeadMaybe(repo_kind, core)) |head_file_buffer| {
+                        var commit_object = try obj.Object(repo_kind).init(allocator, core, head_file_buffer);
+                        defer commit_object.deinit();
+                        try tree.read(core, "", commit_object.content.commit.tree);
                     }
-                }
-            },
-            .commit => {},
+                },
+                .xit => {},
+            }
+
+            return tree;
         }
-    }
-};
+
+        pub fn deinit(self: *HeadTree(repo_kind)) void {
+            self.entries.deinit();
+            self.arena.deinit();
+        }
+
+        fn read(self: *HeadTree(repo_kind), core: *rp.Repo(repo_kind).Core, prefix: []const u8, oid: [hash.SHA1_HEX_LEN]u8) !void {
+            var object = try obj.Object(repo_kind).init(self.arena.allocator(), core, oid);
+
+            switch (object.content) {
+                .blob => {},
+                .tree => {
+                    var iter = object.content.tree.entries.iterator();
+                    while (iter.next()) |entry| {
+                        const name = entry.key_ptr.*;
+                        const path = try std.fs.path.join(self.arena.allocator(), &[_][]const u8{ prefix, name });
+                        if (obj.isTree(entry.value_ptr.*)) {
+                            const oid_hex = std.fmt.bytesToHex(entry.value_ptr.*.oid[0..hash.SHA1_BYTES_LEN], .lower);
+                            try self.read(core, path, oid_hex);
+                        } else {
+                            try self.entries.put(path, entry.value_ptr.*);
+                        }
+                    }
+                },
+                .commit => {},
+            }
+        }
+    };
+}

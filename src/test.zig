@@ -82,32 +82,17 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
     var repo_path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
     const repo_path: [*c]const u8 = @ptrCast(try repo_dir.realpath(".", &repo_path_buffer));
 
-    // TEMPORARY
-    if (repo_kind == .xit) {
-        // make file
-        var hello_txt = try repo_dir.createFile("hello.txt", .{});
-        defer hello_txt.close();
-        try hello_txt.writeAll("hello, world!");
-
-        var paths = std.ArrayList([]const u8).init(allocator);
-        defer paths.deinit();
-        try paths.append("hello.txt");
-
-        var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
-        defer repo.deinit();
-        try repo.add(paths);
-
-        try expectEqual(null, ref.readHeadMaybe(repo_kind, &repo.core));
-
-        return;
-    }
-
     // make sure we can get status before first commit
     {
         var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
         defer repo.deinit();
         var status = try repo.status();
         defer status.deinit();
+    }
+
+    // TEMPORARY
+    if (repo_kind == .xit) {
+        return;
     }
 
     // add and commit
@@ -711,13 +696,15 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
 
     // parse objects
     {
+        var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+        defer repo.deinit();
         // read commit
-        var commit_object = try obj.Object.init(allocator, repo_dir, commit2);
+        var commit_object = try obj.Object(repo_kind).init(allocator, &repo.core, commit2);
         defer commit_object.deinit();
         try std.testing.expectEqualStrings("second commit", commit_object.content.commit.message);
 
         // read tree
-        var tree_object = try obj.Object.init(allocator, repo_dir, commit_object.content.commit.tree);
+        var tree_object = try obj.Object(repo_kind).init(allocator, &repo.core, commit_object.content.commit.tree);
         defer tree_object.deinit();
         try expectEqual(4, tree_object.content.tree.entries.count());
     }
