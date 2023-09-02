@@ -19,28 +19,6 @@ pub const RepoErrors = error{
     RepoAlreadyExists,
 };
 
-pub fn RepoOpts(comptime repo_kind: RepoKind) type {
-    return switch (repo_kind) {
-        .git => struct {
-            git_dir: std.fs.Dir,
-        },
-        .xit => struct {
-            db: *xitdb.Database(.file),
-        },
-    };
-}
-
-pub fn initRepoOpts(comptime repo_kind: RepoKind, repo: *Repo(repo_kind)) RepoOpts(repo_kind) {
-    return switch (repo_kind) {
-        .git => .{
-            .git_dir = repo.core.git_dir,
-        },
-        .xit => .{
-            .db = &repo.core.db,
-        },
-    };
-}
-
 pub fn Repo(comptime repo_kind: RepoKind) type {
     return struct {
         allocator: std.mem.Allocator,
@@ -151,16 +129,18 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     var heads_dir = try refs_dir.makeOpenPath("heads", .{});
                     defer heads_dir.close();
 
-                    // update HEAD
-                    try ref.writeHead(repo_kind, .{ .git_dir = git_dir }, allocator, "master", null);
-
-                    return .{
+                    var self: Repo(repo_kind) = .{
                         .allocator = allocator,
                         .core = .{
                             .repo_dir = repo_dir,
                             .git_dir = git_dir,
                         },
                     };
+
+                    // update HEAD
+                    try ref.writeHead(repo_kind, &self.core, allocator, "master", null);
+
+                    return self;
                 },
                 .xit => {
                     const file = repo_dir.createFile(".xit", .{ .exclusive = true, .lock = .exclusive, .read = true }) catch |err| {
@@ -173,16 +153,18 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     var db = try xitdb.Database(.file).init(allocator, .{ .file = file });
                     errdefer db.deinit();
 
-                    // update HEAD
-                    try ref.writeHead(repo_kind, .{ .db = &db }, allocator, "master", null);
-
-                    return .{
+                    var self: Repo(repo_kind) = .{
                         .allocator = allocator,
                         .core = .{
                             .repo_dir = repo_dir,
                             .db = db,
                         },
                     };
+
+                    // update HEAD
+                    try ref.writeHead(repo_kind, &self.core, allocator, "master", null);
+
+                    return self;
                 },
             }
         }
@@ -235,7 +217,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 cmd.CommandData.commit => {
                     switch (repo_kind) {
                         .git => {
-                            try obj.writeCommit(self.allocator, self.core.git_dir, cmd_data);
+                            try obj.writeCommit(repo_kind, &self.core, self.allocator, cmd_data);
                         },
                         .xit => {},
                     }
@@ -272,12 +254,12 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     switch (repo_kind) {
                         .git => {
                             if (cmd_data.branch.name) |name| {
-                                try branch.create(self.allocator, self.core.git_dir, name);
+                                try branch.create(repo_kind, &self.core, self.allocator, name);
                             } else {
-                                var current_branch_maybe = try ref.Ref.initWithPath(self.allocator, self.core.git_dir, "HEAD");
+                                var current_branch_maybe = try ref.Ref.initWithPath(repo_kind, &self.core, self.allocator, "HEAD");
                                 defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
 
-                                var ref_list = try ref.RefList.init(self.allocator, self.core.git_dir, "heads");
+                                var ref_list = try ref.RefList.init(repo_kind, &self.core, self.allocator, "heads");
                                 defer ref_list.deinit();
 
                                 for (ref_list.refs.items) |r| {
@@ -297,7 +279,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         .git => {
                             var result = chk.CheckoutResult.init();
                             defer result.deinit();
-                            chk.checkout(repo_kind, self.allocator, self.core.repo_dir, cmd_data.checkout.target, &result) catch |err| {
+                            chk.checkout(repo_kind, &self.core, self.allocator, cmd_data.checkout.target, &result) catch |err| {
                                 switch (err) {
                                     error.CheckoutConflict => {},
                                     else => return err,
@@ -311,14 +293,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
         }
 
         pub fn status(self: *Repo(repo_kind)) !st.Status(repo_kind) {
-            switch (repo_kind) {
-                .git => {
-                    return try st.Status(repo_kind).init(self.allocator, self.core.repo_dir, .{ .git_dir = self.core.git_dir });
-                },
-                .xit => {
-                    return try st.Status(repo_kind).init(self.allocator, self.core.repo_dir, .{ .db = &self.core.db });
-                },
-            }
+            return try st.Status(repo_kind).init(self.allocator, &self.core);
         }
 
         pub fn add(self: *Repo(repo_kind), paths: std.ArrayList([]const u8)) !void {
@@ -329,7 +304,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     defer lock.deinit();
 
                     // read index
-                    var index = try idx.Index(.git).init(self.allocator, .{ .git_dir = self.core.git_dir });
+                    var index = try idx.Index(.git).init(self.allocator, &self.core);
                     defer index.deinit();
 
                     // read all the new entries
@@ -352,7 +327,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 },
                 .xit => {
                     // read index
-                    var index = try idx.Index(.xit).init(self.allocator, .{ .db = &self.core.db });
+                    var index = try idx.Index(.xit).init(self.allocator, &self.core);
                     defer index.deinit();
 
                     // read all the new entries

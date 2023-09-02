@@ -329,35 +329,35 @@ pub fn migrate(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, re
     }
 }
 
-pub fn checkout(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, repo_dir: std.fs.Dir, target: []const u8, result: *CheckoutResult) !void {
-    var git_dir = try repo_dir.openDir(".git", .{});
+pub fn checkout(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, target: []const u8, result: *CheckoutResult) !void {
+    var git_dir = try core.repo_dir.openDir(".git", .{});
     defer git_dir.close();
 
     // get the current commit and target oid
-    const current_hash = try ref.readHead(repo_kind, .{ .git_dir = git_dir });
-    const oid_hex = try ref.resolve(repo_kind, .{ .git_dir = git_dir }, target);
+    const current_hash = try ref.readHead(repo_kind, core);
+    const oid_hex = try ref.resolve(repo_kind, core, target);
 
     // compare the commits
     var tree_diff = obj.TreeDiff.init(allocator);
     defer tree_diff.deinit();
-    try tree_diff.compare(repo_dir, current_hash, oid_hex, null);
+    try tree_diff.compare(core.repo_dir, current_hash, oid_hex, null);
 
     // create lock file
     var lock = try io.LockFile.init(allocator, git_dir, "index");
     defer lock.deinit();
 
     // read index
-    var index = try idx.Index(.git).init(allocator, .{ .git_dir = git_dir });
+    var index = try idx.Index(repo_kind).init(allocator, core);
     defer index.deinit();
 
     // update the working tree
-    try migrate(repo_kind, allocator, repo_dir, tree_diff, &index, result);
+    try migrate(repo_kind, allocator, core.repo_dir, tree_diff, &index, result);
 
     // update the index
     try index.write(allocator, .{ .lock_file = lock.lock_file });
 
     // update HEAD
-    try ref.writeHead(repo_kind, .{ .git_dir = git_dir }, allocator, target, oid_hex);
+    try ref.writeHead(repo_kind, core, allocator, target, oid_hex);
 
     // finish lock
     lock.success = true;

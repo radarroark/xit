@@ -56,7 +56,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
             path: []const u8,
         };
 
-        pub fn init(allocator: std.mem.Allocator, opts: rp.RepoOpts(repo_kind)) !Index(repo_kind) {
+        pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core) !Index(repo_kind) {
             var index = Index(repo_kind){
                 .version = 2,
                 .entries = std.StringArrayHashMap(Index(repo_kind).Entry).init(allocator),
@@ -71,7 +71,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
             switch (repo_kind) {
                 .git => {
                     // open index
-                    const index_file = opts.git_dir.openFile("index", .{ .mode = .read_only }) catch |err| {
+                    const index_file = core.git_dir.openFile("index", .{ .mode = .read_only }) catch |err| {
                         switch (err) {
                             error.FileNotFound => return index,
                             else => return err,
@@ -137,7 +137,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     _ = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
                 },
                 .xit => {
-                    if (try opts.db.rootCursor().readCursor(&[_]xitdb.PathPart{
+                    if (try core.db.rootCursor().readCursor(&[_]xitdb.PathPart{
                         .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
                         .{ .map_get = .{ .bytes = "index" } },
                     })) |cursor| {

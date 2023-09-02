@@ -261,13 +261,13 @@ fn addIndexEntries(comptime repo_kind: rp.RepoKind, objects_dir: std.fs.Dir, all
 /// uses the commit message provided to the command.
 /// updates HEAD when it's done using a file locking thingy
 /// so other processes don't step on each others' toes.
-pub fn writeCommit(allocator: std.mem.Allocator, git_dir: std.fs.Dir, command: cmd.CommandData) !void {
+pub fn writeCommit(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, command: cmd.CommandData) !void {
     // open the objects dir
-    var objects_dir = try git_dir.openDir("objects", .{});
+    var objects_dir = try core.git_dir.openDir("objects", .{});
     defer objects_dir.close();
 
     // read index
-    var index = try idx.Index(.git).init(allocator, .{ .git_dir = git_dir });
+    var index = try idx.Index(repo_kind).init(allocator, core);
     defer index.deinit();
 
     // create tree and add index entries
@@ -281,7 +281,7 @@ pub fn writeCommit(allocator: std.mem.Allocator, git_dir: std.fs.Dir, command: c
     const tree_sha1_hex = std.fmt.bytesToHex(tree_sha1_bytes_buffer, .lower);
 
     // read HEAD
-    const head_oid_maybe = try ref.readHeadMaybe(.git, .{ .git_dir = git_dir });
+    const head_oid_maybe = try ref.readHeadMaybe(repo_kind, core);
 
     // metadata
     const author = "radar <radar@foo.com> 1512325222 +0000";
@@ -337,7 +337,7 @@ pub fn writeCommit(allocator: std.mem.Allocator, git_dir: std.fs.Dir, command: c
     try std.fs.rename(commit_hash_prefix_dir, commit_comp_tmp_file_name, commit_hash_prefix_dir, commit_hash_suffix);
 
     // write commit id to HEAD
-    try ref.update(allocator, git_dir, "HEAD", commit_sha1_hex);
+    try ref.update(repo_kind, core, allocator, core.git_dir, "HEAD", commit_sha1_hex);
 }
 
 pub const ObjectKind = enum {

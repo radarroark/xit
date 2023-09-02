@@ -1,13 +1,14 @@
 const std = @import("std");
 const ref = @import("./ref.zig");
 const io = @import("./io.zig");
+const rp = @import("./repo.zig");
 
 pub const BranchError = error{
     InvalidBranchName,
     CannotDeleteCurrentBranch,
 };
 
-pub fn create(allocator: std.mem.Allocator, git_dir: std.fs.Dir, name: []const u8) !void {
+pub fn create(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, name: []const u8) !void {
     if (name.len == 0 or
         name[0] == '.' or
         name[0] == '/' or
@@ -20,7 +21,7 @@ pub fn create(allocator: std.mem.Allocator, git_dir: std.fs.Dir, name: []const u
         return error.InvalidBranchName;
     }
 
-    var refs_dir = try git_dir.openDir("refs", .{});
+    var refs_dir = try core.git_dir.openDir("refs", .{});
     defer refs_dir.close();
     var heads_dir = try refs_dir.makeOpenPath("heads", .{});
     defer heads_dir.close();
@@ -44,7 +45,7 @@ pub fn create(allocator: std.mem.Allocator, git_dir: std.fs.Dir, name: []const u
     defer lock.deinit();
 
     // get HEAD contents
-    const head_file_buffer = try ref.readHead(.git, .{ .git_dir = git_dir });
+    const head_file_buffer = try ref.readHead(repo_kind, core);
 
     // write to lock file
     try lock.lock_file.writeAll(&head_file_buffer);
@@ -54,8 +55,8 @@ pub fn create(allocator: std.mem.Allocator, git_dir: std.fs.Dir, name: []const u
     lock.success = true;
 }
 
-pub fn delete(allocator: std.mem.Allocator, git_dir: std.fs.Dir, name: []const u8) !void {
-    var refs_dir = try git_dir.openDir("refs", .{});
+pub fn delete(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, name: []const u8) !void {
+    var refs_dir = try core.git_dir.openDir("refs", .{});
     defer refs_dir.close();
     var heads_dir = try refs_dir.makeOpenPath("heads", .{});
     defer heads_dir.close();
@@ -67,11 +68,11 @@ pub fn delete(allocator: std.mem.Allocator, git_dir: std.fs.Dir, name: []const u
     const ref_path = try heads_dir.realpath(name, &ref_buffer);
 
     // create lock file for HEAD
-    var head_lock = try io.LockFile.init(allocator, git_dir, "HEAD");
+    var head_lock = try io.LockFile.init(allocator, core.git_dir, "HEAD");
     defer head_lock.deinit();
 
     // don't allow current branch to be deleted
-    var current_branch_maybe = try ref.Ref.initWithPath(allocator, git_dir, "HEAD");
+    var current_branch_maybe = try ref.Ref.initWithPath(repo_kind, core, allocator, "HEAD");
     defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
     if (current_branch_maybe) |current_branch| {
         if (std.mem.eql(u8, current_branch.name, name)) {

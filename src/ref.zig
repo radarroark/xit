@@ -16,7 +16,7 @@ pub const Ref = struct {
     name: []const u8,
     oid: ?[hash.SHA1_HEX_LEN]u8,
 
-    pub fn init(allocator: std.mem.Allocator, git_dir: std.fs.Dir, dir_name: []const u8, relative_path: []const []const u8) !Ref {
+    pub fn init(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, dir_name: []const u8, relative_path: []const []const u8) !Ref {
         const name = try std.mem.join(allocator, "/", relative_path);
         errdefer allocator.free(name);
 
@@ -28,13 +28,13 @@ pub const Ref = struct {
         return .{
             .allocator = allocator,
             .name = name,
-            .oid = try resolve(.git, .{ .git_dir = git_dir }, content),
+            .oid = try resolve(repo_kind, core, content),
         };
     }
 
-    pub fn initWithPath(allocator: std.mem.Allocator, git_dir: std.fs.Dir, path: []const u8) !?Ref {
+    pub fn initWithPath(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, path: []const u8) !?Ref {
         var buffer = [_]u8{0} ** MAX_READ_BYTES;
-        const content = try read(.git, .{ .git_dir = git_dir }, path, &buffer);
+        const content = try read(repo_kind, core, path, &buffer);
 
         if (std.mem.startsWith(u8, content, REF_START_STR) and content.len > REF_START_STR.len) {
             const name_len = content.len - REF_START_STR.len;
@@ -45,7 +45,7 @@ pub const Ref = struct {
             return .{
                 .allocator = allocator,
                 .name = name,
-                .oid = try resolve(.git, .{ .git_dir = git_dir }, content),
+                .oid = try resolve(repo_kind, core, content),
             };
         } else {
             return null;
@@ -57,7 +57,7 @@ pub const Ref = struct {
     }
 };
 
-fn addRefs(allocator: std.mem.Allocator, git_dir: std.fs.Dir, dir_name: []const u8, dir: std.fs.Dir, refs: *std.ArrayList(Ref), path: *std.ArrayList([]const u8)) !void {
+fn addRefs(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, dir_name: []const u8, dir: std.fs.Dir, refs: *std.ArrayList(Ref), path: *std.ArrayList([]const u8)) !void {
     var iter_dir = try dir.openIterableDir(".", .{});
     defer iter_dir.close();
     var iter = iter_dir.iterate();
@@ -67,14 +67,14 @@ fn addRefs(allocator: std.mem.Allocator, git_dir: std.fs.Dir, dir_name: []const 
         try next_path.append(entry.name);
         switch (entry.kind) {
             .file => {
-                var ref = try Ref.init(allocator, git_dir, dir_name, next_path.items);
+                var ref = try Ref.init(repo_kind, core, allocator, dir_name, next_path.items);
                 errdefer ref.deinit();
                 try refs.append(ref);
             },
             .directory => {
                 var next_dir = try dir.openDir(entry.name, .{});
                 defer next_dir.close();
-                try addRefs(allocator, git_dir, dir_name, next_dir, refs, &next_path);
+                try addRefs(repo_kind, core, allocator, dir_name, next_dir, refs, &next_path);
             },
             else => {},
         }
@@ -84,7 +84,7 @@ fn addRefs(allocator: std.mem.Allocator, git_dir: std.fs.Dir, dir_name: []const 
 pub const RefList = struct {
     refs: std.ArrayList(Ref),
 
-    pub fn init(allocator: std.mem.Allocator, git_dir: std.fs.Dir, dir_name: []const u8) !RefList {
+    pub fn init(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, dir_name: []const u8) !RefList {
         var refs = std.ArrayList(Ref).init(allocator);
         errdefer {
             for (refs.items) |*ref| {
@@ -93,14 +93,14 @@ pub const RefList = struct {
             refs.deinit();
         }
 
-        var refs_dir = try git_dir.openDir("refs", .{});
+        var refs_dir = try core.git_dir.openDir("refs", .{});
         defer refs_dir.close();
         var heads_dir = try refs_dir.openDir("heads", .{});
         defer heads_dir.close();
 
         var path = std.ArrayList([]const u8).init(allocator);
         defer path.deinit();
-        try addRefs(allocator, git_dir, dir_name, heads_dir, &refs, &path);
+        try addRefs(repo_kind, core, allocator, dir_name, heads_dir, &refs, &path);
 
         return .{
             .refs = refs,
@@ -115,14 +115,14 @@ pub const RefList = struct {
     }
 };
 
-pub fn resolve(comptime repo_kind: rp.RepoKind, opts: rp.RepoOpts(repo_kind), content: []const u8) !?[hash.SHA1_HEX_LEN]u8 {
+pub fn resolve(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, content: []const u8) !?[hash.SHA1_HEX_LEN]u8 {
     if (std.mem.startsWith(u8, content, REF_START_STR) and content.len > REF_START_STR.len) {
-        return try resolve(repo_kind, opts, content[REF_START_STR.len..]);
+        return try resolve(repo_kind, core, content[REF_START_STR.len..]);
     }
 
     switch (repo_kind) {
         .git => {
-            var refs_dir = try opts.git_dir.openDir("refs", .{});
+            var refs_dir = try core.git_dir.openDir("refs", .{});
             defer refs_dir.close();
             var heads_dir = try refs_dir.openDir("heads", .{});
             defer heads_dir.close();
@@ -132,7 +132,7 @@ pub fn resolve(comptime repo_kind: rp.RepoKind, opts: rp.RepoOpts(repo_kind), co
                 defer ref_file.close();
                 var buffer = [_]u8{0} ** MAX_READ_BYTES;
                 const size = try ref_file.reader().readAll(&buffer);
-                return try resolve(repo_kind, opts, buffer[0..size]);
+                return try resolve(repo_kind, core, buffer[0..size]);
             }
 
             if (content.len >= hash.SHA1_HEX_LEN) {
@@ -145,13 +145,13 @@ pub fn resolve(comptime repo_kind: rp.RepoKind, opts: rp.RepoOpts(repo_kind), co
         },
         .xit => {
             var db_buffer = [_]u8{0} ** MAX_READ_BYTES;
-            if (try opts.db.rootCursor().readByteBuffer(&db_buffer, &[_]xitdb.PathPart{
+            if (try core.db.rootCursor().readByteBuffer(&db_buffer, &[_]xitdb.PathPart{
                 .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
                 .{ .map_get = .{ .bytes = "refs" } },
                 .{ .map_get = .{ .bytes = "heads" } },
                 .{ .map_get = .{ .bytes = content } },
             })) |bytes| {
-                return try resolve(repo_kind, opts, bytes);
+                return try resolve(repo_kind, core, bytes);
             } else {
                 if (content.len >= hash.SHA1_HEX_LEN) {
                     var buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
@@ -165,16 +165,16 @@ pub fn resolve(comptime repo_kind: rp.RepoKind, opts: rp.RepoOpts(repo_kind), co
     }
 }
 
-pub fn read(comptime repo_kind: rp.RepoKind, opts: rp.RepoOpts(repo_kind), path: []const u8, buffer: *[MAX_READ_BYTES]u8) ![]u8 {
+pub fn read(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, path: []const u8, buffer: *[MAX_READ_BYTES]u8) ![]u8 {
     switch (repo_kind) {
         .git => {
-            const head_file = try opts.git_dir.openFile(path, .{ .mode = .read_only });
+            const head_file = try core.git_dir.openFile(path, .{ .mode = .read_only });
             defer head_file.close();
             const size = try head_file.reader().readAll(buffer);
             return buffer[0..size];
         },
         .xit => {
-            if (try opts.db.rootCursor().readByteBuffer(buffer, &[_]xitdb.PathPart{
+            if (try core.db.rootCursor().readByteBuffer(buffer, &[_]xitdb.PathPart{
                 .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
                 .{ .map_get = .{ .bytes = path } },
             })) |target_bytes| {
@@ -186,27 +186,27 @@ pub fn read(comptime repo_kind: rp.RepoKind, opts: rp.RepoOpts(repo_kind), path:
     }
 }
 
-pub fn readHeadMaybe(comptime repo_kind: rp.RepoKind, opts: rp.RepoOpts(repo_kind)) !?[hash.SHA1_HEX_LEN]u8 {
+pub fn readHeadMaybe(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core) !?[hash.SHA1_HEX_LEN]u8 {
     var buffer = [_]u8{0} ** MAX_READ_BYTES;
-    return try resolve(repo_kind, opts, try read(repo_kind, opts, "HEAD", &buffer));
+    return try resolve(repo_kind, core, try read(repo_kind, core, "HEAD", &buffer));
 }
 
-pub fn readHead(comptime repo_kind: rp.RepoKind, opts: rp.RepoOpts(repo_kind)) ![hash.SHA1_HEX_LEN]u8 {
-    if (try readHeadMaybe(repo_kind, opts)) |buffer| {
+pub fn readHead(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core) ![hash.SHA1_HEX_LEN]u8 {
+    if (try readHeadMaybe(repo_kind, core)) |buffer| {
         return buffer;
     } else {
         return error.RefInvalidHash;
     }
 }
 
-pub fn writeHead(comptime repo_kind: rp.RepoKind, opts: rp.RepoOpts(repo_kind), allocator: std.mem.Allocator, target: []const u8, oid_maybe: ?[hash.SHA1_HEX_LEN]u8) !void {
+pub fn writeHead(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, target: []const u8, oid_maybe: ?[hash.SHA1_HEX_LEN]u8) !void {
     switch (repo_kind) {
         .git => {
-            var lock = try io.LockFile.init(allocator, opts.git_dir, "HEAD");
+            var lock = try io.LockFile.init(allocator, core.git_dir, "HEAD");
             defer lock.deinit();
 
             // if the target is a ref, just update HEAD to point to it
-            var refs_dir = try opts.git_dir.openDir("refs", .{});
+            var refs_dir = try core.git_dir.openDir("refs", .{});
             defer refs_dir.close();
             var heads_dir = try refs_dir.openDir("heads", .{});
             defer heads_dir.close();
@@ -245,7 +245,7 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, opts: rp.RepoOpts(repo_kind), 
                 .{ .map_get = .{ .bytes = "HEAD" } },
             });
 
-            if (try opts.db.rootCursor().readBytes(allocator, &[_]xitdb.PathPart{
+            if (try core.db.rootCursor().readBytes(allocator, &[_]xitdb.PathPart{
                 .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
                 .{ .map_get = .{ .bytes = "refs" } },
                 .{ .map_get = .{ .bytes = "heads" } },
@@ -257,18 +257,18 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, opts: rp.RepoOpts(repo_kind), 
                 var write_buffer = [_]u8{0} ** MAX_READ_BYTES;
                 const content = try std.fmt.bufPrint(&write_buffer, "ref: refs/heads/{s}", .{target});
                 try path_parts.append(.{ .value = .{ .bytes = content } });
-                try opts.db.rootCursor().writePath(path_parts.items);
+                try core.db.rootCursor().writePath(path_parts.items);
             } else {
                 if (oid_maybe) |oid| {
                     // the HEAD is detached, so just update it with the oid
                     try path_parts.append(.{ .value = .{ .bytes = &oid } });
-                    try opts.db.rootCursor().writePath(path_parts.items);
+                    try core.db.rootCursor().writePath(path_parts.items);
                 } else {
                     // point HEAD at the ref, even though the ref doesn't exist
                     var write_buffer = [_]u8{0} ** MAX_READ_BYTES;
                     const content = try std.fmt.bufPrint(&write_buffer, "ref: refs/heads/{s}", .{target});
                     try path_parts.append(.{ .value = .{ .bytes = content } });
-                    try opts.db.rootCursor().writePath(path_parts.items);
+                    try core.db.rootCursor().writePath(path_parts.items);
                 }
             }
         },
@@ -278,14 +278,14 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, opts: rp.RepoOpts(repo_kind), 
 /// update the given file with the given oid,
 /// following refs recursively if necessary.
 /// used after a commit is made.
-pub fn update(allocator: std.mem.Allocator, dir: std.fs.Dir, file_name: []const u8, oid: [hash.SHA1_HEX_LEN]u8) !void {
+pub fn update(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, dir: std.fs.Dir, file_name: []const u8, oid: [hash.SHA1_HEX_LEN]u8) !void {
     var lock = try io.LockFile.init(allocator, dir, file_name);
     defer lock.deinit();
 
     // read file and get ref name if necessary
     var buffer = [_]u8{0} ** MAX_READ_BYTES;
     const ref_name_maybe = blk: {
-        const old_content = read(.git, .{ .git_dir = dir }, file_name, &buffer) catch |err| {
+        const old_content = read(repo_kind, core, file_name, &buffer) catch |err| {
             switch (err) {
                 error.FileNotFound => break :blk null,
                 else => return err,
@@ -304,7 +304,7 @@ pub fn update(allocator: std.mem.Allocator, dir: std.fs.Dir, file_name: []const 
         defer refs_dir.close();
         var heads_dir = try refs_dir.openDir("heads", .{});
         defer heads_dir.close();
-        try update(allocator, heads_dir, ref_name, oid);
+        try update(repo_kind, core, allocator, heads_dir, ref_name, oid);
     }
     // otherwise, update it with the oid
     else {

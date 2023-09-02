@@ -31,7 +31,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind) type {
             meta: std.fs.File.Metadata,
         };
 
-        pub fn init(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, opts: rp.RepoOpts(repo_kind)) !Status(repo_kind) {
+        pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core) !Status(repo_kind) {
             var untracked = std.ArrayList(Entry).init(allocator);
             errdefer untracked.deinit();
 
@@ -53,13 +53,13 @@ pub fn Status(comptime repo_kind: rp.RepoKind) type {
             var arena = std.heap.ArenaAllocator.init(allocator);
             errdefer arena.deinit();
 
-            var index = try idx.Index(repo_kind).init(allocator, opts);
+            var index = try idx.Index(repo_kind).init(allocator, core);
             errdefer index.deinit();
 
             var index_bools = try allocator.alloc(bool, index.entries.count());
             defer allocator.free(index_bools);
 
-            _ = try addEntries(repo_kind, arena.allocator(), &untracked, &workspace_modified, index, &index_bools, repo_dir, ".");
+            _ = try addEntries(repo_kind, arena.allocator(), &untracked, &workspace_modified, index, &index_bools, core.repo_dir, ".");
 
             for (index_bools, 0..) |exists, i| {
                 if (!exists) {
@@ -67,7 +67,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind) type {
                 }
             }
 
-            var head_tree = try HeadTree.init(repo_kind, allocator, repo_dir, opts);
+            var head_tree = try HeadTree.init(repo_kind, core, allocator);
             errdefer head_tree.deinit();
 
             for (index.entries.values()) |index_entry| {
@@ -183,7 +183,7 @@ pub const HeadTree = struct {
     entries: std.StringHashMap(obj.TreeEntry),
     arena: std.heap.ArenaAllocator,
 
-    pub fn init(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, repo_dir: std.fs.Dir, opts: rp.RepoOpts(repo_kind)) !HeadTree {
+    pub fn init(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator) !HeadTree {
         var entries = std.StringHashMap(obj.TreeEntry).init(allocator);
         errdefer entries.deinit();
 
@@ -195,10 +195,10 @@ pub const HeadTree = struct {
         // if head points to a valid object, read it
         switch (repo_kind) {
             .git => {
-                if (try ref.readHeadMaybe(repo_kind, opts)) |head_file_buffer| {
-                    var commit_object = try obj.Object.init(allocator, repo_dir, head_file_buffer);
+                if (try ref.readHeadMaybe(repo_kind, core)) |head_file_buffer| {
+                    var commit_object = try obj.Object.init(allocator, core.repo_dir, head_file_buffer);
                     defer commit_object.deinit();
-                    try tree.read(repo_dir, "", commit_object.content.commit.tree);
+                    try tree.read(core.repo_dir, "", commit_object.content.commit.tree);
                 }
             },
             .xit => {},
