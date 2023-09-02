@@ -93,17 +93,12 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
         defer paths.deinit();
         try paths.append("hello.txt");
 
-        {
-            var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
-            defer repo.deinit();
-            try repo.add(paths);
-        }
+        var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+        defer repo.deinit();
+        try repo.add(paths);
 
-        {
-            var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
-            defer repo.deinit();
-            try repo.add(paths);
-        }
+        try expectEqual(null, ref.readHeadMaybe(repo_kind, rp.initRepoOpts(repo_kind, &repo)));
+
         return;
     }
 
@@ -159,7 +154,7 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
 
         // check that the commit object was created
         {
-            const head_file_buffer = try ref.readHead(core.git_dir);
+            const head_file_buffer = try ref.readHead(repo_kind, .{ .git_dir = core.git_dir });
             var objects_dir = try core.git_dir.openDir("objects", .{});
             defer objects_dir.close();
             var hash_prefix_dir = try objects_dir.openDir(head_file_buffer[0..2], .{});
@@ -207,7 +202,7 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
     }
 
     // get HEAD contents
-    const commit1 = try ref.readHead(core.git_dir);
+    const commit1 = try ref.readHead(repo_kind, .{ .git_dir = core.git_dir });
 
     // make another commit
     {
@@ -273,7 +268,7 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
 
         // check that the commit object was created
         {
-            const head_file_buffer = try ref.readHead(core.git_dir);
+            const head_file_buffer = try ref.readHead(repo_kind, .{ .git_dir = core.git_dir });
             var objects_dir = try core.git_dir.openDir("objects", .{});
             defer objects_dir.close();
             var hash_prefix_dir = try objects_dir.openDir(head_file_buffer[0..2], .{});
@@ -300,7 +295,7 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
     }
 
     // get HEAD contents
-    const commit2 = try ref.readHead(core.git_dir);
+    const commit2 = try ref.readHead(repo_kind, .{ .git_dir = core.git_dir });
 
     // try to checkout first commit after making conflicting change
     {
@@ -728,8 +723,8 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
     try main.xitMain(repo_kind, allocator, &args);
 
     // check the refs
-    try expectEqual(commit2, try ref.readHead(core.git_dir));
-    try expectEqual(commit2, try ref.resolve(core.git_dir, "stuff"));
+    try expectEqual(commit2, try ref.readHead(repo_kind, .{ .git_dir = core.git_dir }));
+    try expectEqual(commit2, try ref.resolve(repo_kind, .{ .git_dir = core.git_dir }, "stuff"));
 
     // list all branches
     {
@@ -816,8 +811,8 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
     }
 
     // get HEAD contents
-    const commit3 = try ref.readHead(core.git_dir);
-    try expectEqual(commit3, try ref.resolve(core.git_dir, "stuff"));
+    const commit3 = try ref.readHead(repo_kind, .{ .git_dir = core.git_dir });
+    try expectEqual(commit3, try ref.resolve(repo_kind, .{ .git_dir = core.git_dir }, "stuff"));
 }
 
 test "end to end" {

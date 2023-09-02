@@ -261,10 +261,8 @@ fn addIndexEntries(comptime repo_kind: rp.RepoKind, objects_dir: std.fs.Dir, all
 /// uses the commit message provided to the command.
 /// updates HEAD when it's done using a file locking thingy
 /// so other processes don't step on each others' toes.
-pub fn writeCommit(allocator: std.mem.Allocator, cwd: std.fs.Dir, command: cmd.CommandData) !void {
-    // open the internal dirs
-    var git_dir = try cwd.openDir(".git", .{});
-    defer git_dir.close();
+pub fn writeCommit(allocator: std.mem.Allocator, git_dir: std.fs.Dir, command: cmd.CommandData) !void {
+    // open the objects dir
     var objects_dir = try git_dir.openDir("objects", .{});
     defer objects_dir.close();
 
@@ -283,7 +281,7 @@ pub fn writeCommit(allocator: std.mem.Allocator, cwd: std.fs.Dir, command: cmd.C
     const tree_sha1_hex = std.fmt.bytesToHex(tree_sha1_bytes_buffer, .lower);
 
     // read HEAD
-    const head_oid_maybe = try ref.readHeadMaybe(git_dir);
+    const head_oid_maybe = try ref.readHeadMaybe(.git, .{ .git_dir = git_dir });
 
     // metadata
     const author = "radar <radar@foo.com> 1512325222 +0000";

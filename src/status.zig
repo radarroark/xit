@@ -195,7 +195,7 @@ pub const HeadTree = struct {
         // if head points to a valid object, read it
         switch (repo_kind) {
             .git => {
-                if (try ref.readHeadMaybe(opts.git_dir)) |head_file_buffer| {
+                if (try ref.readHeadMaybe(repo_kind, opts)) |head_file_buffer| {
                     var commit_object = try obj.Object.init(allocator, repo_dir, head_file_buffer);
                     defer commit_object.deinit();
                     try tree.read(repo_dir, "", commit_object.content.commit.tree);

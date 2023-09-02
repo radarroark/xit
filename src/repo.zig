@@ -30,6 +30,17 @@ pub fn RepoOpts(comptime repo_kind: RepoKind) type {
     };
 }
 
+pub fn initRepoOpts(comptime repo_kind: RepoKind, repo: *Repo(repo_kind)) RepoOpts(repo_kind) {
+    return switch (repo_kind) {
+        .git => .{
+            .git_dir = repo.core.git_dir,
+        },
+        .xit => .{
+            .db = &repo.core.db,
+        },
+    };
+}
+
 pub fn Repo(comptime repo_kind: RepoKind) type {
     return struct {
         allocator: std.mem.Allocator,
@@ -141,7 +152,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     defer heads_dir.close();
 
                     // update HEAD
-                    try ref.writeHead(allocator, git_dir, "master", null);
+                    try ref.writeHead(repo_kind, .{ .git_dir = git_dir }, allocator, "master", null);
 
                     return .{
                         .allocator = allocator,
@@ -152,19 +163,24 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     };
                 },
                 .xit => {
-                    const file = repo_dir.createFile(".xit", .{ .exclusive = true, .lock = .exclusive }) catch |err| {
+                    const file = repo_dir.createFile(".xit", .{ .exclusive = true, .lock = .exclusive, .read = true }) catch |err| {
                         switch (err) {
                             error.PathAlreadyExists => return error.RepoAlreadyExists,
                             else => return err,
                         }
                     };
-                    errdefer file.close();
+
+                    var db = try xitdb.Database(.file).init(allocator, .{ .file = file });
+                    errdefer db.deinit();
+
+                    // update HEAD
+                    try ref.writeHead(repo_kind, .{ .db = &db }, allocator, "master", null);
 
                     return .{
                         .allocator = allocator,
                         .core = .{
                             .repo_dir = repo_dir,
-                            .db = try xitdb.Database(.file).init(allocator, .{ .file = file }),
+                            .db = db,
                         },
                     };
                 },
@@ -217,7 +233,12 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     try self.add(cmd_data.add.paths);
                 },
                 cmd.CommandData.commit => {
-                    try obj.writeCommit(self.allocator, self.core.repo_dir, cmd_data);
+                    switch (repo_kind) {
+                        .git => {
+                            try obj.writeCommit(self.allocator, self.core.git_dir, cmd_data);
+                        },
+                        .xit => {},
+                    }
                 },
                 cmd.CommandData.status => {
                     var stat = try self.status();

@@ -334,8 +334,8 @@ pub fn checkout(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, r
     defer git_dir.close();
 
     // get the current commit and target oid
-    const current_hash = try ref.readHead(git_dir);
-    const oid_hex = try ref.resolve(git_dir, target);
+    const current_hash = try ref.readHead(repo_kind, .{ .git_dir = git_dir });
+    const oid_hex = try ref.resolve(repo_kind, .{ .git_dir = git_dir }, target);
 
     // compare the commits
     var tree_diff = obj.TreeDiff.init(allocator);
@@ -357,7 +357,7 @@ pub fn checkout(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, r
     try index.write(allocator, .{ .lock_file = lock.lock_file });
 
     // update HEAD
-    try ref.writeHead(allocator, git_dir, target, oid_hex);
+    try ref.writeHead(repo_kind, .{ .git_dir = git_dir }, allocator, target, oid_hex);
 
     // finish lock
     lock.success = true;

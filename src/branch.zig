@@ -44,7 +44,7 @@ pub fn create(allocator: std.mem.Allocator, git_dir: std.fs.Dir, name: []const u
     defer lock.deinit();
 
     // get HEAD contents
-    const head_file_buffer = try ref.readHead(git_dir);
+    const head_file_buffer = try ref.readHead(.git, .{ .git_dir = git_dir });
 
     // write to lock file
     try lock.lock_file.writeAll(&head_file_buffer);
