@@ -194,15 +194,10 @@ pub fn HeadTree(comptime repo_kind: rp.RepoKind) type {
             };
 
             // if head points to a valid object, read it
-            switch (repo_kind) {
-                .git => {
-                    if (try ref.readHeadMaybe(repo_kind, core)) |head_file_buffer| {
-                        var commit_object = try obj.Object(repo_kind).init(allocator, core, head_file_buffer);
-                        defer commit_object.deinit();
-                        try tree.read(core, "", commit_object.content.commit.tree);
-                    }
-                },
-                .xit => {},
+            if (try ref.readHeadMaybe(repo_kind, core)) |head_file_buffer| {
+                var commit_object = try obj.Object(repo_kind).init(allocator, core, head_file_buffer);
+                defer commit_object.deinit();
+                try tree.read(core, "", commit_object.content.commit.tree);
             }
 
             return tree;

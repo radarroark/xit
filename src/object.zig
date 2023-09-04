@@ -3,6 +3,7 @@
 //! objects for now, but that'll come eventually.
 
 const std = @import("std");
+const xitdb = @import("xitdb");
 const builtin = @import("builtin");
 const hash = @import("./hash.zig");
 const compress = @import("./compress.zig");
@@ -374,6 +375,7 @@ pub const ObjectContent = union(ObjectKind) {
 };
 
 pub const ObjectReadError = error{
+    ObjectNotFound,
     InvalidObjectKind,
     InvalidCommitTreeHash,
     InvalidCommitParentHash,
@@ -386,27 +388,85 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
         content: ObjectContent,
 
         pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core, oid: [hash.SHA1_HEX_LEN]u8) !Object(repo_kind) {
-            // open the objects dir
-            var objects_dir = try core.git_dir.openDir("objects", .{});
-            defer objects_dir.close();
+            var state = blk: {
+                switch (repo_kind) {
+                    .git => {
+                        // open the objects dir
+                        var objects_dir = try core.git_dir.openDir("objects", .{});
+                        errdefer objects_dir.close();
 
-            // open the object file
-            var commit_hash_prefix_dir = try objects_dir.openDir(oid[0..2], .{});
-            defer commit_hash_prefix_dir.close();
-            var commit_hash_suffix_file = try commit_hash_prefix_dir.openFile(oid[2..], .{ .mode = .read_only });
-            defer commit_hash_suffix_file.close();
+                        // open the object file
+                        var commit_hash_prefix_dir = try objects_dir.openDir(oid[0..2], .{});
+                        errdefer commit_hash_prefix_dir.close();
+                        var commit_hash_suffix_file = try commit_hash_prefix_dir.openFile(oid[2..], .{ .mode = .read_only });
+                        errdefer commit_hash_suffix_file.close();
 
-            // decompress the object file
-            var decompressed = try compress.Decompressed.init(allocator, commit_hash_suffix_file);
-            defer decompressed.deinit();
-            const reader = decompressed.stream.reader();
+                        // decompress the object file
+                        var decompressed = try compress.Decompressed.init(allocator, commit_hash_suffix_file);
+                        errdefer decompressed.deinit();
+                        const reader = decompressed.stream.reader();
+
+                        const Reader = @TypeOf(reader);
+                        const State = struct {
+                            objects_dir: std.fs.Dir,
+                            commit_hash_prefix_dir: std.fs.Dir,
+                            commit_hash_suffix_file: std.fs.File,
+                            decompressed: compress.Decompressed,
+                            reader: Reader,
+
+                            fn deinit(self: *@This()) void {
+                                self.decompressed.deinit();
+                                self.commit_hash_suffix_file.close();
+                                self.commit_hash_prefix_dir.close();
+                                self.objects_dir.close();
+                            }
+                        };
+
+                        break :blk State{
+                            .objects_dir = objects_dir,
+                            .commit_hash_prefix_dir = commit_hash_prefix_dir,
+                            .commit_hash_suffix_file = commit_hash_suffix_file,
+                            .decompressed = decompressed,
+                            .reader = reader,
+                        };
+                    },
+                    .xit => {
+                        const State = struct {
+                            allocator: std.mem.Allocator,
+                            buffer: []u8,
+                            stream: std.io.FixedBufferStream([]u8),
+                            reader: std.io.FixedBufferStream([]u8).Reader,
+
+                            fn deinit(self: *@This()) void {
+                                self.allocator.free(self.buffer);
+                            }
+                        };
+                        if (try core.db.rootCursor().readBytesAlloc(allocator, &[_]xitdb.PathPart{
+                            .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
+                            .{ .map_get = .{ .bytes = "objects" } },
+                            .{ .map_get = .{ .bytes = &oid } },
+                        })) |bytes| {
+                            var stream = std.io.fixedBufferStream(bytes);
+                            break :blk State{
+                                .allocator = allocator,
+                                .buffer = bytes,
+                                .stream = stream,
+                                .reader = stream.reader(),
+                            };
+                        } else {
+                            return error.ObjectNotFound;
+                        }
+                    },
+                }
+            };
+            defer state.deinit();
 
             // read the object kind
-            const object_kind = try reader.readUntilDelimiterAlloc(allocator, ' ', MAX_FILE_READ_SIZE);
+            const object_kind = try state.reader.readUntilDelimiterAlloc(allocator, ' ', MAX_FILE_READ_SIZE);
             defer allocator.free(object_kind);
 
             // read the length (currently unused)
-            const object_len = try reader.readUntilDelimiterAlloc(allocator, 0, MAX_FILE_READ_SIZE);
+            const object_len = try state.reader.readUntilDelimiterAlloc(allocator, 0, MAX_FILE_READ_SIZE);
             defer allocator.free(object_len);
             _ = try std.fmt.parseInt(usize, object_len, 10);
 
@@ -423,15 +483,15 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                 var entries = std.StringArrayHashMap(TreeEntry).init(arena.allocator());
 
                 while (true) {
-                    const entry_mode_str = reader.readUntilDelimiterAlloc(arena.allocator(), ' ', MAX_FILE_READ_SIZE) catch |err| {
+                    const entry_mode_str = state.reader.readUntilDelimiterAlloc(arena.allocator(), ' ', MAX_FILE_READ_SIZE) catch |err| {
                         switch (err) {
                             error.EndOfStream => break,
                             else => return err,
                         }
                     };
                     const entry_mode: io.Mode = @bitCast(try std.fmt.parseInt(u32, entry_mode_str, 8));
-                    const entry_name = try reader.readUntilDelimiterAlloc(arena.allocator(), 0, MAX_FILE_READ_SIZE);
-                    const entry_oid = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
+                    const entry_name = try state.reader.readUntilDelimiterAlloc(arena.allocator(), 0, MAX_FILE_READ_SIZE);
+                    const entry_oid = try state.reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
                     try entries.put(entry_name, TreeEntry{ .oid = entry_oid, .mode = entry_mode });
                 }
 
@@ -442,7 +502,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                 };
             } else if (std.mem.eql(u8, "commit", object_kind)) {
                 // read the content kind
-                const content_kind = try reader.readUntilDelimiterAlloc(allocator, ' ', MAX_FILE_READ_SIZE);
+                const content_kind = try state.reader.readUntilDelimiterAlloc(allocator, ' ', MAX_FILE_READ_SIZE);
                 defer allocator.free(content_kind);
                 if (!std.mem.eql(u8, "tree", content_kind)) {
                     return error.InvalidCommitContentKind;
@@ -450,7 +510,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
 
                 // read the tree hash
                 var tree_hash = [_]u8{0} ** (hash.SHA1_HEX_LEN + 1);
-                const tree_hash_slice = try reader.readUntilDelimiter(&tree_hash, '\n');
+                const tree_hash_slice = try state.reader.readUntilDelimiter(&tree_hash, '\n');
                 if (tree_hash_slice.len != hash.SHA1_HEX_LEN) {
                     return error.InvalidCommitTreeHash;
                 }
@@ -476,7 +536,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                 var metadata = std.StringHashMap([]const u8).init(allocator);
                 defer metadata.deinit();
                 while (true) {
-                    const line = try reader.readUntilDelimiterAlloc(object.arena.allocator(), '\n', MAX_FILE_READ_SIZE);
+                    const line = try state.reader.readUntilDelimiterAlloc(object.arena.allocator(), '\n', MAX_FILE_READ_SIZE);
                     if (line.len == 0) {
                         break;
                     }
@@ -491,7 +551,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                 }
 
                 // read the message
-                object.content.commit.message = try reader.readAllAlloc(object.arena.allocator(), MAX_FILE_READ_SIZE);
+                object.content.commit.message = try state.reader.readAllAlloc(object.arena.allocator(), MAX_FILE_READ_SIZE);
 
                 // set metadata fields
                 if (metadata.fetchRemove("parent")) |parent| {
