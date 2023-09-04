@@ -218,12 +218,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     try self.add(cmd_data.add.paths);
                 },
                 cmd.CommandData.commit => {
-                    switch (repo_kind) {
-                        .git => {
-                            try obj.writeCommit(repo_kind, &self.core, self.allocator, cmd_data);
-                        },
-                        .xit => {},
-                    }
+                    try obj.writeCommit(repo_kind, &self.core, self.allocator, cmd_data);
                 },
                 cmd.CommandData.status => {
                     var stat = try self.status();
@@ -321,7 +316,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                             }
                         };
                         defer file.close();
-                        try index.addPath(self.core.repo_dir, path);
+                        try index.addPath(&self.core, path);
                     }
 
                     try index.write(self.allocator, .{ .lock_file = lock.lock_file });
@@ -344,7 +339,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                             }
                         };
                         defer file.close();
-                        try index.addPath(self.core.repo_dir, path);
+                        try index.addPath(&self.core, path);
                     }
 
                     try index.write(self.allocator, .{ .db = &self.core.db });

@@ -183,7 +183,7 @@ fn untrackedFile(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, path: []con
     }
 }
 
-pub fn migrate(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, repo_dir: std.fs.Dir, tree_diff: obj.TreeDiff(repo_kind), index: *idx.Index(.git), result: *CheckoutResult) !void {
+pub fn migrate(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, tree_diff: obj.TreeDiff(repo_kind), index: *idx.Index(.git), result: *CheckoutResult) !void {
     var add_files = std.StringHashMap(obj.TreeEntry).init(allocator);
     defer add_files.deinit();
     var edit_files = std.StringHashMap(obj.TreeEntry).init(allocator);
@@ -228,12 +228,12 @@ pub fn migrate(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, re
             result.conflict(allocator);
             try result.data.conflict.stale_files.put(path, {});
         } else {
-            const file = repo_dir.openFile(path, .{ .mode = .read_only }) catch |err| {
+            const file = core.repo_dir.openFile(path, .{ .mode = .read_only }) catch |err| {
                 switch (err) {
                     error.FileNotFound, error.NotDir => {
                         // if the path doesn't exist in the workspace,
                         // but one of its parents *does* exist and isn't tracked
-                        if (untrackedParent(repo_dir, path, index.*)) |_| {
+                        if (untrackedParent(core.repo_dir, path, index.*)) |_| {
                             result.conflict(allocator);
                             if (entry_maybe) |_| {
                                 try result.data.conflict.stale_files.put(path, {});
@@ -266,7 +266,7 @@ pub fn migrate(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, re
                 },
                 std.fs.File.Kind.directory => {
                     // if the path is a dir with a descendent that isn't in the index
-                    if (try untrackedFile(allocator, repo_dir, path, index.*)) {
+                    if (try untrackedFile(allocator, core.repo_dir, path, index.*)) {
                         result.conflict(allocator);
                         if (entry_maybe) |_| {
                             try result.data.conflict.stale_files.put(path, {});
@@ -288,7 +288,7 @@ pub fn migrate(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, re
     while (remove_files_iter.next()) |entry| {
         // update working tree
         var path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
-        const path = try repo_dir.realpath(entry.key_ptr.*, &path_buffer);
+        const path = try core.repo_dir.realpath(entry.key_ptr.*, &path_buffer);
         try std.fs.deleteFileAbsolute(path);
         // update index
         index.removePath(entry.key_ptr.*);
@@ -298,7 +298,7 @@ pub fn migrate(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, re
     var remove_dirs_iter = remove_dirs.keyIterator();
     while (remove_dirs_iter.next()) |key| {
         // update working tree
-        try repo_dir.deleteTree(key.*);
+        try core.repo_dir.deleteTree(key.*);
         // update index
         index.removePath(key.*);
         try index.removeChildren(key.*);
@@ -307,25 +307,25 @@ pub fn migrate(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, re
     var add_dirs_iter = add_dirs.keyIterator();
     while (add_dirs_iter.next()) |key| {
         // update working tree
-        try repo_dir.makePath(key.*);
+        try core.repo_dir.makePath(key.*);
         // update index
-        try index.addPath(repo_dir, key.*);
+        try index.addPath(core, key.*);
     }
 
     var add_files_iter = add_files.iterator();
     while (add_files_iter.next()) |entry| {
         // update working tree
-        try createFileFromObject(allocator, repo_dir, entry.key_ptr.*, entry.value_ptr.*);
+        try createFileFromObject(allocator, core.repo_dir, entry.key_ptr.*, entry.value_ptr.*);
         // update index
-        try index.addPath(repo_dir, entry.key_ptr.*);
+        try index.addPath(core, entry.key_ptr.*);
     }
 
     var edit_files_iter = edit_files.iterator();
     while (edit_files_iter.next()) |entry| {
         // update working tree
-        try createFileFromObject(allocator, repo_dir, entry.key_ptr.*, entry.value_ptr.*);
+        try createFileFromObject(allocator, core.repo_dir, entry.key_ptr.*, entry.value_ptr.*);
         // update index
-        try index.addPath(repo_dir, entry.key_ptr.*);
+        try index.addPath(core, entry.key_ptr.*);
     }
 }
 
@@ -351,7 +351,7 @@ pub fn checkout(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core,
     defer index.deinit();
 
     // update the working tree
-    try migrate(repo_kind, allocator, core.repo_dir, tree_diff, &index, result);
+    try migrate(repo_kind, core, allocator, tree_diff, &index, result);
 
     // update the index
     try index.write(allocator, .{ .lock_file = lock.lock_file });

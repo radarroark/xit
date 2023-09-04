@@ -197,7 +197,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
         /// if path is a file, adds it as an entry to the index struct.
         /// if path is a dir, adds its children recursively.
         /// ignoring symlinks for now but will add that later.
-        pub fn addPath(self: *Index(repo_kind), repo_dir: std.fs.Dir, path: []const u8) !void {
+        pub fn addPath(self: *Index(repo_kind), core: *rp.Repo(repo_kind).Core, path: []const u8) !void {
             // remove entries that are parents of this path (directory replaces file)
             {
                 var parent_path_maybe = std.fs.path.dirname(path);
@@ -211,15 +211,20 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
             // remove entries that are children of this path (file replaces directory)
             try self.removeChildren(path);
             // read the metadata
-            const file = try repo_dir.openFile(path, .{ .mode = .read_only });
+            const file = try core.repo_dir.openFile(path, .{ .mode = .read_only });
             defer file.close();
             const meta = try file.metadata();
             switch (meta.kind()) {
                 std.fs.File.Kind.file => {
                     // write the object
                     var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-                    if (repo_kind == .git) {
-                        try object.writeBlobFromPath(self.allocator, repo_dir, path, &oid);
+                    switch (repo_kind) {
+                        .git => {
+                            try object.writeBlobFromPath(self.allocator, core.repo_dir, path, &oid);
+                        },
+                        .xit => {
+                            return error.NotImplemented; // TODO
+                        },
                     }
                     // add the entry
                     const times = io.getTimes(meta);
@@ -248,20 +253,29 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     try self.addEntry(entry);
                 },
                 std.fs.File.Kind.directory => {
-                    var dir = try repo_dir.openIterableDir(path, .{});
+                    var dir = try core.repo_dir.openIterableDir(path, .{});
                     defer dir.close();
                     var iter = dir.iterate();
                     while (try iter.next()) |entry| {
-                        // don't traverse the .git dir
-                        if (repo_kind == .git and std.mem.eql(u8, entry.name, ".git")) {
-                            continue;
+                        // ignore internal dir/file
+                        switch (repo_kind) {
+                            .git => {
+                                if (std.mem.eql(u8, entry.name, ".git")) {
+                                    continue;
+                                }
+                            },
+                            .xit => {
+                                if (std.mem.eql(u8, entry.name, ".xit")) {
+                                    continue;
+                                }
+                            },
                         }
 
                         const subpath = if (std.mem.eql(u8, path, "."))
                             try std.fmt.allocPrint(self.arena.allocator(), "{s}", .{entry.name})
                         else
                             try std.fs.path.join(self.arena.allocator(), &[_][]const u8{ path, entry.name });
-                        try self.addPath(repo_dir, subpath);
+                        try self.addPath(core, subpath);
                     }
                 },
                 else => return,
@@ -396,52 +410,55 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     try opts.lock_file.writeAll(&overall_sha1_buffer);
                 },
                 .xit => {
-                    var path_parts = std.ArrayList(xitdb.PathPart(void)).init(allocator);
-                    defer path_parts.deinit();
-                    try path_parts.append(.{ .path = &[_]xitdb.PathPart(void){
-                        .{ .list_get = .append_copy },
-                    } });
+                    const RootUpdateCtx = struct {
+                        db: *xitdb.Database(.file),
+                        allocator: std.mem.Allocator,
+                        index: *Index(repo_kind),
 
-                    var arena = std.heap.ArenaAllocator.init(allocator);
-                    defer arena.deinit();
-                    for (self.entries.values()) |entry| {
-                        var entry_buffer = std.ArrayList(u8).init(arena.allocator());
-                        const writer = entry_buffer.writer();
-                        try writer.writeIntBig(u32, entry.ctime_secs);
-                        try writer.writeIntBig(u32, entry.ctime_nsecs);
-                        try writer.writeIntBig(u32, entry.mtime_secs);
-                        try writer.writeIntBig(u32, entry.mtime_nsecs);
-                        try writer.writeIntBig(u32, entry.dev);
-                        try writer.writeIntBig(u32, entry.ino);
-                        try writer.writeIntBig(u32, @as(u32, @bitCast(entry.mode)));
-                        try writer.writeIntBig(u32, entry.uid);
-                        try writer.writeIntBig(u32, entry.gid);
-                        try writer.writeIntBig(u32, entry.file_size);
-                        try writer.writeAll(&entry.oid);
-                        try writer.writeIntBig(u16, @as(u16, @bitCast(entry.flags)));
+                        pub fn update(root_self: @This(), root_cursor: xitdb.Database(.file).Cursor, _: bool) !void {
+                            var arena = std.heap.ArenaAllocator.init(root_self.allocator);
+                            defer arena.deinit();
+                            for (root_self.index.entries.values()) |entry| {
+                                var entry_buffer = std.ArrayList(u8).init(arena.allocator());
+                                const writer = entry_buffer.writer();
+                                try writer.writeIntBig(u32, entry.ctime_secs);
+                                try writer.writeIntBig(u32, entry.ctime_nsecs);
+                                try writer.writeIntBig(u32, entry.mtime_secs);
+                                try writer.writeIntBig(u32, entry.mtime_nsecs);
+                                try writer.writeIntBig(u32, entry.dev);
+                                try writer.writeIntBig(u32, entry.ino);
+                                try writer.writeIntBig(u32, @as(u32, @bitCast(entry.mode)));
+                                try writer.writeIntBig(u32, entry.uid);
+                                try writer.writeIntBig(u32, entry.gid);
+                                try writer.writeIntBig(u32, entry.file_size);
+                                try writer.writeAll(&entry.oid);
+                                try writer.writeIntBig(u16, @as(u16, @bitCast(entry.flags)));
 
-                        if (try opts.db.rootCursor().readBytesAlloc(allocator, void, &[_]xitdb.PathPart(void){
-                            .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
-                            .{ .map_get = .{ .bytes = "index" } },
-                            .{ .map_get = .{ .bytes = entry.path } },
-                        })) |existing_entry| {
-                            defer allocator.free(existing_entry);
-                            if (std.mem.eql(u8, entry_buffer.items, existing_entry)) {
-                                continue;
+                                if (try root_self.db.rootCursor().readBytesAlloc(root_self.allocator, void, &[_]xitdb.PathPart(void){
+                                    .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
+                                    .{ .map_get = .{ .bytes = "index" } },
+                                    .{ .map_get = .{ .bytes = entry.path } },
+                                })) |existing_entry| {
+                                    defer root_self.allocator.free(existing_entry);
+                                    if (std.mem.eql(u8, entry_buffer.items, existing_entry)) {
+                                        continue;
+                                    }
+                                }
+
+                                try root_cursor.execute(void, &[_]xitdb.PathPart(void){
+                                    .{ .map_get = .{ .bytes = entry.path } },
+                                    .{ .value = .{ .bytes = entry_buffer.items } },
+                                });
                             }
                         }
-
-                        try path_parts.append(.{ .path = &[_]xitdb.PathPart(void){
-                            .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
-                            .map_create,
-                            .{ .map_get = .{ .bytes = "index" } },
-                            .map_create,
-                            .{ .map_get = .{ .bytes = entry.path } },
-                            .{ .value = .{ .bytes = entry_buffer.items } },
-                        } });
-                    }
-
-                    try opts.db.rootCursor().execute(void, path_parts.items);
+                    };
+                    try opts.db.rootCursor().execute(RootUpdateCtx, &[_]xitdb.PathPart(RootUpdateCtx){
+                        .{ .list_get = .append_copy },
+                        .map_create,
+                        .{ .map_get = .{ .bytes = "index" } },
+                        .map_create,
+                        .{ .update = RootUpdateCtx{ .db = opts.db, .allocator = allocator, .index = self } },
+                    });
                 },
             }
         }

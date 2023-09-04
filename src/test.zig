@@ -90,11 +90,6 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
         defer status.deinit();
     }
 
-    // TEMPORARY
-    if (repo_kind == .xit) {
-        return;
-    }
-
     // add and commit
     {
         // make file
@@ -129,6 +124,11 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
         try args.append("add");
         try args.append(".");
         try main.xitMain(repo_kind, allocator, &args);
+
+        // TEMPORARY
+        if (repo_kind == .xit) {
+            return;
+        }
 
         // make a commit
         args.clearAndFree();
