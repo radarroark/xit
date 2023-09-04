@@ -137,16 +137,16 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     _ = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
                 },
                 .xit => {
-                    if (try core.db.rootCursor().readCursor(&[_]xitdb.PathPart{
+                    if (try core.db.rootCursor().readCursor(void, &[_]xitdb.PathPart(void){
                         .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
                         .{ .map_get = .{ .bytes = "index" } },
                     })) |cursor| {
                         var iter = try cursor.iter(.map);
                         defer iter.deinit();
                         while (try iter.next()) |*next_cursor| {
-                            const buffer = (try next_cursor.readBytesAlloc(allocator, &[_]xitdb.PathPart{})).?;
+                            const buffer = (try next_cursor.readBytesAlloc(allocator, void, &[_]xitdb.PathPart(void){})).?;
                             defer allocator.free(buffer);
-                            const path = (try next_cursor.readKeyBytesAlloc(index.arena.allocator(), &[_]xitdb.PathPart{})).?;
+                            const path = (try next_cursor.readKeyBytesAlloc(index.arena.allocator(), void, &[_]xitdb.PathPart(void){})).?;
                             var stream = std.io.fixedBufferStream(buffer);
                             var reader = stream.reader();
                             var entry = Index(repo_kind).Entry{
@@ -396,9 +396,9 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     try opts.lock_file.writeAll(&overall_sha1_buffer);
                 },
                 .xit => {
-                    var path_parts = std.ArrayList(xitdb.PathPart).init(allocator);
+                    var path_parts = std.ArrayList(xitdb.PathPart(void)).init(allocator);
                     defer path_parts.deinit();
-                    try path_parts.append(.{ .path = &[_]xitdb.PathPart{
+                    try path_parts.append(.{ .path = &[_]xitdb.PathPart(void){
                         .{ .list_get = .append_copy },
                     } });
 
@@ -420,7 +420,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                         try writer.writeAll(&entry.oid);
                         try writer.writeIntBig(u16, @as(u16, @bitCast(entry.flags)));
 
-                        if (try opts.db.rootCursor().readBytesAlloc(allocator, &[_]xitdb.PathPart{
+                        if (try opts.db.rootCursor().readBytesAlloc(allocator, void, &[_]xitdb.PathPart(void){
                             .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
                             .{ .map_get = .{ .bytes = "index" } },
                             .{ .map_get = .{ .bytes = entry.path } },
@@ -431,7 +431,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                             }
                         }
 
-                        try path_parts.append(.{ .path = &[_]xitdb.PathPart{
+                        try path_parts.append(.{ .path = &[_]xitdb.PathPart(void){
                             .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
                             .map_create,
                             .{ .map_get = .{ .bytes = "index" } },
@@ -441,7 +441,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                         } });
                     }
 
-                    try opts.db.rootCursor().writePath(path_parts.items);
+                    try opts.db.rootCursor().execute(void, path_parts.items);
                 },
             }
         }

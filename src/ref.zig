@@ -145,7 +145,7 @@ pub fn resolve(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, 
         },
         .xit => {
             var db_buffer = [_]u8{0} ** MAX_READ_BYTES;
-            if (try core.db.rootCursor().readBytes(&db_buffer, &[_]xitdb.PathPart{
+            if (try core.db.rootCursor().readBytes(&db_buffer, void, &[_]xitdb.PathPart(void){
                 .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
                 .{ .map_get = .{ .bytes = "refs" } },
                 .{ .map_get = .{ .bytes = "heads" } },
@@ -174,7 +174,7 @@ pub fn read(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, pat
             return buffer[0..size];
         },
         .xit => {
-            if (try core.db.rootCursor().readBytes(buffer, &[_]xitdb.PathPart{
+            if (try core.db.rootCursor().readBytes(buffer, void, &[_]xitdb.PathPart(void){
                 .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
                 .{ .map_get = .{ .bytes = path } },
             })) |target_bytes| {
@@ -237,15 +237,15 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core
             lock.success = true;
         },
         .xit => {
-            var path_parts = std.ArrayList(xitdb.PathPart).init(allocator);
+            var path_parts = std.ArrayList(xitdb.PathPart(void)).init(allocator);
             defer path_parts.deinit();
-            try path_parts.appendSlice(&[_]xitdb.PathPart{
+            try path_parts.appendSlice(&[_]xitdb.PathPart(void){
                 .{ .list_get = .append_copy },
                 .map_create,
                 .{ .map_get = .{ .bytes = "HEAD" } },
             });
 
-            if (try core.db.rootCursor().readBytesAlloc(allocator, &[_]xitdb.PathPart{
+            if (try core.db.rootCursor().readBytesAlloc(allocator, void, &[_]xitdb.PathPart(void){
                 .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
                 .{ .map_get = .{ .bytes = "refs" } },
                 .{ .map_get = .{ .bytes = "heads" } },
@@ -257,18 +257,18 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core
                 var write_buffer = [_]u8{0} ** MAX_READ_BYTES;
                 const content = try std.fmt.bufPrint(&write_buffer, "ref: refs/heads/{s}", .{target});
                 try path_parts.append(.{ .value = .{ .bytes = content } });
-                try core.db.rootCursor().writePath(path_parts.items);
+                try core.db.rootCursor().execute(void, path_parts.items);
             } else {
                 if (oid_maybe) |oid| {
                     // the HEAD is detached, so just update it with the oid
                     try path_parts.append(.{ .value = .{ .bytes = &oid } });
-                    try core.db.rootCursor().writePath(path_parts.items);
+                    try core.db.rootCursor().execute(void, path_parts.items);
                 } else {
                     // point HEAD at the ref, even though the ref doesn't exist
                     var write_buffer = [_]u8{0} ** MAX_READ_BYTES;
                     const content = try std.fmt.bufPrint(&write_buffer, "ref: refs/heads/{s}", .{target});
                     try path_parts.append(.{ .value = .{ .bytes = content } });
-                    try core.db.rootCursor().writePath(path_parts.items);
+                    try core.db.rootCursor().execute(void, path_parts.items);
                 }
             }
         },

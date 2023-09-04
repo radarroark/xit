@@ -441,7 +441,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                                 self.allocator.free(self.buffer);
                             }
                         };
-                        if (try core.db.rootCursor().readBytesAlloc(allocator, &[_]xitdb.PathPart{
+                        if (try core.db.rootCursor().readBytesAlloc(allocator, void, &[_]xitdb.PathPart(void){
                             .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
                             .{ .map_get = .{ .bytes = "objects" } },
                             .{ .map_get = .{ .bytes = &oid } },
