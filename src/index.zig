@@ -416,10 +416,9 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                         index: *Index(repo_kind),
 
                         pub fn update(root_self: @This(), root_cursor: xitdb.Database(.file).Cursor, _: bool) !void {
-                            var arena = std.heap.ArenaAllocator.init(root_self.allocator);
-                            defer arena.deinit();
                             for (root_self.index.entries.values()) |entry| {
-                                var entry_buffer = std.ArrayList(u8).init(arena.allocator());
+                                var entry_buffer = std.ArrayList(u8).init(root_self.allocator);
+                                defer entry_buffer.deinit();
                                 const writer = entry_buffer.writer();
                                 try writer.writeIntBig(u32, entry.ctime_secs);
                                 try writer.writeIntBig(u32, entry.ctime_nsecs);
