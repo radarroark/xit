@@ -346,7 +346,7 @@ pub fn updateRecur(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
 
             // if it's a ref, update it recursively
             if (ref_name_maybe) |ref_name| {
-                const UpdateCtx = struct {
+                const Ctx = struct {
                     core: *rp.Repo(repo_kind).Core,
                     allocator: std.mem.Allocator,
                     file_name: []const u8,
@@ -357,12 +357,12 @@ pub fn updateRecur(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
                         try updateRecur(repo_kind, ctx_self.core, .{ .root_cursor = ctx_self.root_cursor, .cursor = cursor }, ctx_self.allocator, ctx_self.file_name, ctx_self.oid);
                     }
                 };
-                try opts.root_cursor.execute(UpdateCtx, &[_]xitdb.PathPart(UpdateCtx){
+                try opts.root_cursor.execute(Ctx, &[_]xitdb.PathPart(Ctx){
                     .{ .map_get = .{ .bytes = "refs" } },
                     .map_create,
                     .{ .map_get = .{ .bytes = "heads" } },
                     .map_create,
-                    .{ .update = UpdateCtx{ .core = core, .allocator = allocator, .file_name = ref_name, .oid = oid, .root_cursor = opts.root_cursor } },
+                    .{ .update = Ctx{ .core = core, .allocator = allocator, .file_name = ref_name, .oid = oid, .root_cursor = opts.root_cursor } },
                 });
             }
             // otherwise, update it with the oid

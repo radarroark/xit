@@ -205,7 +205,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     try self.addPathRecur(core, .{ .objects_dir = objects_dir }, path);
                 },
                 .xit => {
-                    const UpdateCtx = struct {
+                    const Ctx = struct {
                         core: *rp.Repo(repo_kind).Core,
                         index: *Index(repo_kind),
                         path: []const u8,
@@ -214,12 +214,12 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                             try ctx_self.index.addPathRecur(ctx_self.core, .{ .cursor = cursor }, ctx_self.path);
                         }
                     };
-                    try core.db.rootCursor().execute(UpdateCtx, &[_]xitdb.PathPart(UpdateCtx){
+                    try core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
                         .{ .list_get = .append_copy },
                         .map_create,
                         .{ .map_get = .{ .bytes = "objects" } },
                         .map_create,
-                        .{ .update = UpdateCtx{ .core = core, .index = self, .path = path } },
+                        .{ .update = Ctx{ .core = core, .index = self, .path = path } },
                     });
                 },
             }
@@ -431,7 +431,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     try opts.lock_file.writeAll(&overall_sha1_buffer);
                 },
                 .xit => {
-                    const UpdateCtx = struct {
+                    const Ctx = struct {
                         db: *xitdb.Database(.file),
                         allocator: std.mem.Allocator,
                         index: *Index(repo_kind),
@@ -472,12 +472,12 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                             }
                         }
                     };
-                    try opts.db.rootCursor().execute(UpdateCtx, &[_]xitdb.PathPart(UpdateCtx){
+                    try opts.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
                         .{ .list_get = .append_copy },
                         .map_create,
                         .{ .map_get = .{ .bytes = "index" } },
                         .map_create,
-                        .{ .update = UpdateCtx{ .db = opts.db, .allocator = allocator, .index = self } },
+                        .{ .update = Ctx{ .db = opts.db, .allocator = allocator, .index = self } },
                     });
                 },
             }

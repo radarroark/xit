@@ -156,7 +156,7 @@ pub fn writeBlob(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core
             try std.fs.rename(hash_prefix_dir, compressed_tmp_file_name, hash_prefix_dir, hash_suffix);
         },
         .xit => {
-            const UpdateCtx = struct {
+            const Ctx = struct {
                 header: []const u8,
                 file: std.fs.File,
                 allocator: std.mem.Allocator,
@@ -189,9 +189,9 @@ pub fn writeBlob(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core
                     });
                 }
             };
-            try opts.cursor.execute(UpdateCtx, &[_]xitdb.PathPart(UpdateCtx){
+            try opts.cursor.execute(Ctx, &[_]xitdb.PathPart(Ctx){
                 .{ .map_get = .{ .bytes = &sha1_hex } },
-                .{ .update = UpdateCtx{ .header = header, .file = file, .allocator = allocator } },
+                .{ .update = Ctx{ .header = header, .file = file, .allocator = allocator } },
             });
         },
     }
@@ -254,7 +254,7 @@ fn writeTree(comptime repo_kind: rp.RepoKind, opts: ObjectOpts(repo_kind), alloc
             try std.fs.rename(tree_hash_prefix_dir, tree_comp_tmp_file_name, tree_hash_prefix_dir, tree_hash_suffix);
         },
         .xit => {
-            const UpdateCtx = struct {
+            const Ctx = struct {
                 tree: []const u8,
 
                 pub fn update(ctx_self: @This(), cursor: xitdb.Database(.file).Cursor, is_empty: bool) !void {
@@ -266,9 +266,9 @@ fn writeTree(comptime repo_kind: rp.RepoKind, opts: ObjectOpts(repo_kind), alloc
                     });
                 }
             };
-            try opts.cursor.execute(UpdateCtx, &[_]xitdb.PathPart(UpdateCtx){
+            try opts.cursor.execute(Ctx, &[_]xitdb.PathPart(Ctx){
                 .{ .map_get = .{ .bytes = &tree_sha1_hex } },
-                .{ .update = UpdateCtx{ .tree = tree } },
+                .{ .update = Ctx{ .tree = tree } },
             });
         },
     }
@@ -403,7 +403,7 @@ pub fn writeCommit(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
             try ref.updateRecur(repo_kind, core, .{ .dir = core.git_dir }, allocator, "HEAD", commit_sha1_hex);
         },
         .xit => {
-            const UpdateCtx = struct {
+            const Ctx = struct {
                 core: *rp.Repo(repo_kind).Core,
                 index: idx.Index(repo_kind),
                 command: cmd.CommandData,
@@ -477,10 +477,10 @@ pub fn writeCommit(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
                     try ref.updateRecur(repo_kind, ctx_self.core, .{ .root_cursor = cursor, .cursor = cursor }, ctx_self.allocator, "HEAD", obj_ctx.commit_sha1_hex);
                 }
             };
-            try core.db.rootCursor().execute(UpdateCtx, &[_]xitdb.PathPart(UpdateCtx){
+            try core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
                 .{ .list_get = .append_copy },
                 .map_create,
-                .{ .update = UpdateCtx{ .core = core, .index = index, .command = command, .allocator = allocator } },
+                .{ .update = Ctx{ .core = core, .index = index, .command = command, .allocator = allocator } },
             });
         },
     }
