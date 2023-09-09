@@ -97,7 +97,7 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
         try hello_txt.writeAll("hello, world!");
 
         // make file
-        var readme = try repo_dir.createFile("README", .{});
+        var readme = try repo_dir.createFile("README", .{ .read = true });
         defer readme.close();
         try readme.writeAll("My cool project");
 
@@ -161,6 +161,26 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
                     defer c.git_commit_free(commit);
                     try std.testing.expectEqualStrings("first commit", std.mem.sliceTo(c.git_commit_message(commit), 0));
                 }
+
+                // make sure we are hashing files the same way git does
+                {
+                    try readme.seekTo(0);
+                    const meta = try readme.metadata();
+                    const file_size = meta.size();
+                    const header = try std.fmt.allocPrint(allocator, "blob {}\x00", .{file_size});
+                    defer allocator.free(header);
+
+                    var sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+                    try hash.sha1_file(readme, header, &sha1_bytes_buffer);
+                    const sha1_hex = std.fmt.bytesToHex(&sha1_bytes_buffer, .lower);
+
+                    var oid: c.git_oid = undefined;
+                    try expectEqual(0, c.git_odb_hashfile(&oid, "README", c.GIT_OBJECT_BLOB));
+                    var oid_str = c.git_oid_tostr_s(&oid);
+                    try std.testing.expect(oid_str != null);
+
+                    try std.testing.expectEqualStrings(&sha1_hex, std.mem.sliceTo(oid_str, 0));
+                }
             },
             .xit => {
                 // check that the commit object was created
@@ -181,27 +201,6 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
     // TEMPORARY
     if (repo_kind == .xit) {
         return;
-    }
-
-    // make sure we are hashing files the same way git does
-    {
-        const readme = try repo_dir.openFile("README", .{});
-        defer readme.close();
-        const meta = try readme.metadata();
-        const file_size = meta.size();
-        const header = try std.fmt.allocPrint(allocator, "blob {}\x00", .{file_size});
-        defer allocator.free(header);
-
-        var sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-        try hash.sha1_file(readme, header, &sha1_bytes_buffer);
-        const sha1_hex = std.fmt.bytesToHex(&sha1_bytes_buffer, .lower);
-
-        var oid: c.git_oid = undefined;
-        try expectEqual(0, c.git_odb_hashfile(&oid, "README", c.GIT_OBJECT_BLOB));
-        var oid_str = c.git_oid_tostr_s(&oid);
-        try std.testing.expect(oid_str != null);
-
-        try std.testing.expectEqualStrings(&sha1_hex, std.mem.sliceTo(oid_str, 0));
     }
 
     // get HEAD contents
