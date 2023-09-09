@@ -55,7 +55,6 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
     const State = switch (repo_kind) {
         .git => struct {
             git_dir: std.fs.Dir,
-            repo: ?*c.git_repository,
         },
         .xit => struct {
             xit_file: std.fs.File,
@@ -64,7 +63,6 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
     var state: State = switch (repo_kind) {
         .git => .{
             .git_dir = try repo_dir.openDir(".git", .{}),
-            .repo = null,
         },
         .xit => .{
             .xit_file = try repo_dir.openFile(".xit", .{ .mode = .read_write }),
@@ -136,28 +134,33 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
         switch (repo_kind) {
             .git => {
                 // check that the commit object was created
-                var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
-                defer repo.deinit();
-                const head_file_buffer = try ref.readHead(repo_kind, &repo.core);
-                var objects_dir = try state.git_dir.openDir("objects", .{});
-                defer objects_dir.close();
-                var hash_prefix_dir = try objects_dir.openDir(head_file_buffer[0..2], .{});
-                defer hash_prefix_dir.close();
-                var hash_suffix_file = try hash_prefix_dir.openFile(head_file_buffer[2..], .{});
-                defer hash_suffix_file.close();
+                {
+                    var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+                    defer repo.deinit();
+                    const head_file_buffer = try ref.readHead(repo_kind, &repo.core);
+                    var objects_dir = try state.git_dir.openDir("objects", .{});
+                    defer objects_dir.close();
+                    var hash_prefix_dir = try objects_dir.openDir(head_file_buffer[0..2], .{});
+                    defer hash_prefix_dir.close();
+                    var hash_suffix_file = try hash_prefix_dir.openFile(head_file_buffer[2..], .{});
+                    defer hash_suffix_file.close();
+                }
 
                 // read the commit with libgit
-                try expectEqual(0, c.git_repository_open(&state.repo, repo_path));
-                defer c.git_repository_free(state.repo);
-                var head: ?*c.git_reference = null;
-                try expectEqual(0, c.git_repository_head(&head, state.repo));
-                defer c.git_reference_free(head);
-                const oid = c.git_reference_target(head);
-                try std.testing.expect(null != oid);
-                var commit: ?*c.git_commit = null;
-                try expectEqual(0, c.git_commit_lookup(&commit, state.repo, oid));
-                defer c.git_commit_free(commit);
-                try std.testing.expectEqualStrings("first commit", std.mem.sliceTo(c.git_commit_message(commit), 0));
+                {
+                    var repo: ?*c.git_repository = null;
+                    try expectEqual(0, c.git_repository_open(&repo, repo_path));
+                    defer c.git_repository_free(repo);
+                    var head: ?*c.git_reference = null;
+                    try expectEqual(0, c.git_repository_head(&head, repo));
+                    defer c.git_reference_free(head);
+                    const oid = c.git_reference_target(head);
+                    try std.testing.expect(null != oid);
+                    var commit: ?*c.git_commit = null;
+                    try expectEqual(0, c.git_commit_lookup(&commit, repo, oid));
+                    defer c.git_commit_free(commit);
+                    try std.testing.expectEqualStrings("first commit", std.mem.sliceTo(c.git_commit_message(commit), 0));
+                }
             },
             .xit => {
                 // check that the commit object was created
@@ -285,16 +288,17 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
 
         // read the commit with libgit
         {
-            try expectEqual(0, c.git_repository_open(&state.repo, repo_path));
-            defer c.git_repository_free(state.repo);
+            var repo: ?*c.git_repository = null;
+            try expectEqual(0, c.git_repository_open(&repo, repo_path));
+            defer c.git_repository_free(repo);
 
             var head: ?*c.git_reference = null;
-            try expectEqual(0, c.git_repository_head(&head, state.repo));
+            try expectEqual(0, c.git_repository_head(&head, repo));
             defer c.git_reference_free(head);
             const oid = c.git_reference_target(head);
             try std.testing.expect(null != oid);
             var commit: ?*c.git_commit = null;
-            try expectEqual(0, c.git_commit_lookup(&commit, state.repo, oid));
+            try expectEqual(0, c.git_commit_lookup(&commit, repo, oid));
             defer c.git_commit_free(commit);
             try std.testing.expectEqualStrings("second commit", std.mem.sliceTo(c.git_commit_message(commit), 0));
         }
@@ -508,11 +512,12 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
 
         // read index with libgit
         {
-            try expectEqual(0, c.git_repository_open(&state.repo, repo_path));
-            defer c.git_repository_free(state.repo);
+            var repo: ?*c.git_repository = null;
+            try expectEqual(0, c.git_repository_open(&repo, repo_path));
+            defer c.git_repository_free(repo);
 
             var index: ?*c.git_index = null;
-            try expectEqual(0, c.git_repository_index(&index, state.repo));
+            try expectEqual(0, c.git_repository_index(&index, repo));
             defer c.git_index_free(index);
             try expectEqual(5, c.git_index_entrycount(index));
         }
@@ -545,11 +550,12 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
 
         // read index with libgit
         {
-            try expectEqual(0, c.git_repository_open(&state.repo, repo_path));
-            defer c.git_repository_free(state.repo);
+            var repo: ?*c.git_repository = null;
+            try expectEqual(0, c.git_repository_open(&repo, repo_path));
+            defer c.git_repository_free(repo);
 
             var index: ?*c.git_index = null;
-            try expectEqual(0, c.git_repository_index(&index, state.repo));
+            try expectEqual(0, c.git_repository_index(&index, repo));
             defer c.git_index_free(index);
             try expectEqual(4, c.git_index_entrycount(index));
         }
@@ -644,15 +650,16 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
 
         // get status with libgit
         {
-            try expectEqual(0, c.git_repository_open(&state.repo, repo_path));
-            defer c.git_repository_free(state.repo);
+            var repo: ?*c.git_repository = null;
+            try expectEqual(0, c.git_repository_open(&repo, repo_path));
+            defer c.git_repository_free(repo);
 
             var status_list: ?*c.git_status_list = null;
             var status_options: c.git_status_options = undefined;
             try expectEqual(0, c.git_status_options_init(&status_options, c.GIT_STATUS_OPTIONS_VERSION));
             status_options.show = c.GIT_STATUS_SHOW_WORKDIR_ONLY;
             status_options.flags = c.GIT_STATUS_OPT_INCLUDE_UNTRACKED;
-            try expectEqual(0, c.git_status_list_new(&status_list, state.repo, &status_options));
+            try expectEqual(0, c.git_status_list_new(&status_list, repo, &status_options));
             defer c.git_status_list_free(status_list);
             try expectEqual(5, c.git_status_list_entrycount(status_list));
         }
@@ -762,11 +769,12 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
 
     // get the current branch with libgit
     {
-        try expectEqual(0, c.git_repository_open(&state.repo, repo_path));
-        defer c.git_repository_free(state.repo);
+        var repo: ?*c.git_repository = null;
+        try expectEqual(0, c.git_repository_open(&repo, repo_path));
+        defer c.git_repository_free(repo);
 
         var head: ?*c.git_reference = null;
-        try expectEqual(0, c.git_repository_head(&head, state.repo));
+        try expectEqual(0, c.git_repository_head(&head, repo));
         defer c.git_reference_free(head);
         const branch_name = c.git_reference_shorthand(head);
         try std.testing.expectEqualStrings("stuff", std.mem.sliceTo(branch_name, 0));
