@@ -68,7 +68,35 @@ pub const Tree = struct {
     }
 };
 
-fn writeBlob(file: std.fs.File, meta: std.fs.File.Metadata, objects_dir: std.fs.Dir, allocator: std.mem.Allocator, sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8) !void {
+pub fn WriteBlobOpts(comptime repo_kind: rp.RepoKind) type {
+    return switch (repo_kind) {
+        .git => struct {
+            objects_dir: std.fs.Dir,
+        },
+        .xit => struct {
+            cursor: xitdb.Database(.file).Cursor,
+        },
+    };
+}
+
+/// writes the file at the given path as a blob.
+/// sha1_bytes_buffer will have the oid when it's done.
+/// on windows files are never marked as executable because
+/// apparently i can't even check if they are...
+/// maybe i'll figure that out later.
+pub fn writeBlob(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, opts: WriteBlobOpts(repo_kind), allocator: std.mem.Allocator, path: []const u8, sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8) !void {
+    // get absolute path of the file
+    var path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
+    const file_path = try core.repo_dir.realpath(path, &path_buffer);
+    var file = try std.fs.openFileAbsolute(file_path, .{ .mode = std.fs.File.OpenMode.read_only });
+    defer file.close();
+
+    // exit early if it's not a file
+    const meta = try file.metadata();
+    if (meta.kind() != std.fs.File.Kind.file) {
+        return;
+    }
+
     // create blob header
     const file_size = meta.size();
     const header = try std.fmt.allocPrint(allocator, "blob {}\x00", .{file_size});
@@ -78,84 +106,94 @@ fn writeBlob(file: std.fs.File, meta: std.fs.File.Metadata, objects_dir: std.fs.
     try hash.sha1_file(file, header, sha1_bytes_buffer);
     const sha1_hex = std.fmt.bytesToHex(sha1_bytes_buffer, .lower);
 
-    // make the two char dir
-    var hash_prefix_dir = try objects_dir.makeOpenPath(sha1_hex[0..2], .{});
-    defer hash_prefix_dir.close();
-    const hash_suffix = sha1_hex[2..];
+    switch (repo_kind) {
+        .git => {
+            // make the two char dir
+            var hash_prefix_dir = try opts.objects_dir.makeOpenPath(sha1_hex[0..2], .{});
+            defer hash_prefix_dir.close();
+            const hash_suffix = sha1_hex[2..];
 
-    // exit early if the file already exists
-    if (hash_prefix_dir.openFile(hash_suffix, .{})) |hash_suffix_file| {
-        hash_suffix_file.close();
-        return error.ObjectAlreadyExists;
-    } else |err| {
-        if (err != error.FileNotFound) {
-            return err;
-        }
-    }
+            // exit early if the file already exists
+            if (hash_prefix_dir.openFile(hash_suffix, .{})) |hash_suffix_file| {
+                hash_suffix_file.close();
+                return;
+            } else |err| {
+                if (err != error.FileNotFound) {
+                    return err;
+                }
+            }
 
-    // open temp file
-    var rand_chars = [_]u8{0} ** 6;
-    try fillWithRandChars(&rand_chars);
-    const tmp_file_name = "tmp_obj_" ++ rand_chars;
-    const tmp_file = try hash_prefix_dir.createFile(tmp_file_name, .{ .read = true });
-    defer tmp_file.close();
-    try tmp_file.writeAll(header);
+            // open temp file
+            var rand_chars = [_]u8{0} ** 6;
+            try fillWithRandChars(&rand_chars);
+            const tmp_file_name = "tmp_obj_" ++ rand_chars;
+            const tmp_file = try hash_prefix_dir.createFile(tmp_file_name, .{ .read = true });
+            defer tmp_file.close();
+            try tmp_file.writeAll(header);
 
-    // copy file into temp file
-    var read_buffer = [_]u8{0} ** MAX_FILE_READ_SIZE;
-    var offset: u64 = 0;
-    while (true) {
-        const size = try file.pread(&read_buffer, offset);
-        offset += size;
-        if (size == 0) {
-            break;
-        }
-        try tmp_file.writeAll(read_buffer[0..size]);
-    }
+            // copy file into temp file
+            var read_buffer = [_]u8{0} ** MAX_FILE_READ_SIZE;
+            var offset: u64 = 0;
+            while (true) {
+                const size = try file.pread(&read_buffer, offset);
+                offset += size;
+                if (size == 0) {
+                    break;
+                }
+                try tmp_file.writeAll(read_buffer[0..size]);
+            }
 
-    // compress the file
-    const compressed_tmp_file_name = tmp_file_name ++ ".compressed";
-    const compressed_tmp_file = try hash_prefix_dir.createFile(compressed_tmp_file_name, .{});
-    defer compressed_tmp_file.close();
-    try compress.compress(allocator, tmp_file, compressed_tmp_file);
+            // compress the file
+            const compressed_tmp_file_name = tmp_file_name ++ ".compressed";
+            const compressed_tmp_file = try hash_prefix_dir.createFile(compressed_tmp_file_name, .{});
+            defer compressed_tmp_file.close();
+            try compress.compress(allocator, tmp_file, compressed_tmp_file);
 
-    // delete uncompressed temp file
-    try hash_prefix_dir.deleteFile(tmp_file_name);
+            // delete uncompressed temp file
+            try hash_prefix_dir.deleteFile(tmp_file_name);
 
-    // rename the compressed temp file
-    try std.fs.rename(hash_prefix_dir, compressed_tmp_file_name, hash_prefix_dir, hash_suffix);
-}
+            // rename the compressed temp file
+            try std.fs.rename(hash_prefix_dir, compressed_tmp_file_name, hash_prefix_dir, hash_suffix);
+        },
+        .xit => {
+            const UpdateCtx = struct {
+                header: []const u8,
+                file: std.fs.File,
+                allocator: std.mem.Allocator,
 
-/// writes the file at the given path into the .git dir.
-/// sha1_bytes_buffer will have the oid when it's done.
-/// on windows files are never marked as executable because
-/// apparently i can't even check if they are...
-/// maybe i'll figure that out later.
-pub fn writeBlobFromPath(allocator: std.mem.Allocator, cwd: std.fs.Dir, path: []const u8, sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8) !void {
-    // open the internal dirs
-    var git_dir = try cwd.openDir(".git", .{});
-    defer git_dir.close();
-    var objects_dir = try git_dir.openDir("objects", .{});
-    defer objects_dir.close();
+                pub fn update(ctx_self: @This(), cursor: xitdb.Database(.file).Cursor, is_empty: bool) !void {
+                    if (!is_empty) {
+                        return;
+                    }
 
-    // get absolute path of the file
-    var path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
-    const file_path = try cwd.realpath(path, &path_buffer);
-    var file = try std.fs.openFileAbsolute(file_path, .{ .mode = std.fs.File.OpenMode.read_only });
-    defer file.close();
+                    // TODO: writing to memory won't work for large files.
+                    // once xitdb supports a writer, use that instead.
+                    var buffer = std.ArrayList(u8).init(ctx_self.allocator);
+                    defer buffer.deinit();
+                    const writer = buffer.writer();
 
-    // see if it's a file or dir
-    const meta = try file.metadata();
-    switch (meta.kind()) {
-        std.fs.File.Kind.file => {
-            writeBlob(file, meta, objects_dir, allocator, sha1_bytes_buffer) catch |err| {
-                switch (err) {
-                    error.ObjectAlreadyExists => {},
-                    else => return err,
+                    try writer.writeAll(ctx_self.header);
+                    var read_buffer = [_]u8{0} ** MAX_FILE_READ_SIZE;
+                    var offset: u64 = 0;
+                    while (true) {
+                        const size = try ctx_self.file.pread(&read_buffer, offset);
+                        offset += size;
+                        if (size == 0) {
+                            break;
+                        }
+                        try writer.writeAll(read_buffer[0..size]);
+                    }
+
+                    try cursor.execute(void, &[_]xitdb.PathPart(void){
+                        .{ .value = .{ .bytes = buffer.items } },
+                    });
                 }
             };
+            try opts.cursor.execute(UpdateCtx, &[_]xitdb.PathPart(UpdateCtx){
+                .{ .map_get = .{ .bytes = &sha1_hex } },
+                .{ .update = UpdateCtx{ .header = header, .file = file, .allocator = allocator } },
+            });
         },
-        else => return,
     }
 }
 

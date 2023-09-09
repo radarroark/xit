@@ -198,6 +198,34 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
         /// if path is a dir, adds its children recursively.
         /// ignoring symlinks for now but will add that later.
         pub fn addPath(self: *Index(repo_kind), core: *rp.Repo(repo_kind).Core, path: []const u8) !void {
+            switch (repo_kind) {
+                .git => {
+                    var objects_dir = try core.git_dir.openDir("objects", .{});
+                    defer objects_dir.close();
+                    try self.addPathRecur(core, .{ .objects_dir = objects_dir }, path);
+                },
+                .xit => {
+                    const UpdateCtx = struct {
+                        core: *rp.Repo(repo_kind).Core,
+                        index: *Index(repo_kind),
+                        path: []const u8,
+
+                        pub fn update(ctx_self: @This(), cursor: xitdb.Database(.file).Cursor, _: bool) !void {
+                            try ctx_self.index.addPathRecur(ctx_self.core, .{ .cursor = cursor }, ctx_self.path);
+                        }
+                    };
+                    try core.db.rootCursor().execute(UpdateCtx, &[_]xitdb.PathPart(UpdateCtx){
+                        .{ .list_get = .append_copy },
+                        .map_create,
+                        .{ .map_get = .{ .bytes = "objects" } },
+                        .map_create,
+                        .{ .update = UpdateCtx{ .core = core, .index = self, .path = path } },
+                    });
+                },
+            }
+        }
+
+        fn addPathRecur(self: *Index(repo_kind), core: *rp.Repo(repo_kind).Core, opts: object.WriteBlobOpts(repo_kind), path: []const u8) !void {
             // remove entries that are parents of this path (directory replaces file)
             {
                 var parent_path_maybe = std.fs.path.dirname(path);
@@ -218,14 +246,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                 std.fs.File.Kind.file => {
                     // write the object
                     var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-                    switch (repo_kind) {
-                        .git => {
-                            try object.writeBlobFromPath(self.allocator, core.repo_dir, path, &oid);
-                        },
-                        .xit => {
-                            return error.NotImplemented; // TODO
-                        },
-                    }
+                    try object.writeBlob(repo_kind, core, opts, self.allocator, path, &oid);
                     // add the entry
                     const times = io.getTimes(meta);
                     const stat = try io.getStat(file);
@@ -275,7 +296,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                             try std.fmt.allocPrint(self.arena.allocator(), "{s}", .{entry.name})
                         else
                             try std.fs.path.join(self.arena.allocator(), &[_][]const u8{ path, entry.name });
-                        try self.addPath(core, subpath);
+                        try self.addPathRecur(core, opts, subpath);
                     }
                 },
                 else => return,
