@@ -1,4 +1,5 @@
 const std = @import("std");
+const xitdb = @import("xitdb");
 const main = @import("./main.zig");
 const hash = @import("./hash.zig");
 const idx = @import("./index.zig");
@@ -132,39 +133,51 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
         try args.append("first commit");
         try main.xitMain(repo_kind, allocator, &args);
 
-        // TEMPORARY
-        if (repo_kind == .xit) {
-            return;
-        }
+        switch (repo_kind) {
+            .git => {
+                // check that the commit object was created
+                var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+                defer repo.deinit();
+                const head_file_buffer = try ref.readHead(repo_kind, &repo.core);
+                var objects_dir = try state.git_dir.openDir("objects", .{});
+                defer objects_dir.close();
+                var hash_prefix_dir = try objects_dir.openDir(head_file_buffer[0..2], .{});
+                defer hash_prefix_dir.close();
+                var hash_suffix_file = try hash_prefix_dir.openFile(head_file_buffer[2..], .{});
+                defer hash_suffix_file.close();
 
-        // check that the commit object was created
-        {
-            var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
-            defer repo.deinit();
-            const head_file_buffer = try ref.readHead(repo_kind, &repo.core);
-            var objects_dir = try state.git_dir.openDir("objects", .{});
-            defer objects_dir.close();
-            var hash_prefix_dir = try objects_dir.openDir(head_file_buffer[0..2], .{});
-            defer hash_prefix_dir.close();
-            var hash_suffix_file = try hash_prefix_dir.openFile(head_file_buffer[2..], .{});
-            defer hash_suffix_file.close();
+                // read the commit with libgit
+                try expectEqual(0, c.git_repository_open(&state.repo, repo_path));
+                defer c.git_repository_free(state.repo);
+                var head: ?*c.git_reference = null;
+                try expectEqual(0, c.git_repository_head(&head, state.repo));
+                defer c.git_reference_free(head);
+                const oid = c.git_reference_target(head);
+                try std.testing.expect(null != oid);
+                var commit: ?*c.git_commit = null;
+                try expectEqual(0, c.git_commit_lookup(&commit, state.repo, oid));
+                defer c.git_commit_free(commit);
+                try std.testing.expectEqualStrings("first commit", std.mem.sliceTo(c.git_commit_message(commit), 0));
+            },
+            .xit => {
+                // check that the commit object was created
+                var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+                defer repo.deinit();
+                const head_file_buffer = try ref.readHead(repo_kind, &repo.core);
+                var db_buffer = [_]u8{0} ** 1024;
+                const bytes_maybe = try repo.core.db.rootCursor().readBytes(&db_buffer, void, &[_]xitdb.PathPart(void){
+                    .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
+                    .{ .map_get = .{ .bytes = "objects" } },
+                    .{ .map_get = .{ .bytes = &head_file_buffer } },
+                });
+                try std.testing.expect(bytes_maybe != null);
+            },
         }
+    }
 
-        // read the commit with libgit
-        {
-            try expectEqual(0, c.git_repository_open(&state.repo, repo_path));
-            defer c.git_repository_free(state.repo);
-
-            var head: ?*c.git_reference = null;
-            try expectEqual(0, c.git_repository_head(&head, state.repo));
-            defer c.git_reference_free(head);
-            const oid = c.git_reference_target(head);
-            try std.testing.expect(null != oid);
-            var commit: ?*c.git_commit = null;
-            try expectEqual(0, c.git_commit_lookup(&commit, state.repo, oid));
-            defer c.git_commit_free(commit);
-            try std.testing.expectEqualStrings("first commit", std.mem.sliceTo(c.git_commit_message(commit), 0));
-        }
+    // TEMPORARY
+    if (repo_kind == .xit) {
+        return;
     }
 
     // make sure we are hashing files the same way git does
