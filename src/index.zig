@@ -410,14 +410,14 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     try opts.lock_file.writeAll(&overall_sha1_buffer);
                 },
                 .xit => {
-                    const RootUpdateCtx = struct {
+                    const UpdateCtx = struct {
                         db: *xitdb.Database(.file),
                         allocator: std.mem.Allocator,
                         index: *Index(repo_kind),
 
-                        pub fn update(root_self: @This(), root_cursor: xitdb.Database(.file).Cursor, _: bool) !void {
-                            for (root_self.index.entries.values()) |entry| {
-                                var entry_buffer = std.ArrayList(u8).init(root_self.allocator);
+                        pub fn update(ctx_self: @This(), cursor: xitdb.Database(.file).Cursor, _: bool) !void {
+                            for (ctx_self.index.entries.values()) |entry| {
+                                var entry_buffer = std.ArrayList(u8).init(ctx_self.allocator);
                                 defer entry_buffer.deinit();
                                 const writer = entry_buffer.writer();
                                 try writer.writeIntBig(u32, entry.ctime_secs);
@@ -433,30 +433,30 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                 try writer.writeAll(&entry.oid);
                                 try writer.writeIntBig(u16, @as(u16, @bitCast(entry.flags)));
 
-                                if (try root_self.db.rootCursor().readBytesAlloc(root_self.allocator, void, &[_]xitdb.PathPart(void){
+                                if (try ctx_self.db.rootCursor().readBytesAlloc(ctx_self.allocator, void, &[_]xitdb.PathPart(void){
                                     .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
                                     .{ .map_get = .{ .bytes = "index" } },
                                     .{ .map_get = .{ .bytes = entry.path } },
                                 })) |existing_entry| {
-                                    defer root_self.allocator.free(existing_entry);
+                                    defer ctx_self.allocator.free(existing_entry);
                                     if (std.mem.eql(u8, entry_buffer.items, existing_entry)) {
                                         continue;
                                     }
                                 }
 
-                                try root_cursor.execute(void, &[_]xitdb.PathPart(void){
+                                try cursor.execute(void, &[_]xitdb.PathPart(void){
                                     .{ .map_get = .{ .bytes = entry.path } },
                                     .{ .value = .{ .bytes = entry_buffer.items } },
                                 });
                             }
                         }
                     };
-                    try opts.db.rootCursor().execute(RootUpdateCtx, &[_]xitdb.PathPart(RootUpdateCtx){
+                    try opts.db.rootCursor().execute(UpdateCtx, &[_]xitdb.PathPart(UpdateCtx){
                         .{ .list_get = .append_copy },
                         .map_create,
                         .{ .map_get = .{ .bytes = "index" } },
                         .map_create,
-                        .{ .update = RootUpdateCtx{ .db = opts.db, .allocator = allocator, .index = self } },
+                        .{ .update = UpdateCtx{ .db = opts.db, .allocator = allocator, .index = self } },
                     });
                 },
             }
