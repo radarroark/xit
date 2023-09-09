@@ -429,6 +429,7 @@ pub fn writeCommit(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
                             const tree_sha1_hex = std.fmt.bytesToHex(tree_sha1_bytes_buffer, .lower);
 
                             // read HEAD
+                            // TODO: make `readHeadMaybe` use root cursor for tx safety
                             const head_oid_maybe = try ref.readHeadMaybe(repo_kind, obj_ctx_self.core);
 
                             // metadata

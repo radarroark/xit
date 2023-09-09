@@ -331,6 +331,7 @@ pub fn updateRecur(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
             // read file and get ref name if necessary
             var buffer = [_]u8{0} ** MAX_READ_BYTES;
             const ref_name_maybe = blk: {
+                // TODO: make `read` use root cursor for tx safety
                 const old_content = read(repo_kind, core, file_name, &buffer) catch |err| {
                     switch (err) {
                         error.KeyNotFound => break :blk null,
