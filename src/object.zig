@@ -68,7 +68,7 @@ pub const Tree = struct {
     }
 };
 
-pub fn WriteBlobOpts(comptime repo_kind: rp.RepoKind) type {
+pub fn ObjectOpts(comptime repo_kind: rp.RepoKind) type {
     return switch (repo_kind) {
         .git => struct {
             objects_dir: std.fs.Dir,
@@ -84,7 +84,7 @@ pub fn WriteBlobOpts(comptime repo_kind: rp.RepoKind) type {
 /// on windows files are never marked as executable because
 /// apparently i can't even check if they are...
 /// maybe i'll figure that out later.
-pub fn writeBlob(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, opts: WriteBlobOpts(repo_kind), allocator: std.mem.Allocator, path: []const u8, sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8) !void {
+pub fn writeBlob(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, opts: ObjectOpts(repo_kind), allocator: std.mem.Allocator, path: []const u8, sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8) !void {
     // get absolute path of the file
     var path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
     const file_path = try core.repo_dir.realpath(path, &path_buffer);
@@ -197,7 +197,7 @@ pub fn writeBlob(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core
     }
 }
 
-fn writeTree(objects_dir: std.fs.Dir, allocator: std.mem.Allocator, entries: *std.ArrayList([]const u8), sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8) !void {
+fn writeTree(comptime repo_kind: rp.RepoKind, opts: ObjectOpts(repo_kind), allocator: std.mem.Allocator, entries: *std.ArrayList([]const u8), sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8) !void {
     // create tree contents
     const tree_contents = try std.mem.join(allocator, "", entries.items);
     defer allocator.free(tree_contents);
@@ -210,52 +210,74 @@ fn writeTree(objects_dir: std.fs.Dir, allocator: std.mem.Allocator, entries: *st
     try hash.sha1_buffer(tree, sha1_bytes_buffer);
     const tree_sha1_hex = std.fmt.bytesToHex(sha1_bytes_buffer, .lower);
 
-    // make the two char dir
-    var tree_hash_prefix_dir = try objects_dir.makeOpenPath(tree_sha1_hex[0..2], .{});
-    defer tree_hash_prefix_dir.close();
-    const tree_hash_suffix = tree_sha1_hex[2..];
+    switch (repo_kind) {
+        .git => {
+            // make the two char dir
+            var tree_hash_prefix_dir = try opts.objects_dir.makeOpenPath(tree_sha1_hex[0..2], .{});
+            defer tree_hash_prefix_dir.close();
+            const tree_hash_suffix = tree_sha1_hex[2..];
 
-    // exit early if there is nothing to commit
-    if (tree_hash_prefix_dir.openFile(tree_hash_suffix, .{})) |tree_hash_suffix_file| {
-        tree_hash_suffix_file.close();
-        return error.ObjectAlreadyExists;
-    } else |err| {
-        if (err != error.FileNotFound) {
-            return err;
-        }
+            // exit early if there is nothing to commit
+            if (tree_hash_prefix_dir.openFile(tree_hash_suffix, .{})) |tree_hash_suffix_file| {
+                tree_hash_suffix_file.close();
+                return error.ObjectAlreadyExists;
+            } else |err| {
+                if (err != error.FileNotFound) {
+                    return err;
+                }
+            }
+
+            // open temp file
+            var tree_rand_chars = [_]u8{0} ** 6;
+            try fillWithRandChars(&tree_rand_chars);
+            const tree_tmp_file_name = "tmp_obj_" ++ tree_rand_chars;
+            const tree_tmp_file = try tree_hash_prefix_dir.createFile(tree_tmp_file_name, .{ .read = true });
+            defer tree_tmp_file.close();
+
+            // write to the temp file
+            try tree_tmp_file.pwriteAll(tree, 0);
+
+            // open compressed temp file
+            var tree_comp_rand_chars = [_]u8{0} ** 6;
+            try fillWithRandChars(&tree_comp_rand_chars);
+            const tree_comp_tmp_file_name = "tmp_obj_" ++ tree_comp_rand_chars;
+            const tree_comp_tmp_file = try tree_hash_prefix_dir.createFile(tree_comp_tmp_file_name, .{});
+            defer tree_comp_tmp_file.close();
+
+            // compress the file
+            try compress.compress(allocator, tree_tmp_file, tree_comp_tmp_file);
+
+            // delete first temp file
+            try tree_hash_prefix_dir.deleteFile(tree_tmp_file_name);
+
+            // rename the file
+            try std.fs.rename(tree_hash_prefix_dir, tree_comp_tmp_file_name, tree_hash_prefix_dir, tree_hash_suffix);
+        },
+        .xit => {
+            const UpdateCtx = struct {
+                tree: []const u8,
+
+                pub fn update(ctx_self: @This(), cursor: xitdb.Database(.file).Cursor, is_empty: bool) !void {
+                    if (!is_empty) {
+                        return error.ObjectAlreadyExists;
+                    }
+                    try cursor.execute(void, &[_]xitdb.PathPart(void){
+                        .{ .value = .{ .bytes = ctx_self.tree } },
+                    });
+                }
+            };
+            try opts.cursor.execute(UpdateCtx, &[_]xitdb.PathPart(UpdateCtx){
+                .{ .map_get = .{ .bytes = &tree_sha1_hex } },
+                .{ .update = UpdateCtx{ .tree = tree } },
+            });
+        },
     }
-
-    // open temp file
-    var tree_rand_chars = [_]u8{0} ** 6;
-    try fillWithRandChars(&tree_rand_chars);
-    const tree_tmp_file_name = "tmp_obj_" ++ tree_rand_chars;
-    const tree_tmp_file = try tree_hash_prefix_dir.createFile(tree_tmp_file_name, .{ .read = true });
-    defer tree_tmp_file.close();
-
-    // write to the temp file
-    try tree_tmp_file.pwriteAll(tree, 0);
-
-    // open compressed temp file
-    var tree_comp_rand_chars = [_]u8{0} ** 6;
-    try fillWithRandChars(&tree_comp_rand_chars);
-    const tree_comp_tmp_file_name = "tmp_obj_" ++ tree_comp_rand_chars;
-    const tree_comp_tmp_file = try tree_hash_prefix_dir.createFile(tree_comp_tmp_file_name, .{});
-    defer tree_comp_tmp_file.close();
-
-    // compress the file
-    try compress.compress(allocator, tree_tmp_file, tree_comp_tmp_file);
-
-    // delete first temp file
-    try tree_hash_prefix_dir.deleteFile(tree_tmp_file_name);
-
-    // rename the file
-    try std.fs.rename(tree_hash_prefix_dir, tree_comp_tmp_file_name, tree_hash_prefix_dir, tree_hash_suffix);
 }
 
 // add each entry to the given tree.
 // if the entry is itself a tree, create a tree object
 // for it and add that as an entry to the original tree.
-fn addIndexEntries(comptime repo_kind: rp.RepoKind, objects_dir: std.fs.Dir, allocator: std.mem.Allocator, tree: *Tree, index: idx.Index(repo_kind), prefix: []const u8, entries: [][]const u8) !void {
+fn addIndexEntries(comptime repo_kind: rp.RepoKind, opts: ObjectOpts(repo_kind), allocator: std.mem.Allocator, tree: *Tree, index: idx.Index(repo_kind), prefix: []const u8, entries: [][]const u8) !void {
     for (entries) |name| {
         const path = try std.fs.path.join(allocator, &[_][]const u8{ prefix, name });
         defer allocator.free(path);
@@ -273,7 +295,7 @@ fn addIndexEntries(comptime repo_kind: rp.RepoKind, objects_dir: std.fs.Dir, all
 
             try addIndexEntries(
                 repo_kind,
-                objects_dir,
+                opts,
                 allocator,
                 &subtree,
                 index,
@@ -282,7 +304,7 @@ fn addIndexEntries(comptime repo_kind: rp.RepoKind, objects_dir: std.fs.Dir, all
             );
 
             var tree_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-            writeTree(objects_dir, allocator, &subtree.entries, &tree_sha1_bytes_buffer) catch |err| {
+            writeTree(repo_kind, opts, allocator, &subtree.entries, &tree_sha1_bytes_buffer) catch |err| {
                 switch (err) {
                     error.ObjectAlreadyExists => {},
                     else => return err,
@@ -301,24 +323,24 @@ fn addIndexEntries(comptime repo_kind: rp.RepoKind, objects_dir: std.fs.Dir, all
 /// updates HEAD when it's done using a file locking thingy
 /// so other processes don't step on each others' toes.
 pub fn writeCommit(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, command: cmd.CommandData) !void {
+    // read index
+    var index = try idx.Index(repo_kind).init(allocator, core);
+    defer index.deinit();
+
     switch (repo_kind) {
         .git => {
             // open the objects dir
             var objects_dir = try core.git_dir.openDir("objects", .{});
             defer objects_dir.close();
 
-            // read index
-            var index = try idx.Index(repo_kind).init(allocator, core);
-            defer index.deinit();
-
             // create tree and add index entries
             var tree = Tree.init(allocator);
             defer tree.deinit();
-            try addIndexEntries(.git, objects_dir, allocator, &tree, index, "", index.root_children.keys());
+            try addIndexEntries(repo_kind, .{ .objects_dir = objects_dir }, allocator, &tree, index, "", index.root_children.keys());
 
             // write and hash tree
             var tree_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-            try writeTree(objects_dir, allocator, &tree.entries, &tree_sha1_bytes_buffer);
+            try writeTree(repo_kind, .{ .objects_dir = objects_dir }, allocator, &tree.entries, &tree_sha1_bytes_buffer);
             const tree_sha1_hex = std.fmt.bytesToHex(tree_sha1_bytes_buffer, .lower);
 
             // read HEAD
@@ -378,10 +400,88 @@ pub fn writeCommit(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
             try std.fs.rename(commit_hash_prefix_dir, commit_comp_tmp_file_name, commit_hash_prefix_dir, commit_hash_suffix);
 
             // write commit id to HEAD
-            try ref.update(repo_kind, core, allocator, core.git_dir, "HEAD", commit_sha1_hex);
+            try ref.updateRecur(repo_kind, core, .{ .dir = core.git_dir }, allocator, "HEAD", commit_sha1_hex);
         },
         .xit => {
-            return error.NotImplemented; // TODO
+            const UpdateCtx = struct {
+                core: *rp.Repo(repo_kind).Core,
+                index: idx.Index(repo_kind),
+                command: cmd.CommandData,
+                allocator: std.mem.Allocator,
+
+                pub fn update(ctx_self: @This(), cursor: xitdb.Database(.file).Cursor, _: bool) !void {
+                    const ObjectsCtx = struct {
+                        core: *rp.Repo(repo_kind).Core,
+                        index: idx.Index(repo_kind),
+                        command: cmd.CommandData,
+                        allocator: std.mem.Allocator,
+                        commit_sha1_hex: [hash.SHA1_HEX_LEN]u8,
+
+                        pub fn update(obj_ctx_self: *@This(), obj_cursor: xitdb.Database(.file).Cursor, _: bool) !void {
+                            // create tree and add index entries
+                            var tree = Tree.init(obj_ctx_self.allocator);
+                            defer tree.deinit();
+                            try addIndexEntries(repo_kind, .{ .cursor = obj_cursor }, obj_ctx_self.allocator, &tree, obj_ctx_self.index, "", obj_ctx_self.index.root_children.keys());
+
+                            // write and hash tree
+                            var tree_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+                            try writeTree(repo_kind, .{ .cursor = obj_cursor }, obj_ctx_self.allocator, &tree.entries, &tree_sha1_bytes_buffer);
+                            const tree_sha1_hex = std.fmt.bytesToHex(tree_sha1_bytes_buffer, .lower);
+
+                            // read HEAD
+                            const head_oid_maybe = try ref.readHeadMaybe(repo_kind, obj_ctx_self.core);
+
+                            // metadata
+                            const author = "radar <radar@foo.com> 1512325222 +0000";
+                            const message = obj_ctx_self.command.commit.message orelse "";
+                            const parent = if (head_oid_maybe) |head_oid|
+                                try std.fmt.allocPrint(obj_ctx_self.allocator, "parent {s}\n", .{head_oid})
+                            else
+                                try std.fmt.allocPrint(obj_ctx_self.allocator, "", .{});
+                            defer obj_ctx_self.allocator.free(parent);
+
+                            // create commit contents
+                            const commit_contents = try std.fmt.allocPrint(obj_ctx_self.allocator, "tree {s}\n{s}author {s}\ncommitter {s}\n\n{s}", .{ tree_sha1_hex, parent, author, author, message });
+                            defer obj_ctx_self.allocator.free(commit_contents);
+
+                            // create commit
+                            const commit = try std.fmt.allocPrint(obj_ctx_self.allocator, "commit {}\x00{s}", .{ commit_contents.len, commit_contents });
+                            defer obj_ctx_self.allocator.free(commit);
+
+                            // calc the sha1 of its contents
+                            var commit_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+                            try hash.sha1_buffer(commit, &commit_sha1_bytes_buffer);
+                            obj_ctx_self.commit_sha1_hex = std.fmt.bytesToHex(commit_sha1_bytes_buffer, .lower);
+
+                            // write commit
+                            try obj_cursor.execute(void, &[_]xitdb.PathPart(void){
+                                .{ .map_get = .{ .bytes = &obj_ctx_self.commit_sha1_hex } },
+                                .{ .value = .{ .bytes = commit } },
+                            });
+                        }
+                    };
+                    var obj_ctx = ObjectsCtx{
+                        .core = ctx_self.core,
+                        .index = ctx_self.index,
+                        .command = ctx_self.command,
+                        .allocator = ctx_self.allocator,
+                        .commit_sha1_hex = undefined,
+                    };
+                    try cursor.execute(*ObjectsCtx, &[_]xitdb.PathPart(*ObjectsCtx){
+                        .{ .map_get = .{ .bytes = "objects" } },
+                        .map_create,
+                        .{ .update = &obj_ctx },
+                    });
+
+                    // write commit id to HEAD
+                    try ref.updateRecur(repo_kind, ctx_self.core, .{ .root_cursor = cursor, .cursor = cursor }, ctx_self.allocator, "HEAD", obj_ctx.commit_sha1_hex);
+                }
+            };
+            try core.db.rootCursor().execute(UpdateCtx, &[_]xitdb.PathPart(UpdateCtx){
+                .{ .list_get = .append_copy },
+                .map_create,
+                .{ .update = UpdateCtx{ .core = core, .index = index, .command = command, .allocator = allocator } },
+            });
         },
     }
 }

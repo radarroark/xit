@@ -125,17 +125,17 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
         try args.append(".");
         try main.xitMain(repo_kind, allocator, &args);
 
-        // TEMPORARY
-        if (repo_kind == .xit) {
-            return;
-        }
-
         // make a commit
         args.clearAndFree();
         try args.append("commit");
         try args.append("-m");
         try args.append("first commit");
         try main.xitMain(repo_kind, allocator, &args);
+
+        // TEMPORARY
+        if (repo_kind == .xit) {
+            return;
+        }
 
         // check that the commit object was created
         {

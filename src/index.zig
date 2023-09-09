@@ -225,7 +225,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
             }
         }
 
-        fn addPathRecur(self: *Index(repo_kind), core: *rp.Repo(repo_kind).Core, opts: object.WriteBlobOpts(repo_kind), path: []const u8) !void {
+        fn addPathRecur(self: *Index(repo_kind), core: *rp.Repo(repo_kind).Core, opts: object.ObjectOpts(repo_kind), path: []const u8) !void {
             // remove entries that are parents of this path (directory replaces file)
             {
                 var parent_path_maybe = std.fs.path.dirname(path);
