@@ -85,13 +85,14 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
         pub fn initWithCommand(allocator: std.mem.Allocator, opts: InitOpts, cmd_data: cmd.CommandData) !Repo(repo_kind) {
             var self_maybe = try Repo(repo_kind).init(allocator, opts);
             if (self_maybe) |*self| {
+                errdefer self.deinit();
                 try self.command(cmd_data);
                 return self.*;
             } else {
                 if (cmd_data == .init) {
                     var self = switch (repo_kind) {
-                        .git => Repo(repo_kind){ .allocator = allocator, .core = .{ .repo_dir = undefined, .git_dir = undefined } },
-                        .xit => Repo(repo_kind){ .allocator = allocator, .core = .{ .repo_dir = undefined, .db = undefined } },
+                        .git => Repo(repo_kind){ .allocator = allocator, .core = undefined },
+                        .xit => Repo(repo_kind){ .allocator = allocator, .core = undefined },
                     };
                     try self.command(cmd_data);
                     return self;
