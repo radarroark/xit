@@ -198,11 +198,6 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
         }
     }
 
-    // TEMPORARY
-    if (repo_kind == .xit) {
-        return;
-    }
-
     // get HEAD contents
     const commit1 = blk: {
         var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
@@ -272,35 +267,56 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
         try args.append("second commit");
         try main.xitMain(repo_kind, allocator, &args);
 
-        // check that the commit object was created
-        {
-            var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
-            defer repo.deinit();
-            const head_file_buffer = try ref.readHead(repo_kind, &repo.core);
-            var objects_dir = try state.git_dir.openDir("objects", .{});
-            defer objects_dir.close();
-            var hash_prefix_dir = try objects_dir.openDir(head_file_buffer[0..2], .{});
-            defer hash_prefix_dir.close();
-            var hash_suffix_file = try hash_prefix_dir.openFile(head_file_buffer[2..], .{});
-            defer hash_suffix_file.close();
-        }
+        switch (repo_kind) {
+            .git => {
+                // check that the commit object was created
+                {
+                    var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+                    defer repo.deinit();
+                    const head_file_buffer = try ref.readHead(repo_kind, &repo.core);
+                    var objects_dir = try state.git_dir.openDir("objects", .{});
+                    defer objects_dir.close();
+                    var hash_prefix_dir = try objects_dir.openDir(head_file_buffer[0..2], .{});
+                    defer hash_prefix_dir.close();
+                    var hash_suffix_file = try hash_prefix_dir.openFile(head_file_buffer[2..], .{});
+                    defer hash_suffix_file.close();
+                }
 
-        // read the commit with libgit
-        {
-            var repo: ?*c.git_repository = null;
-            try expectEqual(0, c.git_repository_open(&repo, repo_path));
-            defer c.git_repository_free(repo);
-
-            var head: ?*c.git_reference = null;
-            try expectEqual(0, c.git_repository_head(&head, repo));
-            defer c.git_reference_free(head);
-            const oid = c.git_reference_target(head);
-            try std.testing.expect(null != oid);
-            var commit: ?*c.git_commit = null;
-            try expectEqual(0, c.git_commit_lookup(&commit, repo, oid));
-            defer c.git_commit_free(commit);
-            try std.testing.expectEqualStrings("second commit", std.mem.sliceTo(c.git_commit_message(commit), 0));
+                // read the commit with libgit
+                {
+                    var repo: ?*c.git_repository = null;
+                    try expectEqual(0, c.git_repository_open(&repo, repo_path));
+                    defer c.git_repository_free(repo);
+                    var head: ?*c.git_reference = null;
+                    try expectEqual(0, c.git_repository_head(&head, repo));
+                    defer c.git_reference_free(head);
+                    const oid = c.git_reference_target(head);
+                    try std.testing.expect(null != oid);
+                    var commit: ?*c.git_commit = null;
+                    try expectEqual(0, c.git_commit_lookup(&commit, repo, oid));
+                    defer c.git_commit_free(commit);
+                    try std.testing.expectEqualStrings("second commit", std.mem.sliceTo(c.git_commit_message(commit), 0));
+                }
+            },
+            .xit => {
+                // check that the commit object was created
+                var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+                defer repo.deinit();
+                const head_file_buffer = try ref.readHead(repo_kind, &repo.core);
+                var db_buffer = [_]u8{0} ** 1024;
+                const bytes_maybe = try repo.core.db.rootCursor().readBytes(&db_buffer, void, &[_]xitdb.PathPart(void){
+                    .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
+                    .{ .map_get = .{ .bytes = "objects" } },
+                    .{ .map_get = .{ .bytes = &head_file_buffer } },
+                });
+                try std.testing.expect(bytes_maybe != null);
+            },
         }
+    }
+
+    // TEMPORARY
+    if (repo_kind == .xit) {
+        return;
     }
 
     // get HEAD contents
