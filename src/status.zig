@@ -143,9 +143,18 @@ fn addEntries(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, unt
             var contains_file = false;
 
             while (try iter.next()) |entry| {
-                // don't traverse the .git dir
-                if (std.mem.eql(u8, entry.name, ".git")) {
-                    continue;
+                // ignore internal dir/file
+                switch (repo_kind) {
+                    .git => {
+                        if (std.mem.eql(u8, entry.name, ".git")) {
+                            continue;
+                        }
+                    },
+                    .xit => {
+                        if (std.mem.eql(u8, entry.name, ".xit")) {
+                            continue;
+                        }
+                    },
                 }
 
                 const subpath = if (std.mem.eql(u8, path, "."))

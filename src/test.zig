@@ -621,11 +621,6 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
         }
     }
 
-    // TEMPORARY
-    if (repo_kind == .xit) {
-        return;
-    }
-
     // status
     {
         // make file
@@ -702,11 +697,10 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
         }
 
         // get status with libgit
-        {
+        if (repo_kind == .git) {
             var repo: ?*c.git_repository = null;
             try expectEqual(0, c.git_repository_open(&repo, repo_path));
             defer c.git_repository_free(repo);
-
             var status_list: ?*c.git_status_list = null;
             var status_options: c.git_status_options = undefined;
             try expectEqual(0, c.git_status_options_init(&status_options, c.GIT_STATUS_OPTIONS_VERSION));
@@ -780,6 +774,11 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
         var tree_object = try obj.Object(repo_kind).init(allocator, &repo.core, commit_object.content.commit.tree);
         defer tree_object.deinit();
         try expectEqual(4, tree_object.content.tree.entries.count());
+    }
+
+    // TEMPORARY
+    if (repo_kind == .xit) {
+        return;
     }
 
     // create a branch
