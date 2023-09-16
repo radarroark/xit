@@ -826,11 +826,6 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
         try std.testing.expectEqualStrings("stuff", std.mem.sliceTo(branch_name, 0));
     }
 
-    // TEMPORARY
-    if (repo_kind == .xit) {
-        return;
-    }
-
     // can't delete current branch
     {
         var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
@@ -845,7 +840,7 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
     try main.xitMain(repo_kind, allocator, &args);
 
     // make sure the ref is created with subdirs
-    {
+    if (repo_kind == .git) {
         const ref_file = try state.git_dir.openFile("refs/heads/a/b/c", .{});
         defer ref_file.close();
     }
@@ -875,7 +870,7 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
     }
 
     // make sure the subdirs are deleted
-    {
+    if (repo_kind == .git) {
         try expectEqual(error.FileNotFound, state.git_dir.openFile("refs/heads/a/b/c", .{}));
         try expectEqual(error.FileNotFound, state.git_dir.openDir("refs/heads/a/b", .{}));
         try expectEqual(error.FileNotFound, state.git_dir.openDir("refs/heads/a", .{}));
@@ -908,6 +903,7 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
         break :blk try ref.readHead(repo_kind, &repo.core);
     };
 
+    // make sure the most recent branch name points to the most recent commit
     {
         var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
         defer repo.deinit();
