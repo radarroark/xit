@@ -437,6 +437,19 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                         index: *Index(repo_kind),
 
                         pub fn update(ctx_self: @This(), cursor: xitdb.Database(.file).Cursor, _: bool) !void {
+                            // remove items no longer in the index
+                            var iter = try cursor.iter(.map);
+                            defer iter.deinit();
+                            while (try iter.next()) |*next_cursor| {
+                                const path = (try next_cursor.readKeyBytesAlloc(ctx_self.allocator, void, &[_]xitdb.PathPart(void){})).?;
+                                defer ctx_self.allocator.free(path);
+                                if (!ctx_self.index.entries.contains(path)) {
+                                    try cursor.execute(void, &[_]xitdb.PathPart(void){
+                                        .{ .map_remove = .{ .bytes = path } },
+                                    });
+                                }
+                            }
+
                             for (ctx_self.index.entries.values()) |entry| {
                                 var entry_buffer = std.ArrayList(u8).init(ctx_self.allocator);
                                 defer entry_buffer.deinit();
