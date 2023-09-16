@@ -314,11 +314,6 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
         }
     }
 
-    // TEMPORARY
-    if (repo_kind == .xit) {
-        return;
-    }
-
     // get HEAD contents
     const commit2 = blk: {
         var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
@@ -525,16 +520,35 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
             try std.testing.expect(index.entries.contains("hello.txt/nested2.txt"));
         }
 
-        // read index with libgit
-        {
-            var repo: ?*c.git_repository = null;
-            try expectEqual(0, c.git_repository_open(&repo, repo_path));
-            defer c.git_repository_free(repo);
-
-            var index: ?*c.git_index = null;
-            try expectEqual(0, c.git_repository_index(&index, repo));
-            defer c.git_index_free(index);
-            try expectEqual(5, c.git_index_entrycount(index));
+        switch (repo_kind) {
+            .git => {
+                // read index with libgit
+                var repo: ?*c.git_repository = null;
+                try expectEqual(0, c.git_repository_open(&repo, repo_path));
+                defer c.git_repository_free(repo);
+                var index: ?*c.git_index = null;
+                try expectEqual(0, c.git_repository_index(&index, repo));
+                defer c.git_index_free(index);
+                try expectEqual(5, c.git_index_entrycount(index));
+            },
+            .xit => {
+                // read the index in xitdb
+                // TODO: use more efficient way to get map size
+                var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+                defer repo.deinit();
+                var count: u32 = 0;
+                if (try repo.core.db.rootCursor().readCursor(void, &[_]xitdb.PathPart(void){
+                    .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
+                    .{ .map_get = .{ .bytes = "index" } },
+                })) |cursor| {
+                    var iter = try cursor.iter(.map);
+                    defer iter.deinit();
+                    while (try iter.next()) |_| {
+                        count += 1;
+                    }
+                }
+                try expectEqual(5, count);
+            },
         }
 
         // replace directory with file
@@ -563,16 +577,35 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
             try std.testing.expect(index.entries.contains("hello.txt"));
         }
 
-        // read index with libgit
-        {
-            var repo: ?*c.git_repository = null;
-            try expectEqual(0, c.git_repository_open(&repo, repo_path));
-            defer c.git_repository_free(repo);
-
-            var index: ?*c.git_index = null;
-            try expectEqual(0, c.git_repository_index(&index, repo));
-            defer c.git_index_free(index);
-            try expectEqual(4, c.git_index_entrycount(index));
+        switch (repo_kind) {
+            .git => {
+                // read index with libgit
+                var repo: ?*c.git_repository = null;
+                try expectEqual(0, c.git_repository_open(&repo, repo_path));
+                defer c.git_repository_free(repo);
+                var index: ?*c.git_index = null;
+                try expectEqual(0, c.git_repository_index(&index, repo));
+                defer c.git_index_free(index);
+                try expectEqual(4, c.git_index_entrycount(index));
+            },
+            .xit => {
+                // read the index in xitdb
+                // TODO: use more efficient way to get map size
+                var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+                defer repo.deinit();
+                var count: u32 = 0;
+                if (try repo.core.db.rootCursor().readCursor(void, &[_]xitdb.PathPart(void){
+                    .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
+                    .{ .map_get = .{ .bytes = "index" } },
+                })) |cursor| {
+                    var iter = try cursor.iter(.map);
+                    defer iter.deinit();
+                    while (try iter.next()) |_| {
+                        count += 1;
+                    }
+                }
+                try expectEqual(4, count);
+            },
         }
 
         // can't add a non-existent file
@@ -582,10 +615,15 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
         try expectEqual(error.FileNotFound, main.xitMain(repo_kind, allocator, &args));
 
         // a stale index lock file isn't hanging around
-        {
+        if (repo_kind == .git) {
             const lock_file_or_err = state.git_dir.openFile("index.lock", .{ .mode = .read_only });
             try expectEqual(error.FileNotFound, lock_file_or_err);
         }
+    }
+
+    // TEMPORARY
+    if (repo_kind == .xit) {
+        return;
     }
 
     // status

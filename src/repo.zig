@@ -274,19 +274,14 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     }
                 },
                 cmd.CommandData.checkout => {
-                    switch (repo_kind) {
-                        .git => {
-                            var result = chk.CheckoutResult.init();
-                            defer result.deinit();
-                            chk.checkout(repo_kind, &self.core, self.allocator, cmd_data.checkout.target, &result) catch |err| {
-                                switch (err) {
-                                    error.CheckoutConflict => {},
-                                    else => return err,
-                                }
-                            };
-                        },
-                        .xit => {},
-                    }
+                    var result = chk.CheckoutResult.init();
+                    defer result.deinit();
+                    chk.checkout(repo_kind, &self.core, self.allocator, cmd_data.checkout.target, &result) catch |err| {
+                        switch (err) {
+                            error.CheckoutConflict => {},
+                            else => return err,
+                        }
+                    };
                 },
             }
         }
