@@ -250,27 +250,22 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     }
                 },
                 cmd.CommandData.branch => {
-                    switch (repo_kind) {
-                        .git => {
-                            if (cmd_data.branch.name) |name| {
-                                try branch.create(repo_kind, &self.core, self.allocator, name);
-                            } else {
-                                var current_branch_maybe = try ref.Ref.initWithPath(repo_kind, &self.core, self.allocator, "HEAD");
-                                defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
+                    if (cmd_data.branch.name) |name| {
+                        try branch.create(repo_kind, &self.core, self.allocator, name);
+                    } else {
+                        var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, &self.core, self.allocator, "HEAD");
+                        defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
 
-                                var ref_list = try ref.RefList.init(repo_kind, &self.core, self.allocator, "heads");
-                                defer ref_list.deinit();
+                        var ref_list = try ref.RefList.init(repo_kind, &self.core, self.allocator, "heads");
+                        defer ref_list.deinit();
 
-                                for (ref_list.refs.items) |r| {
-                                    const is_current_branch = if (current_branch_maybe) |current_branch|
-                                        std.mem.eql(u8, current_branch.name, r.name)
-                                    else
-                                        false;
-                                    try stdout.print("{s} {s}\n", .{ if (is_current_branch) "*" else " ", r.name });
-                                }
-                            }
-                        },
-                        .xit => {},
+                        for (ref_list.refs.items) |r| {
+                            const is_current_branch = if (current_branch_maybe) |current_branch|
+                                std.mem.eql(u8, current_branch.name, r.name)
+                            else
+                                false;
+                            try stdout.print("{s} {s}\n", .{ if (is_current_branch) "*" else " ", r.name });
+                        }
                     }
                 },
                 cmd.CommandData.checkout => {

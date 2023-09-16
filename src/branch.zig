@@ -1,4 +1,5 @@
 const std = @import("std");
+const xitdb = @import("xitdb");
 const ref = @import("./ref.zig");
 const io = @import("./io.zig");
 const rp = @import("./repo.zig");
@@ -21,38 +22,78 @@ pub fn create(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, a
         return error.InvalidBranchName;
     }
 
-    var refs_dir = try core.git_dir.openDir("refs", .{});
-    defer refs_dir.close();
-    var heads_dir = try refs_dir.makeOpenPath("heads", .{});
-    defer heads_dir.close();
+    switch (repo_kind) {
+        .git => {
+            var refs_dir = try core.git_dir.openDir("refs", .{});
+            defer refs_dir.close();
+            var heads_dir = try refs_dir.makeOpenPath("heads", .{});
+            defer heads_dir.close();
 
-    // if there are any slashes in the branch name,
-    // we must treat it as a path and make dirs.
-    // why? i have no idea! what is the point of this, linus!
-    var leaf_name = name;
-    var subdir_maybe = blk: {
-        if (std.mem.lastIndexOf(u8, name, "/")) |last_slash| {
-            leaf_name = name[last_slash + 1 ..];
-            break :blk try heads_dir.makeOpenPath(name[0..last_slash], .{});
-        } else {
-            break :blk null;
-        }
-    };
-    defer if (subdir_maybe) |*subdir| subdir.close();
+            // if there are any slashes in the branch name,
+            // we must treat it as a path and make dirs.
+            // why? i have no idea! what is the point of this, linus!
+            var leaf_name = name;
+            var subdir_maybe = blk: {
+                if (std.mem.lastIndexOf(u8, name, "/")) |last_slash| {
+                    leaf_name = name[last_slash + 1 ..];
+                    break :blk try heads_dir.makeOpenPath(name[0..last_slash], .{});
+                } else {
+                    break :blk null;
+                }
+            };
+            defer if (subdir_maybe) |*subdir| subdir.close();
 
-    // create lock file
-    var lock = try io.LockFile.init(allocator, if (subdir_maybe) |subdir| subdir else heads_dir, leaf_name);
-    defer lock.deinit();
+            // create lock file
+            var lock = try io.LockFile.init(allocator, if (subdir_maybe) |subdir| subdir else heads_dir, leaf_name);
+            defer lock.deinit();
 
-    // get HEAD contents
-    const head_file_buffer = try ref.readHead(repo_kind, core);
+            // get HEAD contents
+            const head_file_buffer = try ref.readHead(repo_kind, core);
 
-    // write to lock file
-    try lock.lock_file.writeAll(&head_file_buffer);
-    try lock.lock_file.writeAll("\n");
+            // write to lock file
+            try lock.lock_file.writeAll(&head_file_buffer);
+            try lock.lock_file.writeAll("\n");
 
-    // finish lock
-    lock.success = true;
+            // finish lock
+            lock.success = true;
+        },
+        .xit => {
+            const Ctx = struct {
+                core: *rp.Repo(repo_kind).Core,
+                name: []const u8,
+
+                pub fn update(ctx_self: @This(), cursor: xitdb.Database(.file).Cursor, _: bool) !void {
+                    // get HEAD contents
+                    // TODO: make `readHead` use cursor for tx safety
+                    const head_file_buffer = try ref.readHead(repo_kind, ctx_self.core);
+
+                    const HeadsCtx = struct {
+                        name: []const u8,
+                        head_file_buffer: []const u8,
+
+                        pub fn update(heads_ctx_self: @This(), heads_cursor: xitdb.Database(.file).Cursor, _: bool) !void {
+                            try heads_cursor.execute(void, &[_]xitdb.PathPart(void){
+                                .{ .map_get = .{ .bytes = heads_ctx_self.name } },
+                                .{ .value = .{ .bytes = heads_ctx_self.head_file_buffer } },
+                            });
+                        }
+                    };
+                    try cursor.execute(HeadsCtx, &[_]xitdb.PathPart(HeadsCtx){
+                        .{ .map_get = .{ .bytes = "refs" } },
+                        .map_create,
+                        .{ .map_get = .{ .bytes = "heads" } },
+                        .map_create,
+                        .{ .update = HeadsCtx{ .name = ctx_self.name, .head_file_buffer = &head_file_buffer } },
+                    });
+                }
+            };
+            try core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
+                .{ .list_get = .append_copy },
+                .map_create,
+                .{ .update = Ctx{ .core = core, .name = name } },
+            });
+        },
+    }
 }
 
 pub fn delete(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, name: []const u8) !void {
@@ -72,7 +113,7 @@ pub fn delete(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, a
     defer head_lock.deinit();
 
     // don't allow current branch to be deleted
-    var current_branch_maybe = try ref.Ref.initWithPath(repo_kind, core, allocator, "HEAD");
+    var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, core, allocator, "HEAD");
     defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
     if (current_branch_maybe) |current_branch| {
         if (std.mem.eql(u8, current_branch.name, name)) {

@@ -776,11 +776,6 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
         try expectEqual(4, tree_object.content.tree.entries.count());
     }
 
-    // TEMPORARY
-    if (repo_kind == .xit) {
-        return;
-    }
-
     // create a branch
     args.clearAndFree();
     try args.append("branch");
@@ -814,22 +809,26 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
     {
         var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
         defer repo.deinit();
-        var current_branch_maybe = try ref.Ref.initWithPath(repo_kind, &repo.core, allocator, "HEAD");
+        var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, &repo.core, allocator, "HEAD");
         defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
         try std.testing.expectEqualStrings("stuff", current_branch_maybe.?.name);
     }
 
     // get the current branch with libgit
-    {
+    if (repo_kind == .git) {
         var repo: ?*c.git_repository = null;
         try expectEqual(0, c.git_repository_open(&repo, repo_path));
         defer c.git_repository_free(repo);
-
         var head: ?*c.git_reference = null;
         try expectEqual(0, c.git_repository_head(&head, repo));
         defer c.git_reference_free(head);
         const branch_name = c.git_reference_shorthand(head);
         try std.testing.expectEqualStrings("stuff", std.mem.sliceTo(branch_name, 0));
+    }
+
+    // TEMPORARY
+    if (repo_kind == .xit) {
+        return;
     }
 
     // can't delete current branch

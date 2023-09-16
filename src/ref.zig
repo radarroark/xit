@@ -16,10 +16,7 @@ pub const Ref = struct {
     name: []const u8,
     oid: ?[hash.SHA1_HEX_LEN]u8,
 
-    pub fn init(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, dir_name: []const u8, relative_path: []const []const u8) !Ref {
-        const name = try std.mem.join(allocator, "/", relative_path);
-        errdefer allocator.free(name);
-
+    pub fn initWithName(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, dir_name: []const u8, name: []const u8) !Ref {
         const path = try std.fs.path.join(allocator, &[_][]const u8{ "refs", dir_name, name });
         defer allocator.free(path);
         const content = try std.fmt.allocPrint(allocator, "ref: {s}", .{path});
@@ -32,7 +29,7 @@ pub const Ref = struct {
         };
     }
 
-    pub fn initWithPath(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, path: []const u8) !?Ref {
+    pub fn initFromLink(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, path: []const u8) !?Ref {
         var buffer = [_]u8{0} ** MAX_READ_BYTES;
         const content = try read(repo_kind, core, path, &buffer);
 
@@ -57,30 +54,6 @@ pub const Ref = struct {
     }
 };
 
-fn addRefs(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, dir_name: []const u8, dir: std.fs.Dir, refs: *std.ArrayList(Ref), path: *std.ArrayList([]const u8)) !void {
-    var iter_dir = try dir.openIterableDir(".", .{});
-    defer iter_dir.close();
-    var iter = iter_dir.iterate();
-    while (try iter.next()) |entry| {
-        var next_path = try path.clone();
-        defer next_path.deinit();
-        try next_path.append(entry.name);
-        switch (entry.kind) {
-            .file => {
-                var ref = try Ref.init(repo_kind, core, allocator, dir_name, next_path.items);
-                errdefer ref.deinit();
-                try refs.append(ref);
-            },
-            .directory => {
-                var next_dir = try dir.openDir(entry.name, .{});
-                defer next_dir.close();
-                try addRefs(repo_kind, core, allocator, dir_name, next_dir, refs, &next_path);
-            },
-            else => {},
-        }
-    }
-}
-
 pub const RefList = struct {
     refs: std.ArrayList(Ref),
 
@@ -93,18 +66,43 @@ pub const RefList = struct {
             refs.deinit();
         }
 
-        var refs_dir = try core.git_dir.openDir("refs", .{});
-        defer refs_dir.close();
-        var heads_dir = try refs_dir.openDir("heads", .{});
-        defer heads_dir.close();
-
-        var path = std.ArrayList([]const u8).init(allocator);
-        defer path.deinit();
-        try addRefs(repo_kind, core, allocator, dir_name, heads_dir, &refs, &path);
-
-        return .{
+        var self = RefList{
             .refs = refs,
         };
+
+        switch (repo_kind) {
+            .git => {
+                var refs_dir = try core.git_dir.openDir("refs", .{});
+                defer refs_dir.close();
+                var heads_dir = try refs_dir.openDir("heads", .{});
+                defer heads_dir.close();
+
+                var path = std.ArrayList([]const u8).init(allocator);
+                defer path.deinit();
+                try self.addRefs(repo_kind, core, allocator, dir_name, heads_dir, &path);
+            },
+            .xit => {
+                if (try core.db.rootCursor().readCursor(void, &[_]xitdb.PathPart(void){
+                    .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
+                    .{ .map_get = .{ .bytes = "refs" } },
+                    .{ .map_get = .{ .bytes = "heads" } },
+                })) |cursor| {
+                    var iter = try cursor.iter(.map);
+                    defer iter.deinit();
+                    while (try iter.next()) |*next_cursor| {
+                        const name = (try next_cursor.readKeyBytesAlloc(allocator, void, &[_]xitdb.PathPart(void){})).?;
+                        errdefer allocator.free(name);
+
+                        var ref = try Ref.initWithName(repo_kind, core, allocator, dir_name, name);
+                        errdefer ref.deinit();
+
+                        try self.refs.append(ref);
+                    }
+                }
+            },
+        }
+
+        return self;
     }
 
     pub fn deinit(self: *RefList) void {
@@ -112,6 +110,32 @@ pub const RefList = struct {
             ref.deinit();
         }
         self.refs.deinit();
+    }
+
+    fn addRefs(self: *RefList, comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, dir_name: []const u8, dir: std.fs.Dir, path: *std.ArrayList([]const u8)) !void {
+        var iter_dir = try dir.openIterableDir(".", .{});
+        defer iter_dir.close();
+        var iter = iter_dir.iterate();
+        while (try iter.next()) |entry| {
+            var next_path = try path.clone();
+            defer next_path.deinit();
+            try next_path.append(entry.name);
+            switch (entry.kind) {
+                .file => {
+                    const name = try std.mem.join(allocator, "/", next_path.items);
+                    errdefer allocator.free(name);
+                    var ref = try Ref.initWithName(repo_kind, core, allocator, dir_name, name);
+                    errdefer ref.deinit();
+                    try self.refs.append(ref);
+                },
+                .directory => {
+                    var next_dir = try dir.openDir(entry.name, .{});
+                    defer next_dir.close();
+                    try self.addRefs(repo_kind, core, allocator, dir_name, next_dir, &next_path);
+                },
+                else => {},
+            }
+        }
     }
 };
 
