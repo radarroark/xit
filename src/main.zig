@@ -73,5 +73,5 @@ pub fn main() !void {
     defer args.deinit();
 
     try appendArgs(&args);
-    try xitMain(.git, allocator, &args);
+    try xitMain(.xit, allocator, &args);
 }
