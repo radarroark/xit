@@ -37,6 +37,10 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
     defer cwd.close();
 
     // create the temp dir
+    if (cwd.openFile(temp_dir_name, .{})) |file| {
+        file.close();
+        try cwd.deleteTree(temp_dir_name);
+    } else |_| {}
     var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
