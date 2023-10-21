@@ -7,9 +7,11 @@
 //! can be merged cleanly. this will allow building things
 //! like issue trackers that are part of the repo, an idea
 //! pioneered by fossil (though in a hard-coded form).
-//! 2. patch-based changes and first-class conflicts, an
+//! 2. built-in text UI that exposes all functionality in an
+//! easy-to-use and discoverable way.
+//! 3. patch-based changes and first-class conflicts, an
 //! idea pioneered by pijul.
-//! 3. git compatibility, most likely implemented by keeping
+//! 4. git compatibility, most likely implemented by keeping
 //! two different commit histories (a git-compatible one and
 //! a patch-based one).
 //!
