@@ -8,6 +8,7 @@ const ref = @import("./ref.zig");
 const chk = @import("./checkout.zig");
 const branch = @import("./branch.zig");
 const rp = @import("./repo.zig");
+const diff = @import("./diff.zig");
 
 const c = @cImport({
     @cInclude("git2.h");
@@ -927,4 +928,17 @@ test "end to end" {
     const allocator = std.testing.allocator;
     try testMain(allocator, .git);
     try testMain(allocator, .xit);
+}
+
+test "diff" {
+    const allocator = std.testing.allocator;
+    const lines1 = [_][]const u8{ "A", "B", "C", "A", "B", "B", "A" };
+    const lines2 = [_][]const u8{ "C", "B", "A", "B", "A", "C" };
+    const expected_diff = [_][]const u8{};
+    var actual_diff = try diff.Diff.init(allocator, &lines1, &lines2);
+    defer actual_diff.deinit();
+    try expectEqual(expected_diff.len, actual_diff.result.items.len);
+    for (expected_diff, actual_diff.result.items) |expected, actual| {
+        try std.testing.expectEqualStrings(expected, actual);
+    }
 }
