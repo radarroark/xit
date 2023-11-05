@@ -763,6 +763,14 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
                 try index_deleted_map.put(path, {});
             }
         }
+
+        // undo readme change
+        // TODO: implement restore command
+        {
+            const readme = try repo_dir.openFile("README", .{ .mode = .read_write });
+            defer readme.close();
+            try readme.writeAll("My cool project");
+        }
     }
 
     // parse objects
