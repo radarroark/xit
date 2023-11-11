@@ -405,3 +405,20 @@ pub fn checkout(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core,
         },
     }
 }
+
+pub fn restore(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, path: []const u8) !void {
+    // get the current commit
+    const current_hash = try ref.readHead(repo_kind, core);
+    var commit_object = try obj.Object(repo_kind).init(allocator, core, current_hash);
+    defer commit_object.deinit();
+
+    // get the tree of the current commit
+    var tree_object = try obj.Object(repo_kind).init(allocator, core, commit_object.content.commit.tree);
+    defer tree_object.deinit();
+
+    // get the entry for the given path
+    const tree_entry = tree_object.content.tree.entries.get(path) orelse return error.ObjectNotFound;
+
+    // restore file in the working tree
+    try createFileFromObject(repo_kind, core, allocator, path, tree_entry);
+}

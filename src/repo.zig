@@ -278,6 +278,9 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         }
                     };
                 },
+                cmd.CommandData.restore => {
+                    try chk.restore(repo_kind, &self.core, self.allocator, cmd_data.restore.path);
+                },
             }
         }
 
