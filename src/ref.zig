@@ -378,7 +378,7 @@ pub fn updateRecur(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
                     oid: [hash.SHA1_HEX_LEN]u8,
                     root_cursor: *xitdb.Database(.file).Cursor,
 
-                    pub fn update(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor, _: bool) !void {
+                    pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
                         try updateRecur(repo_kind, ctx_self.core, .{ .root_cursor = ctx_self.root_cursor, .cursor = cursor }, ctx_self.allocator, ctx_self.file_name, ctx_self.oid);
                     }
                 };
@@ -387,7 +387,7 @@ pub fn updateRecur(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
                     .map_create,
                     .{ .map_get = .{ .bytes = "heads" } },
                     .map_create,
-                    .{ .update = Ctx{ .core = core, .allocator = allocator, .file_name = ref_name, .oid = oid, .root_cursor = opts.root_cursor } },
+                    .{ .ctx = Ctx{ .core = core, .allocator = allocator, .file_name = ref_name, .oid = oid, .root_cursor = opts.root_cursor } },
                 });
             }
             // otherwise, update it with the oid

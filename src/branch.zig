@@ -62,7 +62,7 @@ pub fn create(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, a
                 core: *rp.Repo(repo_kind).Core,
                 name: []const u8,
 
-                pub fn update(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor, _: bool) !void {
+                pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
                     // get HEAD contents
                     // TODO: make `readHead` use cursor for tx safety
                     const head_file_buffer = try ref.readHead(repo_kind, ctx_self.core);
@@ -71,7 +71,7 @@ pub fn create(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, a
                         name: []const u8,
                         head_file_buffer: []const u8,
 
-                        pub fn update(heads_ctx_self: @This(), heads_cursor: *xitdb.Database(.file).Cursor, _: bool) !void {
+                        pub fn run(heads_ctx_self: @This(), heads_cursor: *xitdb.Database(.file).Cursor) !void {
                             try heads_cursor.execute(void, &[_]xitdb.PathPart(void){
                                 .{ .map_get = .{ .bytes = heads_ctx_self.name } },
                                 .{ .value = .{ .bytes = heads_ctx_self.head_file_buffer } },
@@ -83,14 +83,14 @@ pub fn create(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, a
                         .map_create,
                         .{ .map_get = .{ .bytes = "heads" } },
                         .map_create,
-                        .{ .update = HeadsCtx{ .name = ctx_self.name, .head_file_buffer = &head_file_buffer } },
+                        .{ .ctx = HeadsCtx{ .name = ctx_self.name, .head_file_buffer = &head_file_buffer } },
                     });
                 }
             };
             try core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
                 .{ .list_get = .append_copy },
                 .map_create,
-                .{ .update = Ctx{ .core = core, .name = name } },
+                .{ .ctx = Ctx{ .core = core, .name = name } },
             });
         },
     }
@@ -150,7 +150,7 @@ pub fn delete(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, a
                 name: []const u8,
                 allocator: std.mem.Allocator,
 
-                pub fn update(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor, _: bool) !void {
+                pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
                     // don't allow current branch to be deleted
                     // TODO: make `initFromLink` use cursor for tx safety
                     var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, ctx_self.core, ctx_self.allocator, "HEAD");
@@ -164,7 +164,7 @@ pub fn delete(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, a
                     const HeadsCtx = struct {
                         name: []const u8,
 
-                        pub fn update(heads_ctx_self: @This(), heads_cursor: *xitdb.Database(.file).Cursor, _: bool) !void {
+                        pub fn run(heads_ctx_self: @This(), heads_cursor: *xitdb.Database(.file).Cursor) !void {
                             try heads_cursor.execute(void, &[_]xitdb.PathPart(void){
                                 .{ .map_remove = .{ .bytes = heads_ctx_self.name } },
                             });
@@ -175,14 +175,14 @@ pub fn delete(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, a
                         .map_create,
                         .{ .map_get = .{ .bytes = "heads" } },
                         .map_create,
-                        .{ .update = HeadsCtx{ .name = ctx_self.name } },
+                        .{ .ctx = HeadsCtx{ .name = ctx_self.name } },
                     });
                 }
             };
             try core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
                 .{ .list_get = .append_copy },
                 .map_create,
-                .{ .update = Ctx{ .core = core, .name = name, .allocator = allocator } },
+                .{ .ctx = Ctx{ .core = core, .name = name, .allocator = allocator } },
             });
         },
     }

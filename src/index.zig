@@ -210,7 +210,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                         index: *Index(repo_kind),
                         path: []const u8,
 
-                        pub fn update(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor, _: bool) !void {
+                        pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
                             try ctx_self.index.addPathRecur(ctx_self.core, .{ .cursor = cursor }, ctx_self.path);
                         }
                     };
@@ -219,7 +219,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                         .map_create,
                         .{ .map_get = .{ .bytes = "objects" } },
                         .map_create,
-                        .{ .update = Ctx{ .core = core, .index = self, .path = path } },
+                        .{ .ctx = Ctx{ .core = core, .index = self, .path = path } },
                     });
                 },
             }
@@ -436,7 +436,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                         allocator: std.mem.Allocator,
                         index: *Index(repo_kind),
 
-                        pub fn update(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor, _: bool) !void {
+                        pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
                             // remove items no longer in the index
                             var iter = try cursor.iter(.map);
                             defer iter.deinit();
@@ -490,7 +490,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                         .map_create,
                         .{ .map_get = .{ .bytes = "index" } },
                         .map_create,
-                        .{ .update = Ctx{ .db = opts.db, .allocator = allocator, .index = self } },
+                        .{ .ctx = Ctx{ .db = opts.db, .allocator = allocator, .index = self } },
                     });
                 },
             }

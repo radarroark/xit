@@ -161,8 +161,8 @@ pub fn writeBlob(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core
                 file: std.fs.File,
                 allocator: std.mem.Allocator,
 
-                pub fn update(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor, is_empty: bool) !void {
-                    if (!is_empty) {
+                pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
+                    if (!cursor.is_new) {
                         return;
                     }
 
@@ -191,7 +191,7 @@ pub fn writeBlob(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core
             };
             try opts.cursor.execute(Ctx, &[_]xitdb.PathPart(Ctx){
                 .{ .map_get = .{ .bytes = &sha1_hex } },
-                .{ .update = Ctx{ .header = header, .file = file, .allocator = allocator } },
+                .{ .ctx = Ctx{ .header = header, .file = file, .allocator = allocator } },
             });
         },
     }
@@ -257,8 +257,8 @@ fn writeTree(comptime repo_kind: rp.RepoKind, opts: ObjectOpts(repo_kind), alloc
             const Ctx = struct {
                 tree: []const u8,
 
-                pub fn update(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor, is_empty: bool) !void {
-                    if (!is_empty) {
+                pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
+                    if (!cursor.is_new) {
                         return error.ObjectAlreadyExists;
                     }
                     try cursor.execute(void, &[_]xitdb.PathPart(void){
@@ -268,7 +268,7 @@ fn writeTree(comptime repo_kind: rp.RepoKind, opts: ObjectOpts(repo_kind), alloc
             };
             try opts.cursor.execute(Ctx, &[_]xitdb.PathPart(Ctx){
                 .{ .map_get = .{ .bytes = &tree_sha1_hex } },
-                .{ .update = Ctx{ .tree = tree } },
+                .{ .ctx = Ctx{ .tree = tree } },
             });
         },
     }
@@ -409,7 +409,7 @@ pub fn writeCommit(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
                 command: cmd.CommandData,
                 allocator: std.mem.Allocator,
 
-                pub fn update(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor, _: bool) !void {
+                pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
                     const ObjectsCtx = struct {
                         core: *rp.Repo(repo_kind).Core,
                         index: idx.Index(repo_kind),
@@ -417,7 +417,7 @@ pub fn writeCommit(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
                         allocator: std.mem.Allocator,
                         commit_sha1_hex: [hash.SHA1_HEX_LEN]u8,
 
-                        pub fn update(obj_ctx_self: *@This(), obj_cursor: *xitdb.Database(.file).Cursor, _: bool) !void {
+                        pub fn run(obj_ctx_self: *@This(), obj_cursor: *xitdb.Database(.file).Cursor) !void {
                             // create tree and add index entries
                             var tree = Tree.init(obj_ctx_self.allocator);
                             defer tree.deinit();
@@ -471,7 +471,7 @@ pub fn writeCommit(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
                     try cursor.execute(*ObjectsCtx, &[_]xitdb.PathPart(*ObjectsCtx){
                         .{ .map_get = .{ .bytes = "objects" } },
                         .map_create,
-                        .{ .update = &obj_ctx },
+                        .{ .ctx = &obj_ctx },
                     });
 
                     // write commit id to HEAD
@@ -481,7 +481,7 @@ pub fn writeCommit(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
             try core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
                 .{ .list_get = .append_copy },
                 .map_create,
-                .{ .update = Ctx{ .core = core, .index = index, .command = command, .allocator = allocator } },
+                .{ .ctx = Ctx{ .core = core, .index = index, .command = command, .allocator = allocator } },
             });
         },
     }
