@@ -74,7 +74,7 @@ pub fn ObjectOpts(comptime repo_kind: rp.RepoKind) type {
             objects_dir: std.fs.Dir,
         },
         .xit => struct {
-            cursor: xitdb.Database(.file).Cursor,
+            cursor: *xitdb.Database(.file).Cursor,
         },
     };
 }
@@ -161,7 +161,7 @@ pub fn writeBlob(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core
                 file: std.fs.File,
                 allocator: std.mem.Allocator,
 
-                pub fn update(ctx_self: @This(), cursor: xitdb.Database(.file).Cursor, is_empty: bool) !void {
+                pub fn update(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor, is_empty: bool) !void {
                     if (!is_empty) {
                         return;
                     }
@@ -257,7 +257,7 @@ fn writeTree(comptime repo_kind: rp.RepoKind, opts: ObjectOpts(repo_kind), alloc
             const Ctx = struct {
                 tree: []const u8,
 
-                pub fn update(ctx_self: @This(), cursor: xitdb.Database(.file).Cursor, is_empty: bool) !void {
+                pub fn update(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor, is_empty: bool) !void {
                     if (!is_empty) {
                         return error.ObjectAlreadyExists;
                     }
@@ -409,7 +409,7 @@ pub fn writeCommit(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
                 command: cmd.CommandData,
                 allocator: std.mem.Allocator,
 
-                pub fn update(ctx_self: @This(), cursor: xitdb.Database(.file).Cursor, _: bool) !void {
+                pub fn update(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor, _: bool) !void {
                     const ObjectsCtx = struct {
                         core: *rp.Repo(repo_kind).Core,
                         index: idx.Index(repo_kind),
@@ -417,7 +417,7 @@ pub fn writeCommit(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
                         allocator: std.mem.Allocator,
                         commit_sha1_hex: [hash.SHA1_HEX_LEN]u8,
 
-                        pub fn update(obj_ctx_self: *@This(), obj_cursor: xitdb.Database(.file).Cursor, _: bool) !void {
+                        pub fn update(obj_ctx_self: *@This(), obj_cursor: *xitdb.Database(.file).Cursor, _: bool) !void {
                             // create tree and add index entries
                             var tree = Tree.init(obj_ctx_self.allocator);
                             defer tree.deinit();
