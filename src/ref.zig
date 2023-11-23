@@ -305,8 +305,8 @@ pub fn UpdateOpts(comptime repo_kind: rp.RepoKind) type {
             dir: std.fs.Dir,
         },
         .xit => struct {
-            root_cursor: *xitdb.Database(.file).Cursor,
-            cursor: *xitdb.Database(.file).Cursor,
+            root_cursor: xitdb.Database(.file).Cursor,
+            cursor: xitdb.Database(.file).Cursor,
         },
     };
 }
@@ -376,9 +376,9 @@ pub fn updateRecur(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
                     allocator: std.mem.Allocator,
                     file_name: []const u8,
                     oid: [hash.SHA1_HEX_LEN]u8,
-                    root_cursor: *xitdb.Database(.file).Cursor,
+                    root_cursor: xitdb.Database(.file).Cursor,
 
-                    pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
+                    pub fn run(ctx_self: @This(), cursor: xitdb.Database(.file).Cursor) !void {
                         try updateRecur(repo_kind, ctx_self.core, .{ .root_cursor = ctx_self.root_cursor, .cursor = cursor }, ctx_self.allocator, ctx_self.file_name, ctx_self.oid);
                     }
                 };

@@ -210,7 +210,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                         index: *Index(repo_kind),
                         path: []const u8,
 
-                        pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
+                        pub fn run(ctx_self: @This(), cursor: xitdb.Database(.file).Cursor) !void {
                             try ctx_self.index.addPathRecur(ctx_self.core, .{ .cursor = cursor }, ctx_self.path);
                         }
                     };
@@ -436,7 +436,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                         allocator: std.mem.Allocator,
                         index: *Index(repo_kind),
 
-                        pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
+                        pub fn run(ctx_self: @This(), cursor: xitdb.Database(.file).Cursor) !void {
                             // remove items no longer in the index
                             var iter = try cursor.iter(.map);
                             defer iter.deinit();

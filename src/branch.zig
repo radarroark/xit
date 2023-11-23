@@ -62,7 +62,7 @@ pub fn create(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, a
                 core: *rp.Repo(repo_kind).Core,
                 name: []const u8,
 
-                pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
+                pub fn run(ctx_self: @This(), cursor: xitdb.Database(.file).Cursor) !void {
                     // get HEAD contents
                     // TODO: make `readHead` use cursor for tx safety
                     const head_file_buffer = try ref.readHead(repo_kind, ctx_self.core);
@@ -71,7 +71,7 @@ pub fn create(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, a
                         name: []const u8,
                         head_file_buffer: []const u8,
 
-                        pub fn run(heads_ctx_self: @This(), heads_cursor: *xitdb.Database(.file).Cursor) !void {
+                        pub fn run(heads_ctx_self: @This(), heads_cursor: xitdb.Database(.file).Cursor) !void {
                             try heads_cursor.execute(void, &[_]xitdb.PathPart(void){
                                 .{ .map_get = .{ .bytes = heads_ctx_self.name } },
                                 .{ .value = .{ .bytes = heads_ctx_self.head_file_buffer } },
@@ -150,7 +150,7 @@ pub fn delete(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, a
                 name: []const u8,
                 allocator: std.mem.Allocator,
 
-                pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
+                pub fn run(ctx_self: @This(), cursor: xitdb.Database(.file).Cursor) !void {
                     // don't allow current branch to be deleted
                     // TODO: make `initFromLink` use cursor for tx safety
                     var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, ctx_self.core, ctx_self.allocator, "HEAD");
@@ -164,7 +164,7 @@ pub fn delete(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, a
                     const HeadsCtx = struct {
                         name: []const u8,
 
-                        pub fn run(heads_ctx_self: @This(), heads_cursor: *xitdb.Database(.file).Cursor) !void {
+                        pub fn run(heads_ctx_self: @This(), heads_cursor: xitdb.Database(.file).Cursor) !void {
                             try heads_cursor.execute(void, &[_]xitdb.PathPart(void){
                                 .{ .map_remove = .{ .bytes = heads_ctx_self.name } },
                             });
