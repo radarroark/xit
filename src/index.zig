@@ -144,34 +144,36 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                         var iter = try cursor.iter(.map);
                         defer iter.deinit();
                         while (try iter.next()) |*next_cursor| {
-                            const buffer = (try next_cursor.readBytesAlloc(allocator, void, &[_]xitdb.PathPart(void){})).?;
-                            defer allocator.free(buffer);
-                            const path = (try next_cursor.readKeyBytesAlloc(index.arena.allocator(), void, &[_]xitdb.PathPart(void){})).?;
-                            var stream = std.io.fixedBufferStream(buffer);
-                            var reader = stream.reader();
-                            var entry = Index(repo_kind).Entry{
-                                .ctime_secs = try reader.readIntBig(u32),
-                                .ctime_nsecs = try reader.readIntBig(u32),
-                                .mtime_secs = try reader.readIntBig(u32),
-                                .mtime_nsecs = try reader.readIntBig(u32),
-                                .dev = try reader.readIntBig(u32),
-                                .ino = try reader.readIntBig(u32),
-                                .mode = @bitCast(try reader.readIntBig(u32)),
-                                .uid = try reader.readIntBig(u32),
-                                .gid = try reader.readIntBig(u32),
-                                .file_size = try reader.readIntBig(u32),
-                                .oid = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN),
-                                .flags = @bitCast(try reader.readIntBig(u16)),
-                                .extended_flags = null, // TODO: read this if necessary
-                                .path = path,
-                            };
-                            if (entry.mode.unix_permission != 0o755) { // ensure mode is valid
-                                entry.mode.unix_permission = 0o644;
+                            if (try next_cursor.readBytesAlloc(allocator, void, &[_]xitdb.PathPart(void){})) |buffer| {
+                                defer allocator.free(buffer);
+                                if (try next_cursor.readKeyBytesAlloc(index.arena.allocator(), void, &[_]xitdb.PathPart(void){})) |path| {
+                                    var stream = std.io.fixedBufferStream(buffer);
+                                    var reader = stream.reader();
+                                    var entry = Index(repo_kind).Entry{
+                                        .ctime_secs = try reader.readIntBig(u32),
+                                        .ctime_nsecs = try reader.readIntBig(u32),
+                                        .mtime_secs = try reader.readIntBig(u32),
+                                        .mtime_nsecs = try reader.readIntBig(u32),
+                                        .dev = try reader.readIntBig(u32),
+                                        .ino = try reader.readIntBig(u32),
+                                        .mode = @bitCast(try reader.readIntBig(u32)),
+                                        .uid = try reader.readIntBig(u32),
+                                        .gid = try reader.readIntBig(u32),
+                                        .file_size = try reader.readIntBig(u32),
+                                        .oid = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN),
+                                        .flags = @bitCast(try reader.readIntBig(u16)),
+                                        .extended_flags = null, // TODO: read this if necessary
+                                        .path = path,
+                                    };
+                                    if (entry.mode.unix_permission != 0o755) { // ensure mode is valid
+                                        entry.mode.unix_permission = 0o644;
+                                    }
+                                    if (entry.path.len != entry.flags.name_length) {
+                                        return error.InvalidPathSize;
+                                    }
+                                    try index.addEntry(entry);
+                                }
                             }
-                            if (entry.path.len != entry.flags.name_length) {
-                                return error.InvalidPathSize;
-                            }
-                            try index.addEntry(entry);
                         }
                     }
                 },
@@ -441,12 +443,13 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                             var iter = try cursor.iter(.map);
                             defer iter.deinit();
                             while (try iter.next()) |*next_cursor| {
-                                const path = (try next_cursor.readKeyBytesAlloc(ctx_self.allocator, void, &[_]xitdb.PathPart(void){})).?;
-                                defer ctx_self.allocator.free(path);
-                                if (!ctx_self.index.entries.contains(path)) {
-                                    try cursor.execute(void, &[_]xitdb.PathPart(void){
-                                        .{ .map_remove = xitdb.hash_buffer(path) },
-                                    });
+                                if (try next_cursor.readKeyBytesAlloc(ctx_self.allocator, void, &[_]xitdb.PathPart(void){})) |path| {
+                                    defer ctx_self.allocator.free(path);
+                                    if (!ctx_self.index.entries.contains(path)) {
+                                        try cursor.execute(void, &[_]xitdb.PathPart(void){
+                                            .{ .map_remove = xitdb.hash_buffer(path) },
+                                        });
+                                    }
                                 }
                             }
 

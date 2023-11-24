@@ -90,13 +90,14 @@ pub const RefList = struct {
                     var iter = try cursor.iter(.map);
                     defer iter.deinit();
                     while (try iter.next()) |*next_cursor| {
-                        const name = (try next_cursor.readKeyBytesAlloc(allocator, void, &[_]xitdb.PathPart(void){})).?;
-                        errdefer allocator.free(name);
+                        if (try next_cursor.readKeyBytesAlloc(allocator, void, &[_]xitdb.PathPart(void){})) |name| {
+                            errdefer allocator.free(name);
 
-                        var ref = try Ref.initWithName(repo_kind, core, allocator, dir_name, name);
-                        errdefer ref.deinit();
+                            var ref = try Ref.initWithName(repo_kind, core, allocator, dir_name, name);
+                            errdefer ref.deinit();
 
-                        try self.refs.append(ref);
+                            try self.refs.append(ref);
+                        }
                     }
                 }
             },
