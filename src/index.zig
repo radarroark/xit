@@ -139,7 +139,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                 .xit => {
                     if (try core.db.rootCursor().readCursor(void, &[_]xitdb.PathPart(void){
                         .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
-                        .{ .map_get = .{ .bytes = "index" } },
+                        .{ .map_get = xitdb.hash_buffer("index") },
                     })) |cursor| {
                         var iter = try cursor.iter(.map);
                         defer iter.deinit();
@@ -217,7 +217,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     try core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
                         .{ .list_get = .append_copy },
                         .map_create,
-                        .{ .map_get = .{ .bytes = "objects" } },
+                        .{ .map_get = xitdb.hash_buffer("objects") },
                         .map_create,
                         .{ .ctx = Ctx{ .core = core, .index = self, .path = path } },
                     });
@@ -445,7 +445,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                 defer ctx_self.allocator.free(path);
                                 if (!ctx_self.index.entries.contains(path)) {
                                     try cursor.execute(void, &[_]xitdb.PathPart(void){
-                                        .{ .map_remove = .{ .bytes = path } },
+                                        .{ .map_remove = xitdb.hash_buffer(path) },
                                     });
                                 }
                             }
@@ -467,10 +467,12 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                 try writer.writeAll(&entry.oid);
                                 try writer.writeIntBig(u16, @as(u16, @bitCast(entry.flags)));
 
+                                const path_hash = xitdb.hash_buffer(entry.path);
+
                                 if (try ctx_self.db.rootCursor().readBytesAlloc(ctx_self.allocator, void, &[_]xitdb.PathPart(void){
                                     .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
-                                    .{ .map_get = .{ .bytes = "index" } },
-                                    .{ .map_get = .{ .bytes = entry.path } },
+                                    .{ .map_get = xitdb.hash_buffer("index") },
+                                    .{ .map_get = path_hash },
                                 })) |existing_entry| {
                                     defer ctx_self.allocator.free(existing_entry);
                                     if (std.mem.eql(u8, entry_buffer.items, existing_entry)) {
@@ -478,9 +480,10 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                     }
                                 }
 
+                                _ = try cursor.db.writeOnce(path_hash, entry.path);
                                 try cursor.execute(void, &[_]xitdb.PathPart(void){
-                                    .{ .map_get = .{ .bytes = entry.path } },
-                                    .{ .value = .{ .bytes = entry_buffer.items } },
+                                    .{ .map_get = path_hash },
+                                    .{ .value = .{ .pointer = try cursor.db.writeOnce(xitdb.hash_buffer(entry_buffer.items), entry_buffer.items) } },
                                 });
                             }
                         }
@@ -488,7 +491,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     try opts.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
                         .{ .list_get = .append_copy },
                         .map_create,
-                        .{ .map_get = .{ .bytes = "index" } },
+                        .{ .map_get = xitdb.hash_buffer("index") },
                         .map_create,
                         .{ .ctx = Ctx{ .db = opts.db, .allocator = allocator, .index = self } },
                     });

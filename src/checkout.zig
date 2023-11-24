@@ -94,8 +94,8 @@ fn createFileFromObject(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kin
         .xit => {
             if (try core.db.rootCursor().readBytesAlloc(allocator, void, &[_]xitdb.PathPart(void){
                 .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
-                .{ .map_get = .{ .bytes = "objects" } },
-                .{ .map_get = .{ .bytes = &oid_hex } },
+                .{ .map_get = xitdb.hash_buffer("objects") },
+                .{ .map_get = xitdb.hash_buffer(&oid_hex) },
             })) |bytes| {
                 defer allocator.free(bytes);
 
