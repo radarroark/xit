@@ -156,22 +156,15 @@ pub fn writeBlob(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core
             try std.fs.rename(hash_prefix_dir, compressed_tmp_file_name, hash_prefix_dir, hash_suffix);
         },
         .xit => {
+            var file_hash_bytes = [_]u8{0} ** xitdb.HASH_INT_SIZE;
+            @memcpy(file_hash_bytes[0..hash.SHA1_BYTES_LEN], sha1_bytes_buffer);
+            const file_hash = std.mem.bytesToValue(xitdb.Hash, &file_hash_bytes);
+
             const Ctx = struct {
                 header: []const u8,
                 file: std.fs.File,
-                allocator: std.mem.Allocator,
 
-                pub fn run(ctx_self: @This(), cursor: xitdb.Database(.file).Cursor) !void {
-                    if (!cursor.is_new) {
-                        return;
-                    }
-
-                    // TODO: writing to memory won't work for large files.
-                    // once xitdb supports a writer, use that instead.
-                    var buffer = std.ArrayList(u8).init(ctx_self.allocator);
-                    defer buffer.deinit();
-                    const writer = buffer.writer();
-
+                pub fn run(ctx_self: @This(), writer: *xitdb.Database(.file).Writer) !void {
                     try writer.writeAll(ctx_self.header);
                     var read_buffer = [_]u8{0} ** MAX_FILE_READ_SIZE;
                     var offset: u64 = 0;
@@ -183,15 +176,12 @@ pub fn writeBlob(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core
                         }
                         try writer.writeAll(read_buffer[0..size]);
                     }
-
-                    try cursor.execute(void, &[_]xitdb.PathPart(void){
-                        .{ .value = .{ .pointer = try cursor.db.writeAtHash(xitdb.hash_buffer(buffer.items), buffer.items, .once) } },
-                    });
                 }
             };
-            try opts.cursor.execute(Ctx, &[_]xitdb.PathPart(Ctx){
+
+            try opts.cursor.execute(void, &[_]xitdb.PathPart(void){
                 .{ .map_get = xitdb.hash_buffer(&sha1_hex) },
-                .{ .ctx = Ctx{ .header = header, .file = file, .allocator = allocator } },
+                .{ .value = .{ .pointer = try opts.cursor.db.writerAtHash(file_hash, Ctx, Ctx{ .header = header, .file = file }, .once) } },
             });
         },
     }
