@@ -73,10 +73,10 @@ pub fn create(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, a
 
                         pub fn run(heads_ctx_self: @This(), heads_cursor: xitdb.Database(.file).Cursor) !void {
                             const name_hash = xitdb.hash_buffer(heads_ctx_self.name);
-                            _ = try heads_cursor.db.writeOnce(name_hash, heads_ctx_self.name);
+                            _ = try heads_cursor.db.writeAtHash(name_hash, heads_ctx_self.name, .once);
                             try heads_cursor.execute(void, &[_]xitdb.PathPart(void){
                                 .{ .map_get = name_hash },
-                                .{ .value = .{ .pointer = try heads_cursor.db.writeOnce(xitdb.hash_buffer(heads_ctx_self.head_file_buffer), heads_ctx_self.head_file_buffer) } },
+                                .{ .value = .{ .pointer = try heads_cursor.db.writeAtHash(xitdb.hash_buffer(heads_ctx_self.head_file_buffer), heads_ctx_self.head_file_buffer, .once) } },
                             });
                         }
                     };

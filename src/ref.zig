@@ -282,20 +282,20 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core
                 var write_buffer = [_]u8{0} ** MAX_READ_BYTES;
                 const content = try std.fmt.bufPrint(&write_buffer, "ref: refs/heads/{s}", .{target});
                 const content_hash = xitdb.hash_buffer(content);
-                try path_parts.append(.{ .value = .{ .pointer = try core.db.writeOnce(content_hash, content) } });
+                try path_parts.append(.{ .value = .{ .pointer = try core.db.writeAtHash(content_hash, content, .once) } });
                 try core.db.rootCursor().execute(void, path_parts.items);
             } else {
                 if (oid_maybe) |oid| {
                     // the HEAD is detached, so just update it with the oid
                     const oid_hash = xitdb.hash_buffer(&oid);
-                    try path_parts.append(.{ .value = .{ .pointer = try core.db.writeOnce(oid_hash, &oid) } });
+                    try path_parts.append(.{ .value = .{ .pointer = try core.db.writeAtHash(oid_hash, &oid, .once) } });
                     try core.db.rootCursor().execute(void, path_parts.items);
                 } else {
                     // point HEAD at the ref, even though the ref doesn't exist
                     var write_buffer = [_]u8{0} ** MAX_READ_BYTES;
                     const content = try std.fmt.bufPrint(&write_buffer, "ref: refs/heads/{s}", .{target});
                     const content_hash = xitdb.hash_buffer(content);
-                    try path_parts.append(.{ .value = .{ .pointer = try core.db.writeOnce(content_hash, content) } });
+                    try path_parts.append(.{ .value = .{ .pointer = try core.db.writeAtHash(content_hash, content, .once) } });
                     try core.db.rootCursor().execute(void, path_parts.items);
                 }
             }
@@ -397,10 +397,10 @@ pub fn updateRecur(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
             // otherwise, update it with the oid
             else {
                 const file_name_hash = xitdb.hash_buffer(file_name);
-                _ = try opts.cursor.db.writeOnce(file_name_hash, file_name);
+                _ = try opts.cursor.db.writeAtHash(file_name_hash, file_name, .once);
                 try opts.cursor.execute(void, &[_]xitdb.PathPart(void){
                     .{ .map_get = file_name_hash },
-                    .{ .value = .{ .pointer = try opts.cursor.db.writeOnce(xitdb.hash_buffer(&oid), &oid) } },
+                    .{ .value = .{ .pointer = try opts.cursor.db.writeAtHash(xitdb.hash_buffer(&oid), &oid, .once) } },
                 });
             }
         },

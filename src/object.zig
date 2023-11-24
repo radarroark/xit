@@ -185,7 +185,7 @@ pub fn writeBlob(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core
                     }
 
                     try cursor.execute(void, &[_]xitdb.PathPart(void){
-                        .{ .value = .{ .pointer = try cursor.db.writeOnce(xitdb.hash_buffer(buffer.items), buffer.items) } },
+                        .{ .value = .{ .pointer = try cursor.db.writeAtHash(xitdb.hash_buffer(buffer.items), buffer.items, .once) } },
                     });
                 }
             };
@@ -262,7 +262,7 @@ fn writeTree(comptime repo_kind: rp.RepoKind, opts: ObjectOpts(repo_kind), alloc
                         return error.ObjectAlreadyExists;
                     }
                     try cursor.execute(void, &[_]xitdb.PathPart(void){
-                        .{ .value = .{ .pointer = try cursor.db.writeOnce(xitdb.hash_buffer(ctx_self.tree), ctx_self.tree) } },
+                        .{ .value = .{ .pointer = try cursor.db.writeAtHash(xitdb.hash_buffer(ctx_self.tree), ctx_self.tree, .once) } },
                     });
                 }
             };
@@ -457,7 +457,7 @@ pub fn writeCommit(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
                             // write commit
                             try obj_cursor.execute(void, &[_]xitdb.PathPart(void){
                                 .{ .map_get = xitdb.hash_buffer(&obj_ctx_self.commit_sha1_hex) },
-                                .{ .value = .{ .pointer = try obj_cursor.db.writeOnce(xitdb.hash_buffer(commit), commit) } },
+                                .{ .value = .{ .pointer = try obj_cursor.db.writeAtHash(xitdb.hash_buffer(commit), commit, .once) } },
                             });
                         }
                     };

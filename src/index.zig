@@ -483,10 +483,10 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                     }
                                 }
 
-                                _ = try cursor.db.writeOnce(path_hash, entry.path);
+                                _ = try cursor.db.writeAtHash(path_hash, entry.path, .once);
                                 try cursor.execute(void, &[_]xitdb.PathPart(void){
                                     .{ .map_get = path_hash },
-                                    .{ .value = .{ .pointer = try cursor.db.writeOnce(xitdb.hash_buffer(entry_buffer.items), entry_buffer.items) } },
+                                    .{ .value = .{ .pointer = try cursor.db.writeAtHash(xitdb.hash_buffer(entry_buffer.items), entry_buffer.items, .once) } },
                                 });
                             }
                         }
