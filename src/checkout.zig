@@ -5,6 +5,9 @@
 //! since they use the same functionality underneath, but
 //! it's one of those times when you have to set aside your
 //! engineer brain and think about it as a user. oh well.
+//! anyway, i didn't mix them up internally, at least.
+//! the checkout fn below only switches branches,
+//! while the restore fn can be used to restore files.
 
 const std = @import("std");
 const xitdb = @import("xitdb");
@@ -153,6 +156,7 @@ fn createFileFromObject(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kin
                 try createFileFromObject(repo_kind, core, allocator, new_path, entry);
             }
         },
+        // TODO: handle symlinks
         else => return error.ObjectInvalid,
     }
 }
