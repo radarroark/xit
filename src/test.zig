@@ -794,9 +794,17 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
         try args.append("hello.txt");
         try main.xitMain(repo_kind, allocator, &args);
 
+        // directories can be restored
         args.clearAndFree();
         try args.append("restore");
         try args.append("src");
+        try main.xitMain(repo_kind, allocator, &args);
+
+        // nested paths can be restored
+        try repo_dir.deleteFile("src/zig/main.zig");
+        args.clearAndFree();
+        try args.append("restore");
+        try args.append("src/zig/main.zig");
         try main.xitMain(repo_kind, allocator, &args);
 
         // remove changes to index

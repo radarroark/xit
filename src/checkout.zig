@@ -147,6 +147,25 @@ fn createFileFromObject(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kin
     }
 }
 
+fn getTreeEntryForPath(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, parent: obj.Object(repo_kind), path_parts: []const []const u8) !?obj.TreeEntry {
+    const path_part = path_parts[0];
+    const tree_entry = parent.content.tree.entries.get(path_part) orelse return null;
+
+    if (path_parts.len == 1) {
+        return tree_entry;
+    }
+
+    const oid_hex = std.fmt.bytesToHex(tree_entry.oid, .lower);
+    var tree_object = try obj.Object(repo_kind).init(allocator, core, oid_hex);
+    defer tree_object.deinit();
+
+    switch (tree_object.content) {
+        .blob => return null,
+        .tree => return getTreeEntryForPath(repo_kind, core, allocator, tree_object, path_parts[1..]),
+        .commit => return error.ObjectInvalid,
+    }
+}
+
 pub const TreeToWorkspaceChange = enum {
     none,
     untracked,
@@ -446,7 +465,17 @@ pub fn restore(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, 
     defer tree_object.deinit();
 
     // get the entry for the given path
-    const tree_entry = tree_object.content.tree.entries.get(path) orelse return error.ObjectNotFound;
+    var path_parts = std.ArrayList([]const u8).init(allocator);
+    defer path_parts.deinit();
+    var start: usize = 0;
+    for (path, 0..) |ch, i| {
+        if (std.fs.path.isSep(ch) and i > start) {
+            try path_parts.append(path[start..i]);
+            start = i + 1;
+        }
+    }
+    try path_parts.append(path[start..]);
+    const tree_entry = try getTreeEntryForPath(repo_kind, core, allocator, tree_object, path_parts.items) orelse return error.ObjectNotFound;
 
     // restore file in the working tree
     try createFileFromObject(repo_kind, core, allocator, path, tree_entry);
