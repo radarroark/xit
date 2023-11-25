@@ -801,7 +801,7 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
         try main.xitMain(repo_kind, allocator, &args);
 
         // nested paths can be restored
-        try repo_dir.deleteFile("src/zig/main.zig");
+        try repo_dir.deleteTree("src");
         args.clearAndFree();
         try args.append("restore");
         try args.append("src/zig/main.zig");

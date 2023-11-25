@@ -88,6 +88,11 @@ fn createFileFromObject(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kin
                     var in_file = try hash_prefix_dir.openFile(hash_suffix, .{});
                     defer in_file.close();
 
+                    // create parent dir(s)
+                    if (std.fs.path.dirname(path)) |dir| {
+                        try core.repo_dir.makePath(dir);
+                    }
+
                     // open the out file
                     const out_file = try core.repo_dir.createFile(path, .{ .mode = @as(u32, @bitCast(tree_entry.mode)) });
                     defer out_file.close();
@@ -101,6 +106,11 @@ fn createFileFromObject(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kin
                         .{ .map_get = xitdb.hash_buffer("objects") },
                         .{ .map_get = xitdb.hash_buffer(&oid_hex) },
                     })) |ptr| {
+                        // create parent dir(s)
+                        if (std.fs.path.dirname(path)) |dir| {
+                            try core.repo_dir.makePath(dir);
+                        }
+
                         // open the out file
                         const out_file = try core.repo_dir.createFile(path, .{ .mode = @as(u32, @bitCast(tree_entry.mode)) });
                         defer out_file.close();
