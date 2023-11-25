@@ -73,60 +73,77 @@ pub const CheckoutResult = struct {
 fn createFileFromObject(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, path: []const u8, tree_entry: obj.TreeEntry) !void {
     const oid_hex = std.fmt.bytesToHex(tree_entry.oid, .lower);
 
-    switch (repo_kind) {
-        .git => {
-            // open the internal dirs
-            var objects_dir = try core.git_dir.openDir("objects", .{});
-            defer objects_dir.close();
+    switch (tree_entry.mode.object_type) {
+        .regular_file => {
+            switch (repo_kind) {
+                .git => {
+                    // open the internal dirs
+                    var objects_dir = try core.git_dir.openDir("objects", .{});
+                    defer objects_dir.close();
 
-            // open the in file
-            var hash_prefix_dir = try objects_dir.makeOpenPath(oid_hex[0..2], .{});
-            defer hash_prefix_dir.close();
-            const hash_suffix = oid_hex[2..];
-            var in_file = try hash_prefix_dir.openFile(hash_suffix, .{});
-            defer in_file.close();
+                    // open the in file
+                    var hash_prefix_dir = try objects_dir.makeOpenPath(oid_hex[0..2], .{});
+                    defer hash_prefix_dir.close();
+                    const hash_suffix = oid_hex[2..];
+                    var in_file = try hash_prefix_dir.openFile(hash_suffix, .{});
+                    defer in_file.close();
 
-            // open the out file
-            const out_file = try core.repo_dir.createFile(path, .{ .mode = @as(u32, @bitCast(tree_entry.mode)) });
-            defer out_file.close();
+                    // open the out file
+                    const out_file = try core.repo_dir.createFile(path, .{ .mode = @as(u32, @bitCast(tree_entry.mode)) });
+                    defer out_file.close();
 
-            // create the file
-            try compress.decompress(allocator, in_file, out_file, true);
-        },
-        .xit => {
-            if (try core.db.rootCursor().readBytesPointer(void, &[_]xitdb.PathPart(void){
-                .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
-                .{ .map_get = xitdb.hash_buffer("objects") },
-                .{ .map_get = xitdb.hash_buffer(&oid_hex) },
-            })) |ptr| {
-                // open the out file
-                const out_file = try core.repo_dir.createFile(path, .{ .mode = @as(u32, @bitCast(tree_entry.mode)) });
-                defer out_file.close();
+                    // create the file
+                    try compress.decompress(allocator, in_file, out_file, true);
+                },
+                .xit => {
+                    if (try core.db.rootCursor().readBytesPointer(void, &[_]xitdb.PathPart(void){
+                        .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
+                        .{ .map_get = xitdb.hash_buffer("objects") },
+                        .{ .map_get = xitdb.hash_buffer(&oid_hex) },
+                    })) |ptr| {
+                        // open the out file
+                        const out_file = try core.repo_dir.createFile(path, .{ .mode = @as(u32, @bitCast(tree_entry.mode)) });
+                        defer out_file.close();
 
-                var reader = try core.db.readerAtPointer(ptr);
-                var read_buffer = [_]u8{0} ** MAX_FILE_READ_BYTES;
-                var header_skipped = false;
-                while (true) {
-                    const size = try reader.read(&read_buffer);
-                    if (size == 0) break;
-                    if (!header_skipped) {
-                        if (std.mem.indexOf(u8, read_buffer[0..size], &[_]u8{0})) |index| {
-                            if (index + 1 < size) {
-                                try out_file.writeAll(read_buffer[index + 1 .. size]);
+                        var reader = try core.db.readerAtPointer(ptr);
+                        var read_buffer = [_]u8{0} ** MAX_FILE_READ_BYTES;
+                        var header_skipped = false;
+                        while (true) {
+                            const size = try reader.read(&read_buffer);
+                            if (size == 0) break;
+                            if (!header_skipped) {
+                                if (std.mem.indexOf(u8, read_buffer[0..size], &[_]u8{0})) |index| {
+                                    if (index + 1 < size) {
+                                        try out_file.writeAll(read_buffer[index + 1 .. size]);
+                                    }
+                                    header_skipped = true;
+                                }
+                            } else {
+                                try out_file.writeAll(read_buffer[0..size]);
                             }
-                            header_skipped = true;
                         }
-                    } else {
-                        try out_file.writeAll(read_buffer[0..size]);
-                    }
-                }
-                if (header_skipped) return;
+                        if (header_skipped) return;
 
-                return error.ObjectInvalid;
-            } else {
-                return error.ObjectNotFound;
+                        return error.ObjectInvalid;
+                    } else {
+                        return error.ObjectNotFound;
+                    }
+                },
             }
         },
+        .tree => {
+            // load the tree
+            var tree_object = try obj.Object(repo_kind).init(allocator, core, oid_hex);
+            defer tree_object.deinit();
+
+            // update each entry recursively
+            for (tree_object.content.tree.entries.keys(), tree_object.content.tree.entries.values()) |sub_path, entry| {
+                const new_path = try std.fs.path.join(allocator, &[_][]const u8{ path, sub_path });
+                defer allocator.free(new_path);
+                try createFileFromObject(repo_kind, core, allocator, new_path, entry);
+            }
+        },
+        else => return error.ObjectInvalid,
     }
 }
 
