@@ -766,6 +766,47 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
         }
     }
 
+    // restore
+    {
+        // there are two modified files remaining
+        {
+            var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+            defer repo.deinit();
+            var status = try repo.status();
+            defer status.deinit();
+            var workspace_modified_map = std.StringHashMap(void).init(allocator);
+            defer workspace_modified_map.deinit();
+            try expectEqual(2, status.workspace_modified.items.len);
+        }
+
+        args.clearAndFree();
+        try args.append("restore");
+        try args.append("README");
+        try main.xitMain(repo_kind, allocator, &args);
+
+        args.clearAndFree();
+        try args.append("restore");
+        try args.append("hello.txt");
+        try main.xitMain(repo_kind, allocator, &args);
+
+        // remove file from index
+        args.clearAndFree();
+        try args.append("add");
+        try args.append("hello.txt");
+        try main.xitMain(repo_kind, allocator, &args);
+
+        // there are no modified files remaining
+        {
+            var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+            defer repo.deinit();
+            var status = try repo.status();
+            defer status.deinit();
+            var workspace_modified_map = std.StringHashMap(void).init(allocator);
+            defer workspace_modified_map.deinit();
+            try expectEqual(0, status.workspace_modified.items.len);
+        }
+    }
+
     // parse objects
     {
         var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
@@ -913,36 +954,6 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
         var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
         defer repo.deinit();
         try expectEqual(commit3, try ref.resolve(repo_kind, &repo.core, "stuff"));
-    }
-
-    // restore
-    {
-        // there is one modified file remaining
-        {
-            var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
-            defer repo.deinit();
-            var status = try repo.status();
-            defer status.deinit();
-            var workspace_modified_map = std.StringHashMap(void).init(allocator);
-            defer workspace_modified_map.deinit();
-            try expectEqual(1, status.workspace_modified.items.len);
-        }
-
-        args.clearAndFree();
-        try args.append("restore");
-        try args.append("README");
-        try main.xitMain(repo_kind, allocator, &args);
-
-        // there are no modified files remaining
-        {
-            var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
-            defer repo.deinit();
-            var status = try repo.status();
-            defer status.deinit();
-            var workspace_modified_map = std.StringHashMap(void).init(allocator);
-            defer workspace_modified_map.deinit();
-            try expectEqual(0, status.workspace_modified.items.len);
-        }
     }
 }
 
