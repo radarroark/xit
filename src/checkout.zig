@@ -82,7 +82,7 @@ fn createFileFromObject(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kin
                     defer objects_dir.close();
 
                     // open the in file
-                    var hash_prefix_dir = try objects_dir.makeOpenPath(oid_hex[0..2], .{});
+                    var hash_prefix_dir = try objects_dir.openDir(oid_hex[0..2], .{});
                     defer hash_prefix_dir.close();
                     const hash_suffix = oid_hex[2..];
                     var in_file = try hash_prefix_dir.openFile(hash_suffix, .{});
