@@ -103,26 +103,24 @@ fn createFileFromObject(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kin
                 const out_file = try core.repo_dir.createFile(path, .{ .mode = @as(u32, @bitCast(tree_entry.mode)) });
                 defer out_file.close();
 
-                var reader_maybe = try core.db.readerAtPointer(ptr);
-                if (reader_maybe) |*reader| {
-                    var read_buffer = [_]u8{0} ** MAX_FILE_READ_BYTES;
-                    var header_skipped = false;
-                    while (true) {
-                        const size = try reader.read(&read_buffer);
-                        if (size == 0) break;
-                        if (!header_skipped) {
-                            if (std.mem.indexOf(u8, read_buffer[0..size], &[_]u8{0})) |index| {
-                                if (index + 1 < size) {
-                                    try out_file.writeAll(read_buffer[index + 1 .. size]);
-                                }
-                                header_skipped = true;
+                var reader = try core.db.readerAtPointer(ptr);
+                var read_buffer = [_]u8{0} ** MAX_FILE_READ_BYTES;
+                var header_skipped = false;
+                while (true) {
+                    const size = try reader.read(&read_buffer);
+                    if (size == 0) break;
+                    if (!header_skipped) {
+                        if (std.mem.indexOf(u8, read_buffer[0..size], &[_]u8{0})) |index| {
+                            if (index + 1 < size) {
+                                try out_file.writeAll(read_buffer[index + 1 .. size]);
                             }
-                        } else {
-                            try out_file.writeAll(read_buffer[0..size]);
+                            header_skipped = true;
                         }
+                    } else {
+                        try out_file.writeAll(read_buffer[0..size]);
                     }
-                    if (header_skipped) return;
                 }
+                if (header_skipped) return;
 
                 return error.ObjectInvalid;
             } else {
