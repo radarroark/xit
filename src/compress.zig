@@ -5,7 +5,7 @@ const std = @import("std");
 const deflate = std.compress.deflate;
 const zlib = std.compress.zlib;
 
-const MAX_FILE_READ_BYTES = 1024;
+const MAX_FILE_READ_BYTES = 1024; // FIXME: this is arbitrary...
 
 pub fn compress(allocator: std.mem.Allocator, in: std.fs.File, out: std.fs.File) !void {
     // init stream from input file

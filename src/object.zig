@@ -13,7 +13,7 @@ const ref = @import("./ref.zig");
 const io = @import("./io.zig");
 const rp = @import("./repo.zig");
 
-const MAX_FILE_READ_SIZE: comptime_int = 1000; // FIXME: this is arbitrary...
+const MAX_FILE_READ_BYTES = 1024; // FIXME: this is arbitrary...
 
 pub const ObjectWriteError = error{
     ObjectAlreadyExists,
@@ -132,7 +132,7 @@ pub fn writeBlob(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core
             try tmp_file.writeAll(header);
 
             // copy file into temp file
-            var read_buffer = [_]u8{0} ** MAX_FILE_READ_SIZE;
+            var read_buffer = [_]u8{0} ** MAX_FILE_READ_BYTES;
             var offset: u64 = 0;
             while (true) {
                 const size = try file.pread(&read_buffer, offset);
@@ -166,7 +166,7 @@ pub fn writeBlob(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core
 
                 pub fn run(ctx_self: @This(), writer: *xitdb.Database(.file).Writer) !void {
                     try writer.writeAll(ctx_self.header);
-                    var read_buffer = [_]u8{0} ** MAX_FILE_READ_SIZE;
+                    var read_buffer = [_]u8{0} ** MAX_FILE_READ_BYTES;
                     var offset: u64 = 0;
                     while (true) {
                         const size = try ctx_self.file.pread(&read_buffer, offset);
@@ -598,11 +598,11 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
             defer state.deinit();
 
             // read the object kind
-            const object_kind = try state.reader.readUntilDelimiterAlloc(allocator, ' ', MAX_FILE_READ_SIZE);
+            const object_kind = try state.reader.readUntilDelimiterAlloc(allocator, ' ', MAX_FILE_READ_BYTES);
             defer allocator.free(object_kind);
 
             // read the length (currently unused)
-            const object_len = try state.reader.readUntilDelimiterAlloc(allocator, 0, MAX_FILE_READ_SIZE);
+            const object_len = try state.reader.readUntilDelimiterAlloc(allocator, 0, MAX_FILE_READ_BYTES);
             defer allocator.free(object_len);
             _ = try std.fmt.parseInt(usize, object_len, 10);
 
@@ -619,14 +619,14 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                 var entries = std.StringArrayHashMap(TreeEntry).init(arena.allocator());
 
                 while (true) {
-                    const entry_mode_str = state.reader.readUntilDelimiterAlloc(arena.allocator(), ' ', MAX_FILE_READ_SIZE) catch |err| {
+                    const entry_mode_str = state.reader.readUntilDelimiterAlloc(arena.allocator(), ' ', MAX_FILE_READ_BYTES) catch |err| {
                         switch (err) {
                             error.EndOfStream => break,
                             else => return err,
                         }
                     };
                     const entry_mode: io.Mode = @bitCast(try std.fmt.parseInt(u32, entry_mode_str, 8));
-                    const entry_name = try state.reader.readUntilDelimiterAlloc(arena.allocator(), 0, MAX_FILE_READ_SIZE);
+                    const entry_name = try state.reader.readUntilDelimiterAlloc(arena.allocator(), 0, MAX_FILE_READ_BYTES);
                     const entry_oid = try state.reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
                     try entries.put(entry_name, TreeEntry{ .oid = entry_oid, .mode = entry_mode });
                 }
@@ -638,7 +638,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                 };
             } else if (std.mem.eql(u8, "commit", object_kind)) {
                 // read the content kind
-                const content_kind = try state.reader.readUntilDelimiterAlloc(allocator, ' ', MAX_FILE_READ_SIZE);
+                const content_kind = try state.reader.readUntilDelimiterAlloc(allocator, ' ', MAX_FILE_READ_BYTES);
                 defer allocator.free(content_kind);
                 if (!std.mem.eql(u8, "tree", content_kind)) {
                     return error.InvalidCommitContentKind;
@@ -672,7 +672,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                 var metadata = std.StringHashMap([]const u8).init(allocator);
                 defer metadata.deinit();
                 while (true) {
-                    const line = try state.reader.readUntilDelimiterAlloc(object.arena.allocator(), '\n', MAX_FILE_READ_SIZE);
+                    const line = try state.reader.readUntilDelimiterAlloc(object.arena.allocator(), '\n', MAX_FILE_READ_BYTES);
                     if (line.len == 0) {
                         break;
                     }
@@ -687,7 +687,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                 }
 
                 // read the message
-                object.content.commit.message = try state.reader.readAllAlloc(object.arena.allocator(), MAX_FILE_READ_SIZE);
+                object.content.commit.message = try state.reader.readAllAlloc(object.arena.allocator(), MAX_FILE_READ_BYTES);
 
                 // set metadata fields
                 if (metadata.fetchRemove("parent")) |parent| {

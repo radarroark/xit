@@ -16,8 +16,8 @@ const idx = @import("./index.zig");
 const io = @import("./io.zig");
 const rp = @import("./repo.zig");
 
-const MAX_FILE_READ_SIZE: comptime_int = 1000; // FIXME: this is arbitrary...
-//
+const MAX_FILE_READ_BYTES = 1024; // FIXME: this is arbitrary...
+
 pub const CheckoutError = error{
     CheckoutConflict,
 };
@@ -105,7 +105,7 @@ fn createFileFromObject(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kin
 
                 var reader_maybe = try core.db.readerAtPointer(ptr);
                 if (reader_maybe) |*reader| {
-                    var read_buffer = [_]u8{0} ** MAX_FILE_READ_SIZE;
+                    var read_buffer = [_]u8{0} ** MAX_FILE_READ_BYTES;
                     var header_skipped = false;
                     while (true) {
                         const size = try reader.read(&read_buffer);
