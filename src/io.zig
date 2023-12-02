@@ -50,6 +50,10 @@ pub const Mode = packed struct(u32) {
     unused: u3 = 0,
     object_type: ObjectType,
     padding: u16 = 0,
+
+    pub fn to_str(self: Mode) []const u8 {
+        return if (self.unix_permission == 0o755) "100755" else "100644";
+    }
 };
 
 pub fn getMode(meta: std.fs.File.Metadata) Mode {

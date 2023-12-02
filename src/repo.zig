@@ -8,6 +8,7 @@ const branch = @import("./branch.zig");
 const chk = @import("./checkout.zig");
 const ref = @import("./ref.zig");
 const io = @import("./io.zig");
+const df = @import("./diff.zig");
 
 pub const RepoKind = enum {
     git,
@@ -249,6 +250,16 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         try stdout.print("D  {s}\n", .{path});
                     }
                 },
+                cmd.CommandData.diff => {
+                    var diff_list = try self.diff(cmd_data.diff.kind);
+                    defer diff_list.deinit();
+
+                    for (diff_list.diffs.items) |diff_item| {
+                        for (diff_item.lines.items) |line| {
+                            try stdout.print("{s}\n", .{line});
+                        }
+                    }
+                },
                 cmd.CommandData.branch => {
                     if (cmd_data.branch.name) |name| {
                         try branch.create(repo_kind, &self.core, self.allocator, name);
@@ -286,6 +297,10 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
         pub fn status(self: *Repo(repo_kind)) !st.Status(repo_kind) {
             return try st.Status(repo_kind).init(self.allocator, &self.core);
+        }
+
+        pub fn diff(self: *Repo(repo_kind), diff_kind: df.DiffKind) !df.DiffList(repo_kind) {
+            return try df.DiffList(repo_kind).init(self.allocator, &self.core, diff_kind);
         }
 
         pub fn add(self: *Repo(repo_kind), paths: std.ArrayList([]const u8)) !void {

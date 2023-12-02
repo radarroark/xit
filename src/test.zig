@@ -1,5 +1,6 @@
 const std = @import("std");
 const xitdb = @import("xitdb");
+const builtin = @import("builtin");
 const main = @import("./main.zig");
 const hash = @import("./hash.zig");
 const idx = @import("./index.zig");
@@ -115,6 +116,11 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
         defer tests.close();
         try tests.writeAll("testing...");
 
+        // make file
+        var run_sh = try repo_dir.createFile("run.sh", .{});
+        defer run_sh.close();
+        try run_sh.writeAll("#!/bin/sh");
+
         // make file in a dir
         var docs_dir = try repo_dir.makeOpenPath("docs", .{});
         defer docs_dir.close();
@@ -218,22 +224,6 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
         try args.append("pointless commit");
         try expectEqual(error.ObjectAlreadyExists, main.xitMain(repo_kind, allocator, &args));
 
-        // delete a file
-        try repo_dir.deleteFile("LICENSE");
-        args.clearAndFree();
-        try args.append("add");
-        try args.append("LICENSE");
-        try main.xitMain(repo_kind, allocator, &args);
-
-        // delete a file and dir
-        {
-            try repo_dir.deleteTree("docs");
-            args.clearAndFree();
-            try args.append("add");
-            try args.append("docs/design.md");
-            try main.xitMain(repo_kind, allocator, &args);
-        }
-
         // replace a file with a directory
         try repo_dir.deleteFile("tests");
         var tests_dir = try repo_dir.makeOpenPath("tests", .{});
@@ -258,7 +248,100 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
         defer main_zig.close();
         try main_zig.writeAll("pub fn main() !void {}");
 
-        // add the files
+        // change permissions of a file
+        if (builtin.os.tag != .windows) {
+            const run_sh = try repo_dir.openFile("run.sh", .{ .mode = .read_write });
+            defer run_sh.close();
+            try run_sh.setPermissions(std.fs.File.Permissions{ .inner = std.fs.File.PermissionsUnix{ .mode = 0o755 } });
+        }
+
+        // workspace diff
+        {
+            var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+            defer repo.deinit();
+            var diff_list = try repo.diff(.workspace);
+            defer diff_list.deinit();
+
+            if (builtin.os.tag != .windows) {
+                try expectEqual(3, diff_list.diffs.items.len);
+            } else {
+                try expectEqual(2, diff_list.diffs.items.len);
+            }
+
+            for (diff_list.diffs.items) |diff_item| {
+                if (std.mem.eql(u8, "hello.txt", diff_item.path)) {
+                    try std.testing.expectEqualStrings("diff --git a/hello.txt b/hello.txt", diff_item.lines.items[0]);
+                } else if (std.mem.eql(u8, "run.sh", diff_item.path)) {
+                    try std.testing.expectEqualStrings("diff --git a/run.sh b/run.sh", diff_item.lines.items[0]);
+                    try std.testing.expectEqualStrings("old mode 100644", diff_item.lines.items[1]);
+                    try std.testing.expectEqualStrings("new mode 100755", diff_item.lines.items[2]);
+                } else if (std.mem.eql(u8, "tests", diff_item.path)) {
+                    try std.testing.expectEqualStrings("diff --git a/tests b/tests", diff_item.lines.items[0]);
+                    try std.testing.expectEqualStrings("deleted file mode 100644", diff_item.lines.items[1]);
+                } else {
+                    return error.EntryNotExpected;
+                }
+            }
+        }
+
+        // delete a file
+        try repo_dir.deleteFile("LICENSE");
+        args.clearAndFree();
+        try args.append("add");
+        try args.append("LICENSE");
+        try main.xitMain(repo_kind, allocator, &args);
+
+        // delete a file and dir
+        try repo_dir.deleteTree("docs");
+        args.clearAndFree();
+        try args.append("add");
+        try args.append("docs/design.md");
+        try main.xitMain(repo_kind, allocator, &args);
+
+        // add new and modified files
+        args.clearAndFree();
+        try args.append("add");
+        try args.append("hello.txt");
+        try args.append("run.sh");
+        try args.append("src/zig/main.zig");
+        try main.xitMain(repo_kind, allocator, &args);
+
+        // index diff
+        {
+            var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+            defer repo.deinit();
+            var diff_list = try repo.diff(.index);
+            defer diff_list.deinit();
+
+            if (builtin.os.tag != .windows) {
+                try expectEqual(5, diff_list.diffs.items.len);
+            } else {
+                try expectEqual(4, diff_list.diffs.items.len);
+            }
+
+            for (diff_list.diffs.items) |diff_item| {
+                if (std.mem.eql(u8, "LICENSE", diff_item.path)) {
+                    try std.testing.expectEqualStrings("diff --git a/LICENSE b/LICENSE", diff_item.lines.items[0]);
+                    try std.testing.expectEqualStrings("deleted file mode 100644", diff_item.lines.items[1]);
+                } else if (std.mem.eql(u8, "docs/design.md", diff_item.path)) {
+                    try std.testing.expectEqualStrings("diff --git a/docs/design.md b/docs/design.md", diff_item.lines.items[0]);
+                    try std.testing.expectEqualStrings("deleted file mode 100644", diff_item.lines.items[1]);
+                } else if (std.mem.eql(u8, "hello.txt", diff_item.path)) {
+                    try std.testing.expectEqualStrings("diff --git a/hello.txt b/hello.txt", diff_item.lines.items[0]);
+                } else if (std.mem.eql(u8, "run.sh", diff_item.path)) {
+                    try std.testing.expectEqualStrings("diff --git a/run.sh b/run.sh", diff_item.lines.items[0]);
+                    try std.testing.expectEqualStrings("old mode 100644", diff_item.lines.items[1]);
+                    try std.testing.expectEqualStrings("new mode 100755", diff_item.lines.items[2]);
+                } else if (std.mem.eql(u8, "src/zig/main.zig", diff_item.path)) {
+                    try std.testing.expectEqualStrings("diff --git a/src/zig/main.zig b/src/zig/main.zig", diff_item.lines.items[0]);
+                    try std.testing.expectEqualStrings("new file mode 100644", diff_item.lines.items[1]);
+                } else {
+                    return error.EntryNotExpected;
+                }
+            }
+        }
+
+        // add the remaining files
         args.clearAndFree();
         try args.append("add");
         try args.append(".");
@@ -516,12 +599,71 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
             defer repo.deinit();
             var index = try idx.Index(repo_kind).init(allocator, &repo.core);
             defer index.deinit();
-            try expectEqual(5, index.entries.count());
+            try expectEqual(6, index.entries.count());
             try std.testing.expect(index.entries.contains("README"));
             try std.testing.expect(index.entries.contains("src/zig/main.zig"));
             try std.testing.expect(index.entries.contains("tests/main_test.zig"));
             try std.testing.expect(index.entries.contains("hello.txt/nested.txt"));
             try std.testing.expect(index.entries.contains("hello.txt/nested2.txt"));
+            try std.testing.expect(index.entries.contains("run.sh"));
+        }
+
+        switch (repo_kind) {
+            .git => {
+                // read index with libgit
+                var repo: ?*c.git_repository = null;
+                try expectEqual(0, c.git_repository_open(&repo, repo_path));
+                defer c.git_repository_free(repo);
+                var index: ?*c.git_index = null;
+                try expectEqual(0, c.git_repository_index(&index, repo));
+                defer c.git_index_free(index);
+                try expectEqual(6, c.git_index_entrycount(index));
+            },
+            .xit => {
+                // read the index in xitdb
+                // TODO: use more efficient way to get map size
+                var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+                defer repo.deinit();
+                var count: u32 = 0;
+                if (try repo.core.db.rootCursor().readCursor(void, &[_]xitdb.PathPart(void){
+                    .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
+                    .{ .map_get = xitdb.hash_buffer("index") },
+                })) |cursor| {
+                    var iter = try cursor.iter(.map);
+                    defer iter.deinit();
+                    while (try iter.next()) |_| {
+                        count += 1;
+                    }
+                }
+                try expectEqual(6, count);
+            },
+        }
+
+        // replace directory with file
+        try hello_txt_dir.deleteFile("nested.txt");
+        try hello_txt_dir.deleteFile("nested2.txt");
+        try repo_dir.deleteDir("hello.txt");
+        var hello_txt2 = try repo_dir.createFile("hello.txt", .{});
+        defer hello_txt2.close();
+
+        // add the new file
+        args.clearAndFree();
+        try args.append("add");
+        try args.append(".");
+        try main.xitMain(repo_kind, allocator, &args);
+
+        // read index
+        {
+            var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+            defer repo.deinit();
+            var index = try idx.Index(repo_kind).init(allocator, &repo.core);
+            defer index.deinit();
+            try expectEqual(5, index.entries.count());
+            try std.testing.expect(index.entries.contains("README"));
+            try std.testing.expect(index.entries.contains("src/zig/main.zig"));
+            try std.testing.expect(index.entries.contains("tests/main_test.zig"));
+            try std.testing.expect(index.entries.contains("hello.txt"));
+            try std.testing.expect(index.entries.contains("run.sh"));
         }
 
         switch (repo_kind) {
@@ -552,63 +694,6 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
                     }
                 }
                 try expectEqual(5, count);
-            },
-        }
-
-        // replace directory with file
-        try hello_txt_dir.deleteFile("nested.txt");
-        try hello_txt_dir.deleteFile("nested2.txt");
-        try repo_dir.deleteDir("hello.txt");
-        var hello_txt2 = try repo_dir.createFile("hello.txt", .{});
-        defer hello_txt2.close();
-
-        // add the new file
-        args.clearAndFree();
-        try args.append("add");
-        try args.append(".");
-        try main.xitMain(repo_kind, allocator, &args);
-
-        // read index
-        {
-            var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
-            defer repo.deinit();
-            var index = try idx.Index(repo_kind).init(allocator, &repo.core);
-            defer index.deinit();
-            try expectEqual(4, index.entries.count());
-            try std.testing.expect(index.entries.contains("README"));
-            try std.testing.expect(index.entries.contains("src/zig/main.zig"));
-            try std.testing.expect(index.entries.contains("tests/main_test.zig"));
-            try std.testing.expect(index.entries.contains("hello.txt"));
-        }
-
-        switch (repo_kind) {
-            .git => {
-                // read index with libgit
-                var repo: ?*c.git_repository = null;
-                try expectEqual(0, c.git_repository_open(&repo, repo_path));
-                defer c.git_repository_free(repo);
-                var index: ?*c.git_index = null;
-                try expectEqual(0, c.git_repository_index(&index, repo));
-                defer c.git_index_free(index);
-                try expectEqual(4, c.git_index_entrycount(index));
-            },
-            .xit => {
-                // read the index in xitdb
-                // TODO: use more efficient way to get map size
-                var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
-                defer repo.deinit();
-                var count: u32 = 0;
-                if (try repo.core.db.rootCursor().readCursor(void, &[_]xitdb.PathPart(void){
-                    .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
-                    .{ .map_get = xitdb.hash_buffer("index") },
-                })) |cursor| {
-                    var iter = try cursor.iter(.map);
-                    defer iter.deinit();
-                    while (try iter.next()) |_| {
-                        count += 1;
-                    }
-                }
-                try expectEqual(4, count);
             },
         }
 
@@ -842,7 +927,7 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
         // read tree
         var tree_object = try obj.Object(repo_kind).init(allocator, &repo.core, commit_object.content.commit.tree);
         defer tree_object.deinit();
-        try expectEqual(4, tree_object.content.tree.entries.count());
+        try expectEqual(5, tree_object.content.tree.entries.count());
     }
 
     // create a branch
