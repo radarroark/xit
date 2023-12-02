@@ -59,11 +59,13 @@ pub const Tree = struct {
     pub fn addBlobEntry(self: *Tree, mode: io.Mode, name: []const u8, oid: []const u8) !void {
         const mode_str = if (mode.unix_permission == 0o755) "100755" else "100644";
         const entry = try std.fmt.allocPrint(self.allocator, "{s} {s}\x00{s}", .{ mode_str, name, oid });
+        errdefer self.allocator.free(entry);
         try self.entries.append(entry);
     }
 
     pub fn addTreeEntry(self: *Tree, name: []const u8, oid: []const u8) !void {
         const entry = try std.fmt.allocPrint(self.allocator, "40000 {s}\x00{s}", .{ name, oid });
+        errdefer self.allocator.free(entry);
         try self.entries.append(entry);
     }
 };
