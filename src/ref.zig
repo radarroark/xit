@@ -137,7 +137,6 @@ pub const RefList = struct {
                 .file => {
                     const name = try std.mem.join(self.arena.allocator(), "/", next_path.items);
                     var ref = try Ref.initWithName(repo_kind, core, self.arena.allocator(), dir_name, name);
-                    errdefer ref.deinit();
                     try self.refs.append(ref);
                 },
                 .directory => {
