@@ -200,8 +200,8 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
                 var db_buffer = [_]u8{0} ** 1024;
                 const bytes_maybe = try repo.core.db.rootCursor().readBytes(&db_buffer, void, &[_]xitdb.PathPart(void){
                     .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
-                    .{ .map_get = xitdb.hash_buffer("objects") },
-                    .{ .map_get = xitdb.hash_buffer(&head_file_buffer) },
+                    .{ .map_get = hash.hash_buffer("objects") },
+                    .{ .map_get = hash.hash_buffer(&head_file_buffer) },
                 });
                 try std.testing.expect(bytes_maybe != null);
             },
@@ -393,8 +393,8 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
                 var db_buffer = [_]u8{0} ** 1024;
                 const bytes_maybe = try repo.core.db.rootCursor().readBytes(&db_buffer, void, &[_]xitdb.PathPart(void){
                     .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
-                    .{ .map_get = xitdb.hash_buffer("objects") },
-                    .{ .map_get = xitdb.hash_buffer(&head_file_buffer) },
+                    .{ .map_get = hash.hash_buffer("objects") },
+                    .{ .map_get = hash.hash_buffer(&head_file_buffer) },
                 });
                 try std.testing.expect(bytes_maybe != null);
             },
@@ -627,7 +627,7 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
                 var count: u32 = 0;
                 if (try repo.core.db.rootCursor().readCursor(void, &[_]xitdb.PathPart(void){
                     .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
-                    .{ .map_get = xitdb.hash_buffer("index") },
+                    .{ .map_get = hash.hash_buffer("index") },
                 })) |cursor| {
                     var iter = try cursor.iter(.map);
                     defer iter.deinit();
@@ -685,7 +685,7 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
                 var count: u32 = 0;
                 if (try repo.core.db.rootCursor().readCursor(void, &[_]xitdb.PathPart(void){
                     .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
-                    .{ .map_get = xitdb.hash_buffer("index") },
+                    .{ .map_get = hash.hash_buffer("index") },
                 })) |cursor| {
                     var iter = try cursor.iter(.map);
                     defer iter.deinit();

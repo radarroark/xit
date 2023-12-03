@@ -112,8 +112,8 @@ fn createFileFromObject(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kin
 
                         pub fn run(self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
                             var reader_maybe = try cursor.reader(void, &[_]xitdb.PathPart(void){
-                                .{ .map_get = xitdb.hash_buffer("objects") },
-                                .{ .map_get = xitdb.hash_buffer(&self.oid_hex) },
+                                .{ .map_get = hash.hash_buffer("objects") },
+                                .{ .map_get = hash.hash_buffer(&self.oid_hex) },
                             });
                             if (reader_maybe) |*reader| {
                                 // create parent dir(s)

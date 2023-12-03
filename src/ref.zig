@@ -89,15 +89,15 @@ pub const RefList = struct {
 
                     pub fn run(self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
                         if (try cursor.readCursor(void, &[_]xitdb.PathPart(void){
-                            .{ .map_get = xitdb.hash_buffer("refs") },
-                            .{ .map_get = xitdb.hash_buffer("heads") },
+                            .{ .map_get = hash.hash_buffer("refs") },
+                            .{ .map_get = hash.hash_buffer("heads") },
                         })) |heads_cursor| {
                             var iter = try heads_cursor.iter(.map);
                             defer iter.deinit();
                             while (try iter.next()) |*next_cursor| {
                                 if (try next_cursor.readHash(void, &[_]xitdb.PathPart(void){})) |name_hash| {
                                     if (try cursor.readBytesAlloc(self.ref_list.arena.allocator(), void, &[_]xitdb.PathPart(void){
-                                        .{ .map_get = xitdb.hash_buffer("values") },
+                                        .{ .map_get = hash.hash_buffer("values") },
                                         .{ .map_get = name_hash },
                                     })) |name| {
                                         var ref = try Ref.initWithName(repo_kind, self.core, self.ref_list.arena.allocator(), self.dir_name, name);
@@ -183,9 +183,9 @@ pub fn resolve(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, 
             var db_buffer = [_]u8{0} ** MAX_READ_BYTES;
             if (try core.db.rootCursor().readBytes(&db_buffer, void, &[_]xitdb.PathPart(void){
                 .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
-                .{ .map_get = xitdb.hash_buffer("refs") },
-                .{ .map_get = xitdb.hash_buffer("heads") },
-                .{ .map_get = xitdb.hash_buffer(content) },
+                .{ .map_get = hash.hash_buffer("refs") },
+                .{ .map_get = hash.hash_buffer("heads") },
+                .{ .map_get = hash.hash_buffer(content) },
             })) |bytes| {
                 return try resolve(repo_kind, core, bytes);
             } else {
@@ -212,7 +212,7 @@ pub fn read(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, pat
         .xit => {
             if (try core.db.rootCursor().readBytes(buffer, void, &[_]xitdb.PathPart(void){
                 .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
-                .{ .map_get = xitdb.hash_buffer(path) },
+                .{ .map_get = hash.hash_buffer(path) },
             })) |target_bytes| {
                 return target_bytes;
             } else {
@@ -282,22 +282,22 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core
                     var path_parts = std.ArrayList(xitdb.PathPart(void)).init(self.allocator);
                     defer path_parts.deinit();
                     try path_parts.appendSlice(&[_]xitdb.PathPart(void){
-                        .{ .map_get = xitdb.hash_buffer("HEAD") },
+                        .{ .map_get = hash.hash_buffer("HEAD") },
                     });
 
                     if (try cursor.readBytesAlloc(self.allocator, void, &[_]xitdb.PathPart(void){
-                        .{ .map_get = xitdb.hash_buffer("refs") },
-                        .{ .map_get = xitdb.hash_buffer("heads") },
-                        .{ .map_get = xitdb.hash_buffer(self.target) },
+                        .{ .map_get = hash.hash_buffer("refs") },
+                        .{ .map_get = hash.hash_buffer("heads") },
+                        .{ .map_get = hash.hash_buffer(self.target) },
                     })) |target_bytes| {
                         self.allocator.free(target_bytes);
 
                         // point HEAD at the ref
                         var write_buffer = [_]u8{0} ** MAX_READ_BYTES;
                         const content = try std.fmt.bufPrint(&write_buffer, "ref: refs/heads/{s}", .{self.target});
-                        const content_hash = xitdb.hash_buffer(content);
+                        const content_hash = hash.hash_buffer(content);
                         const content_ptr = try cursor.execute(void, &[_]xitdb.PathPart(void){
-                            .{ .map_get = xitdb.hash_buffer("values") },
+                            .{ .map_get = hash.hash_buffer("values") },
                             .map_create,
                             .{ .map_get = content_hash },
                             // TODO: only once
@@ -308,9 +308,9 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core
                     } else {
                         if (self.oid_maybe) |oid| {
                             // the HEAD is detached, so just update it with the oid
-                            const oid_hash = xitdb.hash_buffer(&oid);
+                            const oid_hash = hash.hash_buffer(&oid);
                             const content_ptr = try cursor.execute(void, &[_]xitdb.PathPart(void){
-                                .{ .map_get = xitdb.hash_buffer("values") },
+                                .{ .map_get = hash.hash_buffer("values") },
                                 .map_create,
                                 .{ .map_get = oid_hash },
                                 // TODO: only once
@@ -322,9 +322,9 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core
                             // point HEAD at the ref, even though the ref doesn't exist
                             var write_buffer = [_]u8{0} ** MAX_READ_BYTES;
                             const content = try std.fmt.bufPrint(&write_buffer, "ref: refs/heads/{s}", .{self.target});
-                            const content_hash = xitdb.hash_buffer(content);
+                            const content_hash = hash.hash_buffer(content);
                             const content_ptr = try cursor.execute(void, &[_]xitdb.PathPart(void){
-                                .{ .map_get = xitdb.hash_buffer("values") },
+                                .{ .map_get = hash.hash_buffer("values") },
                                 .map_create,
                                 .{ .map_get = content_hash },
                                 // TODO: only once
@@ -429,9 +429,9 @@ pub fn updateRecur(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
                     }
                 };
                 _ = try opts.root_cursor.execute(Ctx, &[_]xitdb.PathPart(Ctx){
-                    .{ .map_get = xitdb.hash_buffer("refs") },
+                    .{ .map_get = hash.hash_buffer("refs") },
                     .map_create,
-                    .{ .map_get = xitdb.hash_buffer("heads") },
+                    .{ .map_get = hash.hash_buffer("heads") },
                     .map_create,
                     .{ .ctx = Ctx{
                         .core = core,
@@ -444,18 +444,18 @@ pub fn updateRecur(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
             }
             // otherwise, update it with the oid
             else {
-                const file_name_hash = xitdb.hash_buffer(file_name);
+                const file_name_hash = hash.hash_buffer(file_name);
                 _ = try opts.root_cursor.execute(void, &[_]xitdb.PathPart(void){
-                    .{ .map_get = xitdb.hash_buffer("values") },
+                    .{ .map_get = hash.hash_buffer("values") },
                     .map_create,
                     .{ .map_get = file_name_hash },
                     // TODO: only once
                     .{ .value = .{ .bytes = file_name } },
                 });
                 const oid_ptr = try opts.root_cursor.execute(void, &[_]xitdb.PathPart(void){
-                    .{ .map_get = xitdb.hash_buffer("values") },
+                    .{ .map_get = hash.hash_buffer("values") },
                     .map_create,
-                    .{ .map_get = xitdb.hash_buffer(&oid) },
+                    .{ .map_get = hash.hash_buffer(&oid) },
                     // TODO: only once
                     .{ .value = .{ .bytes = &oid } },
                 });

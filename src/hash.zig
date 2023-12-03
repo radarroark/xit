@@ -10,6 +10,7 @@
 //! the course of writing this comment.
 
 const std = @import("std");
+const xitdb = @import("xitdb");
 
 const MAX_READ_BYTES = 1024;
 pub const SHA1_BYTES_LEN = std.crypto.hash.Sha1.digest_length;
@@ -35,4 +36,12 @@ pub fn sha1_buffer(buffer: []const u8, out: *[SHA1_BYTES_LEN]u8) !void {
     var h = std.crypto.hash.Sha1.init(.{});
     h.update(buffer);
     h.final(out);
+}
+
+pub fn hash_buffer(buffer: []const u8) xitdb.Hash {
+    var hash = [_]u8{0} ** xitdb.HASH_INT_SIZE;
+    var h = std.crypto.hash.Sha1.init(.{});
+    h.update(buffer);
+    h.final(hash[0..xitdb.HASH_SIZE]);
+    return std.mem.bytesToValue(xitdb.Hash, &hash);
 }
