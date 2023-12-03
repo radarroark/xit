@@ -154,7 +154,7 @@ pub fn DiffList(comptime repo_kind: rp.RepoKind) type {
                 };
             }
 
-            pub fn initFromWorkspace(core: *rp.Repo(repo_kind).Core, path: []const u8, mode: io.Mode) !Target {
+            pub fn initFromWorkspace(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core, path: []const u8, mode: io.Mode) !Target {
                 var target = Target{
                     .path = path,
                     .oid = [_]u8{0} ** hash.SHA1_BYTES_LEN,
@@ -163,7 +163,10 @@ pub fn DiffList(comptime repo_kind: rp.RepoKind) type {
                 };
                 var file = try core.repo_dir.openFile(path, .{ .mode = std.fs.File.OpenMode.read_only });
                 defer file.close();
-                try hash.sha1_file(file, null, &target.oid);
+                const file_size = (try file.metadata()).size();
+                const header = try std.fmt.allocPrint(allocator, "blob {}\x00", .{file_size});
+                defer allocator.free(header);
+                try hash.sha1_file(file, header, &target.oid);
                 target.oid_hex = std.fmt.bytesToHex(&target.oid, .lower);
                 return target;
             }
@@ -272,7 +275,7 @@ pub fn DiffList(comptime repo_kind: rp.RepoKind) type {
                         try diffs.append(try Diff.init(
                             allocator,
                             Target.initFromIndex(status.index.entries.get(entry.path) orelse return error.EntryNotFound),
-                            try Target.initFromWorkspace(core, entry.path, io.getMode(entry.meta)),
+                            try Target.initFromWorkspace(allocator, core, entry.path, io.getMode(entry.meta)),
                         ));
                     }
 
