@@ -76,12 +76,12 @@ pub fn create(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, a
                         pub fn run(heads_ctx_self: @This(), heads_cursor: *xitdb.Database(.file).Cursor) !void {
                             const name_hash = hash.hash_buffer(heads_ctx_self.name);
                             _ = try heads_ctx_self.root_cursor.writeBytes(heads_ctx_self.name, .once, void, &[_]xitdb.PathPart(void){
-                                .{ .map_get = hash.hash_buffer("values") },
+                                .{ .map_get = hash.hash_buffer("names") },
                                 .map_create,
                                 .{ .map_get = name_hash },
                             });
                             const buffer_ptr = try heads_ctx_self.root_cursor.writeBytes(heads_ctx_self.head_file_buffer, .once, void, &[_]xitdb.PathPart(void){
-                                .{ .map_get = hash.hash_buffer("values") },
+                                .{ .map_get = hash.hash_buffer("ref-values") },
                                 .map_create,
                                 .{ .map_get = hash.hash_buffer(heads_ctx_self.head_file_buffer) },
                             });

@@ -97,7 +97,7 @@ pub const RefList = struct {
                             while (try iter.next()) |*next_cursor| {
                                 if (try next_cursor.readHash(void, &[_]xitdb.PathPart(void){})) |name_hash| {
                                     if (try cursor.readBytesAlloc(self.ref_list.arena.allocator(), void, &[_]xitdb.PathPart(void){
-                                        .{ .map_get = hash.hash_buffer("values") },
+                                        .{ .map_get = hash.hash_buffer("names") },
                                         .{ .map_get = name_hash },
                                     })) |name| {
                                         var ref = try Ref.initWithName(repo_kind, self.core, self.ref_list.arena.allocator(), self.dir_name, name);
@@ -297,7 +297,7 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core
                         const content = try std.fmt.bufPrint(&write_buffer, "ref: refs/heads/{s}", .{self.target});
                         const content_hash = hash.hash_buffer(content);
                         const content_ptr = try cursor.writeBytes(content, .once, void, &[_]xitdb.PathPart(void){
-                            .{ .map_get = hash.hash_buffer("values") },
+                            .{ .map_get = hash.hash_buffer("ref-values") },
                             .map_create,
                             .{ .map_get = content_hash },
                         });
@@ -308,7 +308,7 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core
                             // the HEAD is detached, so just update it with the oid
                             const oid_hash = hash.hash_buffer(&oid);
                             const content_ptr = try cursor.writeBytes(&oid, .once, void, &[_]xitdb.PathPart(void){
-                                .{ .map_get = hash.hash_buffer("values") },
+                                .{ .map_get = hash.hash_buffer("ref-values") },
                                 .map_create,
                                 .{ .map_get = oid_hash },
                             });
@@ -320,7 +320,7 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core
                             const content = try std.fmt.bufPrint(&write_buffer, "ref: refs/heads/{s}", .{self.target});
                             const content_hash = hash.hash_buffer(content);
                             const content_ptr = try cursor.writeBytes(content, .once, void, &[_]xitdb.PathPart(void){
-                                .{ .map_get = hash.hash_buffer("values") },
+                                .{ .map_get = hash.hash_buffer("ref-values") },
                                 .map_create,
                                 .{ .map_get = content_hash },
                             });
@@ -440,12 +440,12 @@ pub fn updateRecur(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
             else {
                 const file_name_hash = hash.hash_buffer(file_name);
                 _ = try opts.root_cursor.writeBytes(file_name, .once, void, &[_]xitdb.PathPart(void){
-                    .{ .map_get = hash.hash_buffer("values") },
+                    .{ .map_get = hash.hash_buffer("names") },
                     .map_create,
                     .{ .map_get = file_name_hash },
                 });
                 const oid_ptr = try opts.root_cursor.writeBytes(&oid, .once, void, &[_]xitdb.PathPart(void){
-                    .{ .map_get = hash.hash_buffer("values") },
+                    .{ .map_get = hash.hash_buffer("ref-values") },
                     .map_create,
                     .{ .map_get = hash.hash_buffer(&oid) },
                 });
