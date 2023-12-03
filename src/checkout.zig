@@ -104,43 +104,55 @@ fn createFileFromObject(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kin
                     try compress.decompress(allocator, in_file, out_file, true);
                 },
                 .xit => {
-                    if (try core.db.rootCursor().readBytesPointer(void, &[_]xitdb.PathPart(void){
-                        .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
-                        .{ .map_get = xitdb.hash_buffer("objects") },
-                        .{ .map_get = xitdb.hash_buffer(&oid_hex) },
-                    })) |ptr| {
-                        // create parent dir(s)
-                        if (std.fs.path.dirname(path)) |dir| {
-                            try core.repo_dir.makePath(dir);
-                        }
+                    const Ctx = struct {
+                        core: *rp.Repo(repo_kind).Core,
+                        path: []const u8,
+                        oid_hex: [hash.SHA1_HEX_LEN]u8,
+                        tree_entry: obj.TreeEntry,
 
-                        // open the out file
-                        const out_file = try core.repo_dir.createFile(path, .{ .mode = @as(u32, @bitCast(tree_entry.mode)) });
-                        defer out_file.close();
-
-                        var reader = try core.db.readerAtPointer(ptr);
-                        var read_buffer = [_]u8{0} ** MAX_FILE_READ_BYTES;
-                        var header_skipped = false;
-                        while (true) {
-                            const size = try reader.read(&read_buffer);
-                            if (size == 0) break;
-                            if (!header_skipped) {
-                                if (std.mem.indexOf(u8, read_buffer[0..size], &[_]u8{0})) |index| {
-                                    if (index + 1 < size) {
-                                        try out_file.writeAll(read_buffer[index + 1 .. size]);
-                                    }
-                                    header_skipped = true;
+                        pub fn run(self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
+                            var reader_maybe = try cursor.reader(void, &[_]xitdb.PathPart(void){
+                                .{ .map_get = xitdb.hash_buffer("objects") },
+                                .{ .map_get = xitdb.hash_buffer(&self.oid_hex) },
+                            });
+                            if (reader_maybe) |*reader| {
+                                // create parent dir(s)
+                                if (std.fs.path.dirname(self.path)) |dir| {
+                                    try self.core.repo_dir.makePath(dir);
                                 }
+
+                                // open the out file
+                                const out_file = try self.core.repo_dir.createFile(self.path, .{ .mode = @as(u32, @bitCast(self.tree_entry.mode)) });
+                                defer out_file.close();
+
+                                var read_buffer = [_]u8{0} ** MAX_FILE_READ_BYTES;
+                                var header_skipped = false;
+                                while (true) {
+                                    const size = try reader.read(&read_buffer);
+                                    if (size == 0) break;
+                                    if (!header_skipped) {
+                                        if (std.mem.indexOf(u8, read_buffer[0..size], &[_]u8{0})) |index| {
+                                            if (index + 1 < size) {
+                                                try out_file.writeAll(read_buffer[index + 1 .. size]);
+                                            }
+                                            header_skipped = true;
+                                        }
+                                    } else {
+                                        try out_file.writeAll(read_buffer[0..size]);
+                                    }
+                                }
+                                if (header_skipped) return;
+
+                                return error.ObjectInvalid;
                             } else {
-                                try out_file.writeAll(read_buffer[0..size]);
+                                return error.ObjectNotFound;
                             }
                         }
-                        if (header_skipped) return;
-
-                        return error.ObjectInvalid;
-                    } else {
-                        return error.ObjectNotFound;
-                    }
+                    };
+                    _ = try core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
+                        .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
+                        .{ .ctx = Ctx{ .core = core, .path = path, .oid_hex = oid_hex, .tree_entry = tree_entry } },
+                    });
                 },
             }
         },

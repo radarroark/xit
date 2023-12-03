@@ -62,34 +62,48 @@ pub fn create(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, a
                 core: *rp.Repo(repo_kind).Core,
                 name: []const u8,
 
-                pub fn run(ctx_self: @This(), cursor: xitdb.Database(.file).Cursor) !void {
+                pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
                     // get HEAD contents
                     // TODO: make `readHead` use cursor for tx safety
                     const head_file_buffer = try ref.readHead(repo_kind, ctx_self.core);
 
                     const HeadsCtx = struct {
+                        root_cursor: *xitdb.Database(.file).Cursor,
                         name: []const u8,
                         head_file_buffer: []const u8,
 
-                        pub fn run(heads_ctx_self: @This(), heads_cursor: xitdb.Database(.file).Cursor) !void {
+                        pub fn run(heads_ctx_self: @This(), heads_cursor: *xitdb.Database(.file).Cursor) !void {
                             const name_hash = xitdb.hash_buffer(heads_ctx_self.name);
-                            _ = try heads_cursor.db.writeAtHash(name_hash, heads_ctx_self.name, .once);
-                            try heads_cursor.execute(void, &[_]xitdb.PathPart(void){
+                            _ = try heads_ctx_self.root_cursor.execute(void, &[_]xitdb.PathPart(void){
+                                .{ .map_get = xitdb.hash_buffer("values") },
+                                .map_create,
                                 .{ .map_get = name_hash },
-                                .{ .value = .{ .pointer = try heads_cursor.db.writeAtHash(xitdb.hash_buffer(heads_ctx_self.head_file_buffer), heads_ctx_self.head_file_buffer, .once) } },
+                                // TODO: only once
+                                .{ .value = .{ .bytes = heads_ctx_self.name } },
+                            });
+                            const buffer_ptr = try heads_ctx_self.root_cursor.execute(void, &[_]xitdb.PathPart(void){
+                                .{ .map_get = xitdb.hash_buffer("values") },
+                                .map_create,
+                                .{ .map_get = xitdb.hash_buffer(heads_ctx_self.head_file_buffer) },
+                                // TODO: only once
+                                .{ .value = .{ .bytes = heads_ctx_self.head_file_buffer } },
+                            });
+                            _ = try heads_cursor.execute(void, &[_]xitdb.PathPart(void){
+                                .{ .map_get = name_hash },
+                                .{ .value = .{ .bytes_ptr = buffer_ptr } },
                             });
                         }
                     };
-                    try cursor.execute(HeadsCtx, &[_]xitdb.PathPart(HeadsCtx){
+                    _ = try cursor.execute(HeadsCtx, &[_]xitdb.PathPart(HeadsCtx){
                         .{ .map_get = xitdb.hash_buffer("refs") },
                         .map_create,
                         .{ .map_get = xitdb.hash_buffer("heads") },
                         .map_create,
-                        .{ .ctx = HeadsCtx{ .name = ctx_self.name, .head_file_buffer = &head_file_buffer } },
+                        .{ .ctx = HeadsCtx{ .root_cursor = cursor, .name = ctx_self.name, .head_file_buffer = &head_file_buffer } },
                     });
                 }
             };
-            try core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
+            _ = try core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
                 .{ .list_get = .append_copy },
                 .map_create,
                 .{ .ctx = Ctx{ .core = core, .name = name } },
@@ -152,7 +166,7 @@ pub fn delete(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, a
                 name: []const u8,
                 allocator: std.mem.Allocator,
 
-                pub fn run(ctx_self: @This(), cursor: xitdb.Database(.file).Cursor) !void {
+                pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
                     // don't allow current branch to be deleted
                     // TODO: make `initFromLink` use cursor for tx safety
                     var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, ctx_self.core, ctx_self.allocator, "HEAD");
@@ -166,13 +180,13 @@ pub fn delete(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, a
                     const HeadsCtx = struct {
                         name: []const u8,
 
-                        pub fn run(heads_ctx_self: @This(), heads_cursor: xitdb.Database(.file).Cursor) !void {
-                            try heads_cursor.execute(void, &[_]xitdb.PathPart(void){
+                        pub fn run(heads_ctx_self: @This(), heads_cursor: *xitdb.Database(.file).Cursor) !void {
+                            _ = try heads_cursor.execute(void, &[_]xitdb.PathPart(void){
                                 .{ .map_remove = xitdb.hash_buffer(heads_ctx_self.name) },
                             });
                         }
                     };
-                    try cursor.execute(HeadsCtx, &[_]xitdb.PathPart(HeadsCtx){
+                    _ = try cursor.execute(HeadsCtx, &[_]xitdb.PathPart(HeadsCtx){
                         .{ .map_get = xitdb.hash_buffer("refs") },
                         .map_create,
                         .{ .map_get = xitdb.hash_buffer("heads") },
@@ -181,7 +195,7 @@ pub fn delete(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, a
                     });
                 }
             };
-            try core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
+            _ = try core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
                 .{ .list_get = .append_copy },
                 .map_create,
                 .{ .ctx = Ctx{ .core = core, .name = name, .allocator = allocator } },
