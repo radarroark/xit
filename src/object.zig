@@ -162,29 +162,41 @@ pub fn writeBlob(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core
             @memcpy(file_hash_bytes[0..hash.SHA1_BYTES_LEN], sha1_bytes_buffer);
             const file_hash = std.mem.bytesToValue(xitdb.Hash, &file_hash_bytes);
 
-            // TODO: only once
-            var writer = try opts.root_cursor.writer(void, &[_]xitdb.PathPart(void){
+            const Ctx = struct {
+                opts: ObjectOpts(repo_kind),
+                file: std.fs.File,
+                sha1_hex: [hash.SHA1_HEX_LEN]u8,
+                header: []const u8,
+
+                pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
+                    if (cursor.getPointer() == null) {
+                        var writer = try cursor.writer(void, &[_]xitdb.PathPart(void){});
+
+                        try writer.writeAll(ctx_self.header);
+                        var read_buffer = [_]u8{0} ** MAX_FILE_READ_BYTES;
+                        var offset: u64 = 0;
+                        while (true) {
+                            const size = try ctx_self.file.pread(&read_buffer, offset);
+                            offset += size;
+                            if (size == 0) {
+                                break;
+                            }
+                            try writer.writeAll(read_buffer[0..size]);
+                        }
+                        try writer.finish();
+
+                        _ = try ctx_self.opts.cursor.execute(void, &[_]xitdb.PathPart(void){
+                            .{ .map_get = hash.hash_buffer(&ctx_self.sha1_hex) },
+                            .{ .value = .{ .bytes_ptr = writer.ptr_position } },
+                        });
+                    }
+                }
+            };
+            _ = try opts.root_cursor.execute(Ctx, &[_]xitdb.PathPart(Ctx){
                 .{ .map_get = hash.hash_buffer("values") },
                 .map_create,
                 .{ .map_get = file_hash },
-            });
-
-            try writer.writeAll(header);
-            var read_buffer = [_]u8{0} ** MAX_FILE_READ_BYTES;
-            var offset: u64 = 0;
-            while (true) {
-                const size = try file.pread(&read_buffer, offset);
-                offset += size;
-                if (size == 0) {
-                    break;
-                }
-                try writer.writeAll(read_buffer[0..size]);
-            }
-            try writer.finish();
-
-            _ = try opts.cursor.execute(void, &[_]xitdb.PathPart(void){
-                .{ .map_get = hash.hash_buffer(&sha1_hex) },
-                .{ .value = .{ .bytes_ptr = writer.ptr_position } },
+                .{ .ctx = Ctx{ .opts = opts, .file = file, .sha1_hex = sha1_hex, .header = header } },
             });
         },
     }
@@ -252,15 +264,13 @@ fn writeTree(comptime repo_kind: rp.RepoKind, opts: ObjectOpts(repo_kind), alloc
                 tree: []const u8,
 
                 pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
-                    if (!cursor.is_new) {
+                    if (cursor.getPointer() != null) {
                         return error.ObjectAlreadyExists;
                     }
-                    const tree_ptr = try ctx_self.root_cursor.execute(void, &[_]xitdb.PathPart(void){
+                    const tree_ptr = try ctx_self.root_cursor.writeBytes(ctx_self.tree, .once, void, &[_]xitdb.PathPart(void){
                         .{ .map_get = hash.hash_buffer("values") },
                         .map_create,
                         .{ .map_get = hash.hash_buffer(ctx_self.tree) },
-                        // TODO: only once
-                        .{ .value = .{ .bytes = ctx_self.tree } },
                     });
                     _ = try cursor.execute(void, &[_]xitdb.PathPart(void){
                         .{ .value = .{ .bytes_ptr = tree_ptr } },
@@ -457,12 +467,10 @@ pub fn writeCommit(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
                             obj_ctx_self.commit_sha1_hex = std.fmt.bytesToHex(commit_sha1_bytes_buffer, .lower);
 
                             // write commit content
-                            const content_ptr = try obj_ctx_self.root_cursor.execute(void, &[_]xitdb.PathPart(void){
+                            const content_ptr = try obj_ctx_self.root_cursor.writeBytes(commit, .once, void, &[_]xitdb.PathPart(void){
                                 .{ .map_get = hash.hash_buffer("values") },
                                 .map_create,
                                 .{ .map_get = hash.hash_buffer(commit) },
-                                // TODO: only once
-                                .{ .value = .{ .bytes = commit } },
                             });
 
                             // write commit

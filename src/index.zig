@@ -516,19 +516,15 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                             }
                                         }
 
-                                        _ = try inner_ctx_self.root_cursor.execute(void, &[_]xitdb.PathPart(void){
+                                        _ = try inner_ctx_self.root_cursor.writeBytes(entry.path, .once, void, &[_]xitdb.PathPart(void){
                                             .{ .map_get = hash.hash_buffer("values") },
                                             .map_create,
                                             .{ .map_get = path_hash },
-                                            // TODO: only once
-                                            .{ .value = .{ .bytes = entry.path } },
                                         });
-                                        const buffer_ptr = try inner_ctx_self.root_cursor.execute(void, &[_]xitdb.PathPart(void){
+                                        const buffer_ptr = try inner_ctx_self.root_cursor.writeBytes(entry_buffer.items, .once, void, &[_]xitdb.PathPart(void){
                                             .{ .map_get = hash.hash_buffer("values") },
                                             .map_create,
                                             .{ .map_get = hash.hash_buffer(entry_buffer.items) },
-                                            // TODO: only once
-                                            .{ .value = .{ .bytes = entry_buffer.items } },
                                         });
                                         _ = try inner_cursor.execute(void, &[_]xitdb.PathPart(void){
                                             .{ .map_get = path_hash },
