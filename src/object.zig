@@ -169,7 +169,7 @@ pub fn writeBlob(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core
                 header: []const u8,
 
                 pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
-                    if (cursor.getPointer() == null) {
+                    if (cursor.pointer() == null) {
                         var writer = try cursor.writer(void, &[_]xitdb.PathPart(void){});
 
                         try writer.writeAll(ctx_self.header);
@@ -264,7 +264,7 @@ fn writeTree(comptime repo_kind: rp.RepoKind, opts: ObjectOpts(repo_kind), alloc
                 tree: []const u8,
 
                 pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
-                    if (cursor.getPointer() != null) {
+                    if (cursor.pointer() != null) {
                         return error.ObjectAlreadyExists;
                     }
                     const tree_ptr = try ctx_self.root_cursor.writeBytes(ctx_self.tree, .once, void, &[_]xitdb.PathPart(void){
