@@ -76,33 +76,33 @@ pub fn create(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, a
                         pub fn run(heads_ctx_self: @This(), heads_cursor: *xitdb.Database(.file).Cursor) !void {
                             const name_hash = hash.hash_buffer(heads_ctx_self.name);
                             _ = try heads_ctx_self.root_cursor.writeBytes(heads_ctx_self.name, .once, void, &[_]xitdb.PathPart(void){
-                                .{ .map_get = hash.hash_buffer("names") },
-                                .map_create,
-                                .{ .map_get = name_hash },
+                                .{ .hash_map_get = hash.hash_buffer("names") },
+                                .hash_map_create,
+                                .{ .hash_map_get = name_hash },
                             });
                             const buffer_ptr = try heads_ctx_self.root_cursor.writeBytes(heads_ctx_self.head_file_buffer, .once, void, &[_]xitdb.PathPart(void){
-                                .{ .map_get = hash.hash_buffer("ref-values") },
-                                .map_create,
-                                .{ .map_get = hash.hash_buffer(heads_ctx_self.head_file_buffer) },
+                                .{ .hash_map_get = hash.hash_buffer("ref-values") },
+                                .hash_map_create,
+                                .{ .hash_map_get = hash.hash_buffer(heads_ctx_self.head_file_buffer) },
                             });
                             _ = try heads_cursor.execute(void, &[_]xitdb.PathPart(void){
-                                .{ .map_get = name_hash },
+                                .{ .hash_map_get = name_hash },
                                 .{ .value = .{ .bytes_ptr = buffer_ptr } },
                             });
                         }
                     };
                     _ = try cursor.execute(HeadsCtx, &[_]xitdb.PathPart(HeadsCtx){
-                        .{ .map_get = hash.hash_buffer("refs") },
-                        .map_create,
-                        .{ .map_get = hash.hash_buffer("heads") },
-                        .map_create,
+                        .{ .hash_map_get = hash.hash_buffer("refs") },
+                        .hash_map_create,
+                        .{ .hash_map_get = hash.hash_buffer("heads") },
+                        .hash_map_create,
                         .{ .ctx = HeadsCtx{ .root_cursor = cursor, .name = ctx_self.name, .head_file_buffer = &head_file_buffer } },
                     });
                 }
             };
             _ = try core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
-                .{ .list_get = .append_copy },
-                .map_create,
+                .{ .array_list_get = .append_copy },
+                .hash_map_create,
                 .{ .ctx = Ctx{ .core = core, .name = name } },
             });
         },
@@ -179,22 +179,22 @@ pub fn delete(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, a
 
                         pub fn run(heads_ctx_self: @This(), heads_cursor: *xitdb.Database(.file).Cursor) !void {
                             _ = try heads_cursor.execute(void, &[_]xitdb.PathPart(void){
-                                .{ .map_remove = hash.hash_buffer(heads_ctx_self.name) },
+                                .{ .hash_map_remove = hash.hash_buffer(heads_ctx_self.name) },
                             });
                         }
                     };
                     _ = try cursor.execute(HeadsCtx, &[_]xitdb.PathPart(HeadsCtx){
-                        .{ .map_get = hash.hash_buffer("refs") },
-                        .map_create,
-                        .{ .map_get = hash.hash_buffer("heads") },
-                        .map_create,
+                        .{ .hash_map_get = hash.hash_buffer("refs") },
+                        .hash_map_create,
+                        .{ .hash_map_get = hash.hash_buffer("heads") },
+                        .hash_map_create,
                         .{ .ctx = HeadsCtx{ .name = ctx_self.name } },
                     });
                 }
             };
             _ = try core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
-                .{ .list_get = .append_copy },
-                .map_create,
+                .{ .array_list_get = .append_copy },
+                .hash_map_create,
                 .{ .ctx = Ctx{ .core = core, .name = name, .allocator = allocator } },
             });
         },

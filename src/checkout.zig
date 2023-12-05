@@ -112,8 +112,8 @@ fn createFileFromObject(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kin
 
                         pub fn run(self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
                             var reader_maybe = try cursor.reader(void, &[_]xitdb.PathPart(void){
-                                .{ .map_get = hash.hash_buffer("objects") },
-                                .{ .map_get = hash.hash_buffer(&self.oid_hex) },
+                                .{ .hash_map_get = hash.hash_buffer("objects") },
+                                .{ .hash_map_get = hash.hash_buffer(&self.oid_hex) },
                             });
                             if (reader_maybe) |*reader| {
                                 // create parent dir(s)
@@ -150,7 +150,7 @@ fn createFileFromObject(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kin
                         }
                     };
                     _ = try core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
-                        .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
+                        .{ .array_list_get = .{ .index = .{ .index = 0, .reverse = true } } },
                         .{ .ctx = Ctx{ .core = core, .path = path, .oid_hex = oid_hex, .tree_entry = tree_entry } },
                     });
                 },

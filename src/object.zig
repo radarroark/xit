@@ -186,16 +186,16 @@ pub fn writeBlob(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core
                         try writer.finish();
 
                         _ = try ctx_self.opts.cursor.execute(void, &[_]xitdb.PathPart(void){
-                            .{ .map_get = hash.hash_buffer(&ctx_self.sha1_hex) },
+                            .{ .hash_map_get = hash.hash_buffer(&ctx_self.sha1_hex) },
                             .{ .value = .{ .bytes_ptr = writer.ptr_position } },
                         });
                     }
                 }
             };
             _ = try opts.root_cursor.execute(Ctx, &[_]xitdb.PathPart(Ctx){
-                .{ .map_get = hash.hash_buffer("file-values") },
-                .map_create,
-                .{ .map_get = file_hash },
+                .{ .hash_map_get = hash.hash_buffer("file-values") },
+                .hash_map_create,
+                .{ .hash_map_get = file_hash },
                 .{ .ctx = Ctx{ .opts = opts, .file = file, .sha1_hex = sha1_hex, .header = header } },
             });
         },
@@ -268,9 +268,9 @@ fn writeTree(comptime repo_kind: rp.RepoKind, opts: ObjectOpts(repo_kind), alloc
                         return error.ObjectAlreadyExists;
                     }
                     const tree_ptr = try ctx_self.root_cursor.writeBytes(ctx_self.tree, .once, void, &[_]xitdb.PathPart(void){
-                        .{ .map_get = hash.hash_buffer("object-values") },
-                        .map_create,
-                        .{ .map_get = hash.hash_buffer(ctx_self.tree) },
+                        .{ .hash_map_get = hash.hash_buffer("object-values") },
+                        .hash_map_create,
+                        .{ .hash_map_get = hash.hash_buffer(ctx_self.tree) },
                     });
                     _ = try cursor.execute(void, &[_]xitdb.PathPart(void){
                         .{ .value = .{ .bytes_ptr = tree_ptr } },
@@ -278,7 +278,7 @@ fn writeTree(comptime repo_kind: rp.RepoKind, opts: ObjectOpts(repo_kind), alloc
                 }
             };
             _ = try opts.cursor.execute(Ctx, &[_]xitdb.PathPart(Ctx){
-                .{ .map_get = hash.hash_buffer(&tree_sha1_hex) },
+                .{ .hash_map_get = hash.hash_buffer(&tree_sha1_hex) },
                 .{ .ctx = Ctx{ .root_cursor = opts.root_cursor, .tree = tree } },
             });
         },
@@ -468,14 +468,14 @@ pub fn writeCommit(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
 
                             // write commit content
                             const content_ptr = try obj_ctx_self.root_cursor.writeBytes(commit, .once, void, &[_]xitdb.PathPart(void){
-                                .{ .map_get = hash.hash_buffer("object-values") },
-                                .map_create,
-                                .{ .map_get = hash.hash_buffer(commit) },
+                                .{ .hash_map_get = hash.hash_buffer("object-values") },
+                                .hash_map_create,
+                                .{ .hash_map_get = hash.hash_buffer(commit) },
                             });
 
                             // write commit
                             _ = try obj_cursor.execute(void, &[_]xitdb.PathPart(void){
-                                .{ .map_get = hash.hash_buffer(&obj_ctx_self.commit_sha1_hex) },
+                                .{ .hash_map_get = hash.hash_buffer(&obj_ctx_self.commit_sha1_hex) },
                                 .{ .value = .{ .bytes_ptr = content_ptr } },
                             });
                         }
@@ -489,8 +489,8 @@ pub fn writeCommit(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
                         .commit_sha1_hex = undefined,
                     };
                     _ = try cursor.execute(*ObjectsCtx, &[_]xitdb.PathPart(*ObjectsCtx){
-                        .{ .map_get = hash.hash_buffer("objects") },
-                        .map_create,
+                        .{ .hash_map_get = hash.hash_buffer("objects") },
+                        .hash_map_create,
                         .{ .ctx = &obj_ctx },
                     });
 
@@ -499,8 +499,8 @@ pub fn writeCommit(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
                 }
             };
             _ = try core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
-                .{ .list_get = .append_copy },
-                .map_create,
+                .{ .array_list_get = .append_copy },
+                .hash_map_create,
                 .{ .ctx = Ctx{ .core = core, .index = index, .command = command, .allocator = allocator } },
             });
         },
@@ -608,9 +608,9 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                             }
                         };
                         if (try core.db.rootCursor().readBytesAlloc(allocator, void, &[_]xitdb.PathPart(void){
-                            .{ .list_get = .{ .index = .{ .index = 0, .reverse = true } } },
-                            .{ .map_get = hash.hash_buffer("objects") },
-                            .{ .map_get = hash.hash_buffer(&oid) },
+                            .{ .array_list_get = .{ .index = .{ .index = 0, .reverse = true } } },
+                            .{ .hash_map_get = hash.hash_buffer("objects") },
+                            .{ .hash_map_get = hash.hash_buffer(&oid) },
                         })) |bytes| {
                             var stream = std.io.fixedBufferStream(bytes);
                             break :blk State{
