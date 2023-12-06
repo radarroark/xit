@@ -108,8 +108,8 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8))
         } else if (std.mem.eql(u8, args.items[0], "status")) {
             return CommandData{ .status = {} };
         } else if (std.mem.eql(u8, args.items[0], "diff")) {
-            const cached_maybe = map_args.get("--cached");
-            return CommandData{ .diff = .{ .kind = if (cached_maybe == null) .workspace else .index } };
+            const staged_maybe = map_args.get("--staged");
+            return CommandData{ .diff = .{ .kind = if (staged_maybe == null) .workspace else .index } };
         } else if (std.mem.eql(u8, args.items[0], "branch")) {
             return CommandData{ .branch = .{ .name = if (pos_args.items.len == 0) null else pos_args.items[0] } };
         } else if (std.mem.eql(u8, args.items[0], "checkout")) {
