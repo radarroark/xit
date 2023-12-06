@@ -129,6 +129,29 @@ pub const MyersDiff = struct {
     }
 };
 
+test "myers diff" {
+    const allocator = std.testing.allocator;
+    const lines1 = [_][]const u8{ "A", "B", "C", "A", "B", "B", "A" };
+    const lines2 = [_][]const u8{ "C", "B", "A", "B", "A", "C" };
+    const expected_diff = [_]MyersDiff.Line{
+        .{ .op = .del, .text = "A" },
+        .{ .op = .del, .text = "B" },
+        .{ .op = .eql, .text = "C" },
+        .{ .op = .ins, .text = "B" },
+        .{ .op = .eql, .text = "A" },
+        .{ .op = .eql, .text = "B" },
+        .{ .op = .del, .text = "B" },
+        .{ .op = .eql, .text = "A" },
+        .{ .op = .ins, .text = "C" },
+    };
+    var actual_diff = try MyersDiff.init(allocator, &lines1, &lines2);
+    defer actual_diff.deinit();
+    try std.testing.expectEqual(expected_diff.len, actual_diff.result.items.len);
+    for (expected_diff, actual_diff.result.items) |expected, actual| {
+        try std.testing.expectEqual(expected, actual);
+    }
+}
+
 pub const DiffKind = enum {
     workspace,
     index,
@@ -328,27 +351,4 @@ pub fn DiffList(comptime repo_kind: rp.RepoKind) type {
             self.status.deinit();
         }
     };
-}
-
-test "myers diff" {
-    const allocator = std.testing.allocator;
-    const lines1 = [_][]const u8{ "A", "B", "C", "A", "B", "B", "A" };
-    const lines2 = [_][]const u8{ "C", "B", "A", "B", "A", "C" };
-    const expected_diff = [_]MyersDiff.Line{
-        .{ .op = .del, .text = "A" },
-        .{ .op = .del, .text = "B" },
-        .{ .op = .eql, .text = "C" },
-        .{ .op = .ins, .text = "B" },
-        .{ .op = .eql, .text = "A" },
-        .{ .op = .eql, .text = "B" },
-        .{ .op = .del, .text = "B" },
-        .{ .op = .eql, .text = "A" },
-        .{ .op = .ins, .text = "C" },
-    };
-    var actual_diff = try MyersDiff.init(allocator, &lines1, &lines2);
-    defer actual_diff.deinit();
-    try std.testing.expectEqual(expected_diff.len, actual_diff.result.items.len);
-    for (expected_diff, actual_diff.result.items) |expected, actual| {
-        try std.testing.expectEqual(expected, actual);
-    }
 }
