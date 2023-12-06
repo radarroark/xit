@@ -6,7 +6,7 @@
 //! it's one of those times when you have to set aside your
 //! engineer brain and think about it as a user. oh well.
 //! anyway, i didn't mix them up internally, at least.
-//! the checkout fn below only switches branches,
+//! the switch_head fn below only switches branches/commits,
 //! while the restore fn can be used to restore files.
 
 const std = @import("std");
@@ -21,16 +21,16 @@ const rp = @import("./repo.zig");
 
 const MAX_FILE_READ_BYTES = 1024; // FIXME: this is arbitrary...
 
-pub const CheckoutError = error{
-    CheckoutConflict,
+pub const SwitchError = error{
+    SwitchConflict,
 };
 
-pub const CheckoutResultKind = enum {
+pub const SwitchResultKind = enum {
     success,
     conflict,
 };
 
-pub const CheckoutResultData = union(CheckoutResultKind) {
+pub const SwitchResultData = union(SwitchResultKind) {
     success,
     conflict: struct {
         stale_files: std.StringHashMap(void),
@@ -40,14 +40,14 @@ pub const CheckoutResultData = union(CheckoutResultKind) {
     },
 };
 
-pub const CheckoutResult = struct {
-    data: CheckoutResultData,
+pub const SwitchResult = struct {
+    data: SwitchResultData,
 
-    pub fn init() CheckoutResult {
-        return CheckoutResult{ .data = CheckoutResultData{ .success = {} } };
+    pub fn init() SwitchResult {
+        return SwitchResult{ .data = SwitchResultData{ .success = {} } };
     }
 
-    pub fn deinit(self: *CheckoutResult) void {
+    pub fn deinit(self: *SwitchResult) void {
         switch (self.data) {
             .success => {},
             .conflict => {
@@ -59,9 +59,9 @@ pub const CheckoutResult = struct {
         }
     }
 
-    pub fn conflict(self: *CheckoutResult, allocator: std.mem.Allocator) void {
+    pub fn conflict(self: *SwitchResult, allocator: std.mem.Allocator) void {
         if (self.data != .conflict) {
-            self.data = CheckoutResultData{
+            self.data = SwitchResultData{
                 .conflict = .{
                     .stale_files = std.StringHashMap(void).init(allocator),
                     .stale_dirs = std.StringHashMap(void).init(allocator),
@@ -285,7 +285,7 @@ fn untrackedFile(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
     }
 }
 
-pub fn migrate(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, tree_diff: obj.TreeDiff(repo_kind), index: *idx.Index(repo_kind), result: *CheckoutResult) !void {
+pub fn migrate(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, tree_diff: obj.TreeDiff(repo_kind), index: *idx.Index(repo_kind), result: *SwitchResult) !void {
     var add_files = std.StringHashMap(obj.TreeEntry).init(allocator);
     defer add_files.deinit();
     var edit_files = std.StringHashMap(obj.TreeEntry).init(allocator);
@@ -383,7 +383,7 @@ pub fn migrate(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, 
     }
 
     if (result.data == .conflict) {
-        return error.CheckoutConflict;
+        return error.SwitchConflict;
     }
 
     var remove_files_iter = remove_files.iterator();
@@ -431,7 +431,7 @@ pub fn migrate(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, 
     }
 }
 
-pub fn checkout(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, target: []const u8, result: *CheckoutResult) !void {
+pub fn switch_head(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, target: []const u8, result: *SwitchResult) !void {
     // get the current commit and target oid
     const current_hash = try ref.readHead(repo_kind, core);
     const oid_hex = try ref.resolve(repo_kind, core, target);

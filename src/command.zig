@@ -12,7 +12,7 @@ pub const CommandKind = enum {
     status,
     diff,
     branch,
-    checkout,
+    switch_head,
     restore,
 };
 
@@ -37,7 +37,7 @@ pub const CommandData = union(CommandKind) {
     branch: struct {
         name: ?[]const u8,
     },
-    checkout: struct {
+    switch_head: struct {
         target: []const u8,
     },
     restore: struct {
@@ -48,7 +48,7 @@ pub const CommandData = union(CommandKind) {
 pub const CommandError = error{
     AddPathsMissing,
     CommitMessageMissing,
-    CheckoutTargetMissing,
+    SwitchTargetMissing,
     RestorePathMissing,
 };
 
@@ -112,11 +112,11 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8))
             return CommandData{ .diff = .{ .kind = if (staged_maybe == null) .workspace else .index } };
         } else if (std.mem.eql(u8, args.items[0], "branch")) {
             return CommandData{ .branch = .{ .name = if (pos_args.items.len == 0) null else pos_args.items[0] } };
-        } else if (std.mem.eql(u8, args.items[0], "checkout")) {
+        } else if (std.mem.eql(u8, args.items[0], "switch")) {
             if (pos_args.items.len == 0) {
-                return CommandError.CheckoutTargetMissing;
+                return CommandError.SwitchTargetMissing;
             }
-            return CommandData{ .checkout = .{ .target = pos_args.items[0] } };
+            return CommandData{ .switch_head = .{ .target = pos_args.items[0] } };
         } else if (std.mem.eql(u8, args.items[0], "restore")) {
             if (pos_args.items.len == 0) {
                 return CommandError.RestorePathMissing;

@@ -408,7 +408,7 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
         break :blk try ref.readHead(repo_kind, &repo.core);
     };
 
-    // try to checkout first commit after making conflicting change
+    // try to switch to first commit after making conflicting change
     {
         {
             // make a new file (and add it to the index) that conflicts with one from commit1
@@ -426,11 +426,11 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
             {
                 var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
                 defer repo.deinit();
-                var result = chk.CheckoutResult.init();
+                var result = chk.SwitchResult.init();
                 defer result.deinit();
-                chk.checkout(repo_kind, &repo.core, allocator, &commit1, &result) catch |err| {
+                chk.switch_head(repo_kind, &repo.core, allocator, &commit1, &result) catch |err| {
                     switch (err) {
-                        error.CheckoutConflict => {},
+                        error.SwitchConflict => {},
                         else => return err,
                     }
                 };
@@ -460,11 +460,11 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
             {
                 var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
                 defer repo.deinit();
-                var result = chk.CheckoutResult.init();
+                var result = chk.SwitchResult.init();
                 defer result.deinit();
-                chk.checkout(repo_kind, &repo.core, allocator, &commit1, &result) catch |err| {
+                chk.switch_head(repo_kind, &repo.core, allocator, &commit1, &result) catch |err| {
                     switch (err) {
-                        error.CheckoutConflict => {},
+                        error.SwitchConflict => {},
                         else => return err,
                     }
                 };
@@ -488,11 +488,11 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
             {
                 var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
                 defer repo.deinit();
-                var result = chk.CheckoutResult.init();
+                var result = chk.SwitchResult.init();
                 defer result.deinit();
-                chk.checkout(repo_kind, &repo.core, allocator, &commit1, &result) catch |err| {
+                chk.switch_head(repo_kind, &repo.core, allocator, &commit1, &result) catch |err| {
                     switch (err) {
-                        error.CheckoutConflict => {},
+                        error.SwitchConflict => {},
                         else => return err,
                     }
                 };
@@ -523,11 +523,11 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
             {
                 var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
                 defer repo.deinit();
-                var result = chk.CheckoutResult.init();
+                var result = chk.SwitchResult.init();
                 defer result.deinit();
-                chk.checkout(repo_kind, &repo.core, allocator, &commit1, &result) catch |err| {
+                chk.switch_head(repo_kind, &repo.core, allocator, &commit1, &result) catch |err| {
                     switch (err) {
-                        error.CheckoutConflict => {},
+                        error.SwitchConflict => {},
                         else => return err,
                     }
                 };
@@ -540,9 +540,9 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
         }
     }
 
-    // checkout first commit
+    // switch to first commit
     args.clearAndFree();
-    try args.append("checkout");
+    try args.append("switch");
     try args.append(&commit1);
     try main.xitMain(repo_kind, allocator, &args);
 
@@ -558,9 +558,9 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
         defer license.close();
     }
 
-    // checkout master
+    // switch to master
     args.clearAndFree();
-    try args.append("checkout");
+    try args.append("switch");
     try args.append("master");
     try main.xitMain(repo_kind, allocator, &args);
 
@@ -936,9 +936,9 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
     try args.append("stuff");
     try main.xitMain(repo_kind, allocator, &args);
 
-    // checkout the branch
+    // switch to the branch
     args.clearAndFree();
-    try args.append("checkout");
+    try args.append("switch");
     try args.append("stuff");
     try main.xitMain(repo_kind, allocator, &args);
 

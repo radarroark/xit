@@ -279,12 +279,12 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         }
                     }
                 },
-                cmd.CommandData.checkout => {
-                    var result = chk.CheckoutResult.init();
+                cmd.CommandData.switch_head => {
+                    var result = chk.SwitchResult.init();
                     defer result.deinit();
-                    chk.checkout(repo_kind, &self.core, self.allocator, cmd_data.checkout.target, &result) catch |err| {
+                    chk.switch_head(repo_kind, &self.core, self.allocator, cmd_data.switch_head.target, &result) catch |err| {
                         switch (err) {
-                            error.CheckoutConflict => {},
+                            error.SwitchConflict => {},
                             else => return err,
                         }
                     };
