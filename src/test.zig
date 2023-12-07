@@ -18,7 +18,7 @@ pub fn expectEqual(expected: anytype, actual: anytype) !void {
     try std.testing.expectEqual(@as(@TypeOf(actual), expected), actual);
 }
 
-fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void {
+fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     const temp_dir_name = "temp-test-end-to-end";
 
     var args = std.ArrayList([]const u8).init(allocator);
@@ -1063,10 +1063,13 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) !void
         defer repo.deinit();
         try expectEqual(commit3, try ref.resolve(repo_kind, &repo.core, "stuff"));
     }
+
+    return commit3;
 }
 
 test "end to end" {
     const allocator = std.testing.allocator;
-    try testMain(allocator, .git);
-    try testMain(allocator, .xit);
+    const last_hash_git = try testMain(allocator, .git);
+    const last_hash_xit = try testMain(allocator, .xit);
+    try std.testing.expectEqualStrings(&last_hash_git, &last_hash_xit);
 }
