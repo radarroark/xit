@@ -226,11 +226,15 @@ pub fn DiffList(comptime repo_kind: rp.RepoKind) type {
 
                 try lines.append(try std.fmt.allocPrint(arena.allocator(), "diff --git a/{s} b/{s}", .{ a.path, b.path }));
 
+                var mode_maybe: ?io.Mode = null;
+
                 if (a.mode) |a_mode| {
                     if (b.mode) |b_mode| {
                         if (a_mode.unix_permission != b_mode.unix_permission) {
                             try lines.append(try std.fmt.allocPrint(arena.allocator(), "old mode {s}", .{a_mode.to_str()}));
                             try lines.append(try std.fmt.allocPrint(arena.allocator(), "new mode {s}", .{b_mode.to_str()}));
+                        } else {
+                            mode_maybe = a_mode;
                         }
                     } else {
                         try lines.append(try std.fmt.allocPrint(arena.allocator(), "deleted file mode {s}", .{a_mode.to_str()}));
@@ -242,26 +246,17 @@ pub fn DiffList(comptime repo_kind: rp.RepoKind) type {
                 }
 
                 if (!std.mem.eql(u8, &a.oid, &b.oid)) {
-                    if (a.mode) |a_mode| {
-                        if (b.mode) |b_mode| {
-                            if (a_mode.unix_permission != b_mode.unix_permission) {
-                                try lines.append(try std.fmt.allocPrint(arena.allocator(), "index {s}..{s} {s}", .{
-                                    a.oid_hex[0..7],
-                                    b.oid_hex[0..7],
-                                    a_mode.to_str(),
-                                }));
-                            } else {
-                                try lines.append(try std.fmt.allocPrint(arena.allocator(), "index {s}..{s}", .{
-                                    a.oid_hex[0..7],
-                                    b.oid_hex[0..7],
-                                }));
-                            }
-                        } else {
-                            try lines.append(try std.fmt.allocPrint(arena.allocator(), "index {s}..{s}", .{
-                                a.oid_hex[0..7],
-                                b.oid_hex[0..7],
-                            }));
-                        }
+                    if (mode_maybe) |mode| {
+                        try lines.append(try std.fmt.allocPrint(arena.allocator(), "index {s}..{s} {s}", .{
+                            a.oid_hex[0..7],
+                            b.oid_hex[0..7],
+                            mode.to_str(),
+                        }));
+                    } else {
+                        try lines.append(try std.fmt.allocPrint(arena.allocator(), "index {s}..{s}", .{
+                            a.oid_hex[0..7],
+                            b.oid_hex[0..7],
+                        }));
                     }
 
                     try lines.append(try std.fmt.allocPrint(arena.allocator(), "--- a/{s}", .{a.path}));
