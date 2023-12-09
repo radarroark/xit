@@ -73,7 +73,7 @@ pub const SwitchResult = struct {
     }
 };
 
-fn createFileFromObject(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, path: []const u8, tree_entry: obj.TreeEntry) !void {
+fn objectToFile(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, path: []const u8, tree_entry: obj.TreeEntry) !void {
     const oid_hex = std.fmt.bytesToHex(tree_entry.oid, .lower);
 
     switch (tree_entry.mode.object_type) {
@@ -165,7 +165,7 @@ fn createFileFromObject(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kin
             for (tree_object.content.tree.entries.keys(), tree_object.content.tree.entries.values()) |sub_path, entry| {
                 const new_path = try std.fs.path.join(allocator, &[_][]const u8{ path, sub_path });
                 defer allocator.free(new_path);
-                try createFileFromObject(repo_kind, core, allocator, new_path, entry);
+                try objectToFile(repo_kind, core, allocator, new_path, entry);
             }
         },
         // TODO: handle symlinks
@@ -173,7 +173,73 @@ fn createFileFromObject(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kin
     }
 }
 
-fn getTreeEntryForPath(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, parent: obj.Object(repo_kind), path_parts: []const []const u8) !?obj.TreeEntry {
+pub fn objectToBuffer(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, oid_hex: [hash.SHA1_HEX_LEN]u8, buffer: []u8) ![]u8 {
+    switch (repo_kind) {
+        .git => {
+            // open the internal dirs
+            var objects_dir = try core.git_dir.openDir("objects", .{});
+            defer objects_dir.close();
+
+            // open the in file
+            var hash_prefix_dir = try objects_dir.openDir(oid_hex[0..2], .{});
+            defer hash_prefix_dir.close();
+            const hash_suffix = oid_hex[2..];
+            var in_file = try hash_prefix_dir.openFile(hash_suffix, .{});
+            defer in_file.close();
+
+            // decompress into arraylist
+            var decompressed = try compress.Decompressed.init(allocator, in_file);
+            defer decompressed.deinit();
+            var reader = decompressed.stream.reader();
+            try reader.skipUntilDelimiterOrEof(0);
+            const size = try reader.read(buffer);
+            return buffer[0..size];
+        },
+        .xit => {
+            const Ctx = struct {
+                core: *rp.Repo(repo_kind).Core,
+                oid_hex: [hash.SHA1_HEX_LEN]u8,
+                buffer: []u8,
+                out_size: u60,
+
+                pub fn run(self: *@This(), cursor: *xitdb.Database(.file).Cursor) !void {
+                    var reader_maybe = try cursor.reader(void, &[_]xitdb.PathPart(void){
+                        .{ .hash_map_get = hash.hash_buffer("objects") },
+                        .{ .hash_map_get = hash.hash_buffer(&self.oid_hex) },
+                    });
+                    if (reader_maybe) |*reader| {
+                        var read_buffer = [_]u8{0} ** 1;
+                        var header_skipped = false;
+                        while (true) {
+                            const size = try reader.read(&read_buffer);
+                            if (size == 0) break;
+                            if (!header_skipped) {
+                                if (read_buffer[0] == 0) {
+                                    header_skipped = true;
+                                    break;
+                                }
+                            }
+                        }
+                        self.out_size = try reader.read(self.buffer);
+                        if (header_skipped) return;
+
+                        return error.ObjectInvalid;
+                    } else {
+                        return error.ObjectNotFound;
+                    }
+                }
+            };
+            var ctx = Ctx{ .core = core, .oid_hex = oid_hex, .buffer = buffer, .out_size = 0 };
+            _ = try core.db.rootCursor().execute(*Ctx, &[_]xitdb.PathPart(*Ctx){
+                .{ .array_list_get = .{ .index = .{ .index = 0, .reverse = true } } },
+                .{ .ctx = &ctx },
+            });
+            return buffer[0..ctx.out_size];
+        },
+    }
+}
+
+fn pathToTreeEntry(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, parent: obj.Object(repo_kind), path_parts: []const []const u8) !?obj.TreeEntry {
     const path_part = path_parts[0];
     const tree_entry = parent.content.tree.entries.get(path_part) orelse return null;
 
@@ -187,7 +253,7 @@ fn getTreeEntryForPath(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind
 
     switch (tree_object.content) {
         .blob => return null,
-        .tree => return getTreeEntryForPath(repo_kind, core, allocator, tree_object, path_parts[1..]),
+        .tree => return pathToTreeEntry(repo_kind, core, allocator, tree_object, path_parts[1..]),
         .commit => return error.ObjectInvalid,
     }
 }
@@ -417,7 +483,7 @@ pub fn migrate(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, 
     var add_files_iter = add_files.iterator();
     while (add_files_iter.next()) |entry| {
         // update working tree
-        try createFileFromObject(repo_kind, core, allocator, entry.key_ptr.*, entry.value_ptr.*);
+        try objectToFile(repo_kind, core, allocator, entry.key_ptr.*, entry.value_ptr.*);
         // update index
         try index.addPath(core, entry.key_ptr.*);
     }
@@ -425,7 +491,7 @@ pub fn migrate(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, 
     var edit_files_iter = edit_files.iterator();
     while (edit_files_iter.next()) |entry| {
         // update working tree
-        try createFileFromObject(repo_kind, core, allocator, entry.key_ptr.*, entry.value_ptr.*);
+        try objectToFile(repo_kind, core, allocator, entry.key_ptr.*, entry.value_ptr.*);
         // update index
         try index.addPath(core, entry.key_ptr.*);
     }
@@ -501,8 +567,8 @@ pub fn restore(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, 
         }
     }
     try path_parts.append(path[start..]);
-    const tree_entry = try getTreeEntryForPath(repo_kind, core, allocator, tree_object, path_parts.items) orelse return error.ObjectNotFound;
+    const tree_entry = try pathToTreeEntry(repo_kind, core, allocator, tree_object, path_parts.items) orelse return error.ObjectNotFound;
 
     // restore file in the working tree
-    try createFileFromObject(repo_kind, core, allocator, path, tree_entry);
+    try objectToFile(repo_kind, core, allocator, path, tree_entry);
 }

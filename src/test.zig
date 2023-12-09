@@ -271,6 +271,8 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
             for (diff_list.diffs.items) |diff_item| {
                 if (std.mem.eql(u8, "hello.txt", diff_item.path)) {
                     try std.testing.expectEqualStrings("diff --git a/hello.txt b/hello.txt", diff_item.lines.items[0]);
+                    try std.testing.expectEqualStrings("- hello, world!", diff_item.lines.items[4]);
+                    try std.testing.expectEqualStrings("+ goodbye, world!", diff_item.lines.items[5]);
                 } else if (std.mem.eql(u8, "run.sh", diff_item.path)) {
                     try std.testing.expectEqualStrings("diff --git a/run.sh b/run.sh", diff_item.lines.items[0]);
                     try std.testing.expectEqualStrings("old mode 100644", diff_item.lines.items[1]);

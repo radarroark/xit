@@ -5,6 +5,7 @@ const hash = @import("./hash.zig");
 const io = @import("./io.zig");
 const idx = @import("./index.zig");
 const obj = @import("./object.zig");
+const chk = @import("./checkout.zig");
 
 fn absIndex(i: isize, len: usize) usize {
     return if (i < 0) len - std.math.absCast(i) else @intCast(i);
@@ -39,7 +40,7 @@ pub const MyersDiff = struct {
             for (v.items) |*item| {
                 item.* = 0;
             }
-            blk: for (0..max) |d| {
+            blk: for (0..max + 1) |d| {
                 try trace.append(try v.clone());
                 for (0..d + 1) |i| {
                     const dd: isize = @intCast(d);
@@ -131,24 +132,42 @@ pub const MyersDiff = struct {
 
 test "myers diff" {
     const allocator = std.testing.allocator;
-    const lines1 = [_][]const u8{ "A", "B", "C", "A", "B", "B", "A" };
-    const lines2 = [_][]const u8{ "C", "B", "A", "B", "A", "C" };
-    const expected_diff = [_]MyersDiff.Line{
-        .{ .op = .del, .text = "A" },
-        .{ .op = .del, .text = "B" },
-        .{ .op = .eql, .text = "C" },
-        .{ .op = .ins, .text = "B" },
-        .{ .op = .eql, .text = "A" },
-        .{ .op = .eql, .text = "B" },
-        .{ .op = .del, .text = "B" },
-        .{ .op = .eql, .text = "A" },
-        .{ .op = .ins, .text = "C" },
-    };
-    var actual_diff = try MyersDiff.init(allocator, &lines1, &lines2);
-    defer actual_diff.deinit();
-    try std.testing.expectEqual(expected_diff.len, actual_diff.result.items.len);
-    for (expected_diff, actual_diff.result.items) |expected, actual| {
-        try std.testing.expectEqual(expected, actual);
+    {
+        const lines1 = [_][]const u8{ "A", "B", "C", "A", "B", "B", "A" };
+        const lines2 = [_][]const u8{ "C", "B", "A", "B", "A", "C" };
+        const expected_diff = [_]MyersDiff.Line{
+            .{ .op = .del, .text = "A" },
+            .{ .op = .del, .text = "B" },
+            .{ .op = .eql, .text = "C" },
+            .{ .op = .ins, .text = "B" },
+            .{ .op = .eql, .text = "A" },
+            .{ .op = .eql, .text = "B" },
+            .{ .op = .del, .text = "B" },
+            .{ .op = .eql, .text = "A" },
+            .{ .op = .ins, .text = "C" },
+        };
+        var actual_diff = try MyersDiff.init(allocator, &lines1, &lines2);
+        defer actual_diff.deinit();
+        try std.testing.expectEqual(expected_diff.len, actual_diff.result.items.len);
+        for (expected_diff, actual_diff.result.items) |expected, actual| {
+            try std.testing.expectEqual(expected.op, actual.op);
+            try std.testing.expectEqualStrings(expected.text, actual.text);
+        }
+    }
+    {
+        const lines1 = [_][]const u8{"hello, world!"};
+        const lines2 = [_][]const u8{"goodbye, world!"};
+        const expected_diff = [_]MyersDiff.Line{
+            .{ .op = .del, .text = "hello, world!" },
+            .{ .op = .ins, .text = "goodbye, world!" },
+        };
+        var actual_diff = try MyersDiff.init(allocator, &lines1, &lines2);
+        defer actual_diff.deinit();
+        try std.testing.expectEqual(expected_diff.len, actual_diff.result.items.len);
+        for (expected_diff, actual_diff.result.items) |expected, actual| {
+            try std.testing.expectEqual(expected.op, actual.op);
+            try std.testing.expectEqualStrings(expected.text, actual.text);
+        }
     }
 }
 
@@ -163,53 +182,111 @@ pub fn DiffList(comptime repo_kind: rp.RepoKind) type {
         status: st.Status(repo_kind),
 
         pub const Target = struct {
+            allocator: std.mem.Allocator,
             path: []const u8,
             oid: [hash.SHA1_BYTES_LEN]u8,
             oid_hex: [hash.SHA1_HEX_LEN]u8,
             mode: ?io.Mode,
+            // TODO: don't read it all into memory
+            buffer: []u8,
+            lines: std.ArrayList([]const u8),
 
-            pub fn initFromIndex(entry: idx.Index(repo_kind).Entry) Target {
-                return .{
+            pub fn initFromIndex(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core, entry: idx.Index(repo_kind).Entry) !Target {
+                const oid_hex = std.fmt.bytesToHex(&entry.oid, .lower);
+                var target = Target{
+                    .allocator = allocator,
                     .path = entry.path,
                     .oid = entry.oid,
-                    .oid_hex = std.fmt.bytesToHex(&entry.oid, .lower),
+                    .oid_hex = oid_hex,
                     .mode = entry.mode,
+                    .buffer = try allocator.alloc(u8, 1024),
+                    .lines = undefined,
                 };
+                const buf = try chk.objectToBuffer(repo_kind, core, allocator, oid_hex, target.buffer);
+
+                var lines = std.ArrayList([]const u8).init(allocator);
+                errdefer lines.deinit();
+                var iter = std.mem.splitScalar(u8, buf, '\n');
+                while (iter.next()) |line| {
+                    try lines.append(line);
+                }
+                target.lines = lines;
+
+                return target;
             }
 
             pub fn initFromWorkspace(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core, path: []const u8, mode: io.Mode) !Target {
                 var target = Target{
+                    .allocator = allocator,
                     .path = path,
-                    .oid = [_]u8{0} ** hash.SHA1_BYTES_LEN,
-                    .oid_hex = [_]u8{0} ** hash.SHA1_HEX_LEN,
+                    .oid = undefined,
+                    .oid_hex = undefined,
                     .mode = mode,
+                    .buffer = try allocator.alloc(u8, 1024),
+                    .lines = undefined,
                 };
+
                 var file = try core.repo_dir.openFile(path, .{ .mode = std.fs.File.OpenMode.read_only });
                 defer file.close();
+                const size = try file.reader().read(target.buffer);
+                const buf = target.buffer[0..size];
+
+                var lines = std.ArrayList([]const u8).init(allocator);
+                errdefer lines.deinit();
+                var iter = std.mem.splitScalar(u8, buf, '\n');
+                while (iter.next()) |line| {
+                    try lines.append(line);
+                }
+                target.lines = lines;
+
                 const file_size = (try file.metadata()).size();
                 const header = try std.fmt.allocPrint(allocator, "blob {}\x00", .{file_size});
                 defer allocator.free(header);
                 try hash.sha1_file(file, header, &target.oid);
                 target.oid_hex = std.fmt.bytesToHex(&target.oid, .lower);
+
                 return target;
             }
 
-            pub fn initFromNothing(path: []const u8) Target {
+            pub fn initFromNothing(allocator: std.mem.Allocator, path: []const u8) !Target {
                 return .{
+                    .allocator = allocator,
                     .path = path,
                     .oid = [_]u8{0} ** hash.SHA1_BYTES_LEN,
                     .oid_hex = [_]u8{0} ** hash.SHA1_HEX_LEN,
                     .mode = null,
+                    .buffer = try allocator.alloc(u8, 0),
+                    .lines = std.ArrayList([]const u8).init(allocator),
                 };
             }
 
-            pub fn initFromHead(path: []const u8, entry: obj.TreeEntry) Target {
-                return .{
+            pub fn initFromHead(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core, path: []const u8, entry: obj.TreeEntry) !Target {
+                const oid_hex = std.fmt.bytesToHex(&entry.oid, .lower);
+                var target = Target{
+                    .allocator = allocator,
                     .path = path,
                     .oid = entry.oid,
-                    .oid_hex = std.fmt.bytesToHex(&entry.oid, .lower),
+                    .oid_hex = oid_hex,
                     .mode = entry.mode,
+                    .buffer = try allocator.alloc(u8, 1024),
+                    .lines = undefined,
                 };
+                const buf = try chk.objectToBuffer(repo_kind, core, allocator, oid_hex, target.buffer);
+
+                var lines = std.ArrayList([]const u8).init(allocator);
+                errdefer lines.deinit();
+                var iter = std.mem.splitScalar(u8, buf, '\n');
+                while (iter.next()) |line| {
+                    try lines.append(line);
+                }
+                target.lines = lines;
+
+                return target;
+            }
+
+            pub fn deinit(self: *Target) void {
+                self.allocator.free(self.buffer);
+                self.lines.deinit();
             }
         };
 
@@ -217,6 +294,8 @@ pub fn DiffList(comptime repo_kind: rp.RepoKind) type {
             path: []const u8,
             lines: std.ArrayList([]const u8),
             arena: std.heap.ArenaAllocator,
+            target_a: Target,
+            target_b: Target,
 
             pub fn init(allocator: std.mem.Allocator, a: Target, b: Target) !Diff {
                 var arena = std.heap.ArenaAllocator.init(allocator);
@@ -266,17 +345,34 @@ pub fn DiffList(comptime repo_kind: rp.RepoKind) type {
                     } else {
                         try lines.append("+++ /dev/null");
                     }
+
+                    var diff = try MyersDiff.init(allocator, a.lines.items, b.lines.items);
+                    defer diff.deinit();
+                    for (diff.result.items) |line| {
+                        try lines.append(try std.fmt.allocPrint(arena.allocator(), "{s} {s}", .{
+                            switch (line.op) {
+                                .eql => " ",
+                                .ins => "+",
+                                .del => "-",
+                            },
+                            line.text,
+                        }));
+                    }
                 }
 
                 return .{
                     .path = a.path,
                     .lines = lines,
                     .arena = arena,
+                    .target_a = a,
+                    .target_b = b,
                 };
             }
 
             pub fn deinit(self: *Diff) void {
                 self.arena.deinit();
+                self.target_a.deinit();
+                self.target_b.deinit();
             }
         };
 
@@ -290,44 +386,44 @@ pub fn DiffList(comptime repo_kind: rp.RepoKind) type {
             switch (diff_kind) {
                 .workspace => {
                     for (status.workspace_modified.items) |entry| {
-                        try diffs.append(try Diff.init(
-                            allocator,
-                            Target.initFromIndex(status.index.entries.get(entry.path) orelse return error.EntryNotFound),
-                            try Target.initFromWorkspace(allocator, core, entry.path, io.getMode(entry.meta)),
-                        ));
+                        var a = try Target.initFromIndex(allocator, core, status.index.entries.get(entry.path) orelse return error.EntryNotFound);
+                        errdefer a.deinit();
+                        var b = try Target.initFromWorkspace(allocator, core, entry.path, io.getMode(entry.meta));
+                        errdefer b.deinit();
+                        try diffs.append(try Diff.init(allocator, a, b));
                     }
 
                     for (status.workspace_deleted.items) |path| {
-                        try diffs.append(try Diff.init(
-                            allocator,
-                            Target.initFromIndex(status.index.entries.get(path) orelse return error.EntryNotFound),
-                            Target.initFromNothing(path),
-                        ));
+                        var a = try Target.initFromIndex(allocator, core, status.index.entries.get(path) orelse return error.EntryNotFound);
+                        errdefer a.deinit();
+                        var b = try Target.initFromNothing(allocator, path);
+                        errdefer b.deinit();
+                        try diffs.append(try Diff.init(allocator, a, b));
                     }
                 },
                 .index => {
                     for (status.index_added.items) |path| {
-                        try diffs.append(try Diff.init(
-                            allocator,
-                            Target.initFromNothing(path),
-                            Target.initFromIndex(status.index.entries.get(path) orelse return error.EntryNotFound),
-                        ));
+                        var a = try Target.initFromNothing(allocator, path);
+                        errdefer a.deinit();
+                        var b = try Target.initFromIndex(allocator, core, status.index.entries.get(path) orelse return error.EntryNotFound);
+                        errdefer b.deinit();
+                        try diffs.append(try Diff.init(allocator, a, b));
                     }
 
                     for (status.index_modified.items) |path| {
-                        try diffs.append(try Diff.init(
-                            allocator,
-                            Target.initFromHead(path, status.head_tree.entries.get(path) orelse return error.EntryNotFound),
-                            Target.initFromIndex(status.index.entries.get(path) orelse return error.EntryNotFound),
-                        ));
+                        var a = try Target.initFromHead(allocator, core, path, status.head_tree.entries.get(path) orelse return error.EntryNotFound);
+                        errdefer a.deinit();
+                        var b = try Target.initFromIndex(allocator, core, status.index.entries.get(path) orelse return error.EntryNotFound);
+                        errdefer b.deinit();
+                        try diffs.append(try Diff.init(allocator, a, b));
                     }
 
                     for (status.index_deleted.items) |path| {
-                        try diffs.append(try Diff.init(
-                            allocator,
-                            Target.initFromHead(path, status.head_tree.entries.get(path) orelse return error.EntryNotFound),
-                            Target.initFromNothing(path),
-                        ));
+                        var a = try Target.initFromHead(allocator, core, path, status.head_tree.entries.get(path) orelse return error.EntryNotFound);
+                        errdefer a.deinit();
+                        var b = try Target.initFromNothing(allocator, path);
+                        errdefer b.deinit();
+                        try diffs.append(try Diff.init(allocator, a, b));
                     }
                 },
             }
