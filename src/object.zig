@@ -25,7 +25,7 @@ pub const ObjectWriteError = error{
 fn randChar() !u8 {
     var rand_int: u8 = 0;
     try std.os.getrandom(std.mem.asBytes(&rand_int));
-    var rand_float: f32 = @as(f32, @floatFromInt(rand_int)) / @as(f32, @floatFromInt(std.math.maxInt(u8)));
+    const rand_float: f32 = @as(f32, @floatFromInt(rand_int)) / @as(f32, @floatFromInt(std.math.maxInt(u8)));
     const min = 'a';
     const max = 'z';
     return @as(u8, @intFromFloat(rand_float * (max - min))) + min;
@@ -711,7 +711,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                     },
                 };
                 errdefer object.arena.deinit();
-                std.mem.copy(u8, &object.content.commit.tree, tree_hash_slice);
+                @memcpy(&object.content.commit.tree, tree_hash_slice);
 
                 // read the metadata
                 var metadata = std.StringHashMap([]const u8).init(allocator);
@@ -837,7 +837,7 @@ pub fn TreeDiff(comptime repo_kind: rp.RepoKind) type {
 
         fn loadTree(self: *TreeDiff(repo_kind), core: *rp.Repo(repo_kind).Core, oid_maybe: ?[hash.SHA1_HEX_LEN]u8) !std.StringArrayHashMap(TreeEntry) {
             if (oid_maybe) |oid| {
-                var obj = try Object(repo_kind).init(self.arena.allocator(), core, oid);
+                const obj = try Object(repo_kind).init(self.arena.allocator(), core, oid);
                 return switch (obj.content) {
                     .blob => std.StringArrayHashMap(TreeEntry).init(self.arena.allocator()),
                     .tree => obj.content.tree.entries,

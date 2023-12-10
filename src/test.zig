@@ -202,7 +202,7 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
 
                     var oid: c.git_oid = undefined;
                     try expectEqual(0, c.git_odb_hashfile(&oid, "README", c.GIT_OBJECT_BLOB));
-                    var oid_str = c.git_oid_tostr_s(&oid);
+                    const oid_str = c.git_oid_tostr_s(&oid);
                     try std.testing.expect(oid_str != null);
 
                     try std.testing.expectEqualStrings(&sha1_hex, std.mem.sliceTo(oid_str, 0));

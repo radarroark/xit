@@ -33,7 +33,10 @@ pub fn create(b: *Builder, target: std.zig.CrossTarget, optimize: std.builtin.Op
     // not sure why, but mbedtls has runtime issues when it's not built as
     // release-small or with the -Os flag, definitely need to figure out what's
     // going on there
-    ret.addCSourceFiles(srcs, &.{"-Os"});
+    ret.addCSourceFiles(.{
+        .files = srcs,
+        .flags = &.{"-Os"},
+    });
     ret.linkLibC();
 
     if (target.isWindows())

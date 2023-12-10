@@ -134,7 +134,7 @@ fn addEntries(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, unt
         std.fs.File.Kind.directory => {
             const is_untracked = !(std.mem.eql(u8, path, ".") or index.dir_to_paths.contains(path) or index.entries.contains(path));
 
-            var dir = try repo_dir.openIterableDir(path, .{});
+            var dir = try repo_dir.openDir(path, .{ .iterate = true });
             defer dir.close();
             var iter = dir.iterate();
 

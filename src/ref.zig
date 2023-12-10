@@ -35,7 +35,7 @@ pub const Ref = struct {
 
         if (std.mem.startsWith(u8, content, REF_START_STR) and content.len > REF_START_STR.len) {
             const name_len = content.len - REF_START_STR.len;
-            var name = try allocator.alloc(u8, name_len);
+            const name = try allocator.alloc(u8, name_len);
             errdefer allocator.free(name);
             @memcpy(name, content[REF_START_STR.len..]);
 
@@ -100,7 +100,7 @@ pub const RefList = struct {
                                         .{ .hash_map_get = hash.hash_buffer("names") },
                                         .{ .hash_map_get = name_hash },
                                     })) |name| {
-                                        var ref = try Ref.initWithName(repo_kind, self.core, self.ref_list.arena.allocator(), self.dir_name, name);
+                                        const ref = try Ref.initWithName(repo_kind, self.core, self.ref_list.arena.allocator(), self.dir_name, name);
                                         try self.ref_list.refs.append(ref);
                                     } else {
                                         return error.ValueNotFound;
@@ -126,7 +126,7 @@ pub const RefList = struct {
     }
 
     fn addRefs(self: *RefList, comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, dir_name: []const u8, dir: std.fs.Dir, path: *std.ArrayList([]const u8)) !void {
-        var iter_dir = try dir.openIterableDir(".", .{});
+        var iter_dir = try dir.openDir(".", .{ .iterate = true });
         defer iter_dir.close();
         var iter = iter_dir.iterate();
         while (try iter.next()) |entry| {
@@ -136,7 +136,7 @@ pub const RefList = struct {
             switch (entry.kind) {
                 .file => {
                     const name = try std.mem.join(self.arena.allocator(), "/", next_path.items);
-                    var ref = try Ref.initWithName(repo_kind, core, self.arena.allocator(), dir_name, name);
+                    const ref = try Ref.initWithName(repo_kind, core, self.arena.allocator(), dir_name, name);
                     try self.refs.append(ref);
                 },
                 .directory => {
@@ -172,7 +172,7 @@ pub fn resolve(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, 
 
             if (content.len >= hash.SHA1_HEX_LEN) {
                 var buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
-                std.mem.copy(u8, &buffer, content[0..hash.SHA1_HEX_LEN]);
+                @memcpy(&buffer, content[0..hash.SHA1_HEX_LEN]);
                 return buffer;
             } else {
                 return null;
@@ -190,7 +190,7 @@ pub fn resolve(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, 
             } else {
                 if (content.len >= hash.SHA1_HEX_LEN) {
                     var buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
-                    std.mem.copy(u8, &buffer, content[0..hash.SHA1_HEX_LEN]);
+                    @memcpy(&buffer, content[0..hash.SHA1_HEX_LEN]);
                     return buffer;
                 } else {
                     return null;

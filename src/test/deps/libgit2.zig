@@ -50,21 +50,39 @@ pub fn create(
     if (64 == target.toTarget().ptrBitWidth())
         try flags.append("-DGIT_ARCH_64=1");
 
-    ret.addCSourceFiles(srcs, flags.items);
+    ret.addCSourceFiles(.{
+        .files = srcs,
+        .flags = flags.items,
+    });
     if (target.isWindows()) {
         try flags.appendSlice(&.{
             "-DGIT_WIN32",
             "-DGIT_WINHTTP",
         });
-        ret.addCSourceFiles(win32_srcs, flags.items);
+        ret.addCSourceFiles(.{
+            .files = win32_srcs,
+            .flags = flags.items,
+        });
 
         if (target.getAbi().isGnu()) {
-            ret.addCSourceFiles(posix_srcs, flags.items);
-            ret.addCSourceFiles(unix_srcs, flags.items);
+            ret.addCSourceFiles(.{
+                .files = posix_srcs,
+                .flags = flags.items,
+            });
+            ret.addCSourceFiles(.{
+                .files = unix_srcs,
+                .flags = flags.items,
+            });
         }
     } else {
-        ret.addCSourceFiles(posix_srcs, flags.items);
-        ret.addCSourceFiles(unix_srcs, flags.items);
+        ret.addCSourceFiles(.{
+            .files = posix_srcs,
+            .flags = flags.items,
+        });
+        ret.addCSourceFiles(.{
+            .files = unix_srcs,
+            .flags = flags.items,
+        });
     }
 
     if (target.isLinux())
@@ -73,15 +91,18 @@ pub fn create(
             "-DGIT_USE_STAT_MTIM=1",
         });
 
-    ret.addCSourceFiles(pcre_srcs, &.{
-        "-DLINK_SIZE=2",
-        "-DNEWLINE=10",
-        "-DPOSIX_MALLOC_THRESHOLD=10",
-        "-DMATCH_LIMIT_RECURSION=MATCH_LIMIT",
-        "-DPARENS_NEST_LIMIT=250",
-        "-DMATCH_LIMIT=10000000",
-        "-DMAX_NAME_SIZE=32",
-        "-DMAX_NAME_COUNT=10000",
+    ret.addCSourceFiles(.{
+        .files = pcre_srcs,
+        .flags = &.{
+            "-DLINK_SIZE=2",
+            "-DNEWLINE=10",
+            "-DPOSIX_MALLOC_THRESHOLD=10",
+            "-DMATCH_LIMIT_RECURSION=MATCH_LIMIT",
+            "-DPARENS_NEST_LIMIT=250",
+            "-DMATCH_LIMIT=10000000",
+            "-DMAX_NAME_SIZE=32",
+            "-DMAX_NAME_COUNT=10000",
+        },
     });
 
     ret.addIncludePath(.{ .cwd_relative = include_dir });

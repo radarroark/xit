@@ -8,7 +8,7 @@ const obj = @import("./object.zig");
 const chk = @import("./checkout.zig");
 
 fn absIndex(i: isize, len: usize) usize {
-    return if (i < 0) len - std.math.absCast(i) else @intCast(i);
+    return if (i < 0) len - @abs(i) else @intCast(i);
 }
 
 pub const MyersDiff = struct {
@@ -330,7 +330,7 @@ pub fn DiffList(comptime repo_kind: rp.RepoKind) type {
                     }
                 }
 
-                var hunks = std.ArrayList(Hunk).init(arena.allocator());
+                const hunks = std.ArrayList(Hunk).init(arena.allocator());
 
                 if (!std.mem.eql(u8, &a.oid, &b.oid)) {
                     if (mode_maybe) |mode| {

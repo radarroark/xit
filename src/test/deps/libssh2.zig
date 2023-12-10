@@ -58,7 +58,10 @@ pub fn create(
     });
     ret.addIncludePath(.{ .cwd_relative = include_dir });
     ret.addIncludePath(.{ .cwd_relative = config_dir });
-    ret.addCSourceFiles(srcs, &.{});
+    ret.addCSourceFiles(.{
+        .files = srcs,
+        .flags = &.{},
+    });
     ret.linkLibC();
 
     ret.defineCMacro("LIBSSH2_MBEDTLS", null);

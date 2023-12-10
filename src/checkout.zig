@@ -335,7 +335,7 @@ fn untrackedFile(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
             return !index.entries.contains(path);
         },
         std.fs.File.Kind.directory => {
-            var dir = try repo_dir.openIterableDir(path, .{});
+            var dir = try repo_dir.openDir(path, .{ .iterate = true });
             defer dir.close();
             var iter = dir.iterate();
             while (try iter.next()) |dir_entry| {

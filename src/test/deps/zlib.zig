@@ -36,7 +36,10 @@ pub fn create(b: *std.build.Builder, target: std.zig.CrossTarget, optimize: std.
         .optimize = optimize,
     });
     ret.linkLibC();
-    ret.addCSourceFiles(srcs, &.{"-std=c89"});
+    ret.addCSourceFiles(.{
+        .files = srcs,
+        .flags = &.{"-std=c89"},
+    });
 
     return Library{ .step = ret };
 }

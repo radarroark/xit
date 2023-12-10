@@ -87,29 +87,29 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     }
 
                     // ignoring version 3 and 4 for now
-                    index.version = try reader.readIntBig(u32);
+                    index.version = try reader.readInt(u32, .big);
                     if (index.version != 2) {
                         return error.InvalidVersion;
                     }
 
-                    var entry_count = try reader.readIntBig(u32);
+                    var entry_count = try reader.readInt(u32, .big);
 
                     while (entry_count > 0) {
                         entry_count -= 1;
                         const start_pos = try reader.context.getPos();
                         var entry = Index(repo_kind).Entry{
-                            .ctime_secs = try reader.readIntBig(u32),
-                            .ctime_nsecs = try reader.readIntBig(u32),
-                            .mtime_secs = try reader.readIntBig(u32),
-                            .mtime_nsecs = try reader.readIntBig(u32),
-                            .dev = try reader.readIntBig(u32),
-                            .ino = try reader.readIntBig(u32),
-                            .mode = @bitCast(try reader.readIntBig(u32)),
-                            .uid = try reader.readIntBig(u32),
-                            .gid = try reader.readIntBig(u32),
-                            .file_size = try reader.readIntBig(u32),
+                            .ctime_secs = try reader.readInt(u32, .big),
+                            .ctime_nsecs = try reader.readInt(u32, .big),
+                            .mtime_secs = try reader.readInt(u32, .big),
+                            .mtime_nsecs = try reader.readInt(u32, .big),
+                            .dev = try reader.readInt(u32, .big),
+                            .ino = try reader.readInt(u32, .big),
+                            .mode = @bitCast(try reader.readInt(u32, .big)),
+                            .uid = try reader.readInt(u32, .big),
+                            .gid = try reader.readInt(u32, .big),
+                            .file_size = try reader.readInt(u32, .big),
                             .oid = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN),
-                            .flags = @bitCast(try reader.readIntBig(u16)),
+                            .flags = @bitCast(try reader.readInt(u16, .big)),
                             .extended_flags = null, // TODO: read this if necessary
                             .path = try reader.readUntilDelimiterAlloc(index.arena.allocator(), 0, std.fs.MAX_PATH_BYTES),
                         };
@@ -155,18 +155,18 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                         var stream = std.io.fixedBufferStream(buffer);
                                         var reader = stream.reader();
                                         var entry = Index(repo_kind).Entry{
-                                            .ctime_secs = try reader.readIntBig(u32),
-                                            .ctime_nsecs = try reader.readIntBig(u32),
-                                            .mtime_secs = try reader.readIntBig(u32),
-                                            .mtime_nsecs = try reader.readIntBig(u32),
-                                            .dev = try reader.readIntBig(u32),
-                                            .ino = try reader.readIntBig(u32),
-                                            .mode = @bitCast(try reader.readIntBig(u32)),
-                                            .uid = try reader.readIntBig(u32),
-                                            .gid = try reader.readIntBig(u32),
-                                            .file_size = try reader.readIntBig(u32),
+                                            .ctime_secs = try reader.readInt(u32, .big),
+                                            .ctime_nsecs = try reader.readInt(u32, .big),
+                                            .mtime_secs = try reader.readInt(u32, .big),
+                                            .mtime_nsecs = try reader.readInt(u32, .big),
+                                            .dev = try reader.readInt(u32, .big),
+                                            .ino = try reader.readInt(u32, .big),
+                                            .mode = @bitCast(try reader.readInt(u32, .big)),
+                                            .uid = try reader.readInt(u32, .big),
+                                            .gid = try reader.readInt(u32, .big),
+                                            .file_size = try reader.readInt(u32, .big),
                                             .oid = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN),
-                                            .flags = @bitCast(try reader.readIntBig(u16)),
+                                            .flags = @bitCast(try reader.readInt(u16, .big)),
                                             .extended_flags = null, // TODO: read this if necessary
                                             .path = path,
                                         };
@@ -296,7 +296,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     try self.addEntry(entry);
                 },
                 std.fs.File.Kind.directory => {
-                    var dir = try core.repo_dir.openIterableDir(path, .{});
+                    var dir = try core.repo_dir.openDir(path, .{ .iterate = true });
                     defer dir.close();
                     var iter = dir.iterate();
                     while (try iter.next()) |entry| {
@@ -333,7 +333,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
 
             while (parent_path_maybe) |parent_path| {
                 // populate dir_to_children
-                var children_maybe = self.dir_to_children.getEntry(parent_path);
+                const children_maybe = self.dir_to_children.getEntry(parent_path);
                 if (children_maybe) |children| {
                     try children.value_ptr.*.put(child, {});
                 } else {
@@ -343,7 +343,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                 }
 
                 // populate dir_to_paths
-                var child_paths_maybe = self.dir_to_paths.getEntry(parent_path);
+                const child_paths_maybe = self.dir_to_paths.getEntry(parent_path);
                 if (child_paths_maybe) |child_paths| {
                     try child_paths.value_ptr.*.put(entry.path, {});
                 } else {
@@ -363,7 +363,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
             _ = self.entries.orderedRemove(path);
             var parent_path_maybe = std.fs.path.dirname(path);
             while (parent_path_maybe) |parent_path| {
-                var child_paths_maybe = self.dir_to_paths.getEntry(parent_path);
+                const child_paths_maybe = self.dir_to_paths.getEntry(parent_path);
                 if (child_paths_maybe) |child_paths| {
                     _ = child_paths.value_ptr.*.orderedRemove(path);
                 }
@@ -372,7 +372,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
         }
 
         pub fn removeChildren(self: *Index(repo_kind), path: []const u8) !void {
-            var child_paths_maybe = self.dir_to_paths.getEntry(path);
+            const child_paths_maybe = self.dir_to_paths.getEntry(path);
             if (child_paths_maybe) |child_paths| {
                 const child_paths_array = child_paths.value_ptr.*.keys();
                 // make a copy of the paths because removePath will modify it
@@ -427,18 +427,18 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                         var entry_buffer = std.ArrayList(u8).init(allocator);
                         defer entry_buffer.deinit();
                         const writer = entry_buffer.writer();
-                        try writer.writeIntBig(u32, entry.ctime_secs);
-                        try writer.writeIntBig(u32, entry.ctime_nsecs);
-                        try writer.writeIntBig(u32, entry.mtime_secs);
-                        try writer.writeIntBig(u32, entry.mtime_nsecs);
-                        try writer.writeIntBig(u32, entry.dev);
-                        try writer.writeIntBig(u32, entry.ino);
-                        try writer.writeIntBig(u32, @as(u32, @bitCast(entry.mode)));
-                        try writer.writeIntBig(u32, entry.uid);
-                        try writer.writeIntBig(u32, entry.gid);
-                        try writer.writeIntBig(u32, entry.file_size);
+                        try writer.writeInt(u32, entry.ctime_secs, .big);
+                        try writer.writeInt(u32, entry.ctime_nsecs, .big);
+                        try writer.writeInt(u32, entry.mtime_secs, .big);
+                        try writer.writeInt(u32, entry.mtime_nsecs, .big);
+                        try writer.writeInt(u32, entry.dev, .big);
+                        try writer.writeInt(u32, entry.ino, .big);
+                        try writer.writeInt(u32, @as(u32, @bitCast(entry.mode)), .big);
+                        try writer.writeInt(u32, entry.uid, .big);
+                        try writer.writeInt(u32, entry.gid, .big);
+                        try writer.writeInt(u32, entry.file_size, .big);
                         try writer.writeAll(&entry.oid);
-                        try writer.writeIntBig(u16, @as(u16, @bitCast(entry.flags)));
+                        try writer.writeInt(u16, @as(u16, @bitCast(entry.flags)), .big);
                         try writer.writeAll(entry.path);
                         while (entry_buffer.items.len % 8 != 0) {
                             try writer.print("\x00", .{});
@@ -491,18 +491,18 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                         var entry_buffer = std.ArrayList(u8).init(inner_ctx_self.allocator);
                                         defer entry_buffer.deinit();
                                         const writer = entry_buffer.writer();
-                                        try writer.writeIntBig(u32, entry.ctime_secs);
-                                        try writer.writeIntBig(u32, entry.ctime_nsecs);
-                                        try writer.writeIntBig(u32, entry.mtime_secs);
-                                        try writer.writeIntBig(u32, entry.mtime_nsecs);
-                                        try writer.writeIntBig(u32, entry.dev);
-                                        try writer.writeIntBig(u32, entry.ino);
-                                        try writer.writeIntBig(u32, @as(u32, @bitCast(entry.mode)));
-                                        try writer.writeIntBig(u32, entry.uid);
-                                        try writer.writeIntBig(u32, entry.gid);
-                                        try writer.writeIntBig(u32, entry.file_size);
+                                        try writer.writeInt(u32, entry.ctime_secs, .big);
+                                        try writer.writeInt(u32, entry.ctime_nsecs, .big);
+                                        try writer.writeInt(u32, entry.mtime_secs, .big);
+                                        try writer.writeInt(u32, entry.mtime_nsecs, .big);
+                                        try writer.writeInt(u32, entry.dev, .big);
+                                        try writer.writeInt(u32, entry.ino, .big);
+                                        try writer.writeInt(u32, @as(u32, @bitCast(entry.mode)), .big);
+                                        try writer.writeInt(u32, entry.uid, .big);
+                                        try writer.writeInt(u32, entry.gid, .big);
+                                        try writer.writeInt(u32, entry.file_size, .big);
                                         try writer.writeAll(&entry.oid);
-                                        try writer.writeIntBig(u16, @as(u16, @bitCast(entry.flags)));
+                                        try writer.writeInt(u16, @as(u16, @bitCast(entry.flags)), .big);
 
                                         const path_hash = hash.hash_buffer(entry.path);
 
