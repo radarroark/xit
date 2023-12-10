@@ -99,7 +99,23 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
         // make file
         var hello_txt = try repo_dir.createFile("hello.txt", .{});
         defer hello_txt.close();
-        try hello_txt.writeAll("hello, world!");
+        try hello_txt.writeAll(
+            \\1
+            \\2
+            \\3
+            \\4
+            \\5
+            \\6
+            \\7
+            \\8
+            \\9
+            \\10
+            \\11
+            \\12
+            \\13
+            \\14
+            \\15
+        );
 
         // make file
         var readme = try repo_dir.createFile("README", .{ .read = true });
@@ -224,18 +240,34 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
         try args.append("pointless commit");
         try expectEqual(error.ObjectAlreadyExists, main.xitMain(repo_kind, allocator, &args));
 
+        // change a file
+        const hello_txt = try repo_dir.openFile("hello.txt", .{ .mode = .read_write });
+        defer hello_txt.close();
+        try hello_txt.writeAll(
+            \\1.0
+            \\2
+            \\3
+            \\4
+            \\5
+            \\6
+            \\7
+            \\8
+            \\9.0
+            \\10.0
+            \\11
+            \\12
+            \\13
+            \\14
+            \\15.0
+        );
+        try hello_txt.setEndPos(try hello_txt.getPos());
+
         // replace a file with a directory
         try repo_dir.deleteFile("tests");
         var tests_dir = try repo_dir.makeOpenPath("tests", .{});
         defer tests_dir.close();
         var main_test_zig = try tests_dir.createFile("main_test.zig", .{});
         defer main_test_zig.close();
-
-        // change a file
-        const hello_txt = try repo_dir.openFile("hello.txt", .{ .mode = .read_write });
-        defer hello_txt.close();
-        try hello_txt.writeAll("goodbye, world!");
-        try hello_txt.setEndPos(try hello_txt.getPos());
 
         // make a few dirs
         var src_dir = try repo_dir.makeOpenPath("src", .{});
@@ -270,16 +302,16 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
 
             for (diff_list.diffs.items) |diff_item| {
                 if (std.mem.eql(u8, "hello.txt", diff_item.path)) {
-                    try std.testing.expectEqualStrings("diff --git a/hello.txt b/hello.txt", diff_item.lines.items[0]);
-                    try std.testing.expectEqualStrings("- hello, world!", diff_item.lines.items[4]);
-                    try std.testing.expectEqualStrings("+ goodbye, world!", diff_item.lines.items[5]);
+                    try std.testing.expectEqualStrings("diff --git a/hello.txt b/hello.txt", diff_item.header_lines.items[0]);
+                    try std.testing.expectEqualStrings("- 1", diff_item.header_lines.items[4]);
+                    try std.testing.expectEqualStrings("+ 1.0", diff_item.header_lines.items[5]);
                 } else if (std.mem.eql(u8, "run.sh", diff_item.path)) {
-                    try std.testing.expectEqualStrings("diff --git a/run.sh b/run.sh", diff_item.lines.items[0]);
-                    try std.testing.expectEqualStrings("old mode 100644", diff_item.lines.items[1]);
-                    try std.testing.expectEqualStrings("new mode 100755", diff_item.lines.items[2]);
+                    try std.testing.expectEqualStrings("diff --git a/run.sh b/run.sh", diff_item.header_lines.items[0]);
+                    try std.testing.expectEqualStrings("old mode 100644", diff_item.header_lines.items[1]);
+                    try std.testing.expectEqualStrings("new mode 100755", diff_item.header_lines.items[2]);
                 } else if (std.mem.eql(u8, "tests", diff_item.path)) {
-                    try std.testing.expectEqualStrings("diff --git a/tests b/tests", diff_item.lines.items[0]);
-                    try std.testing.expectEqualStrings("deleted file mode 100644", diff_item.lines.items[1]);
+                    try std.testing.expectEqualStrings("diff --git a/tests b/tests", diff_item.header_lines.items[0]);
+                    try std.testing.expectEqualStrings("deleted file mode 100644", diff_item.header_lines.items[1]);
                 } else {
                     return error.EntryNotExpected;
                 }
@@ -323,20 +355,20 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
 
             for (diff_list.diffs.items) |diff_item| {
                 if (std.mem.eql(u8, "LICENSE", diff_item.path)) {
-                    try std.testing.expectEqualStrings("diff --git a/LICENSE b/LICENSE", diff_item.lines.items[0]);
-                    try std.testing.expectEqualStrings("deleted file mode 100644", diff_item.lines.items[1]);
+                    try std.testing.expectEqualStrings("diff --git a/LICENSE b/LICENSE", diff_item.header_lines.items[0]);
+                    try std.testing.expectEqualStrings("deleted file mode 100644", diff_item.header_lines.items[1]);
                 } else if (std.mem.eql(u8, "docs/design.md", diff_item.path)) {
-                    try std.testing.expectEqualStrings("diff --git a/docs/design.md b/docs/design.md", diff_item.lines.items[0]);
-                    try std.testing.expectEqualStrings("deleted file mode 100644", diff_item.lines.items[1]);
+                    try std.testing.expectEqualStrings("diff --git a/docs/design.md b/docs/design.md", diff_item.header_lines.items[0]);
+                    try std.testing.expectEqualStrings("deleted file mode 100644", diff_item.header_lines.items[1]);
                 } else if (std.mem.eql(u8, "hello.txt", diff_item.path)) {
-                    try std.testing.expectEqualStrings("diff --git a/hello.txt b/hello.txt", diff_item.lines.items[0]);
+                    try std.testing.expectEqualStrings("diff --git a/hello.txt b/hello.txt", diff_item.header_lines.items[0]);
                 } else if (std.mem.eql(u8, "run.sh", diff_item.path)) {
-                    try std.testing.expectEqualStrings("diff --git a/run.sh b/run.sh", diff_item.lines.items[0]);
-                    try std.testing.expectEqualStrings("old mode 100644", diff_item.lines.items[1]);
-                    try std.testing.expectEqualStrings("new mode 100755", diff_item.lines.items[2]);
+                    try std.testing.expectEqualStrings("diff --git a/run.sh b/run.sh", diff_item.header_lines.items[0]);
+                    try std.testing.expectEqualStrings("old mode 100644", diff_item.header_lines.items[1]);
+                    try std.testing.expectEqualStrings("new mode 100755", diff_item.header_lines.items[2]);
                 } else if (std.mem.eql(u8, "src/zig/main.zig", diff_item.path)) {
-                    try std.testing.expectEqualStrings("diff --git a/src/zig/main.zig b/src/zig/main.zig", diff_item.lines.items[0]);
-                    try std.testing.expectEqualStrings("new file mode 100644", diff_item.lines.items[1]);
+                    try std.testing.expectEqualStrings("diff --git a/src/zig/main.zig b/src/zig/main.zig", diff_item.header_lines.items[0]);
+                    try std.testing.expectEqualStrings("new file mode 100644", diff_item.header_lines.items[1]);
                 } else {
                     return error.EntryNotExpected;
                 }
@@ -479,12 +511,13 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
 
         {
             // change a file so it conflicts with the one in commit1
-            {
-                const hello_txt = try repo_dir.openFile("hello.txt", .{ .mode = .read_write });
-                defer hello_txt.close();
-                try hello_txt.writeAll("howdy, world!");
-                try hello_txt.setEndPos(try hello_txt.getPos());
-            }
+            const hello_txt = try repo_dir.openFile("hello.txt", .{ .mode = .read_write });
+            defer hello_txt.close();
+            const old_content = try hello_txt.readToEndAlloc(allocator, 1024);
+            defer allocator.free(old_content);
+            try hello_txt.seekTo(0);
+            try hello_txt.writeAll("12345");
+            try hello_txt.setEndPos(try hello_txt.getPos());
 
             // check out commit1 and make sure the conflict is found
             {
@@ -503,12 +536,9 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
             }
 
             // change the file back
-            {
-                const hello_txt = try repo_dir.openFile("hello.txt", .{ .mode = .read_write });
-                defer hello_txt.close();
-                try hello_txt.writeAll("goodbye, world!");
-                try hello_txt.setEndPos(try hello_txt.getPos());
-            }
+            try hello_txt.seekTo(0);
+            try hello_txt.writeAll(old_content);
+            try hello_txt.setEndPos(try hello_txt.getPos());
         }
 
         {
@@ -554,7 +584,7 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
         defer hello_txt.close();
         const content = try hello_txt.readToEndAlloc(allocator, 1024);
         defer allocator.free(content);
-        try std.testing.expectEqualStrings("hello, world!", content);
+        try std.testing.expectEqualStrings("1\n2", content[0..3]);
 
         const license = try repo_dir.openFile("LICENSE", .{ .mode = .read_only });
         defer license.close();
@@ -572,7 +602,7 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
         defer hello_txt.close();
         const content = try hello_txt.readToEndAlloc(allocator, 1024);
         defer allocator.free(content);
-        try std.testing.expectEqualStrings("goodbye, world!", content);
+        try std.testing.expectEqualStrings("1.0", content[0..3]);
 
         const license_or_err = repo_dir.openFile("LICENSE", .{ .mode = .read_only });
         try expectEqual(error.FileNotFound, license_or_err);

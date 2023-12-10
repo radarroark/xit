@@ -12,9 +12,9 @@ fn absIndex(i: isize, len: usize) usize {
 }
 
 pub const MyersDiff = struct {
-    result: std.ArrayList(Line),
+    result: std.ArrayList(Edit),
 
-    pub const Line = struct {
+    pub const Edit = struct {
         op: enum {
             eql,
             ins,
@@ -100,7 +100,7 @@ pub const MyersDiff = struct {
             }
         }
 
-        var result = try std.ArrayList(Line).initCapacity(allocator, backtrack.items.len);
+        var result = try std.ArrayList(Edit).initCapacity(allocator, backtrack.items.len);
         errdefer result.deinit();
         result.expandToCapacity();
         for (backtrack.items, 0..) |edit, i| {
@@ -135,7 +135,7 @@ test "myers diff" {
     {
         const lines1 = [_][]const u8{ "A", "B", "C", "A", "B", "B", "A" };
         const lines2 = [_][]const u8{ "C", "B", "A", "B", "A", "C" };
-        const expected_diff = [_]MyersDiff.Line{
+        const expected_diff = [_]MyersDiff.Edit{
             .{ .op = .del, .text = "A" },
             .{ .op = .del, .text = "B" },
             .{ .op = .eql, .text = "C" },
@@ -157,7 +157,7 @@ test "myers diff" {
     {
         const lines1 = [_][]const u8{"hello, world!"};
         const lines2 = [_][]const u8{"goodbye, world!"};
-        const expected_diff = [_]MyersDiff.Line{
+        const expected_diff = [_]MyersDiff.Edit{
             .{ .op = .del, .text = "hello, world!" },
             .{ .op = .ins, .text = "goodbye, world!" },
         };
@@ -292,64 +292,72 @@ pub fn DiffList(comptime repo_kind: rp.RepoKind) type {
 
         pub const Diff = struct {
             path: []const u8,
-            lines: std.ArrayList([]const u8),
+            header_lines: std.ArrayList([]const u8),
+            hunks: std.ArrayList(Hunk),
             arena: std.heap.ArenaAllocator,
             target_a: Target,
             target_b: Target,
+
+            pub const Hunk = struct {
+                lines: std.ArrayList([]const u8),
+                edits: std.ArrayList(MyersDiff.Edit),
+            };
 
             pub fn init(allocator: std.mem.Allocator, a: Target, b: Target) !Diff {
                 var arena = std.heap.ArenaAllocator.init(allocator);
                 errdefer arena.deinit();
 
-                var lines = std.ArrayList([]const u8).init(arena.allocator());
+                var header_lines = std.ArrayList([]const u8).init(arena.allocator());
 
-                try lines.append(try std.fmt.allocPrint(arena.allocator(), "diff --git a/{s} b/{s}", .{ a.path, b.path }));
+                try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "diff --git a/{s} b/{s}", .{ a.path, b.path }));
 
                 var mode_maybe: ?io.Mode = null;
 
                 if (a.mode) |a_mode| {
                     if (b.mode) |b_mode| {
                         if (a_mode.unix_permission != b_mode.unix_permission) {
-                            try lines.append(try std.fmt.allocPrint(arena.allocator(), "old mode {s}", .{a_mode.to_str()}));
-                            try lines.append(try std.fmt.allocPrint(arena.allocator(), "new mode {s}", .{b_mode.to_str()}));
+                            try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "old mode {s}", .{a_mode.to_str()}));
+                            try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "new mode {s}", .{b_mode.to_str()}));
                         } else {
                             mode_maybe = a_mode;
                         }
                     } else {
-                        try lines.append(try std.fmt.allocPrint(arena.allocator(), "deleted file mode {s}", .{a_mode.to_str()}));
+                        try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "deleted file mode {s}", .{a_mode.to_str()}));
                     }
                 } else {
                     if (b.mode) |b_mode| {
-                        try lines.append(try std.fmt.allocPrint(arena.allocator(), "new file mode {s}", .{b_mode.to_str()}));
+                        try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "new file mode {s}", .{b_mode.to_str()}));
                     }
                 }
 
+                var hunks = std.ArrayList(Hunk).init(arena.allocator());
+
                 if (!std.mem.eql(u8, &a.oid, &b.oid)) {
                     if (mode_maybe) |mode| {
-                        try lines.append(try std.fmt.allocPrint(arena.allocator(), "index {s}..{s} {s}", .{
+                        try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "index {s}..{s} {s}", .{
                             a.oid_hex[0..7],
                             b.oid_hex[0..7],
                             mode.to_str(),
                         }));
                     } else {
-                        try lines.append(try std.fmt.allocPrint(arena.allocator(), "index {s}..{s}", .{
+                        try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "index {s}..{s}", .{
                             a.oid_hex[0..7],
                             b.oid_hex[0..7],
                         }));
                     }
 
-                    try lines.append(try std.fmt.allocPrint(arena.allocator(), "--- a/{s}", .{a.path}));
+                    try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "--- a/{s}", .{a.path}));
 
                     if (b.mode != null) {
-                        try lines.append(try std.fmt.allocPrint(arena.allocator(), "+++ b/{s}", .{b.path}));
+                        try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "+++ b/{s}", .{b.path}));
                     } else {
-                        try lines.append("+++ /dev/null");
+                        try header_lines.append("+++ /dev/null");
                     }
 
                     var diff = try MyersDiff.init(allocator, a.lines.items, b.lines.items);
                     defer diff.deinit();
                     for (diff.result.items) |line| {
-                        try lines.append(try std.fmt.allocPrint(arena.allocator(), "{s} {s}", .{
+                        try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "{s} {s}", .{
                             switch (line.op) {
                                 .eql => " ",
                                 .ins => "+",
@@ -362,7 +370,8 @@ pub fn DiffList(comptime repo_kind: rp.RepoKind) type {
 
                 return .{
                     .path = a.path,
-                    .lines = lines,
+                    .header_lines = header_lines,
+                    .hunks = hunks,
                     .arena = arena,
                     .target_a = a,
                     .target_b = b,

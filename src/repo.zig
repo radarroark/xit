@@ -255,8 +255,13 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     defer diff_list.deinit();
 
                     for (diff_list.diffs.items) |diff_item| {
-                        for (diff_item.lines.items) |line| {
-                            try stdout.print("{s}\n", .{line});
+                        for (diff_item.header_lines.items) |header_line| {
+                            try stdout.print("{s}\n", .{header_line});
+                        }
+                        for (diff_item.hunks.items) |hunk| {
+                            for (hunk.lines.items) |line| {
+                                try stdout.print("{s}\n", .{line});
+                            }
                         }
                     }
                 },
