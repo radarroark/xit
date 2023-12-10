@@ -94,28 +94,30 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
         defer status.deinit();
     }
 
+    const hello_txt_content =
+        \\1
+        \\2
+        \\3
+        \\4
+        \\5
+        \\6
+        \\7
+        \\8
+        \\9
+        \\10
+        \\11
+        \\12
+        \\13
+        \\14
+        \\15
+    ;
+
     // add and commit
     {
         // make file
         var hello_txt = try repo_dir.createFile("hello.txt", .{});
         defer hello_txt.close();
-        try hello_txt.writeAll(
-            \\1
-            \\2
-            \\3
-            \\4
-            \\5
-            \\6
-            \\7
-            \\8
-            \\9
-            \\10
-            \\11
-            \\12
-            \\13
-            \\14
-            \\15
-        );
+        try hello_txt.writeAll(hello_txt_content);
 
         // make file
         var readme = try repo_dir.createFile("README", .{ .read = true });
@@ -231,6 +233,24 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
         break :blk try ref.readHead(repo_kind, &repo.core);
     };
 
+    const new_hello_txt_content =
+        \\1
+        \\2
+        \\3
+        \\4
+        \\5.0
+        \\6
+        \\7
+        \\8
+        \\9.0
+        \\10.0
+        \\11
+        \\12
+        \\13
+        \\14
+        \\15.0
+    ;
+
     // make another commit
     {
         // can't commit again because nothing has changed
@@ -243,23 +263,7 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
         // change a file
         const hello_txt = try repo_dir.openFile("hello.txt", .{ .mode = .read_write });
         defer hello_txt.close();
-        try hello_txt.writeAll(
-            \\1.0
-            \\2
-            \\3
-            \\4
-            \\5
-            \\6
-            \\7
-            \\8
-            \\9.0
-            \\10.0
-            \\11
-            \\12
-            \\13
-            \\14
-            \\15.0
-        );
+        try hello_txt.writeAll(new_hello_txt_content);
         try hello_txt.setEndPos(try hello_txt.getPos());
 
         // replace a file with a directory
@@ -303,8 +307,37 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
             for (diff_list.diffs.items) |diff_item| {
                 if (std.mem.eql(u8, "hello.txt", diff_item.path)) {
                     try std.testing.expectEqualStrings("diff --git a/hello.txt b/hello.txt", diff_item.header_lines.items[0]);
-                    try std.testing.expectEqualStrings("- 1", diff_item.header_lines.items[4]);
-                    try std.testing.expectEqualStrings("+ 1.0", diff_item.header_lines.items[5]);
+                    const expected_lines = [_][]const []const u8{
+                        &[_][]const u8{
+                            "  2",
+                            "  3",
+                            "  4",
+                            "- 5",
+                            "+ 5.0",
+                            "  6",
+                            "  7",
+                            "  8",
+                        },
+                        &[_][]const u8{
+                            "- 9",
+                            "- 10",
+                            "+ 9.0",
+                            "+ 10.0",
+                            "  11",
+                            "  12",
+                            "  13",
+                        },
+                        &[_][]const u8{
+                            "  14",
+                            "- 15",
+                            "+ 15.0",
+                        },
+                    };
+                    for (expected_lines, diff_item.hunks.items) |expected_hunk_lines, actual_hunk| {
+                        for (expected_hunk_lines, actual_hunk.lines.items) |expected_line, actual_line| {
+                            try std.testing.expectEqualStrings(expected_line, actual_line);
+                        }
+                    }
                 } else if (std.mem.eql(u8, "run.sh", diff_item.path)) {
                     try std.testing.expectEqualStrings("diff --git a/run.sh b/run.sh", diff_item.header_lines.items[0]);
                     try std.testing.expectEqualStrings("old mode 100644", diff_item.header_lines.items[1]);
@@ -511,13 +544,13 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
 
         {
             // change a file so it conflicts with the one in commit1
-            const hello_txt = try repo_dir.openFile("hello.txt", .{ .mode = .read_write });
-            defer hello_txt.close();
-            const old_content = try hello_txt.readToEndAlloc(allocator, 1024);
-            defer allocator.free(old_content);
-            try hello_txt.seekTo(0);
-            try hello_txt.writeAll("12345");
-            try hello_txt.setEndPos(try hello_txt.getPos());
+            {
+                const hello_txt = try repo_dir.openFile("hello.txt", .{ .mode = .read_write });
+                defer hello_txt.close();
+                try hello_txt.seekTo(0);
+                try hello_txt.writeAll("12345");
+                try hello_txt.setEndPos(try hello_txt.getPos());
+            }
 
             // check out commit1 and make sure the conflict is found
             {
@@ -536,9 +569,12 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
             }
 
             // change the file back
-            try hello_txt.seekTo(0);
-            try hello_txt.writeAll(old_content);
-            try hello_txt.setEndPos(try hello_txt.getPos());
+            {
+                const hello_txt = try repo_dir.openFile("hello.txt", .{ .mode = .read_write });
+                defer hello_txt.close();
+                try hello_txt.writeAll(new_hello_txt_content);
+                try hello_txt.setEndPos(try hello_txt.getPos());
+            }
         }
 
         {
@@ -584,7 +620,7 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
         defer hello_txt.close();
         const content = try hello_txt.readToEndAlloc(allocator, 1024);
         defer allocator.free(content);
-        try std.testing.expectEqualStrings("1\n2", content[0..3]);
+        try std.testing.expectEqualStrings(hello_txt_content, content);
 
         const license = try repo_dir.openFile("LICENSE", .{ .mode = .read_only });
         defer license.close();
@@ -602,7 +638,7 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
         defer hello_txt.close();
         const content = try hello_txt.readToEndAlloc(allocator, 1024);
         defer allocator.free(content);
-        try std.testing.expectEqualStrings("1.0", content[0..3]);
+        try std.testing.expectEqualStrings(new_hello_txt_content, content);
 
         const license_or_err = repo_dir.openFile("LICENSE", .{ .mode = .read_only });
         try expectEqual(error.FileNotFound, license_or_err);

@@ -12,7 +12,7 @@ fn absIndex(i: isize, len: usize) usize {
 }
 
 pub const MyersDiff = struct {
-    result: std.ArrayList(Edit),
+    edits: std.ArrayList(Edit),
 
     pub const Edit = struct {
         op: enum {
@@ -100,9 +100,9 @@ pub const MyersDiff = struct {
             }
         }
 
-        var result = try std.ArrayList(Edit).initCapacity(allocator, backtrack.items.len);
-        errdefer result.deinit();
-        result.expandToCapacity();
+        var edits = try std.ArrayList(Edit).initCapacity(allocator, backtrack.items.len);
+        errdefer edits.deinit();
+        edits.expandToCapacity();
         for (backtrack.items, 0..) |edit, i| {
             const ii = backtrack.items.len - i - 1;
 
@@ -112,21 +112,21 @@ pub const MyersDiff = struct {
             const yy = edit[3];
 
             if (xx == prev_xx) {
-                result.items[ii] = .{ .op = .ins, .text = b[absIndex(prev_yy, b.len)] };
+                edits.items[ii] = .{ .op = .ins, .text = b[absIndex(prev_yy, b.len)] };
             } else if (yy == prev_yy) {
-                result.items[ii] = .{ .op = .del, .text = a[absIndex(prev_xx, a.len)] };
+                edits.items[ii] = .{ .op = .del, .text = a[absIndex(prev_xx, a.len)] };
             } else {
-                result.items[ii] = .{ .op = .eql, .text = a[absIndex(prev_xx, a.len)] };
+                edits.items[ii] = .{ .op = .eql, .text = a[absIndex(prev_xx, a.len)] };
             }
         }
 
         return MyersDiff{
-            .result = result,
+            .edits = edits,
         };
     }
 
     pub fn deinit(self: *MyersDiff) void {
-        self.result.deinit();
+        self.edits.deinit();
     }
 };
 
@@ -148,8 +148,8 @@ test "myers diff" {
         };
         var actual_diff = try MyersDiff.init(allocator, &lines1, &lines2);
         defer actual_diff.deinit();
-        try std.testing.expectEqual(expected_diff.len, actual_diff.result.items.len);
-        for (expected_diff, actual_diff.result.items) |expected, actual| {
+        try std.testing.expectEqual(expected_diff.len, actual_diff.edits.items.len);
+        for (expected_diff, actual_diff.edits.items) |expected, actual| {
             try std.testing.expectEqual(expected.op, actual.op);
             try std.testing.expectEqualStrings(expected.text, actual.text);
         }
@@ -163,8 +163,8 @@ test "myers diff" {
         };
         var actual_diff = try MyersDiff.init(allocator, &lines1, &lines2);
         defer actual_diff.deinit();
-        try std.testing.expectEqual(expected_diff.len, actual_diff.result.items.len);
-        for (expected_diff, actual_diff.result.items) |expected, actual| {
+        try std.testing.expectEqual(expected_diff.len, actual_diff.edits.items.len);
+        for (expected_diff, actual_diff.edits.items) |expected, actual| {
             try std.testing.expectEqual(expected.op, actual.op);
             try std.testing.expectEqualStrings(expected.text, actual.text);
         }
@@ -300,7 +300,6 @@ pub fn DiffList(comptime repo_kind: rp.RepoKind) type {
 
             pub const Hunk = struct {
                 lines: std.ArrayList([]const u8),
-                edits: std.ArrayList(MyersDiff.Edit),
             };
 
             pub fn init(allocator: std.mem.Allocator, a: Target, b: Target) !Diff {
@@ -330,7 +329,7 @@ pub fn DiffList(comptime repo_kind: rp.RepoKind) type {
                     }
                 }
 
-                const hunks = std.ArrayList(Hunk).init(arena.allocator());
+                var hunks = std.ArrayList(Hunk).init(arena.allocator());
 
                 if (!std.mem.eql(u8, &a.oid, &b.oid)) {
                     if (mode_maybe) |mode| {
@@ -356,15 +355,60 @@ pub fn DiffList(comptime repo_kind: rp.RepoKind) type {
 
                     var diff = try MyersDiff.init(allocator, a.lines.items, b.lines.items);
                     defer diff.deinit();
-                    for (diff.result.items) |line| {
-                        try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "{s} {s}", .{
-                            switch (line.op) {
-                                .eql => " ",
-                                .ins => "+",
-                                .del => "-",
-                            },
-                            line.text,
-                        }));
+                    var edit_indexes = std.ArrayList(usize).init(allocator);
+                    defer edit_indexes.deinit();
+                    const max_margin: usize = 3;
+                    var found_edit = false;
+                    var margin: usize = 0;
+
+                    for (diff.edits.items, 0..) |edit, i| {
+                        try edit_indexes.append(i);
+
+                        if (edit.op == .eql) {
+                            margin += 1;
+                            if (found_edit) {
+                                // if the end margin isn't the max,
+                                // keep adding to the hunk
+                                if (margin < max_margin) {
+                                    if (i < diff.edits.items.len - 1) continue;
+                                }
+                            }
+                            // if the begin margin is over the max,
+                            // remove the first line (which is
+                            // guaranteed to be an .eql edit)
+                            else if (margin > max_margin) {
+                                _ = edit_indexes.orderedRemove(0);
+                                margin -= 1;
+                                if (i < diff.edits.items.len - 1) continue;
+                            }
+                        } else {
+                            found_edit = true;
+                            margin = 0;
+                            if (i < diff.edits.items.len - 1) continue;
+                        }
+
+                        // if the edit_indexes contains an actual edit
+                        // (that is, one line whose op is not .eql)
+                        if (found_edit) {
+                            var hunk = Hunk{
+                                .lines = std.ArrayList([]const u8).init(arena.allocator()),
+                            };
+                            for (edit_indexes.items) |edit_idx| {
+                                const hunk_edit = diff.edits.items[edit_idx];
+                                try hunk.lines.append(try std.fmt.allocPrint(arena.allocator(), "{s} {s}", .{
+                                    switch (hunk_edit.op) {
+                                        .eql => " ",
+                                        .ins => "+",
+                                        .del => "-",
+                                    },
+                                    hunk_edit.text,
+                                }));
+                            }
+                            try hunks.append(hunk);
+                            edit_indexes.clearAndFree();
+                            found_edit = false;
+                            margin = 0;
+                        }
                     }
                 }
 
