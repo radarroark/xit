@@ -259,9 +259,26 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                             try stdout.print("{s}\n", .{header_line});
                         }
                         for (diff_item.hunks.items) |hunk| {
-                            try stdout.print("@@\n", .{}); // TODO: print hunk offset
-                            for (hunk.lines.items) |line| {
-                                try stdout.print("{s}\n", .{line});
+                            const offsets = hunk.offsets();
+                            try stdout.print("@@ -{},{} +{},{} @@\n", .{
+                                offsets.del_start,
+                                offsets.del_count,
+                                offsets.ins_start,
+                                offsets.ins_count,
+                            });
+                            for (hunk.edits.items) |edit| {
+                                try stdout.print("{s} {s}\n", .{
+                                    switch (edit) {
+                                        .eql => " ",
+                                        .ins => "+",
+                                        .del => "-",
+                                    },
+                                    switch (edit) {
+                                        .eql => edit.eql.new_line.text,
+                                        .ins => edit.ins.new_line.text,
+                                        .del => edit.del.old_line.text,
+                                    },
+                                });
                             }
                         }
                     }

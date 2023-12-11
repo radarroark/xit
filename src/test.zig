@@ -9,6 +9,7 @@ const ref = @import("./ref.zig");
 const chk = @import("./checkout.zig");
 const branch = @import("./branch.zig");
 const rp = @import("./repo.zig");
+const diff = @import("./diff.zig");
 
 const c = @cImport({
     @cInclude("git2.h");
@@ -307,35 +308,35 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
             for (diff_list.diffs.items) |diff_item| {
                 if (std.mem.eql(u8, "hello.txt", diff_item.path)) {
                     try std.testing.expectEqualStrings("diff --git a/hello.txt b/hello.txt", diff_item.header_lines.items[0]);
-                    const expected_lines = [_][]const []const u8{
-                        &[_][]const u8{
-                            "  2",
-                            "  3",
-                            "  4",
-                            "- 5",
-                            "+ 5.0",
-                            "  6",
-                            "  7",
-                            "  8",
+                    const expected_hunks = [_][]const diff.MyersDiff.Edit{
+                        &[_]diff.MyersDiff.Edit{
+                            .{ .eql = .{ .old_line = .{ .num = 2, .text = "2" }, .new_line = .{ .num = 2, .text = "2" } } },
+                            .{ .eql = .{ .old_line = .{ .num = 3, .text = "3" }, .new_line = .{ .num = 3, .text = "3" } } },
+                            .{ .eql = .{ .old_line = .{ .num = 4, .text = "4" }, .new_line = .{ .num = 4, .text = "4" } } },
+                            .{ .del = .{ .old_line = .{ .num = 5, .text = "5" } } },
+                            .{ .ins = .{ .new_line = .{ .num = 5, .text = "5.0" } } },
+                            .{ .eql = .{ .old_line = .{ .num = 6, .text = "6" }, .new_line = .{ .num = 6, .text = "6" } } },
+                            .{ .eql = .{ .old_line = .{ .num = 7, .text = "7" }, .new_line = .{ .num = 7, .text = "7" } } },
+                            .{ .eql = .{ .old_line = .{ .num = 8, .text = "8" }, .new_line = .{ .num = 8, .text = "8" } } },
                         },
-                        &[_][]const u8{
-                            "- 9",
-                            "- 10",
-                            "+ 9.0",
-                            "+ 10.0",
-                            "  11",
-                            "  12",
-                            "  13",
+                        &[_]diff.MyersDiff.Edit{
+                            .{ .del = .{ .old_line = .{ .num = 9, .text = "9" } } },
+                            .{ .del = .{ .old_line = .{ .num = 10, .text = "10" } } },
+                            .{ .ins = .{ .new_line = .{ .num = 9, .text = "9.0" } } },
+                            .{ .ins = .{ .new_line = .{ .num = 10, .text = "10.0" } } },
+                            .{ .eql = .{ .old_line = .{ .num = 11, .text = "11" }, .new_line = .{ .num = 11, .text = "11" } } },
+                            .{ .eql = .{ .old_line = .{ .num = 12, .text = "12" }, .new_line = .{ .num = 12, .text = "12" } } },
+                            .{ .eql = .{ .old_line = .{ .num = 13, .text = "13" }, .new_line = .{ .num = 13, .text = "13" } } },
                         },
-                        &[_][]const u8{
-                            "  14",
-                            "- 15",
-                            "+ 15.0",
+                        &[_]diff.MyersDiff.Edit{
+                            .{ .eql = .{ .old_line = .{ .num = 14, .text = "14" }, .new_line = .{ .num = 14, .text = "14" } } },
+                            .{ .del = .{ .old_line = .{ .num = 15, .text = "15" } } },
+                            .{ .ins = .{ .new_line = .{ .num = 15, .text = "15.0" } } },
                         },
                     };
-                    for (expected_lines, diff_item.hunks.items) |expected_hunk_lines, actual_hunk| {
-                        for (expected_hunk_lines, actual_hunk.lines.items) |expected_line, actual_line| {
-                            try std.testing.expectEqualStrings(expected_line, actual_line);
+                    for (expected_hunks, diff_item.hunks.items) |expected_hunk, actual_hunk| {
+                        for (expected_hunk, actual_hunk.edits.items) |expected_edit, actual_edit| {
+                            try std.testing.expectEqualDeep(expected_edit, actual_edit);
                         }
                     }
                 } else if (std.mem.eql(u8, "run.sh", diff_item.path)) {
