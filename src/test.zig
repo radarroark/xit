@@ -335,7 +335,7 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
                         },
                     };
                     for (expected_hunks, diff_item.hunks.items) |expected_hunk, actual_hunk| {
-                        for (expected_hunk, actual_hunk.edits.items) |expected_edit, actual_edit| {
+                        for (expected_hunk, actual_hunk.edits) |expected_edit, actual_edit| {
                             try std.testing.expectEqualDeep(expected_edit, actual_edit);
                         }
                     }

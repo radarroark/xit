@@ -317,13 +317,14 @@ pub fn DiffList(comptime repo_kind: rp.RepoKind) type {
         pub const Diff = struct {
             path: []const u8,
             header_lines: std.ArrayList([]const u8),
+            myers_diff: ?MyersDiff,
             hunks: std.ArrayList(Hunk),
             arena: std.heap.ArenaAllocator,
             target_a: Target,
             target_b: Target,
 
             pub const Hunk = struct {
-                edits: std.ArrayList(MyersDiff.Edit),
+                edits: []MyersDiff.Edit,
 
                 pub const Offsets = struct {
                     del_start: usize,
@@ -339,7 +340,7 @@ pub fn DiffList(comptime repo_kind: rp.RepoKind) type {
                         .ins_start = 0,
                         .ins_count = 0,
                     };
-                    for (self.edits.items) |edit| {
+                    for (self.edits) |edit| {
                         switch (edit) {
                             .eql => {
                                 if (o.ins_start == 0) o.ins_start = edit.eql.new_line.num;
@@ -388,7 +389,15 @@ pub fn DiffList(comptime repo_kind: rp.RepoKind) type {
                     }
                 }
 
-                var hunks = std.ArrayList(Hunk).init(arena.allocator());
+                var diff = Diff{
+                    .path = a.path,
+                    .header_lines = header_lines,
+                    .myers_diff = null,
+                    .hunks = std.ArrayList(Hunk).init(arena.allocator()),
+                    .arena = arena,
+                    .target_a = a,
+                    .target_b = b,
+                };
 
                 if (!std.mem.eql(u8, &a.oid, &b.oid)) {
                     if (mode_maybe) |mode| {
@@ -412,78 +421,65 @@ pub fn DiffList(comptime repo_kind: rp.RepoKind) type {
                         try header_lines.append("+++ /dev/null");
                     }
 
-                    var diff = try MyersDiff.init(allocator, a.lines.items, b.lines.items);
-                    defer diff.deinit();
+                    var myers_diff = try MyersDiff.init(allocator, a.lines.items, b.lines.items);
+                    errdefer myers_diff.deinit();
                     const max_margin: usize = 3;
-                    const DiffState = struct {
-                        found_edit: bool,
-                        margin: usize,
-                        begin_idx: usize,
-                        end_idx: usize,
-                    };
-                    var diff_state = DiffState{
-                        .found_edit = false,
-                        .margin = 0,
-                        .begin_idx = 0,
-                        .end_idx = 0,
-                    };
+                    var found_edit = false;
+                    var margin: usize = 0;
+                    var begin_idx: usize = 0;
+                    var end_idx: usize = 0;
 
-                    for (diff.edits.items, 0..) |edit, i| {
-                        diff_state.end_idx = i;
+                    for (myers_diff.edits.items, 0..) |edit, i| {
+                        end_idx = i;
 
                         if (edit == .eql) {
-                            diff_state.margin += 1;
-                            if (diff_state.found_edit) {
+                            margin += 1;
+                            if (found_edit) {
                                 // if the end margin isn't the max,
                                 // keep adding to the hunk
-                                if (diff_state.margin < max_margin) {
-                                    if (i < diff.edits.items.len - 1) continue;
+                                if (margin < max_margin) {
+                                    if (i < myers_diff.edits.items.len - 1) continue;
                                 }
                             }
                             // if the begin margin is over the max,
                             // remove the first line (which is
-                            // guaranteed to be an .eql edit)
-                            else if (diff_state.margin > max_margin) {
-                                diff_state.begin_idx += 1;
-                                diff_state.margin -= 1;
-                                if (i < diff.edits.items.len - 1) continue;
+                            // guaranteed to be an eql edit)
+                            else if (margin > max_margin) {
+                                begin_idx += 1;
+                                margin -= 1;
+                                if (i < myers_diff.edits.items.len - 1) continue;
                             }
                         } else {
-                            diff_state.found_edit = true;
-                            diff_state.margin = 0;
-                            if (i < diff.edits.items.len - 1) continue;
+                            found_edit = true;
+                            margin = 0;
+                            if (i < myers_diff.edits.items.len - 1) continue;
                         }
 
                         // if the diff state contains an actual edit
-                        // (that is, one line whose op is not .eql)
-                        if (diff_state.found_edit) {
-                            var hunk = Hunk{
-                                .edits = std.ArrayList(MyersDiff.Edit).init(arena.allocator()),
+                        // (that is, non-eql line)
+                        if (found_edit) {
+                            const hunk = Hunk{
+                                .edits = myers_diff.edits.items[begin_idx .. end_idx + 1],
                             };
-                            for (diff_state.begin_idx..diff_state.end_idx + 1) |edit_idx| {
-                                try hunk.edits.append(diff.edits.items[edit_idx]);
-                            }
-                            try hunks.append(hunk);
-                            diff_state.found_edit = false;
-                            diff_state.margin = 0;
-                            diff_state.end_idx += 1;
-                            diff_state.begin_idx = diff_state.end_idx;
+                            try diff.hunks.append(hunk);
+                            found_edit = false;
+                            margin = 0;
+                            end_idx += 1;
+                            begin_idx = end_idx;
                         }
                     }
+
+                    diff.myers_diff = myers_diff;
                 }
 
-                return .{
-                    .path = a.path,
-                    .header_lines = header_lines,
-                    .hunks = hunks,
-                    .arena = arena,
-                    .target_a = a,
-                    .target_b = b,
-                };
+                return diff;
             }
 
             pub fn deinit(self: *Diff) void {
                 self.arena.deinit();
+                if (self.myers_diff) |*myers_diff| {
+                    myers_diff.deinit();
+                }
                 self.target_a.deinit();
                 self.target_b.deinit();
             }

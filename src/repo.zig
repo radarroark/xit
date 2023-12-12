@@ -266,7 +266,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                                 offsets.ins_start,
                                 offsets.ins_count,
                             });
-                            for (hunk.edits.items) |edit| {
+                            for (hunk.edits) |edit| {
                                 try stdout.print("{s} {s}\n", .{
                                     switch (edit) {
                                         .eql => " ",
