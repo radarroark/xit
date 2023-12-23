@@ -1,0 +1,3 @@
+[submodule "src/test/deps"]
+	path = src/test/deps
+	url = https://github.com/radarroark/git-deps.git
