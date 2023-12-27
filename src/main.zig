@@ -1,28 +1,16 @@
 //! you're looking at radar's hopeless attempt to implement
-//! the successor to git. key features planned for xit:
+//! the successor to git. behold the three rules of xit:
 //!
-//! 1. xitlets: small programs that live inside the repo and
-//! whose data is versioned just like files are. changes to
-//! their data will happen exclusively via CRDTs, so they
-//! can be merged cleanly. this will allow building things
-//! like issue trackers that are part of the repo, an idea
-//! pioneered by fossil (though in a hard-coded form).
-//! 2. built-in text UI that exposes all functionality in an
-//! easy-to-use and discoverable way.
-//! 3. patch-based changes and first-class conflicts, an
-//! idea pioneered by pijul.
-//! 4. git compatibility, most likely implemented by keeping
-//! two different commit histories (a git-compatible one and
-//! a patch-based one).
-//!
-//! this will be a stupid amount of work with no guarantee
-//! of success, but good ol' radar has nothing better to do.
+//! 1. keep the codebase small and stupid.
+//! 2. prefer features that solve multiple problems imperfectly
+//! over those that solve a single problem perfectly.
+//! 3. never take yourself too seriously. be a dork, and you'll
+//! attract dorks. together, we'll make a glorious pack of strays.
 //!
 //! "C'mon Alex! You always dreamt about going on a big adventure!
 //!  Let this be our first!" -- Lunar: Silver Star Story
 
 const std = @import("std");
-const hash = @import("./hash.zig");
 const cmd = @import("./command.zig");
 const rp = @import("./repo.zig");
 
