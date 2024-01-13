@@ -4,7 +4,7 @@ const zlib = @import("src/test/deps/zlib.zig");
 const mbedtls = @import("src/test/deps/mbedtls.zig");
 const libssh2 = @import("src/test/deps/libssh2.zig");
 
-pub fn build(b: *std.build.Builder) !void {
+pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
 
     const optimize = b.standardOptimizeOption(.{});
@@ -15,8 +15,8 @@ pub fn build(b: *std.build.Builder) !void {
         .target = target,
         .optimize = optimize,
     });
-    exe.addAnonymousModule("xitdb", .{
-        .source_file = .{ .path = "../xitdb/src/main.zig" },
+    exe.root_module.addAnonymousImport("xitdb", .{
+        .root_source_file = .{ .path = "../xitdb/src/main.zig" },
     });
     b.installArtifact(exe);
 
@@ -43,8 +43,8 @@ pub fn build(b: *std.build.Builder) !void {
         .root_source_file = .{ .path = "src/test.zig" },
         .optimize = optimize,
     });
-    unit_tests.addAnonymousModule("xitdb", .{
-        .source_file = .{ .path = "../xitdb/src/main.zig" },
+    unit_tests.root_module.addAnonymousImport("xitdb", .{
+        .root_source_file = .{ .path = "../xitdb/src/main.zig" },
     });
     unit_tests.linkLibC();
     unit_tests.addIncludePath(.{ .path = "src/test/deps/libgit2/include" });
