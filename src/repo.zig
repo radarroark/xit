@@ -1,5 +1,6 @@
 const std = @import("std");
 const xitdb = @import("xitdb");
+const hash = @import("./hash.zig");
 const obj = @import("./object.zig");
 const cmd = @import("./command.zig");
 const idx = @import("./index.zig");
@@ -314,6 +315,27 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 },
                 cmd.CommandData.restore => {
                     try chk.restore(repo_kind, &self.core, self.allocator, cmd_data.restore.path);
+                },
+                cmd.CommandData.log => {
+                    const current_hash = try ref.readHead(repo_kind, &self.core);
+                    var next_hash_maybe: ?[hash.SHA1_HEX_LEN]u8 = current_hash;
+                    while (next_hash_maybe) |next_hash| {
+                        var commit_object = try obj.Object(repo_kind).init(self.allocator, &self.core, next_hash);
+                        defer commit_object.deinit();
+
+                        try stdout.print("commit {s}\n", .{next_hash});
+                        if (commit_object.content.commit.author) |author| {
+                            try stdout.print("Author {s}\n", .{author});
+                        }
+                        try stdout.print("\n", .{});
+                        var iter = std.mem.split(u8, commit_object.content.commit.message, "\n");
+                        while (iter.next()) |line| {
+                            try stdout.print("    {s}\n", .{line});
+                        }
+                        try stdout.print("\n", .{});
+
+                        next_hash_maybe = commit_object.content.commit.parent;
+                    }
                 },
             }
         }

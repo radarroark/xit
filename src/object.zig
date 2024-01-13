@@ -548,7 +548,7 @@ pub const ObjectContent = union(ObjectKind) {
     },
     commit: struct {
         tree: [hash.SHA1_HEX_LEN]u8,
-        parent: ?[]const u8,
+        parent: ?[hash.SHA1_HEX_LEN]u8,
         author: ?[]const u8,
         committer: ?[]const u8,
         message: []const u8,
@@ -739,7 +739,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                     if (parent.value.len != hash.SHA1_HEX_LEN) {
                         return error.InvalidCommitParentHash;
                     }
-                    object.content.commit.parent = parent.value;
+                    object.content.commit.parent = parent.value[0..hash.SHA1_HEX_LEN].*;
                 }
                 if (metadata.fetchRemove("author")) |author| {
                     object.content.commit.author = author.value;

@@ -14,6 +14,7 @@ pub const CommandKind = enum {
     branch,
     switch_head,
     restore,
+    log,
 };
 
 pub const CommandData = union(CommandKind) {
@@ -43,6 +44,7 @@ pub const CommandData = union(CommandKind) {
     restore: struct {
         path: []const u8,
     },
+    log,
 };
 
 pub const CommandError = error{
@@ -122,6 +124,8 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8))
                 return CommandError.RestorePathMissing;
             }
             return CommandData{ .restore = .{ .path = pos_args.items[0] } };
+        } else if (std.mem.eql(u8, args.items[0], "log")) {
+            return CommandData{ .log = {} };
         } else {
             return CommandData{ .invalid = .{ .name = args.items[0] } };
         }
