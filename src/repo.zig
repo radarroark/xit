@@ -317,24 +317,27 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     try chk.restore(repo_kind, &self.core, self.allocator, cmd_data.restore.path);
                 },
                 cmd.CommandData.log => {
-                    const current_hash = try ref.readHead(repo_kind, &self.core);
-                    var next_hash_maybe: ?[hash.SHA1_HEX_LEN]u8 = current_hash;
-                    while (next_hash_maybe) |next_hash| {
-                        var commit_object = try obj.Object(repo_kind).init(self.allocator, &self.core, next_hash);
-                        defer commit_object.deinit();
-
-                        try stdout.print("commit {s}\n", .{next_hash});
-                        if (commit_object.content.commit.author) |author| {
-                            try stdout.print("Author {s}\n", .{author});
+                    if (try ref.readHeadMaybe(repo_kind, &self.core)) |oid| {
+                        var commit_iter = try self.log(oid);
+                        var commit_object_maybe: ?obj.Object(repo_kind) = null;
+                        while (true) {
+                            commit_object_maybe = try commit_iter.next();
+                            if (commit_object_maybe) |*commit_object| {
+                                defer commit_object.deinit();
+                                try stdout.print("commit {s}\n", .{commit_object.oid});
+                                if (commit_object.content.commit.author) |author| {
+                                    try stdout.print("Author {s}\n", .{author});
+                                }
+                                try stdout.print("\n", .{});
+                                var split_iter = std.mem.split(u8, commit_object.content.commit.message, "\n");
+                                while (split_iter.next()) |line| {
+                                    try stdout.print("    {s}\n", .{line});
+                                }
+                                try stdout.print("\n", .{});
+                            } else {
+                                break;
+                            }
                         }
-                        try stdout.print("\n", .{});
-                        var iter = std.mem.split(u8, commit_object.content.commit.message, "\n");
-                        while (iter.next()) |line| {
-                            try stdout.print("    {s}\n", .{line});
-                        }
-                        try stdout.print("\n", .{});
-
-                        next_hash_maybe = commit_object.content.commit.parent;
                     }
                 },
             }
@@ -399,6 +402,10 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     try index.write(self.allocator, .{ .db = &self.core.db });
                 },
             }
+        }
+
+        pub fn log(self: *Repo(repo_kind), oid: [hash.SHA1_HEX_LEN]u8) !obj.ObjectIterator(repo_kind) {
+            return try obj.ObjectIterator(repo_kind).init(self.allocator, &self.core, oid);
         }
     };
 }

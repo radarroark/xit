@@ -1133,6 +1133,27 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
         try expectEqual(commit3, try ref.resolve(repo_kind, &repo.core, "stuff"));
     }
 
+    // log
+    {
+        var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+        defer repo.deinit();
+        var iter = try repo.log(commit3);
+
+        var object3 = try iter.next();
+        defer object3.?.deinit();
+        try expectEqual(commit3, object3.?.oid);
+
+        var object2 = try iter.next();
+        defer object2.?.deinit();
+        try expectEqual(commit2, object2.?.oid);
+
+        var object1 = try iter.next();
+        defer object1.?.deinit();
+        try expectEqual(commit1, object1.?.oid);
+
+        try expectEqual(null, try iter.next());
+    }
+
     return commit3;
 }
 

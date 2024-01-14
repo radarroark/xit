@@ -567,6 +567,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
         allocator: std.mem.Allocator,
         arena: std.heap.ArenaAllocator,
         content: ObjectContent,
+        oid: [hash.SHA1_HEX_LEN]u8,
 
         pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core, oid: [hash.SHA1_HEX_LEN]u8) !Object(repo_kind) {
             var state = blk: {
@@ -656,6 +657,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                     .allocator = allocator,
                     .arena = std.heap.ArenaAllocator.init(allocator),
                     .content = ObjectContent{ .blob = {} },
+                    .oid = oid,
                 };
             } else if (std.mem.eql(u8, "tree", object_kind)) {
                 var arena = std.heap.ArenaAllocator.init(allocator);
@@ -680,6 +682,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                     .allocator = allocator,
                     .arena = arena,
                     .content = ObjectContent{ .tree = .{ .entries = entries } },
+                    .oid = oid,
                 };
             } else if (std.mem.eql(u8, "commit", object_kind)) {
                 // read the content kind
@@ -709,6 +712,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                             .message = undefined,
                         },
                     },
+                    .oid = oid,
                 };
                 errdefer object.arena.deinit();
                 @memcpy(&object.content.commit.tree, tree_hash_slice);
@@ -845,6 +849,33 @@ pub fn TreeDiff(comptime repo_kind: rp.RepoKind) type {
                 };
             } else {
                 return std.StringArrayHashMap(TreeEntry).init(self.arena.allocator());
+            }
+        }
+    };
+}
+
+pub fn ObjectIterator(comptime repo_kind: rp.RepoKind) type {
+    return struct {
+        allocator: std.mem.Allocator,
+        core: *rp.Repo(repo_kind).Core,
+        next_oid: ?[hash.SHA1_HEX_LEN]u8,
+
+        pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core, oid: [hash.SHA1_HEX_LEN]u8) !ObjectIterator(repo_kind) {
+            return .{
+                .allocator = allocator,
+                .core = core,
+                .next_oid = oid,
+            };
+        }
+
+        pub fn next(self: *ObjectIterator(repo_kind)) !?Object(repo_kind) {
+            if (self.next_oid) |next_oid| {
+                var commit_object = try Object(repo_kind).init(self.allocator, self.core, next_oid);
+                errdefer commit_object.deinit();
+                self.next_oid = commit_object.content.commit.parent;
+                return commit_object;
+            } else {
+                return null;
             }
         }
     };
