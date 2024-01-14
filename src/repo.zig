@@ -255,39 +255,33 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     var diff_iter = try self.diff(cmd_data.diff.kind);
                     defer diff_iter.deinit();
 
-                    var diff_item_maybe: ?df.Diff(repo_kind) = null;
-                    while (true) {
-                        diff_item_maybe = try diff_iter.next();
-                        if (diff_item_maybe) |*diff_item| {
-                            defer diff_item.deinit();
-                            for (diff_item.header_lines.items) |header_line| {
-                                try stdout.print("{s}\n", .{header_line});
-                            }
-                            for (diff_item.hunks.items) |hunk| {
-                                const offsets = hunk.offsets();
-                                try stdout.print("@@ -{},{} +{},{} @@\n", .{
-                                    offsets.del_start,
-                                    offsets.del_count,
-                                    offsets.ins_start,
-                                    offsets.ins_count,
+                    while (try diff_iter.next()) |diff_item| {
+                        defer diff_item.deinit();
+                        for (diff_item.header_lines.items) |header_line| {
+                            try stdout.print("{s}\n", .{header_line});
+                        }
+                        for (diff_item.hunks.items) |hunk| {
+                            const offsets = hunk.offsets();
+                            try stdout.print("@@ -{},{} +{},{} @@\n", .{
+                                offsets.del_start,
+                                offsets.del_count,
+                                offsets.ins_start,
+                                offsets.ins_count,
+                            });
+                            for (hunk.edits) |edit| {
+                                try stdout.print("{s} {s}\n", .{
+                                    switch (edit) {
+                                        .eql => " ",
+                                        .ins => "+",
+                                        .del => "-",
+                                    },
+                                    switch (edit) {
+                                        .eql => edit.eql.new_line.text,
+                                        .ins => edit.ins.new_line.text,
+                                        .del => edit.del.old_line.text,
+                                    },
                                 });
-                                for (hunk.edits) |edit| {
-                                    try stdout.print("{s} {s}\n", .{
-                                        switch (edit) {
-                                            .eql => " ",
-                                            .ins => "+",
-                                            .del => "-",
-                                        },
-                                        switch (edit) {
-                                            .eql => edit.eql.new_line.text,
-                                            .ins => edit.ins.new_line.text,
-                                            .del => edit.del.old_line.text,
-                                        },
-                                    });
-                                }
                             }
-                        } else {
-                            break;
                         }
                     }
                 },
@@ -326,24 +320,18 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 cmd.CommandData.log => {
                     if (try ref.readHeadMaybe(repo_kind, &self.core)) |oid| {
                         var commit_iter = try self.log(oid);
-                        var commit_object_maybe: ?obj.Object(repo_kind) = null;
-                        while (true) {
-                            commit_object_maybe = try commit_iter.next();
-                            if (commit_object_maybe) |*commit_object| {
-                                defer commit_object.deinit();
-                                try stdout.print("commit {s}\n", .{commit_object.oid});
-                                if (commit_object.content.commit.author) |author| {
-                                    try stdout.print("Author {s}\n", .{author});
-                                }
-                                try stdout.print("\n", .{});
-                                var split_iter = std.mem.split(u8, commit_object.content.commit.message, "\n");
-                                while (split_iter.next()) |line| {
-                                    try stdout.print("    {s}\n", .{line});
-                                }
-                                try stdout.print("\n", .{});
-                            } else {
-                                break;
+                        while (try commit_iter.next()) |commit_object| {
+                            defer commit_object.deinit();
+                            try stdout.print("commit {s}\n", .{commit_object.oid});
+                            if (commit_object.content.commit.author) |author| {
+                                try stdout.print("Author {s}\n", .{author});
                             }
+                            try stdout.print("\n", .{});
+                            var split_iter = std.mem.split(u8, commit_object.content.commit.message, "\n");
+                            while (split_iter.next()) |line| {
+                                try stdout.print("    {s}\n", .{line});
+                            }
+                            try stdout.print("\n", .{});
                         }
                     }
                 },

@@ -490,6 +490,7 @@ pub fn DiffIterator(comptime repo_kind: rp.RepoKind) type {
         core: *rp.Repo(repo_kind).Core,
         diff_kind: DiffKind,
         status: st.Status(repo_kind),
+        diff: Diff(repo_kind),
         next_index: usize,
 
         pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core, diff_kind: DiffKind) !DiffIterator(repo_kind) {
@@ -500,11 +501,12 @@ pub fn DiffIterator(comptime repo_kind: rp.RepoKind) type {
                 .core = core,
                 .diff_kind = diff_kind,
                 .status = status,
+                .diff = undefined,
                 .next_index = 0,
             };
         }
 
-        pub fn next(self: *DiffIterator(repo_kind)) !?Diff(repo_kind) {
+        pub fn next(self: *DiffIterator(repo_kind)) !?*Diff(repo_kind) {
             var next_index = self.next_index;
             switch (self.diff_kind) {
                 .workspace => {
@@ -514,8 +516,9 @@ pub fn DiffIterator(comptime repo_kind: rp.RepoKind) type {
                         errdefer a.deinit();
                         var b = try Target(repo_kind).initFromWorkspace(self.allocator, self.core, entry.path, io.getMode(entry.meta));
                         errdefer b.deinit();
+                        self.diff = try Diff(repo_kind).init(self.allocator, a, b);
                         self.next_index += 1;
-                        return try Diff(repo_kind).init(self.allocator, a, b);
+                        return &self.diff;
                     } else {
                         next_index -= self.status.workspace_modified.items.len;
                     }
@@ -526,8 +529,9 @@ pub fn DiffIterator(comptime repo_kind: rp.RepoKind) type {
                         errdefer a.deinit();
                         var b = try Target(repo_kind).initFromNothing(self.allocator, path);
                         errdefer b.deinit();
+                        self.diff = try Diff(repo_kind).init(self.allocator, a, b);
                         self.next_index += 1;
-                        return try Diff(repo_kind).init(self.allocator, a, b);
+                        return &self.diff;
                     }
                 },
                 .index => {
@@ -537,8 +541,9 @@ pub fn DiffIterator(comptime repo_kind: rp.RepoKind) type {
                         errdefer a.deinit();
                         var b = try Target(repo_kind).initFromIndex(self.allocator, self.core, self.status.index.entries.get(path) orelse return error.EntryNotFound);
                         errdefer b.deinit();
+                        self.diff = try Diff(repo_kind).init(self.allocator, a, b);
                         self.next_index += 1;
-                        return try Diff(repo_kind).init(self.allocator, a, b);
+                        return &self.diff;
                     } else {
                         next_index -= self.status.index_added.items.len;
                     }
@@ -549,8 +554,9 @@ pub fn DiffIterator(comptime repo_kind: rp.RepoKind) type {
                         errdefer a.deinit();
                         var b = try Target(repo_kind).initFromIndex(self.allocator, self.core, self.status.index.entries.get(path) orelse return error.EntryNotFound);
                         errdefer b.deinit();
+                        self.diff = try Diff(repo_kind).init(self.allocator, a, b);
                         self.next_index += 1;
-                        return try Diff(repo_kind).init(self.allocator, a, b);
+                        return &self.diff;
                     } else {
                         next_index -= self.status.index_modified.items.len;
                     }
@@ -561,8 +567,9 @@ pub fn DiffIterator(comptime repo_kind: rp.RepoKind) type {
                         errdefer a.deinit();
                         var b = try Target(repo_kind).initFromNothing(self.allocator, path);
                         errdefer b.deinit();
+                        self.diff = try Diff(repo_kind).init(self.allocator, a, b);
                         self.next_index += 1;
-                        return try Diff(repo_kind).init(self.allocator, a, b);
+                        return &self.diff;
                     }
                 },
             }

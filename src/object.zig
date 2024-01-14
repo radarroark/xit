@@ -858,22 +858,25 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind) type {
     return struct {
         allocator: std.mem.Allocator,
         core: *rp.Repo(repo_kind).Core,
+        object: Object(repo_kind),
         next_oid: ?[hash.SHA1_HEX_LEN]u8,
 
         pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core, oid: [hash.SHA1_HEX_LEN]u8) !ObjectIterator(repo_kind) {
             return .{
                 .allocator = allocator,
                 .core = core,
+                .object = undefined,
                 .next_oid = oid,
             };
         }
 
-        pub fn next(self: *ObjectIterator(repo_kind)) !?Object(repo_kind) {
+        pub fn next(self: *ObjectIterator(repo_kind)) !?*Object(repo_kind) {
             if (self.next_oid) |next_oid| {
                 var commit_object = try Object(repo_kind).init(self.allocator, self.core, next_oid);
                 errdefer commit_object.deinit();
+                self.object = commit_object;
                 self.next_oid = commit_object.content.commit.parent;
-                return commit_object;
+                return &self.object;
             } else {
                 return null;
             }
