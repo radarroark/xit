@@ -252,35 +252,42 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     }
                 },
                 cmd.CommandData.diff => {
-                    var diff_list = try self.diff(cmd_data.diff.kind);
-                    defer diff_list.deinit();
+                    var diff_iter = try self.diff(cmd_data.diff.kind);
+                    defer diff_iter.deinit();
 
-                    for (diff_list.diffs.items) |diff_item| {
-                        for (diff_item.header_lines.items) |header_line| {
-                            try stdout.print("{s}\n", .{header_line});
-                        }
-                        for (diff_item.hunks.items) |hunk| {
-                            const offsets = hunk.offsets();
-                            try stdout.print("@@ -{},{} +{},{} @@\n", .{
-                                offsets.del_start,
-                                offsets.del_count,
-                                offsets.ins_start,
-                                offsets.ins_count,
-                            });
-                            for (hunk.edits) |edit| {
-                                try stdout.print("{s} {s}\n", .{
-                                    switch (edit) {
-                                        .eql => " ",
-                                        .ins => "+",
-                                        .del => "-",
-                                    },
-                                    switch (edit) {
-                                        .eql => edit.eql.new_line.text,
-                                        .ins => edit.ins.new_line.text,
-                                        .del => edit.del.old_line.text,
-                                    },
-                                });
+                    var diff_item_maybe: ?df.Diff(repo_kind) = null;
+                    while (true) {
+                        diff_item_maybe = try diff_iter.next();
+                        if (diff_item_maybe) |*diff_item| {
+                            defer diff_item.deinit();
+                            for (diff_item.header_lines.items) |header_line| {
+                                try stdout.print("{s}\n", .{header_line});
                             }
+                            for (diff_item.hunks.items) |hunk| {
+                                const offsets = hunk.offsets();
+                                try stdout.print("@@ -{},{} +{},{} @@\n", .{
+                                    offsets.del_start,
+                                    offsets.del_count,
+                                    offsets.ins_start,
+                                    offsets.ins_count,
+                                });
+                                for (hunk.edits) |edit| {
+                                    try stdout.print("{s} {s}\n", .{
+                                        switch (edit) {
+                                            .eql => " ",
+                                            .ins => "+",
+                                            .del => "-",
+                                        },
+                                        switch (edit) {
+                                            .eql => edit.eql.new_line.text,
+                                            .ins => edit.ins.new_line.text,
+                                            .del => edit.del.old_line.text,
+                                        },
+                                    });
+                                }
+                            }
+                        } else {
+                            break;
                         }
                     }
                 },
@@ -347,8 +354,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             return try st.Status(repo_kind).init(self.allocator, &self.core);
         }
 
-        pub fn diff(self: *Repo(repo_kind), diff_kind: df.DiffKind) !df.DiffList(repo_kind) {
-            return try df.DiffList(repo_kind).init(self.allocator, &self.core, diff_kind);
+        pub fn diff(self: *Repo(repo_kind), diff_kind: df.DiffKind) !df.DiffIterator(repo_kind) {
+            return try df.DiffIterator(repo_kind).init(self.allocator, &self.core, diff_kind);
         }
 
         pub fn add(self: *Repo(repo_kind), paths: std.ArrayList([]const u8)) !void {
