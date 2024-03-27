@@ -24,7 +24,7 @@ pub const ObjectWriteError = error{
 /// eventually i'll make it return upper case and maybe numbers too.
 fn randChar() !u8 {
     var rand_int: u8 = 0;
-    try std.os.getrandom(std.mem.asBytes(&rand_int));
+    try std.posix.getrandom(std.mem.asBytes(&rand_int));
     const rand_float: f32 = @as(f32, @floatFromInt(rand_int)) / @as(f32, @floatFromInt(std.math.maxInt(u8)));
     const min = 'a';
     const max = 'z';
@@ -149,7 +149,7 @@ pub fn writeBlob(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core
             const compressed_tmp_file_name = tmp_file_name ++ ".compressed";
             const compressed_tmp_file = try hash_prefix_dir.createFile(compressed_tmp_file_name, .{});
             defer compressed_tmp_file.close();
-            try compress.compress(allocator, tmp_file, compressed_tmp_file);
+            try compress.compress(tmp_file, compressed_tmp_file);
 
             // delete uncompressed temp file
             try hash_prefix_dir.deleteFile(tmp_file_name);
@@ -265,7 +265,7 @@ fn writeTree(comptime repo_kind: rp.RepoKind, opts: ObjectOpts(repo_kind), alloc
             defer tree_comp_tmp_file.close();
 
             // compress the file
-            try compress.compress(allocator, tree_tmp_file, tree_comp_tmp_file);
+            try compress.compress(tree_tmp_file, tree_comp_tmp_file);
 
             // delete first temp file
             try tree_hash_prefix_dir.deleteFile(tree_tmp_file_name);
@@ -417,7 +417,7 @@ pub fn writeCommit(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
             defer commit_comp_tmp_file.close();
 
             // compress the file
-            try compress.compress(allocator, commit_tmp_file, commit_comp_tmp_file);
+            try compress.compress(commit_tmp_file, commit_comp_tmp_file);
 
             // delete first temp file
             try commit_hash_prefix_dir.deleteFile(commit_tmp_file_name);
@@ -584,8 +584,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                         errdefer commit_hash_suffix_file.close();
 
                         // decompress the object file
-                        var decompressed = try compress.Decompressed.init(allocator, commit_hash_suffix_file);
-                        errdefer decompressed.deinit();
+                        var decompressed = try compress.Decompressed.init(commit_hash_suffix_file);
                         const reader = decompressed.stream.reader();
 
                         const Reader = @TypeOf(reader);
@@ -597,7 +596,6 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                             reader: Reader,
 
                             fn deinit(self: *@This()) void {
-                                self.decompressed.deinit();
                                 self.commit_hash_suffix_file.close();
                                 self.commit_hash_prefix_dir.close();
                                 self.objects_dir.close();

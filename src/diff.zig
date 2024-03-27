@@ -217,7 +217,7 @@ pub fn Target(comptime repo_kind: rp.RepoKind) type {
                 .buffer = try allocator.alloc(u8, 1024),
                 .lines = undefined,
             };
-            const buf = try chk.objectToBuffer(repo_kind, core, allocator, oid_hex, target.buffer);
+            const buf = try chk.objectToBuffer(repo_kind, core, oid_hex, target.buffer);
 
             var lines = std.ArrayList([]const u8).init(allocator);
             errdefer lines.deinit();
@@ -286,7 +286,7 @@ pub fn Target(comptime repo_kind: rp.RepoKind) type {
                 .buffer = try allocator.alloc(u8, 1024),
                 .lines = undefined,
             };
-            const buf = try chk.objectToBuffer(repo_kind, core, allocator, oid_hex, target.buffer);
+            const buf = try chk.objectToBuffer(repo_kind, core, oid_hex, target.buffer);
 
             var lines = std.ArrayList([]const u8).init(allocator);
             errdefer lines.deinit();

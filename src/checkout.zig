@@ -101,7 +101,7 @@ fn objectToFile(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core,
                     defer out_file.close();
 
                     // create the file
-                    try compress.decompress(allocator, in_file, out_file, true);
+                    try compress.decompress(in_file, out_file, true);
                 },
                 .xit => {
                     const Ctx = struct {
@@ -173,7 +173,7 @@ fn objectToFile(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core,
     }
 }
 
-pub fn objectToBuffer(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, oid_hex: [hash.SHA1_HEX_LEN]u8, buffer: []u8) ![]u8 {
+pub fn objectToBuffer(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, oid_hex: [hash.SHA1_HEX_LEN]u8, buffer: []u8) ![]u8 {
     switch (repo_kind) {
         .git => {
             // open the internal dirs
@@ -188,8 +188,7 @@ pub fn objectToBuffer(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind)
             defer in_file.close();
 
             // decompress into arraylist
-            var decompressed = try compress.Decompressed.init(allocator, in_file);
-            defer decompressed.deinit();
+            var decompressed = try compress.Decompressed.init(in_file);
             var reader = decompressed.stream.reader();
             try reader.skipUntilDelimiterOrEof(0);
             const size = try reader.read(buffer);

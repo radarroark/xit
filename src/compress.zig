@@ -7,10 +7,9 @@ const zlib = std.compress.zlib;
 
 const MAX_FILE_READ_BYTES = 1024; // FIXME: this is arbitrary...
 
-pub fn compress(allocator: std.mem.Allocator, in: std.fs.File, out: std.fs.File) !void {
+pub fn compress(in: std.fs.File, out: std.fs.File) !void {
     // init stream from input file
-    var zlib_stream = try zlib.compressStream(allocator, out.writer(), .{ .level = .default });
-    defer zlib_stream.deinit();
+    var zlib_stream = try zlib.compressor(out.writer(), .{ .level = .default });
 
     // write the compressed data to the output file
     try in.seekTo(0);
@@ -26,11 +25,10 @@ pub fn compress(allocator: std.mem.Allocator, in: std.fs.File, out: std.fs.File)
     try zlib_stream.finish();
 }
 
-pub fn decompress(allocator: std.mem.Allocator, in: std.fs.File, out: std.fs.File, skip_header: bool) !void {
+pub fn decompress(in: std.fs.File, out: std.fs.File, skip_header: bool) !void {
     // init stream from input file
     try in.seekTo(0);
-    var zlib_stream = try zlib.decompressStream(allocator, in.reader());
-    defer zlib_stream.deinit();
+    var zlib_stream = zlib.decompressor(in.reader());
     if (skip_header) {
         // skip section in beginning of file which is not compressed
         try zlib_stream.reader().skipUntilDelimiterOrEof(0);
@@ -56,9 +54,9 @@ const CompressError = error{
 };
 pub const Decompressed = struct {
     buffer: [MAX_FILE_SIZE_BYTES]u8,
-    stream: std.compress.zlib.DecompressStream(std.io.Reader(*std.io.FixedBufferStream([]u8), std.io.FixedBufferStream([]u8).ReadError, std.io.FixedBufferStream([]u8).read)),
+    stream: std.compress.zlib.Decompressor(std.io.Reader(*std.io.FixedBufferStream([]u8), std.io.FixedBufferStream([]u8).ReadError, std.io.FixedBufferStream([]u8).read)),
 
-    pub fn init(allocator: std.mem.Allocator, in: std.fs.File) !Decompressed {
+    pub fn init(in: std.fs.File) !Decompressed {
         var decompressed = Decompressed{
             .buffer = [_]u8{0} ** MAX_FILE_SIZE_BYTES,
             .stream = undefined,
@@ -72,13 +70,9 @@ pub const Decompressed = struct {
 
         // create the stream
         var fixed_buffer = std.io.fixedBufferStream(decompressed.buffer[0..in_size]);
-        decompressed.stream = try zlib.decompressStream(allocator, fixed_buffer.reader());
+        decompressed.stream = zlib.decompressor(fixed_buffer.reader());
 
         return decompressed;
-    }
-
-    pub fn deinit(self: *Decompressed) void {
-        defer self.stream.deinit();
     }
 };
 
@@ -109,12 +103,12 @@ test "compress and decompress" {
     // compress the file
     var out_compressed = try temp_dir.createFile("hello.txt.compressed", .{ .read = true });
     defer out_compressed.close();
-    try compress(allocator, hello_txt, out_compressed);
+    try compress(hello_txt, out_compressed);
 
     // decompress it so we know it works
     var out_decompressed = try temp_dir.createFile("out_decompressed", .{ .read = true });
     defer out_decompressed.close();
-    try decompress(allocator, out_compressed, out_decompressed, false);
+    try decompress(out_compressed, out_decompressed, false);
 
     // read the decompressed file into memory and check that it's the same
     var read_buffer = [_]u8{0} ** MAX_FILE_SIZE_BYTES;
@@ -122,8 +116,7 @@ test "compress and decompress" {
     try std.testing.expect(std.mem.eql(u8, hello_txt_content, read_buffer[0..size]));
 
     // decompress purely in memory
-    var decompressed = try Decompressed.init(allocator, out_compressed);
-    defer decompressed.deinit();
+    var decompressed = try Decompressed.init(out_compressed);
     const buf = try decompressed.stream.reader().readAllAlloc(allocator, std.math.maxInt(usize));
     defer allocator.free(buf);
     try std.testing.expect(std.mem.eql(u8, hello_txt_content, buf));

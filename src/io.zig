@@ -105,7 +105,7 @@ pub fn getStat(file: std.fs.File) !Stat {
             .gid = 0,
         },
         else => {
-            const stat = try std.os.fstat(file.handle);
+            const stat = try std.posix.fstat(file.handle);
             return .{
                 .dev = @intCast(stat.dev),
                 .ino = @intCast(stat.ino),
