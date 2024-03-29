@@ -320,6 +320,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 cmd.CommandData.log => {
                     if (try ref.readHeadMaybe(repo_kind, &self.core)) |oid| {
                         var commit_iter = try self.log(oid);
+                        defer commit_iter.deinit();
                         while (try commit_iter.next()) |commit_object| {
                             defer commit_object.deinit();
                             try stdout.print("commit {s}\n", .{commit_object.oid});

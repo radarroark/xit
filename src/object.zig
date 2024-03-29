@@ -548,7 +548,7 @@ pub const ObjectContent = union(ObjectKind) {
     },
     commit: struct {
         tree: [hash.SHA1_HEX_LEN]u8,
-        parent: ?[hash.SHA1_HEX_LEN]u8,
+        parents: std.ArrayList([hash.SHA1_HEX_LEN]u8),
         author: ?[]const u8,
         committer: ?[]const u8,
         message: []const u8,
@@ -697,29 +697,22 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                     return error.InvalidCommitTreeHash;
                 }
 
-                // init the object
-                var object = Object(repo_kind){
-                    .allocator = allocator,
-                    .arena = std.heap.ArenaAllocator.init(allocator),
-                    .content = ObjectContent{
-                        .commit = .{
-                            .tree = undefined,
-                            .parent = null,
-                            .author = null,
-                            .committer = null,
-                            .message = undefined,
-                        },
+                // init the content
+                var arena = std.heap.ArenaAllocator.init(allocator);
+                errdefer arena.deinit();
+                var content = ObjectContent{
+                    .commit = .{
+                        .tree = tree_hash_slice[0..hash.SHA1_HEX_LEN].*,
+                        .parents = std.ArrayList([hash.SHA1_HEX_LEN]u8).init(arena.allocator()),
+                        .author = null,
+                        .committer = null,
+                        .message = undefined,
                     },
-                    .oid = oid,
                 };
-                errdefer object.arena.deinit();
-                @memcpy(&object.content.commit.tree, tree_hash_slice);
 
                 // read the metadata
-                var metadata = std.StringHashMap([]const u8).init(allocator);
-                defer metadata.deinit();
                 while (true) {
-                    const line = try state.reader.readUntilDelimiterAlloc(object.arena.allocator(), '\n', MAX_FILE_READ_BYTES);
+                    const line = try state.reader.readUntilDelimiterAlloc(arena.allocator(), '\n', MAX_FILE_READ_BYTES);
                     if (line.len == 0) {
                         break;
                     }
@@ -729,28 +722,29 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                         }
                         const key = line[0..line_idx];
                         const value = line[line_idx + 1 ..];
-                        try metadata.put(key, value);
+
+                        if (std.mem.eql(u8, "parent", key)) {
+                            if (value.len != hash.SHA1_HEX_LEN) {
+                                return error.InvalidCommitParentHash;
+                            }
+                            try content.commit.parents.append(value[0..hash.SHA1_HEX_LEN].*);
+                        } else if (std.mem.eql(u8, "author", key)) {
+                            content.commit.author = value;
+                        } else if (std.mem.eql(u8, "committer", key)) {
+                            content.commit.committer = value;
+                        }
                     }
                 }
 
                 // read the message
-                object.content.commit.message = try state.reader.readAllAlloc(object.arena.allocator(), MAX_FILE_READ_BYTES);
+                content.commit.message = try state.reader.readAllAlloc(arena.allocator(), MAX_FILE_READ_BYTES);
 
-                // set metadata fields
-                if (metadata.fetchRemove("parent")) |parent| {
-                    if (parent.value.len != hash.SHA1_HEX_LEN) {
-                        return error.InvalidCommitParentHash;
-                    }
-                    object.content.commit.parent = parent.value[0..hash.SHA1_HEX_LEN].*;
-                }
-                if (metadata.fetchRemove("author")) |author| {
-                    object.content.commit.author = author.value;
-                }
-                if (metadata.fetchRemove("committer")) |committer| {
-                    object.content.commit.committer = committer.value;
-                }
-
-                return object;
+                return Object(repo_kind){
+                    .allocator = allocator,
+                    .arena = arena,
+                    .content = content,
+                    .oid = oid,
+                };
             } else {
                 return error.InvalidObjectKind;
             }
@@ -856,24 +850,42 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind) type {
     return struct {
         allocator: std.mem.Allocator,
         core: *rp.Repo(repo_kind).Core,
+        oid_queue: std.DoublyLinkedList([hash.SHA1_HEX_LEN]u8),
         object: Object(repo_kind),
-        next_oid: ?[hash.SHA1_HEX_LEN]u8,
 
         pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core, oid: [hash.SHA1_HEX_LEN]u8) !ObjectIterator(repo_kind) {
+            var oid_queue = std.DoublyLinkedList([hash.SHA1_HEX_LEN]u8){};
+            var node = try allocator.create(std.DoublyLinkedList([hash.SHA1_HEX_LEN]u8).Node);
+            errdefer allocator.destroy(node);
+            node.data = oid;
+            oid_queue.append(node);
             return .{
                 .allocator = allocator,
                 .core = core,
+                .oid_queue = oid_queue,
                 .object = undefined,
-                .next_oid = oid,
             };
         }
 
+        pub fn deinit(self: *ObjectIterator(repo_kind)) void {
+            while (self.oid_queue.popFirst()) |node| {
+                self.allocator.destroy(node);
+            }
+        }
+
         pub fn next(self: *ObjectIterator(repo_kind)) !?*Object(repo_kind) {
-            if (self.next_oid) |next_oid| {
+            if (self.oid_queue.popFirst()) |node| {
+                const next_oid = node.data;
+                self.allocator.destroy(node);
                 var commit_object = try Object(repo_kind).init(self.allocator, self.core, next_oid);
                 errdefer commit_object.deinit();
                 self.object = commit_object;
-                self.next_oid = commit_object.content.commit.parent;
+                for (commit_object.content.commit.parents.items) |parent_oid| {
+                    var new_node = try self.allocator.create(std.DoublyLinkedList([hash.SHA1_HEX_LEN]u8).Node);
+                    errdefer self.allocator.destroy(new_node);
+                    new_node.data = parent_oid;
+                    self.oid_queue.append(new_node);
+                }
                 return &self.object;
             } else {
                 return null;
@@ -902,18 +914,18 @@ pub fn commonAncestor(comptime repo_kind: rp.RepoKind, allocator: std.mem.Alloca
 
     {
         const object = try Object(repo_kind).init(arena.allocator(), core, oid1.*);
-        if (object.content.commit.parent) |parent| {
+        for (object.content.commit.parents.items) |parent_oid| {
             var node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
-            node.data = .{ .oid = &parent, .parent_of = .one };
+            node.data = .{ .oid = &parent_oid, .parent_of = .one };
             list.append(node);
         }
     }
 
     {
         const object = try Object(repo_kind).init(arena.allocator(), core, oid2.*);
-        if (object.content.commit.parent) |parent| {
+        for (object.content.commit.parents.items) |parent_oid| {
             var node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
-            node.data = .{ .oid = &parent, .parent_of = .two };
+            node.data = .{ .oid = &parent_oid, .parent_of = .two };
             list.append(node);
         }
     }
@@ -946,9 +958,9 @@ pub fn commonAncestor(comptime repo_kind: rp.RepoKind, allocator: std.mem.Alloca
         // TODO: instead of appending to the end, append it in descending order of timestamp
         // so we prioritize more recent commits and avoid wasteful traversal deep in the history.
         const object = try Object(repo_kind).init(arena.allocator(), core, node.data.oid.*);
-        if (object.content.commit.parent) |parent| {
+        for (object.content.commit.parents.items) |parent_oid| {
             var new_node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
-            new_node.data = .{ .oid = &parent, .parent_of = node.data.parent_of };
+            new_node.data = .{ .oid = &parent_oid, .parent_of = node.data.parent_of };
             list.append(new_node);
         }
     }
