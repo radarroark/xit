@@ -881,3 +881,77 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind) type {
         }
     };
 }
+
+pub fn commonAncestor(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core, oid1: *const [hash.SHA1_HEX_LEN]u8, oid2: *const [hash.SHA1_HEX_LEN]u8) ![hash.SHA1_HEX_LEN]u8 {
+    if (std.mem.eql(u8, oid1, oid2)) {
+        return oid1.*;
+    }
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    const ParentKind = enum {
+        one,
+        two,
+    };
+    const Parent = struct {
+        oid: *const [hash.SHA1_HEX_LEN]u8,
+        parent_of: ParentKind,
+    };
+    var list = std.DoublyLinkedList(Parent){};
+
+    {
+        const object = try Object(repo_kind).init(arena.allocator(), core, oid1.*);
+        if (object.content.commit.parent) |parent| {
+            var node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
+            node.data = .{ .oid = &parent, .parent_of = .one };
+            list.append(node);
+        }
+    }
+
+    {
+        const object = try Object(repo_kind).init(arena.allocator(), core, oid2.*);
+        if (object.content.commit.parent) |parent| {
+            var node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
+            node.data = .{ .oid = &parent, .parent_of = .two };
+            list.append(node);
+        }
+    }
+
+    var parents_of_1 = std.StringHashMap(void).init(arena.allocator());
+    var parents_of_2 = std.StringHashMap(void).init(arena.allocator());
+
+    while (list.popFirst()) |node| {
+        switch (node.data.parent_of) {
+            .one => {
+                if (parents_of_2.contains(node.data.oid)) {
+                    return node.data.oid.*;
+                } else if (parents_of_1.contains(node.data.oid)) {
+                    continue;
+                } else {
+                    try parents_of_1.put(node.data.oid, {});
+                }
+            },
+            .two => {
+                if (parents_of_1.contains(node.data.oid)) {
+                    return node.data.oid.*;
+                } else if (parents_of_2.contains(node.data.oid)) {
+                    continue;
+                } else {
+                    try parents_of_2.put(node.data.oid, {});
+                }
+            },
+        }
+
+        // TODO: instead of appending to the end, append it in descending order of timestamp
+        // so we prioritize more recent commits and avoid wasteful traversal deep in the history.
+        const object = try Object(repo_kind).init(arena.allocator(), core, node.data.oid.*);
+        if (object.content.commit.parent) |parent| {
+            var new_node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
+            new_node.data = .{ .oid = &parent, .parent_of = node.data.parent_of };
+            list.append(new_node);
+        }
+    }
+
+    return error.NoCommonAncestor;
+}

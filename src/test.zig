@@ -1058,6 +1058,48 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
         try expectEqual(error.CannotDeleteCurrentBranch, branch.delete(repo_kind, &repo.core, allocator, "stuff"));
     }
 
+    // make a few commits on the stuff branch
+    {
+        const hello_txt = try repo_dir.openFile("hello.txt", .{ .mode = .read_write });
+        defer hello_txt.close();
+        try hello_txt.writeAll("hello, world on the stuff branch, commit 3!");
+
+        // add the files
+        args.clearAndFree();
+        try args.append("add");
+        try args.append("hello.txt");
+        try main.xitMain(repo_kind, allocator, &args);
+
+        // make a commit
+        args.clearAndFree();
+        try args.append("commit");
+        try args.append("-m");
+        try args.append("third commit");
+        try main.xitMain(repo_kind, allocator, &args);
+
+        try hello_txt.writeAll("hello, world on the stuff branch, commit 4!");
+
+        // add the files
+        args.clearAndFree();
+        try args.append("add");
+        try args.append("hello.txt");
+        try main.xitMain(repo_kind, allocator, &args);
+
+        // make a commit
+        args.clearAndFree();
+        try args.append("commit");
+        try args.append("-m");
+        try args.append("fourth commit");
+        try main.xitMain(repo_kind, allocator, &args);
+    }
+
+    // get HEAD contents
+    const commit4_stuff = blk: {
+        var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+        defer repo.deinit();
+        break :blk try ref.readHead(repo_kind, &repo.core);
+    };
+
     // create a branch with slashes
     args.clearAndFree();
     try args.append("branch");
@@ -1101,6 +1143,12 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
         try expectEqual(error.FileNotFound, state.git_dir.openDir("refs/heads/a", .{}));
     }
 
+    // switch to master
+    args.clearAndFree();
+    try args.append("switch");
+    try args.append("master");
+    try main.xitMain(repo_kind, allocator, &args);
+
     // modify file and commit
     {
         const hello_txt = try repo_dir.openFile("hello.txt", .{ .mode = .read_write });
@@ -1132,7 +1180,7 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
     {
         var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
         defer repo.deinit();
-        try expectEqual(commit3, try ref.resolve(repo_kind, &repo.core, "stuff"));
+        try expectEqual(commit3, try ref.resolve(repo_kind, &repo.core, "master"));
     }
 
     // log
@@ -1154,6 +1202,14 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
         object1.?.deinit();
 
         try expectEqual(null, try iter.next());
+    }
+
+    {
+        var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+        defer repo.deinit();
+
+        const ancestor_commit = try obj.commonAncestor(repo_kind, allocator, &repo.core, &commit3, &commit4_stuff);
+        try std.testing.expectEqualStrings(&ancestor_commit, &commit2);
     }
 
     return commit3;
