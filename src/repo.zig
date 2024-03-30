@@ -221,7 +221,9 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     try self.add(cmd_data.add.paths);
                 },
                 cmd.CommandData.commit => {
-                    try obj.writeCommit(repo_kind, &self.core, self.allocator, cmd_data);
+                    const head_oid_maybe = try ref.readHeadMaybe(repo_kind, &self.core);
+                    const parent_oids = if (head_oid_maybe) |head_oid| &[_][hash.SHA1_HEX_LEN]u8{head_oid} else &[_][hash.SHA1_HEX_LEN]u8{};
+                    try obj.writeCommit(repo_kind, &self.core, self.allocator, parent_oids, cmd_data.commit.message);
                 },
                 cmd.CommandData.status => {
                     var stat = try self.status();

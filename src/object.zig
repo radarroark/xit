@@ -344,11 +344,31 @@ fn addIndexEntries(comptime repo_kind: rp.RepoKind, opts: ObjectOpts(repo_kind),
     }
 }
 
-/// makes a new commit as a child of whatever is in HEAD.
-/// uses the commit message provided to the command.
-/// updates HEAD when it's done using a file locking thingy
-/// so other processes don't step on each others' toes.
-pub fn writeCommit(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, command: cmd.CommandData) !void {
+fn createCommitContents(allocator: std.mem.Allocator, tree_sha1_hex: [hash.SHA1_HEX_LEN]u8, parent_oids: []const [hash.SHA1_HEX_LEN]u8, message_maybe: ?[]const u8) ![]const u8 {
+    var metadata_lines = std.ArrayList([]const u8).init(allocator);
+    defer {
+        for (metadata_lines.items) |line| {
+            allocator.free(line);
+        }
+        metadata_lines.deinit();
+    }
+
+    try metadata_lines.append(try std.fmt.allocPrint(allocator, "tree {s}", .{tree_sha1_hex}));
+
+    for (parent_oids) |parent_oid| {
+        try metadata_lines.append(try std.fmt.allocPrint(allocator, "parent {s}", .{parent_oid}));
+    }
+
+    const author = "radar <radar@foo.com> 1512325222 +0000";
+    try metadata_lines.append(try std.fmt.allocPrint(allocator, "author {s}", .{author}));
+    try metadata_lines.append(try std.fmt.allocPrint(allocator, "committer {s}", .{author}));
+
+    try metadata_lines.append(try std.fmt.allocPrint(allocator, "\n{s}", .{message_maybe orelse ""}));
+
+    return try std.mem.join(allocator, "\n", metadata_lines.items);
+}
+
+pub fn writeCommit(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, parent_oids: []const [hash.SHA1_HEX_LEN]u8, message_maybe: ?[]const u8) !void {
     // read index
     var index = try idx.Index(repo_kind).init(allocator, core);
     defer index.deinit();
@@ -369,20 +389,8 @@ pub fn writeCommit(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
             try writeTree(repo_kind, .{ .objects_dir = objects_dir }, allocator, &tree, &tree_sha1_bytes_buffer);
             const tree_sha1_hex = std.fmt.bytesToHex(tree_sha1_bytes_buffer, .lower);
 
-            // read HEAD
-            const head_oid_maybe = try ref.readHeadMaybe(repo_kind, core);
-
-            // metadata
-            const author = "radar <radar@foo.com> 1512325222 +0000";
-            const message = command.commit.message orelse "";
-            const parent = if (head_oid_maybe) |head_oid|
-                try std.fmt.allocPrint(allocator, "parent {s}\n", .{head_oid})
-            else
-                try std.fmt.allocPrint(allocator, "", .{});
-            defer allocator.free(parent);
-
             // create commit contents
-            const commit_contents = try std.fmt.allocPrint(allocator, "tree {s}\n{s}author {s}\ncommitter {s}\n\n{s}", .{ tree_sha1_hex, parent, author, author, message });
+            const commit_contents = try createCommitContents(allocator, tree_sha1_hex, parent_oids, message_maybe);
             defer allocator.free(commit_contents);
 
             // create commit
@@ -432,7 +440,8 @@ pub fn writeCommit(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
             const Ctx = struct {
                 core: *rp.Repo(repo_kind).Core,
                 index: idx.Index(repo_kind),
-                command: cmd.CommandData,
+                parent_oids: []const [hash.SHA1_HEX_LEN]u8,
+                message_maybe: ?[]const u8,
                 allocator: std.mem.Allocator,
 
                 pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
@@ -440,7 +449,8 @@ pub fn writeCommit(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
                         root_cursor: *xitdb.Database(.file).Cursor,
                         core: *rp.Repo(repo_kind).Core,
                         index: idx.Index(repo_kind),
-                        command: cmd.CommandData,
+                        parent_oids: []const [hash.SHA1_HEX_LEN]u8,
+                        message_maybe: ?[]const u8,
                         allocator: std.mem.Allocator,
                         commit_sha1_hex: [hash.SHA1_HEX_LEN]u8,
 
@@ -455,21 +465,8 @@ pub fn writeCommit(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
                             try writeTree(repo_kind, .{ .root_cursor = obj_ctx_self.root_cursor, .cursor = obj_cursor }, obj_ctx_self.allocator, &tree, &tree_sha1_bytes_buffer);
                             const tree_sha1_hex = std.fmt.bytesToHex(tree_sha1_bytes_buffer, .lower);
 
-                            // read HEAD
-                            // TODO: make `readHeadMaybe` use root cursor for tx safety
-                            const head_oid_maybe = try ref.readHeadMaybe(repo_kind, obj_ctx_self.core);
-
-                            // metadata
-                            const author = "radar <radar@foo.com> 1512325222 +0000";
-                            const message = obj_ctx_self.command.commit.message orelse "";
-                            const parent = if (head_oid_maybe) |head_oid|
-                                try std.fmt.allocPrint(obj_ctx_self.allocator, "parent {s}\n", .{head_oid})
-                            else
-                                try std.fmt.allocPrint(obj_ctx_self.allocator, "", .{});
-                            defer obj_ctx_self.allocator.free(parent);
-
                             // create commit contents
-                            const commit_contents = try std.fmt.allocPrint(obj_ctx_self.allocator, "tree {s}\n{s}author {s}\ncommitter {s}\n\n{s}", .{ tree_sha1_hex, parent, author, author, message });
+                            const commit_contents = try createCommitContents(obj_ctx_self.allocator, tree_sha1_hex, obj_ctx_self.parent_oids, obj_ctx_self.message_maybe);
                             defer obj_ctx_self.allocator.free(commit_contents);
 
                             // create commit
@@ -499,7 +496,8 @@ pub fn writeCommit(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
                         .root_cursor = cursor,
                         .core = ctx_self.core,
                         .index = ctx_self.index,
-                        .command = ctx_self.command,
+                        .parent_oids = ctx_self.parent_oids,
+                        .message_maybe = ctx_self.message_maybe,
                         .allocator = ctx_self.allocator,
                         .commit_sha1_hex = undefined,
                     };
@@ -516,7 +514,7 @@ pub fn writeCommit(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
             _ = try core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
                 .{ .array_list_get = .append_copy },
                 .hash_map_create,
-                .{ .ctx = Ctx{ .core = core, .index = index, .command = command, .allocator = allocator } },
+                .{ .ctx = Ctx{ .core = core, .index = index, .parent_oids = parent_oids, .message_maybe = message_maybe, .allocator = allocator } },
             });
         },
     }
