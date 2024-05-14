@@ -350,7 +350,7 @@ fn untrackedFile(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
     }
 }
 
-pub fn migrate(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, tree_diff: obj.TreeDiff(repo_kind), index: *idx.Index(repo_kind), result: *SwitchResult) !void {
+pub fn migrate(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, tree_diff: obj.TreeDiff(repo_kind), index: *idx.Index(repo_kind), result_maybe: ?*SwitchResult) !void {
     var add_files = std.StringHashMap(obj.TreeEntry).init(allocator);
     defer add_files.deinit();
     var edit_files = std.StringHashMap(obj.TreeEntry).init(allocator);
@@ -390,17 +390,38 @@ pub fn migrate(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, 
             }
         }
         // check for conflicts
-        const entry_maybe = index.entries.get(path);
-        if (compareTreeToIndex(repo_kind, change.old, entry_maybe) != .none and compareTreeToIndex(repo_kind, change.new, entry_maybe) != .none) {
-            result.conflict(allocator);
-            try result.data.conflict.stale_files.put(path, {});
-        } else {
-            const file = core.repo_dir.openFile(path, .{ .mode = .read_only }) catch |err| {
-                switch (err) {
-                    error.FileNotFound, error.NotDir => {
-                        // if the path doesn't exist in the workspace,
-                        // but one of its parents *does* exist and isn't tracked
-                        if (untrackedParent(repo_kind, core.repo_dir, path, index.*)) |_| {
+        if (result_maybe) |result| {
+            const entry_maybe = index.entries.get(path);
+            if (compareTreeToIndex(repo_kind, change.old, entry_maybe) != .none and compareTreeToIndex(repo_kind, change.new, entry_maybe) != .none) {
+                result.conflict(allocator);
+                try result.data.conflict.stale_files.put(path, {});
+            } else {
+                const file = core.repo_dir.openFile(path, .{ .mode = .read_only }) catch |err| {
+                    switch (err) {
+                        error.FileNotFound, error.NotDir => {
+                            // if the path doesn't exist in the workspace,
+                            // but one of its parents *does* exist and isn't tracked
+                            if (untrackedParent(repo_kind, core.repo_dir, path, index.*)) |_| {
+                                result.conflict(allocator);
+                                if (entry_maybe) |_| {
+                                    try result.data.conflict.stale_files.put(path, {});
+                                } else if (change.new) |_| {
+                                    try result.data.conflict.untracked_overwritten.put(path, {});
+                                } else {
+                                    try result.data.conflict.untracked_removed.put(path, {});
+                                }
+                            }
+                            continue;
+                        },
+                        else => return err,
+                    }
+                };
+                defer file.close();
+                const meta = try file.metadata();
+                switch (meta.kind()) {
+                    std.fs.File.Kind.file => {
+                        // if the path is a file that differs from the index
+                        if (try compareIndexToWorkspace(repo_kind, entry_maybe, file) != .none) {
                             result.conflict(allocator);
                             if (entry_maybe) |_| {
                                 try result.data.conflict.stale_files.put(path, {});
@@ -410,45 +431,28 @@ pub fn migrate(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, 
                                 try result.data.conflict.untracked_removed.put(path, {});
                             }
                         }
-                        continue;
                     },
-                    else => return err,
+                    std.fs.File.Kind.directory => {
+                        // if the path is a dir with a descendent that isn't in the index
+                        if (try untrackedFile(repo_kind, allocator, core.repo_dir, path, index.*)) {
+                            result.conflict(allocator);
+                            if (entry_maybe) |_| {
+                                try result.data.conflict.stale_files.put(path, {});
+                            } else {
+                                try result.data.conflict.stale_dirs.put(path, {});
+                            }
+                        }
+                    },
+                    else => {},
                 }
-            };
-            defer file.close();
-            const meta = try file.metadata();
-            switch (meta.kind()) {
-                std.fs.File.Kind.file => {
-                    // if the path is a file that differs from the index
-                    if (try compareIndexToWorkspace(repo_kind, entry_maybe, file) != .none) {
-                        result.conflict(allocator);
-                        if (entry_maybe) |_| {
-                            try result.data.conflict.stale_files.put(path, {});
-                        } else if (change.new) |_| {
-                            try result.data.conflict.untracked_overwritten.put(path, {});
-                        } else {
-                            try result.data.conflict.untracked_removed.put(path, {});
-                        }
-                    }
-                },
-                std.fs.File.Kind.directory => {
-                    // if the path is a dir with a descendent that isn't in the index
-                    if (try untrackedFile(repo_kind, allocator, core.repo_dir, path, index.*)) {
-                        result.conflict(allocator);
-                        if (entry_maybe) |_| {
-                            try result.data.conflict.stale_files.put(path, {});
-                        } else {
-                            try result.data.conflict.stale_dirs.put(path, {});
-                        }
-                    }
-                },
-                else => {},
             }
         }
     }
 
-    if (result.data == .conflict) {
-        return error.SwitchConflict;
+    if (result_maybe) |result| {
+        if (result.data == .conflict) {
+            return error.SwitchConflict;
+        }
     }
 
     var remove_files_iter = remove_files.iterator();

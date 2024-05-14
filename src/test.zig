@@ -10,6 +10,7 @@ const chk = @import("./checkout.zig");
 const branch = @import("./branch.zig");
 const rp = @import("./repo.zig");
 const df = @import("./diff.zig");
+const mrg = @import("./merge.zig");
 
 const c = @cImport({
     @cInclude("git2.h");
@@ -1062,7 +1063,10 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
     {
         const hello_txt = try repo_dir.openFile("hello.txt", .{ .mode = .read_write });
         defer hello_txt.close();
+
+        try hello_txt.seekTo(0);
         try hello_txt.writeAll("hello, world on the stuff branch, commit 3!");
+        try hello_txt.setEndPos(try hello_txt.getPos());
 
         // add the files
         args.clearAndFree();
@@ -1077,7 +1081,9 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
         try args.append("third commit");
         try main.xitMain(repo_kind, allocator, &args);
 
+        try hello_txt.seekTo(0);
         try hello_txt.writeAll("hello, world on the stuff branch, commit 4!");
+        try hello_txt.setEndPos(try hello_txt.getPos());
 
         // add the files
         args.clearAndFree();
@@ -1151,14 +1157,14 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
 
     // modify file and commit
     {
-        const hello_txt = try repo_dir.openFile("hello.txt", .{ .mode = .read_write });
-        defer hello_txt.close();
-        try hello_txt.writeAll("hello, world once again!");
+        const goodbye_txt = try repo_dir.openFile("goodbye.txt", .{ .mode = .read_write });
+        defer goodbye_txt.close();
+        try goodbye_txt.writeAll("goodbye, world once again!");
 
         // add the files
         args.clearAndFree();
         try args.append("add");
-        try args.append("hello.txt");
+        try args.append("goodbye.txt");
         try main.xitMain(repo_kind, allocator, &args);
 
         // make a commit
@@ -1205,15 +1211,44 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
         try expectEqual(null, try iter.next());
     }
 
+    // merge
     {
         var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
         defer repo.deinit();
 
+        // common ancestor
         const ancestor_commit = try obj.commonAncestor(repo_kind, allocator, &repo.core, &commit3, &commit4_stuff);
         try std.testing.expectEqualStrings(&ancestor_commit, &commit2);
+
+        try mrg.merge(repo_kind, &repo.core, allocator, "stuff");
+
+        // change from stuff exists
+        {
+            const hello_txt = try repo_dir.openFile("hello.txt", .{ .mode = .read_only });
+            defer hello_txt.close();
+            const content = try hello_txt.readToEndAlloc(allocator, 1024);
+            defer allocator.free(content);
+            try std.testing.expectEqualStrings("hello, world on the stuff branch, commit 4!", content);
+        }
+
+        // change from master still exists
+        {
+            const goodbye_txt = try repo_dir.openFile("goodbye.txt", .{ .mode = .read_only });
+            defer goodbye_txt.close();
+            const content = try goodbye_txt.readToEndAlloc(allocator, 1024);
+            defer allocator.free(content);
+            try std.testing.expectEqualStrings("goodbye, world once again!", content);
+        }
     }
 
-    return commit3;
+    // get HEAD contents
+    const commit4 = blk: {
+        var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+        defer repo.deinit();
+        break :blk try ref.readHead(repo_kind, &repo.core);
+    };
+
+    return commit4;
 }
 
 test "end to end" {
