@@ -498,13 +498,13 @@ pub fn migrate(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, 
 
 pub fn switch_head(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, target: []const u8, result: *SwitchResult) !void {
     // get the current commit and target oid
-    const current_hash = try ref.readHead(repo_kind, core);
-    const oid_hex = try ref.resolve(repo_kind, core, target);
+    const current_oid = try ref.readHead(repo_kind, core);
+    const target_oid = try ref.resolve(repo_kind, core, target) orelse return error.InvalidTarget;
 
     // compare the commits
     var tree_diff = obj.TreeDiff(repo_kind).init(allocator);
     defer tree_diff.deinit();
-    try tree_diff.compare(core, current_hash, oid_hex, null);
+    try tree_diff.compare(core, current_oid, target_oid, null);
 
     switch (repo_kind) {
         .git => {
@@ -523,7 +523,7 @@ pub fn switch_head(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
             try index.write(allocator, .{ .lock_file = lock.lock_file });
 
             // update HEAD
-            try ref.writeHead(repo_kind, core, allocator, target, oid_hex);
+            try ref.writeHead(repo_kind, core, allocator, target, target_oid);
 
             // finish lock
             lock.success = true;
@@ -540,15 +540,15 @@ pub fn switch_head(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
             try index.write(allocator, .{ .db = &core.db });
 
             // update HEAD
-            try ref.writeHead(repo_kind, core, allocator, target, oid_hex);
+            try ref.writeHead(repo_kind, core, allocator, target, target_oid);
         },
     }
 }
 
 pub fn restore(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, path: []const u8) !void {
     // get the current commit
-    const current_hash = try ref.readHead(repo_kind, core);
-    var commit_object = try obj.Object(repo_kind).init(allocator, core, current_hash);
+    const current_oid = try ref.readHead(repo_kind, core);
+    var commit_object = try obj.Object(repo_kind).init(allocator, core, current_oid);
     defer commit_object.deinit();
 
     // get the tree of the current commit
