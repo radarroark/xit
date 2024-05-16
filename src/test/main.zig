@@ -1,3 +1,7 @@
+//! end-to-end test using the main entrypoint (xitMain).
+//! tests both xit and git modes, using libgit2 to
+//! validate git mode.
+
 const std = @import("std");
 const xitdb = @import("xitdb");
 const builtin = @import("builtin");
@@ -16,7 +20,7 @@ const c = @cImport({
     @cInclude("git2.h");
 });
 
-pub fn expectEqual(expected: anytype, actual: anytype) !void {
+fn expectEqual(expected: anytype, actual: anytype) !void {
     try std.testing.expectEqual(@as(@TypeOf(actual), expected), actual);
 }
 
