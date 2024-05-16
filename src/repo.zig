@@ -25,6 +25,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
     return struct {
         allocator: std.mem.Allocator,
         core: Core,
+        init_opts: InitOpts,
 
         pub const Core = switch (repo_kind) {
             .git => struct {
@@ -57,6 +58,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                                 .repo_dir = repo_dir,
                                 .git_dir = git_dir.*,
                             },
+                            .init_opts = opts,
                         };
                     } else {
                         return null;
@@ -76,6 +78,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                                 .repo_dir = repo_dir,
                                 .db = try xitdb.Database(.file).init(allocator, .{ .file = xit_file.* }),
                             },
+                            .init_opts = opts,
                         };
                     } else {
                         return null;
@@ -93,8 +96,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             } else {
                 if (cmd_data == .init) {
                     var self = switch (repo_kind) {
-                        .git => Repo(repo_kind){ .allocator = allocator, .core = undefined },
-                        .xit => Repo(repo_kind){ .allocator = allocator, .core = undefined },
+                        .git => Repo(repo_kind){ .allocator = allocator, .core = undefined, .init_opts = opts },
+                        .xit => Repo(repo_kind){ .allocator = allocator, .core = undefined, .init_opts = opts },
                     };
                     try self.command(cmd_data);
                     return self;
@@ -132,12 +135,13 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     var heads_dir = try refs_dir.makeOpenPath("heads", .{});
                     defer heads_dir.close();
 
-                    var self: Repo(repo_kind) = .{
+                    var self = Repo(repo_kind){
                         .allocator = allocator,
                         .core = .{
                             .repo_dir = repo_dir,
                             .git_dir = git_dir,
                         },
+                        .init_opts = .{ .cwd = dir },
                     };
 
                     // update HEAD
@@ -159,12 +163,13 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     };
                     errdefer db.deinit();
 
-                    var self: Repo(repo_kind) = .{
+                    var self = Repo(repo_kind){
                         .allocator = allocator,
                         .core = .{
                             .repo_dir = repo_dir,
                             .db = db,
                         },
+                        .init_opts = .{ .cwd = dir },
                     };
 
                     // update HEAD
@@ -207,7 +212,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     , .{});
                 },
                 cmd.CommandData.init => {
-                    self.* = Repo(repo_kind).initNew(self.allocator, std.fs.cwd(), cmd_data.init.dir) catch |err| {
+                    self.* = Repo(repo_kind).initNew(self.allocator, self.init_opts.cwd, cmd_data.init.dir) catch |err| {
                         switch (err) {
                             error.RepoAlreadyExists => {
                                 try stderr.print("{s} is already a repository\n", .{cmd_data.init.dir});
