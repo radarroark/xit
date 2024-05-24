@@ -208,13 +208,15 @@ pub fn Target(comptime repo_kind: rp.RepoKind) type {
 
         pub fn initFromIndex(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core, entry: idx.Index(repo_kind).Entry) !Target(repo_kind) {
             const oid_hex = std.fmt.bytesToHex(&entry.oid, .lower);
+            const buffer = try allocator.alloc(u8, 1024);
+            errdefer allocator.free(buffer);
             var target = Target(repo_kind){
                 .allocator = allocator,
                 .path = entry.path,
                 .oid = entry.oid,
                 .oid_hex = oid_hex,
                 .mode = entry.mode,
-                .buffer = try allocator.alloc(u8, 1024),
+                .buffer = buffer,
                 .lines = undefined,
             };
             const buf = try chk.objectToBuffer(repo_kind, core, oid_hex, target.buffer);
@@ -231,13 +233,15 @@ pub fn Target(comptime repo_kind: rp.RepoKind) type {
         }
 
         pub fn initFromWorkspace(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core, path: []const u8, mode: io.Mode) !Target(repo_kind) {
+            const buffer = try allocator.alloc(u8, 1024);
+            errdefer allocator.free(buffer);
             var target = Target(repo_kind){
                 .allocator = allocator,
                 .path = path,
                 .oid = undefined,
                 .oid_hex = undefined,
                 .mode = mode,
-                .buffer = try allocator.alloc(u8, 1024),
+                .buffer = buffer,
                 .lines = undefined,
             };
 
@@ -264,26 +268,30 @@ pub fn Target(comptime repo_kind: rp.RepoKind) type {
         }
 
         pub fn initFromNothing(allocator: std.mem.Allocator, path: []const u8) !Target(repo_kind) {
+            const buffer = try allocator.alloc(u8, 0);
+            errdefer allocator.free(buffer);
             return .{
                 .allocator = allocator,
                 .path = path,
                 .oid = [_]u8{0} ** hash.SHA1_BYTES_LEN,
                 .oid_hex = [_]u8{0} ** hash.SHA1_HEX_LEN,
                 .mode = null,
-                .buffer = try allocator.alloc(u8, 0),
+                .buffer = buffer,
                 .lines = std.ArrayList([]const u8).init(allocator),
             };
         }
 
         pub fn initFromHead(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core, path: []const u8, entry: obj.TreeEntry) !Target(repo_kind) {
             const oid_hex = std.fmt.bytesToHex(&entry.oid, .lower);
+            const buffer = try allocator.alloc(u8, 1024);
+            errdefer allocator.free(buffer);
             var target = Target(repo_kind){
                 .allocator = allocator,
                 .path = path,
                 .oid = entry.oid,
                 .oid_hex = oid_hex,
                 .mode = entry.mode,
-                .buffer = try allocator.alloc(u8, 1024),
+                .buffer = buffer,
                 .lines = undefined,
             };
             const buf = try chk.objectToBuffer(repo_kind, core, oid_hex, target.buffer);
