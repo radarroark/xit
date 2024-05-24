@@ -305,11 +305,10 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core
                     } else {
                         if (self.oid_maybe) |oid| {
                             // the HEAD is detached, so just update it with the oid
-                            const oid_hash = hash.hash_buffer(&oid);
                             const content_ptr = try cursor.writeBytes(&oid, .once, void, &[_]xitdb.PathPart(void){
                                 .{ .hash_map_get = hash.hash_buffer("ref-values") },
                                 .hash_map_create,
-                                .{ .hash_map_get = oid_hash },
+                                .{ .hash_map_get = try hash.hex_to_hash(&oid) },
                             });
                             try path_parts.append(.{ .value = .{ .bytes_ptr = content_ptr } });
                             _ = try cursor.execute(void, path_parts.items);
@@ -446,7 +445,7 @@ pub fn updateRecur(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
                 const oid_ptr = try opts.root_cursor.writeBytes(&oid, .once, void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = hash.hash_buffer("ref-values") },
                     .hash_map_create,
-                    .{ .hash_map_get = hash.hash_buffer(&oid) },
+                    .{ .hash_map_get = try hash.hex_to_hash(&oid) },
                 });
                 _ = try opts.cursor.execute(void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = file_name_hash },

@@ -228,7 +228,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 cmd.CommandData.commit => {
                     const head_oid_maybe = try ref.readHeadMaybe(repo_kind, &self.core);
                     const parent_oids = if (head_oid_maybe) |head_oid| &[_][hash.SHA1_HEX_LEN]u8{head_oid} else &[_][hash.SHA1_HEX_LEN]u8{};
-                    try obj.writeCommit(repo_kind, &self.core, self.allocator, parent_oids, cmd_data.commit.message);
+                    _ = try self.commit(parent_oids, cmd_data.commit.message);
                 },
                 cmd.CommandData.status => {
                     var stat = try self.status();
@@ -344,6 +344,12 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     }
                 },
             }
+        }
+
+        pub fn commit(self: *Repo(repo_kind), parent_oids: []const [hash.SHA1_HEX_LEN]u8, message_maybe: ?[]const u8) ![hash.SHA1_BYTES_LEN]u8 {
+            var sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+            try obj.writeCommit(repo_kind, &self.core, self.allocator, parent_oids, message_maybe, &sha1_bytes_buffer);
+            return sha1_bytes_buffer;
         }
 
         pub fn status(self: *Repo(repo_kind)) !st.Status(repo_kind) {

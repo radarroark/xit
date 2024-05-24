@@ -56,5 +56,5 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
 
     // commit the change
     const parent_oids = &[_][hash.SHA1_HEX_LEN]u8{ current_oid, target_oid };
-    try obj.writeCommit(repo_kind, core, allocator, parent_oids, commit_message);
+    try obj.writeCommit(repo_kind, core, allocator, parent_oids, commit_message, null);
 }

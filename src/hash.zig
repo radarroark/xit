@@ -45,3 +45,15 @@ pub fn hash_buffer(buffer: []const u8) xitdb.Hash {
     h.final(hash[0..xitdb.HASH_SIZE]);
     return std.mem.bytesToValue(xitdb.Hash, &hash);
 }
+
+pub fn hex_to_hash(hex_buffer: *const [SHA1_HEX_LEN]u8) !xitdb.Hash {
+    var hash = [_]u8{0} ** xitdb.HASH_INT_SIZE;
+    _ = try std.fmt.hexToBytes(hash[0..xitdb.HASH_SIZE], hex_buffer);
+    return std.mem.bytesToValue(xitdb.Hash, &hash);
+}
+
+pub fn bytes_to_hash(bytes_buffer: *const [SHA1_BYTES_LEN]u8) xitdb.Hash {
+    var hash = [_]u8{0} ** xitdb.HASH_INT_SIZE;
+    @memcpy(hash[0..xitdb.HASH_SIZE], bytes_buffer);
+    return std.mem.bytesToValue(xitdb.Hash, &hash);
+}

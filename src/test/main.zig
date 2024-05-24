@@ -221,7 +221,7 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
                 const bytes_maybe = try repo.core.db.rootCursor().readBytes(&db_buffer, void, &[_]xitdb.PathPart(void){
                     .{ .array_list_get = .{ .index = .{ .index = 0, .reverse = true } } },
                     .{ .hash_map_get = hash.hash_buffer("objects") },
-                    .{ .hash_map_get = hash.hash_buffer(&head_file_buffer) },
+                    .{ .hash_map_get = try hash.hex_to_hash(&head_file_buffer) },
                 });
                 try std.testing.expect(bytes_maybe != null);
             },
@@ -465,7 +465,7 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
                 const bytes_maybe = try repo.core.db.rootCursor().readBytes(&db_buffer, void, &[_]xitdb.PathPart(void){
                     .{ .array_list_get = .{ .index = .{ .index = 0, .reverse = true } } },
                     .{ .hash_map_get = hash.hash_buffer("objects") },
-                    .{ .hash_map_get = hash.hash_buffer(&head_file_buffer) },
+                    .{ .hash_map_get = try hash.hex_to_hash(&head_file_buffer) },
                 });
                 try std.testing.expect(bytes_maybe != null);
             },

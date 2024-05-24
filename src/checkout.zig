@@ -113,7 +113,7 @@ fn objectToFile(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core,
                         pub fn run(self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
                             var reader_maybe = try cursor.reader(void, &[_]xitdb.PathPart(void){
                                 .{ .hash_map_get = hash.hash_buffer("objects") },
-                                .{ .hash_map_get = hash.hash_buffer(&self.oid_hex) },
+                                .{ .hash_map_get = try hash.hex_to_hash(&self.oid_hex) },
                             });
                             if (reader_maybe) |*reader| {
                                 // create parent dir(s)
@@ -204,7 +204,7 @@ pub fn objectToBuffer(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind)
                 pub fn run(self: *@This(), cursor: *xitdb.Database(.file).Cursor) !void {
                     var reader_maybe = try cursor.reader(void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = hash.hash_buffer("objects") },
-                        .{ .hash_map_get = hash.hash_buffer(&self.oid_hex) },
+                        .{ .hash_map_get = try hash.hex_to_hash(&self.oid_hex) },
                     });
                     if (reader_maybe) |*reader| {
                         var read_buffer = [_]u8{0} ** 1;
