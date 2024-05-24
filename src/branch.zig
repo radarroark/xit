@@ -74,16 +74,16 @@ pub fn create(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, a
                         head_file_buffer: []const u8,
 
                         pub fn run(heads_ctx_self: @This(), heads_cursor: *xitdb.Database(.file).Cursor) !void {
-                            const name_hash = hash.hash_buffer(heads_ctx_self.name);
+                            const name_hash = hash.hashBuffer(heads_ctx_self.name);
                             _ = try heads_ctx_self.root_cursor.writeBytes(heads_ctx_self.name, .once, void, &[_]xitdb.PathPart(void){
-                                .{ .hash_map_get = hash.hash_buffer("names") },
+                                .{ .hash_map_get = hash.hashBuffer("names") },
                                 .hash_map_create,
                                 .{ .hash_map_get = name_hash },
                             });
                             const buffer_ptr = try heads_ctx_self.root_cursor.writeBytes(heads_ctx_self.head_file_buffer, .once, void, &[_]xitdb.PathPart(void){
-                                .{ .hash_map_get = hash.hash_buffer("ref-values") },
+                                .{ .hash_map_get = hash.hashBuffer("ref-values") },
                                 .hash_map_create,
-                                .{ .hash_map_get = hash.hash_buffer(heads_ctx_self.head_file_buffer) },
+                                .{ .hash_map_get = hash.hashBuffer(heads_ctx_self.head_file_buffer) },
                             });
                             _ = try heads_cursor.execute(void, &[_]xitdb.PathPart(void){
                                 .{ .hash_map_get = name_hash },
@@ -92,9 +92,9 @@ pub fn create(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, a
                         }
                     };
                     _ = try cursor.execute(HeadsCtx, &[_]xitdb.PathPart(HeadsCtx){
-                        .{ .hash_map_get = hash.hash_buffer("refs") },
+                        .{ .hash_map_get = hash.hashBuffer("refs") },
                         .hash_map_create,
-                        .{ .hash_map_get = hash.hash_buffer("heads") },
+                        .{ .hash_map_get = hash.hashBuffer("heads") },
                         .hash_map_create,
                         .{ .ctx = HeadsCtx{ .root_cursor = cursor, .name = ctx_self.name, .head_file_buffer = &head_file_buffer } },
                     });
@@ -179,14 +179,14 @@ pub fn delete(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, a
 
                         pub fn run(heads_ctx_self: @This(), heads_cursor: *xitdb.Database(.file).Cursor) !void {
                             _ = try heads_cursor.execute(void, &[_]xitdb.PathPart(void){
-                                .{ .hash_map_remove = hash.hash_buffer(heads_ctx_self.name) },
+                                .{ .hash_map_remove = hash.hashBuffer(heads_ctx_self.name) },
                             });
                         }
                     };
                     _ = try cursor.execute(HeadsCtx, &[_]xitdb.PathPart(HeadsCtx){
-                        .{ .hash_map_get = hash.hash_buffer("refs") },
+                        .{ .hash_map_get = hash.hashBuffer("refs") },
                         .hash_map_create,
-                        .{ .hash_map_get = hash.hash_buffer("heads") },
+                        .{ .hash_map_get = hash.hashBuffer("heads") },
                         .hash_map_create,
                         .{ .ctx = HeadsCtx{ .name = ctx_self.name } },
                     });

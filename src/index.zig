@@ -139,7 +139,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                 .xit => {
                     if (try core.db.rootCursor().readCursor(void, &[_]xitdb.PathPart(void){
                         .{ .array_list_get = .{ .index = .{ .index = 0, .reverse = true } } },
-                        .{ .hash_map_get = hash.hash_buffer("index") },
+                        .{ .hash_map_get = hash.hashBuffer("index") },
                     })) |index_cursor| {
                         var iter = try index_cursor.iter(.hash_map);
                         defer iter.deinit();
@@ -149,7 +149,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                 if (try next_cursor.readHash(void, &[_]xitdb.PathPart(void){})) |path_hash| {
                                     if (try core.db.rootCursor().readBytesAlloc(index.arena.allocator(), void, &[_]xitdb.PathPart(void){
                                         .{ .array_list_get = .{ .index = .{ .index = 0, .reverse = true } } },
-                                        .{ .hash_map_get = hash.hash_buffer("paths") },
+                                        .{ .hash_map_get = hash.hashBuffer("paths") },
                                         .{ .hash_map_get = path_hash },
                                     })) |path| {
                                         var stream = std.io.fixedBufferStream(buffer);
@@ -232,7 +232,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                 }
                             };
                             _ = try cursor.execute(InnerCtx, &[_]xitdb.PathPart(InnerCtx){
-                                .{ .hash_map_get = hash.hash_buffer("objects") },
+                                .{ .hash_map_get = hash.hashBuffer("objects") },
                                 .hash_map_create,
                                 .{ .ctx = InnerCtx{ .core = ctx_self.core, .index = ctx_self.index, .path = ctx_self.path, .root_cursor = cursor } },
                             });
@@ -472,13 +472,13 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                     while (try iter.next()) |*next_cursor| {
                                         if (try next_cursor.readHash(void, &[_]xitdb.PathPart(void){})) |path_hash| {
                                             if (try inner_ctx_self.root_cursor.readBytesAlloc(inner_ctx_self.allocator, void, &[_]xitdb.PathPart(void){
-                                                .{ .hash_map_get = hash.hash_buffer("paths") },
+                                                .{ .hash_map_get = hash.hashBuffer("paths") },
                                                 .{ .hash_map_get = path_hash },
                                             })) |path| {
                                                 defer inner_ctx_self.allocator.free(path);
                                                 if (!inner_ctx_self.index.entries.contains(path)) {
                                                     _ = try inner_cursor.execute(void, &[_]xitdb.PathPart(void){
-                                                        .{ .hash_map_remove = hash.hash_buffer(path) },
+                                                        .{ .hash_map_remove = hash.hashBuffer(path) },
                                                     });
                                                 }
                                             } else {
@@ -504,10 +504,10 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                         try writer.writeAll(&entry.oid);
                                         try writer.writeInt(u16, @as(u16, @bitCast(entry.flags)), .big);
 
-                                        const path_hash = hash.hash_buffer(entry.path);
+                                        const path_hash = hash.hashBuffer(entry.path);
 
                                         if (try inner_ctx_self.root_cursor.readBytesAlloc(inner_ctx_self.allocator, void, &[_]xitdb.PathPart(void){
-                                            .{ .hash_map_get = hash.hash_buffer("index") },
+                                            .{ .hash_map_get = hash.hashBuffer("index") },
                                             .{ .hash_map_get = path_hash },
                                         })) |existing_entry| {
                                             defer inner_ctx_self.allocator.free(existing_entry);
@@ -517,14 +517,14 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                         }
 
                                         _ = try inner_ctx_self.root_cursor.writeBytes(entry.path, .once, void, &[_]xitdb.PathPart(void){
-                                            .{ .hash_map_get = hash.hash_buffer("paths") },
+                                            .{ .hash_map_get = hash.hashBuffer("paths") },
                                             .hash_map_create,
                                             .{ .hash_map_get = path_hash },
                                         });
                                         const buffer_ptr = try inner_ctx_self.root_cursor.writeBytes(entry_buffer.items, .once, void, &[_]xitdb.PathPart(void){
-                                            .{ .hash_map_get = hash.hash_buffer("index-values") },
+                                            .{ .hash_map_get = hash.hashBuffer("index-values") },
                                             .hash_map_create,
-                                            .{ .hash_map_get = hash.hash_buffer(entry_buffer.items) },
+                                            .{ .hash_map_get = hash.hashBuffer(entry_buffer.items) },
                                         });
                                         _ = try inner_cursor.execute(void, &[_]xitdb.PathPart(void){
                                             .{ .hash_map_get = path_hash },
@@ -534,7 +534,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                 }
                             };
                             _ = try cursor.execute(InnerCtx, &[_]xitdb.PathPart(InnerCtx){
-                                .{ .hash_map_get = hash.hash_buffer("index") },
+                                .{ .hash_map_get = hash.hashBuffer("index") },
                                 .hash_map_create,
                                 .{ .ctx = InnerCtx{ .db = ctx_self.db, .allocator = ctx_self.allocator, .index = ctx_self.index, .root_cursor = cursor } },
                             });
@@ -567,7 +567,7 @@ pub fn indexDiffersFromWorkspace(comptime repo_kind: rp.RepoKind, entry: Index(r
             const header = try std.fmt.bufPrint(&header_buffer, "blob {}\x00", .{file_size});
 
             var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-            try hash.sha1_file(file, header, &oid);
+            try hash.sha1File(file, header, &oid);
             if (!std.mem.eql(u8, &entry.oid, &oid)) {
                 return true;
             }

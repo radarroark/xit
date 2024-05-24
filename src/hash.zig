@@ -16,7 +16,7 @@ const MAX_READ_BYTES = 1024;
 pub const SHA1_BYTES_LEN = std.crypto.hash.Sha1.digest_length;
 pub const SHA1_HEX_LEN = SHA1_BYTES_LEN * 2;
 
-pub fn sha1_file(file: std.fs.File, header_maybe: ?[]const u8, out: *[SHA1_BYTES_LEN]u8) !void {
+pub fn sha1File(file: std.fs.File, header_maybe: ?[]const u8, out: *[SHA1_BYTES_LEN]u8) !void {
     var h = std.crypto.hash.Sha1.init(.{});
     var buffer = [_]u8{0} ** MAX_READ_BYTES;
     if (header_maybe) |header| {
@@ -32,13 +32,13 @@ pub fn sha1_file(file: std.fs.File, header_maybe: ?[]const u8, out: *[SHA1_BYTES
     h.final(out);
 }
 
-pub fn sha1_buffer(buffer: []const u8, out: *[SHA1_BYTES_LEN]u8) !void {
+pub fn sha1Buffer(buffer: []const u8, out: *[SHA1_BYTES_LEN]u8) !void {
     var h = std.crypto.hash.Sha1.init(.{});
     h.update(buffer);
     h.final(out);
 }
 
-pub fn hash_buffer(buffer: []const u8) xitdb.Hash {
+pub fn hashBuffer(buffer: []const u8) xitdb.Hash {
     var hash = [_]u8{0} ** xitdb.HASH_INT_SIZE;
     var h = std.crypto.hash.Sha1.init(.{});
     h.update(buffer);
@@ -46,13 +46,13 @@ pub fn hash_buffer(buffer: []const u8) xitdb.Hash {
     return std.mem.bytesToValue(xitdb.Hash, &hash);
 }
 
-pub fn hex_to_hash(hex_buffer: *const [SHA1_HEX_LEN]u8) !xitdb.Hash {
+pub fn hexToHash(hex_buffer: *const [SHA1_HEX_LEN]u8) !xitdb.Hash {
     var hash = [_]u8{0} ** xitdb.HASH_INT_SIZE;
     _ = try std.fmt.hexToBytes(hash[0..xitdb.HASH_SIZE], hex_buffer);
     return std.mem.bytesToValue(xitdb.Hash, &hash);
 }
 
-pub fn bytes_to_hash(bytes_buffer: *const [SHA1_BYTES_LEN]u8) xitdb.Hash {
+pub fn bytesToHash(bytes_buffer: *const [SHA1_BYTES_LEN]u8) xitdb.Hash {
     var hash = [_]u8{0} ** xitdb.HASH_INT_SIZE;
     @memcpy(hash[0..xitdb.HASH_SIZE], bytes_buffer);
     return std.mem.bytesToValue(xitdb.Hash, &hash);

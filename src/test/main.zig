@@ -201,7 +201,7 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
                     defer allocator.free(header);
 
                     var sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-                    try hash.sha1_file(readme, header, &sha1_bytes_buffer);
+                    try hash.sha1File(readme, header, &sha1_bytes_buffer);
                     const sha1_hex = std.fmt.bytesToHex(&sha1_bytes_buffer, .lower);
 
                     var oid: c.git_oid = undefined;
@@ -220,8 +220,8 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
                 var db_buffer = [_]u8{0} ** 1024;
                 const bytes_maybe = try repo.core.db.rootCursor().readBytes(&db_buffer, void, &[_]xitdb.PathPart(void){
                     .{ .array_list_get = .{ .index = .{ .index = 0, .reverse = true } } },
-                    .{ .hash_map_get = hash.hash_buffer("objects") },
-                    .{ .hash_map_get = try hash.hex_to_hash(&head_file_buffer) },
+                    .{ .hash_map_get = hash.hashBuffer("objects") },
+                    .{ .hash_map_get = try hash.hexToHash(&head_file_buffer) },
                 });
                 try std.testing.expect(bytes_maybe != null);
             },
@@ -464,8 +464,8 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
                 var db_buffer = [_]u8{0} ** 1024;
                 const bytes_maybe = try repo.core.db.rootCursor().readBytes(&db_buffer, void, &[_]xitdb.PathPart(void){
                     .{ .array_list_get = .{ .index = .{ .index = 0, .reverse = true } } },
-                    .{ .hash_map_get = hash.hash_buffer("objects") },
-                    .{ .hash_map_get = try hash.hex_to_hash(&head_file_buffer) },
+                    .{ .hash_map_get = hash.hashBuffer("objects") },
+                    .{ .hash_map_get = try hash.hexToHash(&head_file_buffer) },
                 });
                 try std.testing.expect(bytes_maybe != null);
             },
@@ -699,7 +699,7 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
                 var count: u32 = 0;
                 if (try repo.core.db.rootCursor().readCursor(void, &[_]xitdb.PathPart(void){
                     .{ .array_list_get = .{ .index = .{ .index = 0, .reverse = true } } },
-                    .{ .hash_map_get = hash.hash_buffer("index") },
+                    .{ .hash_map_get = hash.hashBuffer("index") },
                 })) |cursor| {
                     var iter = try cursor.iter(.hash_map);
                     defer iter.deinit();
@@ -757,7 +757,7 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
                 var count: u32 = 0;
                 if (try repo.core.db.rootCursor().readCursor(void, &[_]xitdb.PathPart(void){
                     .{ .array_list_get = .{ .index = .{ .index = 0, .reverse = true } } },
-                    .{ .hash_map_get = hash.hash_buffer("index") },
+                    .{ .hash_map_get = hash.hashBuffer("index") },
                 })) |cursor| {
                     var iter = try cursor.iter(.hash_map);
                     defer iter.deinit();
