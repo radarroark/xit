@@ -11,7 +11,7 @@ const idx = @import("../index.zig");
 const obj = @import("../object.zig");
 const ref = @import("../ref.zig");
 const chk = @import("../checkout.zig");
-const branch = @import("../branch.zig");
+const bch = @import("../branch.zig");
 const rp = @import("../repo.zig");
 const df = @import("../diff.zig");
 const mrg = @import("../merge.zig");
@@ -1060,7 +1060,7 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
     {
         var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
         defer repo.deinit();
-        try expectEqual(error.CannotDeleteCurrentBranch, branch.delete(repo_kind, &repo.core, allocator, "stuff"));
+        try expectEqual(error.CannotDeleteCurrentBranch, bch.delete(repo_kind, &repo.core, allocator, "stuff"));
     }
 
     // make a few commits on the stuff branch
@@ -1143,7 +1143,7 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
     {
         var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
         defer repo.deinit();
-        try branch.delete(repo_kind, &repo.core, allocator, "a/b/c");
+        try bch.delete(repo_kind, &repo.core, allocator, "a/b/c");
     }
 
     // make sure the subdirs are deleted

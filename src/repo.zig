@@ -5,7 +5,7 @@ const obj = @import("./object.zig");
 const cmd = @import("./command.zig");
 const idx = @import("./index.zig");
 const st = @import("./status.zig");
-const branch = @import("./branch.zig");
+const bch = @import("./branch.zig");
 const chk = @import("./checkout.zig");
 const ref = @import("./ref.zig");
 const io = @import("./io.zig");
@@ -294,7 +294,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 },
                 cmd.CommandData.branch => {
                     if (cmd_data.branch.name) |name| {
-                        try branch.create(repo_kind, &self.core, self.allocator, name);
+                        try self.create_branch(name);
                     } else {
                         var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, &self.core, self.allocator, "HEAD");
                         defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
@@ -314,7 +314,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 cmd.CommandData.switch_head => {
                     var result = chk.SwitchResult.init();
                     defer result.deinit();
-                    chk.switch_head(repo_kind, &self.core, self.allocator, cmd_data.switch_head.target, &result) catch |err| {
+                    self.switch_head(cmd_data.switch_head.target, &result) catch |err| {
                         switch (err) {
                             error.SwitchConflict => {},
                             else => return err,
@@ -350,14 +350,6 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             var sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
             try obj.writeCommit(repo_kind, &self.core, self.allocator, parent_oids, message_maybe, &sha1_bytes_buffer);
             return std.fmt.bytesToHex(sha1_bytes_buffer, .lower);
-        }
-
-        pub fn status(self: *Repo(repo_kind)) !st.Status(repo_kind) {
-            return try st.Status(repo_kind).init(self.allocator, &self.core);
-        }
-
-        pub fn diff(self: *Repo(repo_kind), diff_kind: df.DiffKind) !df.DiffIterator(repo_kind) {
-            return try df.DiffIterator(repo_kind).init(self.allocator, &self.core, diff_kind);
         }
 
         pub fn add(self: *Repo(repo_kind), paths: []const []const u8) !void {
@@ -411,6 +403,22 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     try index.write(self.allocator, .{ .db = &self.core.db });
                 },
             }
+        }
+
+        pub fn status(self: *Repo(repo_kind)) !st.Status(repo_kind) {
+            return try st.Status(repo_kind).init(self.allocator, &self.core);
+        }
+
+        pub fn diff(self: *Repo(repo_kind), diff_kind: df.DiffKind) !df.DiffIterator(repo_kind) {
+            return try df.DiffIterator(repo_kind).init(self.allocator, &self.core, diff_kind);
+        }
+
+        pub fn create_branch(self: *Repo(repo_kind), name: []const u8) !void {
+            try bch.create(repo_kind, &self.core, self.allocator, name);
+        }
+
+        pub fn switch_head(self: *Repo(repo_kind), target: []const u8, result: *chk.SwitchResult) !void {
+            try chk.switch_head(repo_kind, &self.core, self.allocator, target, result);
         }
 
         pub fn log(self: *Repo(repo_kind), oid: [hash.SHA1_HEX_LEN]u8) !obj.ObjectIterator(repo_kind) {
