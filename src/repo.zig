@@ -346,10 +346,10 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             }
         }
 
-        pub fn commit(self: *Repo(repo_kind), parent_oids: []const [hash.SHA1_HEX_LEN]u8, message_maybe: ?[]const u8) ![hash.SHA1_BYTES_LEN]u8 {
+        pub fn commit(self: *Repo(repo_kind), parent_oids: []const [hash.SHA1_HEX_LEN]u8, message_maybe: ?[]const u8) ![hash.SHA1_HEX_LEN]u8 {
             var sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
             try obj.writeCommit(repo_kind, &self.core, self.allocator, parent_oids, message_maybe, &sha1_bytes_buffer);
-            return sha1_bytes_buffer;
+            return std.fmt.bytesToHex(sha1_bytes_buffer, .lower);
         }
 
         pub fn status(self: *Repo(repo_kind)) !st.Status(repo_kind) {
