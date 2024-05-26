@@ -223,7 +223,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     };
                 },
                 cmd.CommandData.add => {
-                    try self.add(cmd_data.add.paths);
+                    try self.add(cmd_data.add.paths.items);
                 },
                 cmd.CommandData.commit => {
                     const head_oid_maybe = try ref.readHeadMaybe(repo_kind, &self.core);
@@ -360,7 +360,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             return try df.DiffIterator(repo_kind).init(self.allocator, &self.core, diff_kind);
         }
 
-        pub fn add(self: *Repo(repo_kind), paths: std.ArrayList([]const u8)) !void {
+        pub fn add(self: *Repo(repo_kind), paths: []const []const u8) !void {
             switch (repo_kind) {
                 .git => {
                     // create lock file
@@ -372,7 +372,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     defer index.deinit();
 
                     // read all the new entries
-                    for (paths.items) |path| {
+                    for (paths) |path| {
                         const file = self.core.repo_dir.openFile(path, .{ .mode = .read_only }) catch |err| {
                             if (err == error.FileNotFound and index.entries.contains(path)) {
                                 index.removePath(path);
@@ -395,7 +395,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     defer index.deinit();
 
                     // read all the new entries
-                    for (paths.items) |path| {
+                    for (paths) |path| {
                         const file = self.core.repo_dir.openFile(path, .{ .mode = .read_only }) catch |err| {
                             if (err == error.FileNotFound and index.entries.contains(path)) {
                                 index.removePath(path);
