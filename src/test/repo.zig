@@ -11,22 +11,18 @@ fn expectEqual(expected: anytype, actual: anytype) !void {
     try std.testing.expectEqual(@as(@TypeOf(actual), expected), actual);
 }
 
-const Change = union(enum) {
-    add: struct {
-        path: []const u8,
-        content: []const u8,
-    },
-    remove: struct {
-        path: []const u8,
-    },
-};
-
 fn Action(comptime CommitName: type) type {
     return union(enum) {
+        add_file: struct {
+            path: []const u8,
+            content: []const u8,
+        },
+        remove_file: struct {
+            path: []const u8,
+        },
         commit: struct {
             name: CommitName,
             parents: []const CommitName,
-            changes: []const Change,
         },
         create_branch: struct {
             name: []const u8,
@@ -47,27 +43,22 @@ fn execActions(
 ) !void {
     for (actions) |action| {
         switch (action) {
+            .add_file => {
+                const file = try repo.core.repo_dir.createFile(action.add_file.path, .{ .truncate = true });
+                defer file.close();
+                try file.writeAll(action.add_file.content);
+                try repo.add(&[_][]const u8{action.add_file.path});
+            },
+            .remove_file => {
+                try repo.core.repo_dir.deleteFile(action.remove_file.path);
+                try repo.add(&[_][]const u8{action.remove_file.path});
+            },
             .commit => {
                 var parent_oids = std.ArrayList([hash.SHA1_HEX_LEN]u8).init(allocator);
                 defer parent_oids.deinit();
 
                 for (action.commit.parents) |commit_name| {
                     try parent_oids.append(commit_name_to_oid.get(commit_name) orelse return error.ParentNotFound);
-                }
-
-                for (action.commit.changes) |change| {
-                    switch (change) {
-                        .add => {
-                            const file = try repo.core.repo_dir.createFile(change.add.path, .{ .truncate = true });
-                            defer file.close();
-                            try file.writeAll(change.add.content);
-                            try repo.add(&[_][]const u8{change.add.path});
-                        },
-                        .remove => {
-                            try repo.core.repo_dir.deleteFile(change.remove.path);
-                            try repo.add(&[_][]const u8{change.remove.path});
-                        },
-                    }
                 }
 
                 const oid_hex = try repo.commit(parent_oids.items, @tagName(action.commit.name));
@@ -106,41 +97,14 @@ test "simple" {
 
     const actions =
         &[_]Action(CommitName){
-        .{
-            .commit = .{
-                .name = .a,
-                .parents = &[_]CommitName{},
-                .changes = &[_]Change{
-                    .{ .add = .{ .path = "README.md", .content = "Hello, world!" } },
-                },
-            },
-        },
-        .{
-            .commit = .{
-                .name = .b,
-                .parents = &[_]CommitName{.a},
-                .changes = &[_]Change{
-                    .{ .add = .{ .path = "README.md", .content = "Goodbye, world!" } },
-                },
-            },
-        },
-        .{
-            .commit = .{
-                .name = .c,
-                .parents = &[_]CommitName{.b},
-                .changes = &[_]Change{
-                    .{ .remove = .{ .path = "README.md" } },
-                },
-            },
-        },
+        .{ .add_file = .{ .path = "README.md", .content = "Hello, world!" } },
+        .{ .commit = .{ .name = .a, .parents = &[_]CommitName{} } },
+        .{ .add_file = .{ .path = "README.md", .content = "Goodbye, world!" } },
+        .{ .commit = .{ .name = .b, .parents = &[_]CommitName{.a} } },
+        .{ .remove_file = .{ .path = "README.md" } },
+        .{ .commit = .{ .name = .c, .parents = &[_]CommitName{.b} } },
         // make sure empty commits are possible
-        .{
-            .commit = .{
-                .name = .d,
-                .parents = &[_]CommitName{.c},
-                .changes = &[_]Change{},
-            },
-        },
+        .{ .commit = .{ .name = .d, .parents = &[_]CommitName{.c} } },
     };
 
     var commit_name_to_oid = std.AutoArrayHashMap(CommitName, [hash.SHA1_HEX_LEN]u8).init(allocator);
@@ -194,30 +158,12 @@ test "branch" {
 
     const actions =
         &[_]Action(CommitName){
-        .{
-            .commit = .{
-                .name = .master_a,
-                .parents = &[_]CommitName{},
-                .changes = &[_]Change{
-                    .{ .add = .{ .path = "README.md", .content = "Hello, world!" } },
-                },
-            },
-        },
-        .{
-            .create_branch = .{ .name = "foo" },
-        },
-        .{
-            .switch_head = .{ .target = "foo" },
-        },
-        .{
-            .commit = .{
-                .name = .foo_b,
-                .parents = &[_]CommitName{.master_a},
-                .changes = &[_]Change{
-                    .{ .add = .{ .path = "README.md", .content = "Goodbye, world!" } },
-                },
-            },
-        },
+        .{ .add_file = .{ .path = "README.md", .content = "Hello, world!" } },
+        .{ .commit = .{ .name = .master_a, .parents = &[_]CommitName{} } },
+        .{ .create_branch = .{ .name = "foo" } },
+        .{ .switch_head = .{ .target = "foo" } },
+        .{ .add_file = .{ .path = "README.md", .content = "Goodbye, world!" } },
+        .{ .commit = .{ .name = .foo_b, .parents = &[_]CommitName{.master_a} } },
     };
 
     var commit_name_to_oid = std.AutoArrayHashMap(CommitName, [hash.SHA1_HEX_LEN]u8).init(allocator);
