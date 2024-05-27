@@ -15,11 +15,6 @@ const rp = @import("./repo.zig");
 
 const MAX_FILE_READ_BYTES = 1024; // FIXME: this is arbitrary...
 
-pub const ObjectWriteError = error{
-    ObjectAlreadyExists,
-    ObjectEntryNotFound,
-};
-
 /// returns a single random character. just lower case for now.
 /// eventually i'll make it return upper case and maybe numbers too.
 fn randChar() !u8 {
@@ -238,7 +233,7 @@ fn writeTree(comptime repo_kind: rp.RepoKind, opts: ObjectOpts(repo_kind), alloc
             // exit early if there is nothing to commit
             if (tree_hash_prefix_dir.openFile(tree_hash_suffix, .{})) |tree_hash_suffix_file| {
                 tree_hash_suffix_file.close();
-                return error.ObjectAlreadyExists;
+                return;
             } else |err| {
                 if (err != error.FileNotFound) {
                     return err;
@@ -278,8 +273,9 @@ fn writeTree(comptime repo_kind: rp.RepoKind, opts: ObjectOpts(repo_kind), alloc
                 tree_bytes: []const u8,
 
                 pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
+                    // exit early if there is nothing to commit
                     if (cursor.pointer() != null) {
-                        return error.ObjectAlreadyExists;
+                        return;
                     }
                     const tree_ptr = try ctx_self.root_cursor.writeBytes(ctx_self.tree_bytes, .once, void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = hash.hashBuffer("object-values") },
@@ -333,12 +329,7 @@ fn addIndexEntries(comptime repo_kind: rp.RepoKind, opts: ObjectOpts(repo_kind),
             );
 
             var tree_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-            writeTree(repo_kind, opts, allocator, &subtree, &tree_sha1_bytes_buffer) catch |err| {
-                switch (err) {
-                    error.ObjectAlreadyExists => {},
-                    else => return err,
-                }
-            };
+            try writeTree(repo_kind, opts, allocator, &subtree, &tree_sha1_bytes_buffer);
 
             try tree.addTreeEntry(name, &tree_sha1_bytes_buffer);
         } else {

@@ -102,7 +102,7 @@ test "simple" {
     var repo = try rp.Repo(.xit).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } });
     defer repo.deinit();
 
-    const CommitName = enum { a, b, c };
+    const CommitName = enum { a, b, c, d };
 
     const actions =
         &[_]Action(CommitName){
@@ -131,6 +131,14 @@ test "simple" {
                 .changes = &[_]Change{
                     .{ .remove = .{ .path = "README.md" } },
                 },
+            },
+        },
+        // make sure empty commits are possible
+        .{
+            .commit = .{
+                .name = .d,
+                .parents = &[_]CommitName{.c},
+                .changes = &[_]Change{},
             },
         },
     };

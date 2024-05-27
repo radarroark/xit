@@ -259,13 +259,6 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
 
     // make another commit
     {
-        // can't commit again because nothing has changed
-        args.clearAndFree();
-        try args.append("commit");
-        try args.append("-m");
-        try args.append("pointless commit");
-        try expectEqual(error.ObjectAlreadyExists, main.xitMain(repo_kind, allocator, &args));
-
         // change a file
         const hello_txt = try repo_dir.openFile("hello.txt", .{ .mode = .read_write });
         defer hello_txt.close();
