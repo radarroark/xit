@@ -8,13 +8,6 @@ const hash = @import("./hash.zig");
 const io = @import("./io.zig");
 const rp = @import("./repo.zig");
 
-pub const ReadIndexError = error{
-    InvalidSignature,
-    InvalidVersion,
-    InvalidPathSize,
-    InvalidNullPadding,
-};
-
 pub fn Index(comptime repo_kind: rp.RepoKind) type {
     return struct {
         version: u32,

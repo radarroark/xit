@@ -47,13 +47,6 @@ pub const CommandData = union(CommandKind) {
     log,
 };
 
-pub const CommandError = error{
-    AddPathsMissing,
-    CommitMessageMissing,
-    SwitchTargetMissing,
-    RestorePathMissing,
-};
-
 /// returns the data from the process args in a nicer format.
 /// right now it just parses the args into a sorted map. i was
 /// thinking of using an existing arg parser lib but i decided
@@ -96,7 +89,7 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8))
             return CommandData{ .init = .{ .dir = if (args.items.len > 1) args.items[1] else "." } };
         } else if (std.mem.eql(u8, args.items[0], "add")) {
             if (pos_args.items.len == 0) {
-                return CommandError.AddPathsMissing;
+                return error.AddPathsMissing;
             }
             var paths = try std.ArrayList([]const u8).initCapacity(allocator, pos_args.capacity);
             errdefer paths.deinit(); // pointless for now but for future sake
@@ -105,7 +98,7 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8))
         } else if (std.mem.eql(u8, args.items[0], "commit")) {
             // if a message is included, it must have a non-null value
             const message_maybe = map_args.get("-m");
-            const message = if (message_maybe == null) null else (message_maybe.? orelse return CommandError.CommitMessageMissing);
+            const message = if (message_maybe == null) null else (message_maybe.? orelse return error.CommitMessageMissing);
             return CommandData{ .commit = .{ .message = message } };
         } else if (std.mem.eql(u8, args.items[0], "status")) {
             return CommandData{ .status = {} };
@@ -116,12 +109,12 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8))
             return CommandData{ .branch = .{ .name = if (pos_args.items.len == 0) null else pos_args.items[0] } };
         } else if (std.mem.eql(u8, args.items[0], "switch")) {
             if (pos_args.items.len == 0) {
-                return CommandError.SwitchTargetMissing;
+                return error.SwitchTargetMissing;
             }
             return CommandData{ .switch_head = .{ .target = pos_args.items[0] } };
         } else if (std.mem.eql(u8, args.items[0], "restore")) {
             if (pos_args.items.len == 0) {
-                return CommandError.RestorePathMissing;
+                return error.RestorePathMissing;
             }
             return CommandData{ .restore = .{ .path = pos_args.items[0] } };
         } else if (std.mem.eql(u8, args.items[0], "log")) {
@@ -160,7 +153,7 @@ test "command" {
 
     args.clearAndFree();
     try args.append("add");
-    try std.testing.expect(CommandError.AddPathsMissing == Command.init(allocator, &args));
+    try std.testing.expect(error.AddPathsMissing == Command.init(allocator, &args));
 
     args.clearAndFree();
     try args.append("add");
@@ -174,7 +167,7 @@ test "command" {
     args.clearAndFree();
     try args.append("commit");
     try args.append("-m");
-    try std.testing.expect(CommandError.CommitMessageMissing == Command.init(allocator, &args));
+    try std.testing.expect(error.CommitMessageMissing == Command.init(allocator, &args));
 
     args.clearAndFree();
     try args.append("commit");

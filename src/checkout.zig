@@ -21,10 +21,6 @@ const rp = @import("./repo.zig");
 
 const MAX_FILE_READ_BYTES = 1024; // FIXME: this is arbitrary...
 
-pub const SwitchError = error{
-    SwitchConflict,
-};
-
 pub const SwitchResultKind = enum {
     success,
     conflict,

@@ -5,11 +5,6 @@ const ref = @import("./ref.zig");
 const io = @import("./io.zig");
 const rp = @import("./repo.zig");
 
-pub const BranchError = error{
-    InvalidBranchName,
-    CannotDeleteCurrentBranch,
-};
-
 pub fn create(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, name: []const u8) !void {
     if (name.len == 0 or
         name[0] == '.' or

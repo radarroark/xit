@@ -7,10 +7,6 @@ const rp = @import("./repo.zig");
 const MAX_READ_BYTES = 1024;
 const REF_START_STR = "ref: refs/heads/";
 
-pub const RefError = error{
-    RefInvalidHash,
-};
-
 pub const Ref = struct {
     allocator: std.mem.Allocator,
     name: []const u8,

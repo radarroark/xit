@@ -16,11 +16,6 @@ pub const RepoKind = enum {
     xit,
 };
 
-pub const RepoErrors = error{
-    NotARepo,
-    RepoAlreadyExists,
-};
-
 pub fn Repo(comptime repo_kind: RepoKind) type {
     return struct {
         allocator: std.mem.Allocator,

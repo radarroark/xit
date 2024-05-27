@@ -563,13 +563,6 @@ pub const ObjectContent = union(ObjectKind) {
     },
 };
 
-pub const ObjectReadError = error{
-    ObjectNotFound,
-    InvalidObjectKind,
-    InvalidCommitTreeHash,
-    InvalidCommitParentHash,
-};
-
 pub fn Object(comptime repo_kind: rp.RepoKind) type {
     return struct {
         allocator: std.mem.Allocator,

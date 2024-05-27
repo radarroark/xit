@@ -49,9 +49,6 @@ pub fn decompress(in: std.fs.File, out: std.fs.File, skip_header: bool) !void {
 // does the same thing as decompress, except it remains completely
 // in memory and can clean itself up via deinit.
 const MAX_FILE_SIZE_BYTES = 1024;
-const CompressError = error{
-    FileTooLarge,
-};
 pub const Decompressed = struct {
     buffer: [MAX_FILE_SIZE_BYTES]u8,
     stream: std.compress.zlib.Decompressor(std.io.Reader(*std.io.FixedBufferStream([]u8), std.io.FixedBufferStream([]u8).ReadError, std.io.FixedBufferStream([]u8).read)),
@@ -65,7 +62,7 @@ pub const Decompressed = struct {
         // read the in file into memory
         const in_size = try in.pread(&decompressed.buffer, 0);
         if (in_size == MAX_FILE_SIZE_BYTES) {
-            return CompressError.FileTooLarge;
+            return error.FileTooLarge;
         }
 
         // create the stream
