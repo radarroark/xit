@@ -1213,7 +1213,7 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
         defer repo.deinit();
 
         const ancestor_commit = try obj.commonAncestor(repo_kind, allocator, &repo.core, &commit3, &commit4_stuff);
-        try std.testing.expectEqualStrings(&ancestor_commit, &commit2);
+        try std.testing.expectEqualStrings(&commit2, &ancestor_commit);
     }
 
     // merge

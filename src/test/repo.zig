@@ -6,6 +6,7 @@ const hash = @import("../hash.zig");
 const rp = @import("../repo.zig");
 const ref = @import("../ref.zig");
 const chk = @import("../checkout.zig");
+const obj = @import("../object.zig");
 
 fn expectEqual(expected: anytype, actual: anytype) !void {
     try std.testing.expectEqual(@as(@TypeOf(actual), expected), actual);
@@ -29,6 +30,10 @@ fn Action(comptime CommitName: type) type {
         },
         switch_head: struct {
             target: []const u8,
+        },
+        merge: struct {
+            name: CommitName,
+            source: []const u8,
         },
     };
 }
@@ -71,6 +76,10 @@ fn execActions(
                 var result = chk.SwitchResult.init();
                 defer result.deinit();
                 try repo.switch_head(action.switch_head.target, &result);
+            },
+            .merge => {
+                const oid_hex = try repo.merge(action.merge.source);
+                try commit_name_to_oid.put(action.merge.name, oid_hex);
             },
         }
     }
@@ -134,9 +143,9 @@ test "simple" {
     try expectEqual(0, oid_to_action.count());
 }
 
-test "branch" {
+test "best common ancestor" {
     const allocator = std.testing.allocator;
-    const temp_dir_name = "temp-test-repo-branch";
+    const temp_dir_name = "temp-test-repo-best-common-ancestor";
     const cwd = std.fs.cwd();
 
     // create the temp dir
@@ -151,23 +160,49 @@ test "branch" {
     var repo = try rp.Repo(.xit).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } });
     defer repo.deinit();
 
-    const CommitName = enum {
-        master_a,
-        foo_b,
-    };
+    const CommitName = enum { a, b, c, d, e, f, g, h, j, k };
 
     const actions =
         &[_]Action(CommitName){
-        .{ .add_file = .{ .path = "README.md", .content = "Hello, world!" } },
-        .{ .commit = .{ .name = .master_a, .parents = &[_]CommitName{} } },
+        .{ .add_file = .{ .path = "master.md", .content = "a" } },
+        .{ .commit = .{ .name = .a, .parents = &[_]CommitName{} } },
+        .{ .add_file = .{ .path = "master.md", .content = "b" } },
+        .{ .commit = .{ .name = .b, .parents = &[_]CommitName{.a} } },
         .{ .create_branch = .{ .name = "foo" } },
         .{ .switch_head = .{ .target = "foo" } },
-        .{ .add_file = .{ .path = "README.md", .content = "Goodbye, world!" } },
-        .{ .commit = .{ .name = .foo_b, .parents = &[_]CommitName{.master_a} } },
+        .{ .add_file = .{ .path = "foo.md", .content = "d" } },
+        .{ .commit = .{ .name = .d, .parents = &[_]CommitName{.b} } },
+        .{ .create_branch = .{ .name = "bar" } },
+        .{ .switch_head = .{ .target = "bar" } },
+        .{ .add_file = .{ .path = "bar.md", .content = "g" } },
+        .{ .commit = .{ .name = .g, .parents = &[_]CommitName{.d} } },
+        .{ .add_file = .{ .path = "bar.md", .content = "h" } },
+        .{ .commit = .{ .name = .h, .parents = &[_]CommitName{.g} } },
+        .{ .switch_head = .{ .target = "master" } },
+        .{ .add_file = .{ .path = "master.md", .content = "c" } },
+        .{ .commit = .{ .name = .c, .parents = &[_]CommitName{.b} } },
+        .{ .switch_head = .{ .target = "foo" } },
+        .{ .add_file = .{ .path = "foo.md", .content = "e" } },
+        .{ .commit = .{ .name = .e, .parents = &[_]CommitName{.d} } },
+        .{ .add_file = .{ .path = "foo.md", .content = "f" } },
+        .{ .commit = .{ .name = .f, .parents = &[_]CommitName{.e} } },
+        .{ .switch_head = .{ .target = "master" } },
+        .{ .add_file = .{ .path = "master.md", .content = "c" } },
+        .{ .commit = .{ .name = .c, .parents = &[_]CommitName{.b} } },
+        .{ .merge = .{ .name = .j, .source = "foo" } },
+        .{ .add_file = .{ .path = "master.md", .content = "k" } },
+        .{ .commit = .{ .name = .k, .parents = &[_]CommitName{.j} } },
     };
 
     var commit_name_to_oid = std.AutoArrayHashMap(CommitName, [hash.SHA1_HEX_LEN]u8).init(allocator);
     defer commit_name_to_oid.deinit();
 
     try execActions(allocator, &repo, CommitName, actions, &commit_name_to_oid);
+
+    const commit_k = commit_name_to_oid.get(.k).?;
+    const commit_h = commit_name_to_oid.get(.h).?;
+    const commit_a = commit_name_to_oid.get(.a).?;
+
+    const ancestor_commit = try obj.commonAncestor(.xit, allocator, &repo.core, &commit_k, &commit_h);
+    try std.testing.expectEqualStrings(&commit_a, &ancestor_commit);
 }
