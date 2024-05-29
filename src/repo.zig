@@ -10,6 +10,7 @@ const chk = @import("./checkout.zig");
 const ref = @import("./ref.zig");
 const io = @import("./io.zig");
 const df = @import("./diff.zig");
+const mrg = @import("./merge.zig");
 
 pub const RepoKind = enum {
     git,
@@ -338,6 +339,9 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         }
                     }
                 },
+                cmd.CommandData.merge => {
+                    _ = try self.merge(cmd_data.merge.source);
+                },
             }
         }
 
@@ -418,6 +422,10 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
         pub fn log(self: *Repo(repo_kind), oid: [hash.SHA1_HEX_LEN]u8) !obj.ObjectIterator(repo_kind) {
             return try obj.ObjectIterator(repo_kind).init(self.allocator, &self.core, oid);
+        }
+
+        pub fn merge(self: *Repo(repo_kind), source: []const u8) ![hash.SHA1_HEX_LEN]u8 {
+            return try mrg.merge(repo_kind, &self.core, self.allocator, source);
         }
     };
 }

@@ -14,7 +14,6 @@ const chk = @import("../checkout.zig");
 const bch = @import("../branch.zig");
 const rp = @import("../repo.zig");
 const df = @import("../diff.zig");
-const mrg = @import("../merge.zig");
 
 const c = @cImport({
     @cInclude("git2.h");
@@ -1208,16 +1207,21 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
         try expectEqual(null, try iter.next());
     }
 
-    // merge
+    // common ancestor
     {
         var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
         defer repo.deinit();
 
-        // common ancestor
         const ancestor_commit = try obj.commonAncestor(repo_kind, allocator, &repo.core, &commit3, &commit4_stuff);
         try std.testing.expectEqualStrings(&ancestor_commit, &commit2);
+    }
 
-        try mrg.merge(repo_kind, &repo.core, allocator, "stuff");
+    // merge
+    {
+        args.clearAndFree();
+        try args.append("merge");
+        try args.append("stuff");
+        try main.xitMain(repo_kind, allocator, &args);
 
         // change from stuff exists
         {
