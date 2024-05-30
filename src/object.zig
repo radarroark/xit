@@ -895,6 +895,73 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind) type {
     };
 }
 
+fn getDescendent(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core, oid1: *const [hash.SHA1_HEX_LEN]u8, oid2: *const [hash.SHA1_HEX_LEN]u8) ![hash.SHA1_HEX_LEN]u8 {
+    if (std.mem.eql(u8, oid1, oid2)) {
+        return oid1.*;
+    }
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    const ParentKind = enum {
+        one,
+        two,
+    };
+    const Parent = struct {
+        oid: [hash.SHA1_HEX_LEN]u8,
+        parent_kind: ParentKind,
+    };
+    var queue = std.DoublyLinkedList(Parent){};
+
+    {
+        const object = try Object(repo_kind).init(arena.allocator(), core, oid1.*);
+        for (object.content.commit.parents.items) |parent_oid| {
+            var node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
+            node.data = .{ .oid = parent_oid, .parent_kind = .one };
+            queue.append(node);
+        }
+    }
+
+    {
+        const object = try Object(repo_kind).init(arena.allocator(), core, oid2.*);
+        for (object.content.commit.parents.items) |parent_oid| {
+            var node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
+            node.data = .{ .oid = parent_oid, .parent_kind = .two };
+            queue.append(node);
+        }
+    }
+
+    while (queue.popFirst()) |node| {
+        switch (node.data.parent_kind) {
+            .one => {
+                if (std.mem.eql(u8, oid2, &node.data.oid)) {
+                    return oid1.*;
+                } else if (std.mem.eql(u8, oid1, &node.data.oid)) {
+                    return error.InvalidCycle;
+                }
+            },
+            .two => {
+                if (std.mem.eql(u8, oid1, &node.data.oid)) {
+                    return oid2.*;
+                } else if (std.mem.eql(u8, oid2, &node.data.oid)) {
+                    return error.InvalidCycle;
+                }
+            },
+        }
+
+        // TODO: instead of appending to the end, append it in descending order of timestamp
+        // so we prioritize more recent commits and avoid wasteful traversal deep in the history.
+        const object = try Object(repo_kind).init(arena.allocator(), core, node.data.oid);
+        for (object.content.commit.parents.items) |parent_oid| {
+            var new_node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
+            new_node.data = .{ .oid = parent_oid, .parent_kind = node.data.parent_kind };
+            queue.append(new_node);
+        }
+    }
+
+    return error.DescendentNotFound;
+}
+
 pub fn commonAncestor(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core, oid1: *const [hash.SHA1_HEX_LEN]u8, oid2: *const [hash.SHA1_HEX_LEN]u8) ![hash.SHA1_HEX_LEN]u8 {
     if (std.mem.eql(u8, oid1, oid2)) {
         return oid1.*;
@@ -990,7 +1057,13 @@ pub fn commonAncestor(comptime repo_kind: rp.RepoKind, allocator: std.mem.Alloca
     }
 
     const common_ancestor_count = parents_of_both.count();
-    if (common_ancestor_count >= 1) {
+    if (common_ancestor_count > 1) {
+        var oid = parents_of_both.keys()[0][0..hash.SHA1_HEX_LEN].*;
+        for (parents_of_both.keys()[1..]) |next_oid| {
+            oid = try getDescendent(repo_kind, allocator, core, oid[0..hash.SHA1_HEX_LEN], next_oid[0..hash.SHA1_HEX_LEN]);
+        }
+        return oid;
+    } else if (common_ancestor_count == 1) {
         return parents_of_both.keys()[0][0..hash.SHA1_HEX_LEN].*;
     } else {
         return error.NoCommonAncestor;
