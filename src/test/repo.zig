@@ -201,8 +201,8 @@ test "best common ancestor" {
 
     const commit_k = commit_name_to_oid.get(.k).?;
     const commit_h = commit_name_to_oid.get(.h).?;
-    const commit_a = commit_name_to_oid.get(.a).?;
+    const commit_b = commit_name_to_oid.get(.b).?;
 
     const ancestor_commit = try obj.commonAncestor(.xit, allocator, &repo.core, &commit_k, &commit_h);
-    try std.testing.expectEqualStrings(&commit_a, &ancestor_commit);
+    try std.testing.expectEqualStrings(&commit_b, &ancestor_commit);
 }

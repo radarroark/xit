@@ -906,19 +906,20 @@ pub fn commonAncestor(comptime repo_kind: rp.RepoKind, allocator: std.mem.Alloca
     const ParentKind = enum {
         one,
         two,
+        stale,
     };
     const Parent = struct {
-        oid: *const [hash.SHA1_HEX_LEN]u8,
-        parent_of: ParentKind,
+        oid: [hash.SHA1_HEX_LEN]u8,
+        parent_kind: ParentKind,
     };
-    var list = std.DoublyLinkedList(Parent){};
+    var queue = std.DoublyLinkedList(Parent){};
 
     {
         const object = try Object(repo_kind).init(arena.allocator(), core, oid1.*);
         for (object.content.commit.parents.items) |parent_oid| {
             var node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
-            node.data = .{ .oid = &parent_oid, .parent_of = .one };
-            list.append(node);
+            node.data = .{ .oid = parent_oid, .parent_kind = .one };
+            queue.append(node);
         }
     }
 
@@ -926,45 +927,72 @@ pub fn commonAncestor(comptime repo_kind: rp.RepoKind, allocator: std.mem.Alloca
         const object = try Object(repo_kind).init(arena.allocator(), core, oid2.*);
         for (object.content.commit.parents.items) |parent_oid| {
             var node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
-            node.data = .{ .oid = &parent_oid, .parent_of = .two };
-            list.append(node);
+            node.data = .{ .oid = parent_oid, .parent_kind = .two };
+            queue.append(node);
         }
     }
 
     var parents_of_1 = std.StringHashMap(void).init(arena.allocator());
     var parents_of_2 = std.StringHashMap(void).init(arena.allocator());
+    var parents_of_both = std.StringArrayHashMap(void).init(arena.allocator());
+    var stale_oids = std.StringHashMap(void).init(arena.allocator());
 
-    while (list.popFirst()) |node| {
-        switch (node.data.parent_of) {
+    while (queue.popFirst()) |node| {
+        switch (node.data.parent_kind) {
             .one => {
-                if (parents_of_2.contains(node.data.oid)) {
-                    return node.data.oid.*;
-                } else if (parents_of_1.contains(node.data.oid)) {
-                    continue;
+                if (parents_of_2.contains(&node.data.oid)) {
+                    try parents_of_both.put(&node.data.oid, {});
+                } else if (parents_of_1.contains(&node.data.oid)) {
+                    return error.InvalidCycle;
                 } else {
-                    try parents_of_1.put(node.data.oid, {});
+                    try parents_of_1.put(&node.data.oid, {});
                 }
             },
             .two => {
-                if (parents_of_1.contains(node.data.oid)) {
-                    return node.data.oid.*;
-                } else if (parents_of_2.contains(node.data.oid)) {
-                    continue;
+                if (parents_of_1.contains(&node.data.oid)) {
+                    try parents_of_both.put(&node.data.oid, {});
+                } else if (parents_of_2.contains(&node.data.oid)) {
+                    return error.InvalidCycle;
                 } else {
-                    try parents_of_2.put(node.data.oid, {});
+                    try parents_of_2.put(&node.data.oid, {});
                 }
+            },
+            .stale => {
+                try stale_oids.put(&node.data.oid, {});
             },
         }
 
+        const is_common_ancestor = parents_of_both.contains(&node.data.oid);
+
         // TODO: instead of appending to the end, append it in descending order of timestamp
         // so we prioritize more recent commits and avoid wasteful traversal deep in the history.
-        const object = try Object(repo_kind).init(arena.allocator(), core, node.data.oid.*);
+        const object = try Object(repo_kind).init(arena.allocator(), core, node.data.oid);
         for (object.content.commit.parents.items) |parent_oid| {
+            const is_stale = is_common_ancestor or stale_oids.contains(&parent_oid);
             var new_node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
-            new_node.data = .{ .oid = &parent_oid, .parent_of = node.data.parent_of };
-            list.append(new_node);
+            new_node.data = .{ .oid = parent_oid, .parent_kind = if (is_stale) .stale else node.data.parent_kind };
+            queue.append(new_node);
+        }
+
+        // stop if queue only has stale nodes
+        var queue_is_stale = true;
+        var next_node_maybe = queue.first;
+        while (next_node_maybe) |next_node| {
+            if (!stale_oids.contains(&next_node.data.oid)) {
+                queue_is_stale = false;
+                break;
+            }
+            next_node_maybe = next_node.next;
+        }
+        if (queue_is_stale) {
+            break;
         }
     }
 
-    return error.NoCommonAncestor;
+    const common_ancestor_count = parents_of_both.count();
+    if (common_ancestor_count >= 1) {
+        return parents_of_both.keys()[0][0..hash.SHA1_HEX_LEN].*;
+    } else {
+        return error.NoCommonAncestor;
+    }
 }
