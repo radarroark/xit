@@ -23,7 +23,6 @@ fn Action(comptime CommitName: type) type {
         },
         commit: struct {
             name: CommitName,
-            parents: []const CommitName,
         },
         create_branch: struct {
             name: []const u8,
@@ -40,7 +39,6 @@ fn Action(comptime CommitName: type) type {
 
 /// executes the actions on the given repo
 fn execActions(
-    allocator: std.mem.Allocator,
     repo: *rp.Repo(.xit),
     comptime CommitName: type,
     actions: []const Action(CommitName),
@@ -59,14 +57,7 @@ fn execActions(
                 try repo.add(&[_][]const u8{action.remove_file.path});
             },
             .commit => {
-                var parent_oids = std.ArrayList([hash.SHA1_HEX_LEN]u8).init(allocator);
-                defer parent_oids.deinit();
-
-                for (action.commit.parents) |commit_name| {
-                    try parent_oids.append(commit_name_to_oid.get(commit_name) orelse return error.ParentNotFound);
-                }
-
-                const oid_hex = try repo.commit(parent_oids.items, @tagName(action.commit.name));
+                const oid_hex = try repo.commit(null, @tagName(action.commit.name));
                 try commit_name_to_oid.put(action.commit.name, oid_hex);
             },
             .create_branch => {
@@ -107,19 +98,19 @@ test "simple" {
     const actions =
         &[_]Action(CommitName){
         .{ .add_file = .{ .path = "README.md", .content = "Hello, world!" } },
-        .{ .commit = .{ .name = .a, .parents = &[_]CommitName{} } },
+        .{ .commit = .{ .name = .a } },
         .{ .add_file = .{ .path = "README.md", .content = "Goodbye, world!" } },
-        .{ .commit = .{ .name = .b, .parents = &[_]CommitName{.a} } },
+        .{ .commit = .{ .name = .b } },
         .{ .remove_file = .{ .path = "README.md" } },
-        .{ .commit = .{ .name = .c, .parents = &[_]CommitName{.b} } },
+        .{ .commit = .{ .name = .c } },
         // make sure empty commits are possible
-        .{ .commit = .{ .name = .d, .parents = &[_]CommitName{.c} } },
+        .{ .commit = .{ .name = .d } },
     };
 
     var commit_name_to_oid = std.AutoArrayHashMap(CommitName, [hash.SHA1_HEX_LEN]u8).init(allocator);
     defer commit_name_to_oid.deinit();
 
-    try execActions(allocator, &repo, CommitName, actions, &commit_name_to_oid);
+    try execActions(&repo, CommitName, actions, &commit_name_to_oid);
 
     var oid_to_action = std.StringArrayHashMap(Action(CommitName)).init(allocator);
     defer oid_to_action.deinit();
@@ -165,39 +156,39 @@ test "best common ancestor" {
     const actions =
         &[_]Action(CommitName){
         .{ .add_file = .{ .path = "master.md", .content = "a" } },
-        .{ .commit = .{ .name = .a, .parents = &[_]CommitName{} } },
+        .{ .commit = .{ .name = .a } },
         .{ .add_file = .{ .path = "master.md", .content = "b" } },
-        .{ .commit = .{ .name = .b, .parents = &[_]CommitName{.a} } },
+        .{ .commit = .{ .name = .b } },
         .{ .create_branch = .{ .name = "foo" } },
         .{ .switch_head = .{ .target = "foo" } },
         .{ .add_file = .{ .path = "foo.md", .content = "d" } },
-        .{ .commit = .{ .name = .d, .parents = &[_]CommitName{.b} } },
+        .{ .commit = .{ .name = .d } },
         .{ .create_branch = .{ .name = "bar" } },
         .{ .switch_head = .{ .target = "bar" } },
         .{ .add_file = .{ .path = "bar.md", .content = "g" } },
-        .{ .commit = .{ .name = .g, .parents = &[_]CommitName{.d} } },
+        .{ .commit = .{ .name = .g } },
         .{ .add_file = .{ .path = "bar.md", .content = "h" } },
-        .{ .commit = .{ .name = .h, .parents = &[_]CommitName{.g} } },
+        .{ .commit = .{ .name = .h } },
         .{ .switch_head = .{ .target = "master" } },
         .{ .add_file = .{ .path = "master.md", .content = "c" } },
-        .{ .commit = .{ .name = .c, .parents = &[_]CommitName{.b} } },
+        .{ .commit = .{ .name = .c } },
         .{ .switch_head = .{ .target = "foo" } },
         .{ .add_file = .{ .path = "foo.md", .content = "e" } },
-        .{ .commit = .{ .name = .e, .parents = &[_]CommitName{.d} } },
+        .{ .commit = .{ .name = .e } },
         .{ .add_file = .{ .path = "foo.md", .content = "f" } },
-        .{ .commit = .{ .name = .f, .parents = &[_]CommitName{.e} } },
+        .{ .commit = .{ .name = .f } },
         .{ .switch_head = .{ .target = "master" } },
         .{ .add_file = .{ .path = "master.md", .content = "c" } },
-        .{ .commit = .{ .name = .c, .parents = &[_]CommitName{.b} } },
+        .{ .commit = .{ .name = .c } },
         .{ .merge = .{ .name = .j, .source = "foo" } },
         .{ .add_file = .{ .path = "master.md", .content = "k" } },
-        .{ .commit = .{ .name = .k, .parents = &[_]CommitName{.j} } },
+        .{ .commit = .{ .name = .k } },
     };
 
     var commit_name_to_oid = std.AutoArrayHashMap(CommitName, [hash.SHA1_HEX_LEN]u8).init(allocator);
     defer commit_name_to_oid.deinit();
 
-    try execActions(allocator, &repo, CommitName, actions, &commit_name_to_oid);
+    try execActions(&repo, CommitName, actions, &commit_name_to_oid);
 
     const commit_k = commit_name_to_oid.get(.k).?;
     const commit_h = commit_name_to_oid.get(.h).?;
