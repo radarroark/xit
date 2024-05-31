@@ -95,8 +95,7 @@ test "simple" {
 
     const CommitName = enum { a, b, c, d };
 
-    const actions =
-        &[_]Action(CommitName){
+    const actions = &[_]Action(CommitName){
         .{ .add_file = .{ .path = "README.md", .content = "Hello, world!" } },
         .{ .commit = .{ .name = .a } },
         .{ .add_file = .{ .path = "README.md", .content = "Goodbye, world!" } },
@@ -153,8 +152,7 @@ test "best common ancestor" {
 
     const CommitName = enum { a, b, c, d, e, f, g, h, j, k };
 
-    const actions =
-        &[_]Action(CommitName){
+    const actions = &[_]Action(CommitName){
         .{ .add_file = .{ .path = "master.md", .content = "a" } },
         .{ .commit = .{ .name = .a } },
         .{ .add_file = .{ .path = "master.md", .content = "b" } },
