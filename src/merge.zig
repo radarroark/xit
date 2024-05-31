@@ -7,7 +7,24 @@ const chk = @import("./checkout.zig");
 const io = @import("./io.zig");
 const rp = @import("./repo.zig");
 
-pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, source: []const u8) ![hash.SHA1_HEX_LEN]u8 {
+pub const MergeResultData = union(enum) {
+    success: struct {
+        oid: [hash.SHA1_HEX_LEN]u8,
+    },
+    conflict,
+};
+
+pub const MergeResult = struct {
+    data: MergeResultData,
+
+    pub fn init() MergeResult {
+        return MergeResult{ .data = MergeResultData{ .success = .{ .oid = undefined } } };
+    }
+
+    pub fn deinit(_: *MergeResult) void {}
+};
+
+pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, source: []const u8) !MergeResult {
     // get the current oid, source oid, and common oid
     const current_oid = try ref.readHead(repo_kind, core);
     const source_oid = try ref.resolve(repo_kind, core, source) orelse return error.InvalidTarget;
@@ -59,5 +76,8 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
     var sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
     try obj.writeCommit(repo_kind, core, allocator, parent_oids, commit_message, &sha1_bytes_buffer);
 
-    return std.fmt.bytesToHex(sha1_bytes_buffer, .lower);
+    // return result
+    var result = MergeResult.init();
+    result.data.success.oid = std.fmt.bytesToHex(sha1_bytes_buffer, .lower);
+    return result;
 }

@@ -332,7 +332,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     }
                 },
                 cmd.CommandData.merge => {
-                    _ = try self.merge(cmd_data.merge.source);
+                    var result = try self.merge(cmd_data.merge.source);
+                    defer result.deinit();
                 },
             }
         }
@@ -420,7 +421,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             return try obj.ObjectIterator(repo_kind).init(self.allocator, &self.core, oid);
         }
 
-        pub fn merge(self: *Repo(repo_kind), source: []const u8) ![hash.SHA1_HEX_LEN]u8 {
+        pub fn merge(self: *Repo(repo_kind), source: []const u8) !mrg.MergeResult {
             return try mrg.merge(repo_kind, &self.core, self.allocator, source);
         }
     };

@@ -7,6 +7,7 @@ const rp = @import("../repo.zig");
 const ref = @import("../ref.zig");
 const chk = @import("../checkout.zig");
 const obj = @import("../object.zig");
+const mrg = @import("../merge.zig");
 
 fn expectEqual(expected: anytype, actual: anytype) !void {
     try std.testing.expectEqual(@as(@TypeOf(actual), expected), actual);
@@ -68,8 +69,14 @@ fn execActions(
                 defer result.deinit();
             },
             .merge => {
-                const oid_hex = try repo.merge(action.merge.source);
-                try commit_name_to_oid.put(action.merge.name, oid_hex);
+                var result = try repo.merge(action.merge.source);
+                defer result.deinit();
+                switch (result.data) {
+                    .success => {
+                        try commit_name_to_oid.put(action.merge.name, result.data.success.oid);
+                    },
+                    .conflict => return error.MergeConflict,
+                }
             },
         }
     }
