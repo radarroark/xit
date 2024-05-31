@@ -40,7 +40,8 @@ fn Action(comptime CommitName: type) type {
 
 /// executes the actions on the given repo
 fn execActions(
-    repo: *rp.Repo(.xit),
+    comptime repo_kind: rp.RepoKind,
+    repo: *rp.Repo(repo_kind),
     comptime CommitName: type,
     actions: []const Action(CommitName),
     commit_name_to_oid: *std.AutoArrayHashMap(CommitName, [hash.SHA1_HEX_LEN]u8),
@@ -79,7 +80,7 @@ fn execActions(
     }
 }
 
-test "simple" {
+fn testSimple(comptime repo_kind: rp.RepoKind) !void {
     const allocator = std.testing.allocator;
     const temp_dir_name = "temp-test-repo-simple";
     const cwd = std.fs.cwd();
@@ -93,7 +94,7 @@ test "simple" {
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
-    var repo = try rp.Repo(.xit).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } });
+    var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } });
     defer repo.deinit();
 
     const CommitName = enum { a, b, c, d };
@@ -112,7 +113,7 @@ test "simple" {
     var commit_name_to_oid = std.AutoArrayHashMap(CommitName, [hash.SHA1_HEX_LEN]u8).init(allocator);
     defer commit_name_to_oid.deinit();
 
-    try execActions(&repo, CommitName, actions, &commit_name_to_oid);
+    try execActions(repo_kind, &repo, CommitName, actions, &commit_name_to_oid);
 
     var oid_to_action = std.StringArrayHashMap(Action(CommitName)).init(allocator);
     defer oid_to_action.deinit();
@@ -126,7 +127,7 @@ test "simple" {
     }
 
     // assert that all commits in `actions` have been found in the log
-    const head_oid = try ref.readHead(.xit, &repo.core);
+    const head_oid = try ref.readHead(repo_kind, &repo.core);
     var commit_iter = try repo.log(head_oid);
     defer commit_iter.deinit();
     while (try commit_iter.next()) |commit_object| {
@@ -136,7 +137,12 @@ test "simple" {
     try expectEqual(0, oid_to_action.count());
 }
 
-test "merge" {
+test "simple" {
+    try testSimple(.git);
+    try testSimple(.xit);
+}
+
+fn testMerge(comptime repo_kind: rp.RepoKind) !void {
     const allocator = std.testing.allocator;
     const temp_dir_name = "temp-test-repo-merge";
     const cwd = std.fs.cwd();
@@ -150,7 +156,7 @@ test "merge" {
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
-    var repo = try rp.Repo(.xit).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } });
+    var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } });
     defer repo.deinit();
 
     const CommitName = enum { a, b, c, d, e, f, g, h, j, k };
@@ -196,7 +202,7 @@ test "merge" {
     var commit_name_to_oid = std.AutoArrayHashMap(CommitName, [hash.SHA1_HEX_LEN]u8).init(allocator);
     defer commit_name_to_oid.deinit();
 
-    try execActions(&repo, CommitName, actions, &commit_name_to_oid);
+    try execActions(repo_kind, &repo, CommitName, actions, &commit_name_to_oid);
 
     const commit_d = commit_name_to_oid.get(.d).?;
     const commit_h = commit_name_to_oid.get(.h).?;
@@ -205,11 +211,11 @@ test "merge" {
 
     // there are multiple common ancestors, b and d,
     // but d is the best one because it is a descendent of b
-    const ancestor_k_h = try obj.commonAncestor(.xit, allocator, &repo.core, &commit_k, &commit_h);
+    const ancestor_k_h = try obj.commonAncestor(repo_kind, allocator, &repo.core, &commit_k, &commit_h);
     try std.testing.expectEqualStrings(&commit_d, &ancestor_k_h);
 
     // if one commit is an ancestor of the other, it is the best common ancestor
-    const ancestor_k_j = try obj.commonAncestor(.xit, allocator, &repo.core, &commit_k, &commit_j);
+    const ancestor_k_j = try obj.commonAncestor(repo_kind, allocator, &repo.core, &commit_k, &commit_j);
     try std.testing.expectEqualStrings(&commit_j, &ancestor_k_j);
 
     // if we try merging foo again, it does nothing
@@ -227,7 +233,12 @@ test "merge" {
         defer merge_result.deinit();
         try std.testing.expect(.fast_forward == merge_result.data);
 
-        const head_oid = try ref.readHead(.xit, &repo.core);
+        const head_oid = try ref.readHead(repo_kind, &repo.core);
         try expectEqual(commit_k, head_oid);
     }
+}
+
+test "merge" {
+    try testMerge(.git);
+    try testMerge(.xit);
 }
