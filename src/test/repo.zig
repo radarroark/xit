@@ -159,6 +159,13 @@ test "best common ancestor" {
 
     const CommitName = enum { a, b, c, d, e, f, g, h, j, k, l };
 
+    // A --- B --- C --------- J --- K [master]
+    //        \               /
+    //         \             /
+    //          D --- E --- F [foo]
+    //           \
+    //            \
+    //             G --- H [bar]
     const actions = &[_]Action(CommitName){
         .{ .add_file = .{ .path = "master.md", .content = "a" } },
         .{ .commit = .{ .name = .a } },
