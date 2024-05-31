@@ -71,12 +71,8 @@ fn execActions(
             .merge => {
                 var result = try repo.merge(action.merge.source);
                 defer result.deinit();
-                switch (result.data) {
-                    .success => {
-                        try commit_name_to_oid.put(action.merge.name, result.data.success.oid);
-                    },
-                    .nothing => return error.MergeNotNecessary,
-                    .conflict => return error.MergeConflict,
+                if (.success == result.data) {
+                    try commit_name_to_oid.put(action.merge.name, result.data.success.oid);
                 }
             },
         }
@@ -130,7 +126,7 @@ test "simple" {
     }
 
     // assert that all commits in `actions` have been found in the log
-    const head_oid = (try ref.readHeadMaybe(.xit, &repo.core)).?;
+    const head_oid = try ref.readHead(.xit, &repo.core);
     var commit_iter = try repo.log(head_oid);
     defer commit_iter.deinit();
     while (try commit_iter.next()) |commit_object| {
@@ -140,9 +136,9 @@ test "simple" {
     try expectEqual(0, oid_to_action.count());
 }
 
-test "best common ancestor" {
+test "merge" {
     const allocator = std.testing.allocator;
-    const temp_dir_name = "temp-test-repo-best-common-ancestor";
+    const temp_dir_name = "temp-test-repo-merge";
     const cwd = std.fs.cwd();
 
     // create the temp dir
@@ -157,7 +153,7 @@ test "best common ancestor" {
     var repo = try rp.Repo(.xit).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } });
     defer repo.deinit();
 
-    const CommitName = enum { a, b, c, d, e, f, g, h, j, k, l };
+    const CommitName = enum { a, b, c, d, e, f, g, h, j, k };
 
     // A --- B --- C --------- J --- K [master]
     //        \               /
@@ -217,5 +213,21 @@ test "best common ancestor" {
     try std.testing.expectEqualStrings(&commit_j, &ancestor_k_j);
 
     // if we try merging foo again, it does nothing
-    try expectEqual(error.MergeNotNecessary, execActions(&repo, CommitName, &[_]Action(CommitName){.{ .merge = .{ .name = .l, .source = "foo" } }}, &commit_name_to_oid));
+    {
+        var merge_result = try repo.merge("foo");
+        defer merge_result.deinit();
+        try std.testing.expect(.nothing == merge_result.data);
+    }
+
+    // if we try merging master into foo, it fast forwards
+    {
+        var switch_result = try repo.switch_head("foo");
+        defer switch_result.deinit();
+        var merge_result = try repo.merge("master");
+        defer merge_result.deinit();
+        try std.testing.expect(.fast_forward == merge_result.data);
+
+        const head_oid = try ref.readHead(.xit, &repo.core);
+        try expectEqual(commit_k, head_oid);
+    }
 }
