@@ -23,7 +23,8 @@ fn expectEqual(expected: anytype, actual: anytype) !void {
     try std.testing.expectEqual(@as(@TypeOf(actual), expected), actual);
 }
 
-fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
+fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
+    const allocator = std.testing.allocator;
     const temp_dir_name = "temp-test-main";
 
     var args = std.ArrayList([]const u8).init(allocator);
@@ -1229,8 +1230,7 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
 }
 
 test "main" {
-    const allocator = std.testing.allocator;
-    const last_hash_git = try testMain(allocator, .git);
-    const last_hash_xit = try testMain(allocator, .xit);
+    const last_hash_git = try testMain(.git);
+    const last_hash_xit = try testMain(.xit);
     try std.testing.expectEqualStrings(&last_hash_git, &last_hash_xit);
 }
