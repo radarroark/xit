@@ -937,14 +937,14 @@ fn getDescendent(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
                 if (std.mem.eql(u8, oid2, &node.data.oid)) {
                     return oid1.*;
                 } else if (std.mem.eql(u8, oid1, &node.data.oid)) {
-                    return error.InvalidCycle;
+                    continue; // this oid was already added to the queue
                 }
             },
             .two => {
                 if (std.mem.eql(u8, oid1, &node.data.oid)) {
                     return oid2.*;
                 } else if (std.mem.eql(u8, oid2, &node.data.oid)) {
-                    return error.InvalidCycle;
+                    continue; // this oid was already added to the queue
                 }
             },
         }
@@ -1010,7 +1010,7 @@ pub fn commonAncestor(comptime repo_kind: rp.RepoKind, allocator: std.mem.Alloca
                 if (parents_of_2.contains(&node.data.oid)) {
                     try parents_of_both.put(&node.data.oid, {});
                 } else if (parents_of_1.contains(&node.data.oid)) {
-                    return error.InvalidCycle;
+                    continue; // this oid was already added to the queue
                 } else {
                     try parents_of_1.put(&node.data.oid, {});
                 }
@@ -1019,7 +1019,7 @@ pub fn commonAncestor(comptime repo_kind: rp.RepoKind, allocator: std.mem.Alloca
                 if (parents_of_1.contains(&node.data.oid)) {
                     try parents_of_both.put(&node.data.oid, {});
                 } else if (parents_of_2.contains(&node.data.oid)) {
-                    return error.InvalidCycle;
+                    continue; // this oid was already added to the queue
                 } else {
                     try parents_of_2.put(&node.data.oid, {});
                 }
