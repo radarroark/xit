@@ -75,6 +75,7 @@ fn execActions(
                     .success => {
                         try commit_name_to_oid.put(action.merge.name, result.data.success.oid);
                     },
+                    .nothing => return error.MergeNotNecessary,
                     .conflict => return error.MergeConflict,
                 }
             },
@@ -156,7 +157,7 @@ test "best common ancestor" {
     var repo = try rp.Repo(.xit).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } });
     defer repo.deinit();
 
-    const CommitName = enum { a, b, c, d, e, f, g, h, j, k };
+    const CommitName = enum { a, b, c, d, e, f, g, h, j, k, l };
 
     const actions = &[_]Action(CommitName){
         .{ .add_file = .{ .path = "master.md", .content = "a" } },
@@ -207,4 +208,7 @@ test "best common ancestor" {
     // if one commit is an ancestor of the other, it is the best common ancestor
     const ancestor_k_j = try obj.commonAncestor(.xit, allocator, &repo.core, &commit_k, &commit_j);
     try std.testing.expectEqualStrings(&commit_j, &ancestor_k_j);
+
+    // if we try merging foo again, it does nothing
+    try expectEqual(error.MergeNotNecessary, execActions(&repo, CommitName, &[_]Action(CommitName){.{ .merge = .{ .name = .l, .source = "foo" } }}, &commit_name_to_oid));
 }

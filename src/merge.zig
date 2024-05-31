@@ -11,6 +11,7 @@ pub const MergeResultData = union(enum) {
     success: struct {
         oid: [hash.SHA1_HEX_LEN]u8,
     },
+    nothing,
     conflict,
 };
 
@@ -29,6 +30,11 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
     const current_oid = try ref.readHead(repo_kind, core);
     const source_oid = try ref.resolve(repo_kind, core, source) orelse return error.InvalidTarget;
     const common_oid = try obj.commonAncestor(repo_kind, allocator, core, &current_oid, &source_oid);
+
+    // if the common ancestor is the source oid, do nothing
+    if (std.mem.eql(u8, &source_oid, &common_oid)) {
+        return .{ .data = .nothing };
+    }
 
     // compare the commits
     var tree_diff = obj.TreeDiff(repo_kind).init(allocator);
@@ -76,8 +82,8 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
     var sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
     try obj.writeCommit(repo_kind, core, allocator, parent_oids, commit_message, &sha1_bytes_buffer);
 
-    // return result
     var result = MergeResult.init();
+    errdefer result.deinit();
     result.data.success.oid = std.fmt.bytesToHex(sha1_bytes_buffer, .lower);
     return result;
 }
