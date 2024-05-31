@@ -194,10 +194,17 @@ test "best common ancestor" {
 
     try execActions(&repo, CommitName, actions, &commit_name_to_oid);
 
-    const commit_k = commit_name_to_oid.get(.k).?;
-    const commit_h = commit_name_to_oid.get(.h).?;
     const commit_d = commit_name_to_oid.get(.d).?;
+    const commit_h = commit_name_to_oid.get(.h).?;
+    const commit_j = commit_name_to_oid.get(.j).?;
+    const commit_k = commit_name_to_oid.get(.k).?;
 
-    const ancestor_commit = try obj.commonAncestor(.xit, allocator, &repo.core, &commit_k, &commit_h);
-    try std.testing.expectEqualStrings(&commit_d, &ancestor_commit);
+    // there are multiple common ancestors, b and d,
+    // but d is the best one because it is a descendent of b
+    const ancestor_k_h = try obj.commonAncestor(.xit, allocator, &repo.core, &commit_k, &commit_h);
+    try std.testing.expectEqualStrings(&commit_d, &ancestor_k_h);
+
+    // if one commit is an ancestor of the other, it is the best common ancestor
+    const ancestor_k_j = try obj.commonAncestor(.xit, allocator, &repo.core, &commit_k, &commit_j);
+    try std.testing.expectEqualStrings(&commit_j, &ancestor_k_j);
 }

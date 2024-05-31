@@ -909,7 +909,7 @@ fn getDescendent(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
     };
     const Parent = struct {
         oid: [hash.SHA1_HEX_LEN]u8,
-        parent_kind: ParentKind,
+        kind: ParentKind,
     };
     var queue = std.DoublyLinkedList(Parent){};
 
@@ -917,7 +917,7 @@ fn getDescendent(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
         const object = try Object(repo_kind).init(arena.allocator(), core, oid1.*);
         for (object.content.commit.parents.items) |parent_oid| {
             var node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
-            node.data = .{ .oid = parent_oid, .parent_kind = .one };
+            node.data = .{ .oid = parent_oid, .kind = .one };
             queue.append(node);
         }
     }
@@ -926,13 +926,13 @@ fn getDescendent(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
         const object = try Object(repo_kind).init(arena.allocator(), core, oid2.*);
         for (object.content.commit.parents.items) |parent_oid| {
             var node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
-            node.data = .{ .oid = parent_oid, .parent_kind = .two };
+            node.data = .{ .oid = parent_oid, .kind = .two };
             queue.append(node);
         }
     }
 
     while (queue.popFirst()) |node| {
-        switch (node.data.parent_kind) {
+        switch (node.data.kind) {
             .one => {
                 if (std.mem.eql(u8, oid2, &node.data.oid)) {
                     return oid1.*;
@@ -954,7 +954,7 @@ fn getDescendent(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
         const object = try Object(repo_kind).init(arena.allocator(), core, node.data.oid);
         for (object.content.commit.parents.items) |parent_oid| {
             var new_node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
-            new_node.data = .{ .oid = parent_oid, .parent_kind = node.data.parent_kind };
+            new_node.data = .{ .oid = parent_oid, .kind = node.data.kind };
             queue.append(new_node);
         }
     }
@@ -970,33 +970,26 @@ pub fn commonAncestor(comptime repo_kind: rp.RepoKind, allocator: std.mem.Alloca
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    const ParentKind = enum {
-        one,
-        two,
-        stale,
-    };
     const Parent = struct {
         oid: [hash.SHA1_HEX_LEN]u8,
-        parent_kind: ParentKind,
+        kind: enum {
+            one,
+            two,
+            stale,
+        },
     };
     var queue = std.DoublyLinkedList(Parent){};
 
     {
-        const object = try Object(repo_kind).init(arena.allocator(), core, oid1.*);
-        for (object.content.commit.parents.items) |parent_oid| {
-            var node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
-            node.data = .{ .oid = parent_oid, .parent_kind = .one };
-            queue.append(node);
-        }
+        var node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
+        node.data = .{ .oid = oid1.*, .kind = .one };
+        queue.append(node);
     }
 
     {
-        const object = try Object(repo_kind).init(arena.allocator(), core, oid2.*);
-        for (object.content.commit.parents.items) |parent_oid| {
-            var node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
-            node.data = .{ .oid = parent_oid, .parent_kind = .two };
-            queue.append(node);
-        }
+        var node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
+        node.data = .{ .oid = oid2.*, .kind = .two };
+        queue.append(node);
     }
 
     var parents_of_1 = std.StringHashMap(void).init(arena.allocator());
@@ -1005,7 +998,7 @@ pub fn commonAncestor(comptime repo_kind: rp.RepoKind, allocator: std.mem.Alloca
     var stale_oids = std.StringHashMap(void).init(arena.allocator());
 
     while (queue.popFirst()) |node| {
-        switch (node.data.parent_kind) {
+        switch (node.data.kind) {
             .one => {
                 if (parents_of_2.contains(&node.data.oid)) {
                     try parents_of_both.put(&node.data.oid, {});
@@ -1037,7 +1030,7 @@ pub fn commonAncestor(comptime repo_kind: rp.RepoKind, allocator: std.mem.Alloca
         for (object.content.commit.parents.items) |parent_oid| {
             const is_stale = is_common_ancestor or stale_oids.contains(&parent_oid);
             var new_node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
-            new_node.data = .{ .oid = parent_oid, .parent_kind = if (is_stale) .stale else node.data.parent_kind };
+            new_node.data = .{ .oid = parent_oid, .kind = if (is_stale) .stale else node.data.kind };
             queue.append(new_node);
         }
 
