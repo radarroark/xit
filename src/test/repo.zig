@@ -64,9 +64,8 @@ fn execActions(
                 try repo.create_branch(action.create_branch.name);
             },
             .switch_head => {
-                var result = chk.SwitchResult.init();
+                var result = try repo.switch_head(action.switch_head.target);
                 defer result.deinit();
-                try repo.switch_head(action.switch_head.target, &result);
             },
             .merge => {
                 const oid_hex = try repo.merge(action.merge.source);

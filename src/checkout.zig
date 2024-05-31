@@ -21,12 +21,7 @@ const rp = @import("./repo.zig");
 
 const MAX_FILE_READ_BYTES = 1024; // FIXME: this is arbitrary...
 
-pub const SwitchResultKind = enum {
-    success,
-    conflict,
-};
-
-pub const SwitchResultData = union(SwitchResultKind) {
+pub const SwitchResultData = union(enum) {
     success,
     conflict: struct {
         stale_files: std.StringHashMap(void),
@@ -346,7 +341,14 @@ fn untrackedFile(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
     }
 }
 
-pub fn migrate(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, tree_diff: obj.TreeDiff(repo_kind), index: *idx.Index(repo_kind), result_maybe: ?*SwitchResult) !void {
+pub fn migrate(
+    comptime repo_kind: rp.RepoKind,
+    core: *rp.Repo(repo_kind).Core,
+    allocator: std.mem.Allocator,
+    tree_diff: obj.TreeDiff(repo_kind),
+    index: *idx.Index(repo_kind),
+    result_maybe: ?*SwitchResult,
+) !void {
     var add_files = std.StringHashMap(obj.TreeEntry).init(allocator);
     defer add_files.deinit();
     var edit_files = std.StringHashMap(obj.TreeEntry).init(allocator);
@@ -447,7 +449,7 @@ pub fn migrate(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, 
 
     if (result_maybe) |result| {
         if (result.data == .conflict) {
-            return error.SwitchConflict;
+            return;
         }
     }
 
@@ -496,7 +498,7 @@ pub fn migrate(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, 
     }
 }
 
-pub fn switch_head(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, target: []const u8, result: *SwitchResult) !void {
+pub fn switch_head(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, target: []const u8) !SwitchResult {
     // get the current commit and target oid
     const current_oid = try ref.readHead(repo_kind, core);
     const target_oid = try ref.resolve(repo_kind, core, target) orelse return error.InvalidTarget;
@@ -505,6 +507,9 @@ pub fn switch_head(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
     var tree_diff = obj.TreeDiff(repo_kind).init(allocator);
     defer tree_diff.deinit();
     try tree_diff.compare(core, current_oid, target_oid, null);
+
+    var result = SwitchResult.init();
+    errdefer result.deinit();
 
     switch (repo_kind) {
         .git => {
@@ -517,7 +522,12 @@ pub fn switch_head(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
             defer index.deinit();
 
             // update the working tree
-            try migrate(repo_kind, core, allocator, tree_diff, &index, result);
+            try migrate(repo_kind, core, allocator, tree_diff, &index, &result);
+
+            // return early if conflict
+            if (result.data == .conflict) {
+                return result;
+            }
 
             // update the index
             try index.write(allocator, .{ .lock_file = lock.lock_file });
@@ -534,7 +544,12 @@ pub fn switch_head(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
             defer index.deinit();
 
             // update the working tree
-            try migrate(repo_kind, core, allocator, tree_diff, &index, result);
+            try migrate(repo_kind, core, allocator, tree_diff, &index, &result);
+
+            // return early if conflict
+            if (result.data == .conflict) {
+                return result;
+            }
 
             // update the index
             try index.write(allocator, .{ .db = &core.db });
@@ -543,6 +558,8 @@ pub fn switch_head(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
             try ref.writeHead(repo_kind, core, allocator, target, target_oid);
         },
     }
+
+    return result;
 }
 
 pub fn restore(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, path: []const u8) !void {

@@ -493,14 +493,8 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
             {
                 var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
                 defer repo.deinit();
-                var result = chk.SwitchResult.init();
+                var result = try chk.switch_head(repo_kind, &repo.core, allocator, &commit1);
                 defer result.deinit();
-                chk.switch_head(repo_kind, &repo.core, allocator, &commit1, &result) catch |err| {
-                    switch (err) {
-                        error.SwitchConflict => {},
-                        else => return err,
-                    }
-                };
                 try std.testing.expect(result.data == .conflict);
                 try expectEqual(1, result.data.conflict.stale_files.count());
             }
@@ -527,14 +521,8 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
             {
                 var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
                 defer repo.deinit();
-                var result = chk.SwitchResult.init();
+                var result = try chk.switch_head(repo_kind, &repo.core, allocator, &commit1);
                 defer result.deinit();
-                chk.switch_head(repo_kind, &repo.core, allocator, &commit1, &result) catch |err| {
-                    switch (err) {
-                        error.SwitchConflict => {},
-                        else => return err,
-                    }
-                };
                 try std.testing.expect(result.data == .conflict);
             }
 
@@ -556,14 +544,8 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
             {
                 var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
                 defer repo.deinit();
-                var result = chk.SwitchResult.init();
+                var result = try chk.switch_head(repo_kind, &repo.core, allocator, &commit1);
                 defer result.deinit();
-                chk.switch_head(repo_kind, &repo.core, allocator, &commit1, &result) catch |err| {
-                    switch (err) {
-                        error.SwitchConflict => {},
-                        else => return err,
-                    }
-                };
                 try std.testing.expect(result.data == .conflict);
                 try expectEqual(1, result.data.conflict.stale_files.count());
             }
@@ -591,14 +573,8 @@ fn testMain(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind) ![has
             {
                 var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
                 defer repo.deinit();
-                var result = chk.SwitchResult.init();
+                var result = try chk.switch_head(repo_kind, &repo.core, allocator, &commit1);
                 defer result.deinit();
-                chk.switch_head(repo_kind, &repo.core, allocator, &commit1, &result) catch |err| {
-                    switch (err) {
-                        error.SwitchConflict => {},
-                        else => return err,
-                    }
-                };
                 try std.testing.expect(result.data == .conflict);
                 try expectEqual(1, result.data.conflict.stale_dirs.count());
             }

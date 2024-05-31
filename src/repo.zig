@@ -306,14 +306,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     }
                 },
                 cmd.CommandData.switch_head => {
-                    var result = chk.SwitchResult.init();
+                    var result = try self.switch_head(cmd_data.switch_head.target);
                     defer result.deinit();
-                    self.switch_head(cmd_data.switch_head.target, &result) catch |err| {
-                        switch (err) {
-                            error.SwitchConflict => {},
-                            else => return err,
-                        }
-                    };
                 },
                 cmd.CommandData.restore => {
                     try chk.restore(repo_kind, &self.core, self.allocator, cmd_data.restore.path);
@@ -418,8 +412,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             try bch.create(repo_kind, &self.core, self.allocator, name);
         }
 
-        pub fn switch_head(self: *Repo(repo_kind), target: []const u8, result: *chk.SwitchResult) !void {
-            try chk.switch_head(repo_kind, &self.core, self.allocator, target, result);
+        pub fn switch_head(self: *Repo(repo_kind), target: []const u8) !chk.SwitchResult {
+            return try chk.switch_head(repo_kind, &self.core, self.allocator, target);
         }
 
         pub fn log(self: *Repo(repo_kind), oid: [hash.SHA1_HEX_LEN]u8) !obj.ObjectIterator(repo_kind) {
