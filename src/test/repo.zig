@@ -242,3 +242,50 @@ test "merge" {
     try testMerge(.git);
     try testMerge(.xit);
 }
+
+fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
+    const allocator = std.testing.allocator;
+    const temp_dir_name = "temp-test-repo-merge-conflict";
+    const cwd = std.fs.cwd();
+
+    // create the temp dir
+    if (cwd.openFile(temp_dir_name, .{})) |file| {
+        file.close();
+        try cwd.deleteTree(temp_dir_name);
+    } else |_| {}
+    var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
+    defer cwd.deleteTree(temp_dir_name) catch {};
+    defer temp_dir.close();
+
+    var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } });
+    defer repo.deinit();
+
+    const CommitName = enum { a, b, c, d };
+
+    // A --- B --- M [master]
+    //  \         /
+    //   \       /
+    //    `---- C [foo]
+    const actions = &[_]Action(CommitName){
+        .{ .add_file = .{ .path = "f.txt", .content = "1" } },
+        .{ .commit = .{ .name = .a } },
+        .{ .create_branch = .{ .name = "foo" } },
+        .{ .add_file = .{ .path = "f.txt", .content = "2" } },
+        .{ .commit = .{ .name = .b } },
+        .{ .switch_head = .{ .target = "foo" } },
+        .{ .add_file = .{ .path = "f.txt", .content = "3" } },
+        .{ .commit = .{ .name = .d } },
+        .{ .switch_head = .{ .target = "master" } },
+        .{ .merge = .{ .name = .c, .source = "foo" } },
+    };
+
+    var commit_name_to_oid = std.AutoArrayHashMap(CommitName, [hash.SHA1_HEX_LEN]u8).init(allocator);
+    defer commit_name_to_oid.deinit();
+
+    try execActions(repo_kind, &repo, CommitName, actions, &commit_name_to_oid);
+}
+
+test "merge conflict" {
+    try testMergeConflict(.git);
+    try testMergeConflict(.xit);
+}
