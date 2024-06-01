@@ -75,7 +75,7 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
         // the common ancestor is the current oid, so just update HEAD
         switch (repo_kind) {
             .git => {
-                try ref.updateRecur(repo_kind, core, .{ .dir = core.git_dir }, allocator, "HEAD", source_oid);
+                try ref.updateRecur(repo_kind, core, .{ .dir = core.git_dir }, allocator, "HEAD", &source_oid);
             },
             .xit => {
                 const Ctx = struct {
@@ -84,7 +84,7 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
                     oid: *const [hash.SHA1_HEX_LEN]u8,
 
                     pub fn run(ctx_self: *@This(), cursor: *xitdb.Database(.file).Cursor) !void {
-                        try ref.updateRecur(repo_kind, ctx_self.core, .{ .root_cursor = cursor, .cursor = cursor }, ctx_self.allocator, "HEAD", ctx_self.oid.*);
+                        try ref.updateRecur(repo_kind, ctx_self.core, .{ .root_cursor = cursor, .cursor = cursor }, ctx_self.allocator, "HEAD", ctx_self.oid);
                     }
                 };
                 var ctx = Ctx{

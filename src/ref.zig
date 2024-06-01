@@ -348,7 +348,7 @@ pub fn UpdateOpts(comptime repo_kind: rp.RepoKind) type {
 /// update the given file with the given oid,
 /// following refs recursively if necessary.
 /// used after a commit is made.
-pub fn updateRecur(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, opts: UpdateOpts(repo_kind), allocator: std.mem.Allocator, file_name: []const u8, oid_hex: [hash.SHA1_HEX_LEN]u8) anyerror!void {
+pub fn updateRecur(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, opts: UpdateOpts(repo_kind), allocator: std.mem.Allocator, file_name: []const u8, oid_hex: *const [hash.SHA1_HEX_LEN]u8) anyerror!void {
     switch (repo_kind) {
         .git => {
             var lock = try io.LockFile.init(allocator, opts.dir, file_name);
@@ -380,7 +380,7 @@ pub fn updateRecur(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
             }
             // otherwise, update it with the oid
             else {
-                try lock.lock_file.writeAll(&oid_hex);
+                try lock.lock_file.writeAll(oid_hex);
                 try lock.lock_file.writeAll("\n");
                 lock.success = true;
             }
@@ -409,7 +409,7 @@ pub fn updateRecur(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
                     core: *rp.Repo(repo_kind).Core,
                     allocator: std.mem.Allocator,
                     file_name: []const u8,
-                    oid_hex: [hash.SHA1_HEX_LEN]u8,
+                    oid_hex: *const [hash.SHA1_HEX_LEN]u8,
                     root_cursor: *xitdb.Database(.file).Cursor,
 
                     pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
@@ -438,10 +438,10 @@ pub fn updateRecur(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
                     .hash_map_create,
                     .{ .hash_map_get = file_name_hash },
                 });
-                const oid_ptr = try opts.root_cursor.writeBytes(&oid_hex, .once, void, &[_]xitdb.PathPart(void){
+                const oid_ptr = try opts.root_cursor.writeBytes(oid_hex, .once, void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = hash.hashBuffer("ref-values") },
                     .hash_map_create,
-                    .{ .hash_map_get = try hash.hexToHash(&oid_hex) },
+                    .{ .hash_map_get = try hash.hexToHash(oid_hex) },
                 });
                 _ = try opts.cursor.execute(void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = file_name_hash },
