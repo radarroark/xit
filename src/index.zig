@@ -3,7 +3,7 @@
 
 const std = @import("std");
 const xitdb = @import("xitdb");
-const object = @import("./object.zig");
+const obj = @import("./object.zig");
 const hash = @import("./hash.zig");
 const io = @import("./io.zig");
 const rp = @import("./repo.zig");
@@ -244,7 +244,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
             }
         }
 
-        fn addPathRecur(self: *Index(repo_kind), core: *rp.Repo(repo_kind).Core, opts: object.ObjectOpts(repo_kind), path: []const u8) !void {
+        fn addPathRecur(self: *Index(repo_kind), core: *rp.Repo(repo_kind).Core, opts: obj.ObjectOpts(repo_kind), path: []const u8) !void {
             // remove entries that are parents of this path (directory replaces file)
             {
                 var parent_path_maybe = std.fs.path.dirname(path);
@@ -265,7 +265,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                 std.fs.File.Kind.file => {
                     // write the object
                     var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-                    try object.writeBlob(repo_kind, core, opts, self.allocator, path, &oid);
+                    try obj.writeBlob(repo_kind, core, opts, self.allocator, path, &oid);
                     // add the entry
                     const times = io.getTimes(meta);
                     const stat = try io.getStat(file);
