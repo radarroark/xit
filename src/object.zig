@@ -306,7 +306,8 @@ fn addIndexEntries(comptime repo_kind: rp.RepoKind, opts: ObjectOpts(repo_kind),
     for (entries) |name| {
         const path = try std.fs.path.join(allocator, &[_][]const u8{ prefix, name });
         defer allocator.free(path);
-        if (index.entries.get(path)) |entry| {
+        if (index.entries.get(path)) |*entries_for_path| {
+            const entry = entries_for_path[0] orelse return error.NullEntry;
             try tree.addBlobEntry(entry.mode, name, &entry.oid);
         } else if (index.dir_to_children.get(path)) |children| {
             var subtree = Tree.init(allocator);

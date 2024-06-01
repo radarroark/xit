@@ -389,7 +389,7 @@ pub fn migrate(
         }
         // check for conflicts
         if (result_maybe) |result| {
-            const entry_maybe = index.entries.get(path);
+            const entry_maybe = if (index.entries.get(path)) |*entries_for_path| (entries_for_path[0] orelse return error.NullEntry) else null;
             if (compareTreeToIndex(repo_kind, change.old, entry_maybe) != .none and compareTreeToIndex(repo_kind, change.new, entry_maybe) != .none) {
                 result.conflict(allocator);
                 try result.data.conflict.stale_files.put(path, {});

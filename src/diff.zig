@@ -520,7 +520,8 @@ pub fn DiffIterator(comptime repo_kind: rp.RepoKind) type {
                 .workspace => {
                     if (next_index < self.status.workspace_modified.items.len) {
                         const entry = self.status.workspace_modified.items[next_index];
-                        var a = try Target(repo_kind).initFromIndex(self.allocator, self.core, self.status.index.entries.get(entry.path) orelse return error.EntryNotFound);
+                        const index_entries_for_path = self.status.index.entries.get(entry.path) orelse return error.EntryNotFound;
+                        var a = try Target(repo_kind).initFromIndex(self.allocator, self.core, index_entries_for_path[0] orelse return error.NullEntry);
                         errdefer a.deinit();
                         var b = try Target(repo_kind).initFromWorkspace(self.allocator, self.core, entry.path, io.getMode(entry.meta));
                         errdefer b.deinit();
@@ -533,7 +534,8 @@ pub fn DiffIterator(comptime repo_kind: rp.RepoKind) type {
 
                     if (next_index < self.status.workspace_deleted.items.len) {
                         const path = self.status.workspace_deleted.items[next_index];
-                        var a = try Target(repo_kind).initFromIndex(self.allocator, self.core, self.status.index.entries.get(path) orelse return error.EntryNotFound);
+                        const index_entries_for_path = self.status.index.entries.get(path) orelse return error.EntryNotFound;
+                        var a = try Target(repo_kind).initFromIndex(self.allocator, self.core, index_entries_for_path[0] orelse return error.NullEntry);
                         errdefer a.deinit();
                         var b = try Target(repo_kind).initFromNothing(self.allocator, path);
                         errdefer b.deinit();
@@ -547,7 +549,8 @@ pub fn DiffIterator(comptime repo_kind: rp.RepoKind) type {
                         const path = self.status.index_added.items[next_index];
                         var a = try Target(repo_kind).initFromNothing(self.allocator, path);
                         errdefer a.deinit();
-                        var b = try Target(repo_kind).initFromIndex(self.allocator, self.core, self.status.index.entries.get(path) orelse return error.EntryNotFound);
+                        const index_entries_for_path = self.status.index.entries.get(path) orelse return error.EntryNotFound;
+                        var b = try Target(repo_kind).initFromIndex(self.allocator, self.core, index_entries_for_path[0] orelse return error.NullEntry);
                         errdefer b.deinit();
                         self.diff = try Diff(repo_kind).init(self.allocator, a, b);
                         self.next_index += 1;
@@ -560,7 +563,8 @@ pub fn DiffIterator(comptime repo_kind: rp.RepoKind) type {
                         const path = self.status.index_modified.items[next_index];
                         var a = try Target(repo_kind).initFromHead(self.allocator, self.core, path, self.status.head_tree.entries.get(path) orelse return error.EntryNotFound);
                         errdefer a.deinit();
-                        var b = try Target(repo_kind).initFromIndex(self.allocator, self.core, self.status.index.entries.get(path) orelse return error.EntryNotFound);
+                        const index_entries_for_path = self.status.index.entries.get(path) orelse return error.EntryNotFound;
+                        var b = try Target(repo_kind).initFromIndex(self.allocator, self.core, index_entries_for_path[0] orelse return error.NullEntry);
                         errdefer b.deinit();
                         self.diff = try Diff(repo_kind).init(self.allocator, a, b);
                         self.next_index += 1;

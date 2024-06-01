@@ -70,7 +70,8 @@ pub fn Status(comptime repo_kind: rp.RepoKind) type {
             var head_tree = try HeadTree(repo_kind).init(allocator, core);
             errdefer head_tree.deinit();
 
-            for (index.entries.values()) |index_entry| {
+            for (index.entries.values()) |*index_entries_for_path| {
+                const index_entry = index_entries_for_path[0] orelse return error.NullEntry;
                 if (head_tree.entries.get(index_entry.path)) |head_entry| {
                     if (!io.modeEquals(index_entry.mode, head_entry.mode) or !std.mem.eql(u8, &index_entry.oid, &head_entry.oid)) {
                         try index_modified.append(index_entry.path);
@@ -122,9 +123,12 @@ fn addEntries(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, unt
         std.fs.File.Kind.file => {
             if (index.entries.getIndex(path)) |entry_index| {
                 index_bools.*[entry_index] = true;
-                const entry = index.entries.values()[entry_index];
-                if (try idx.indexDiffersFromWorkspace(repo_kind, entry, file, meta)) {
-                    try modified.append(Status(repo_kind).Entry{ .path = path, .meta = meta });
+                if (index.entries.values()[entry_index][0]) |entry| {
+                    if (try idx.indexDiffersFromWorkspace(repo_kind, entry, file, meta)) {
+                        try modified.append(Status(repo_kind).Entry{ .path = path, .meta = meta });
+                    }
+                } else {
+                    return error.NullEntry;
                 }
             } else {
                 try untracked.append(Status(repo_kind).Entry{ .path = path, .meta = meta });

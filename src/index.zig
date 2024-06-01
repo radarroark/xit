@@ -11,7 +11,9 @@ const rp = @import("./repo.zig");
 pub fn Index(comptime repo_kind: rp.RepoKind) type {
     return struct {
         version: u32,
-        entries: std.StringArrayHashMap(Entry),
+        // TODO: maybe store pointers to save space,
+        // since usually only the first slot is used
+        entries: std.StringArrayHashMap([4]?Entry),
         dir_to_paths: std.StringArrayHashMap(std.StringArrayHashMap(void)),
         dir_to_children: std.StringArrayHashMap(std.StringArrayHashMap(void)),
         root_children: std.StringArrayHashMap(void),
@@ -52,7 +54,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
         pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core) !Index(repo_kind) {
             var index = Index(repo_kind){
                 .version = 2,
-                .entries = std.StringArrayHashMap(Index(repo_kind).Entry).init(allocator),
+                .entries = std.StringArrayHashMap([4]?Index(repo_kind).Entry).init(allocator),
                 .dir_to_paths = std.StringArrayHashMap(std.StringArrayHashMap(void)).init(allocator),
                 .dir_to_children = std.StringArrayHashMap(std.StringArrayHashMap(void)).init(allocator),
                 .root_children = std.StringArrayHashMap(void).init(allocator),
@@ -147,29 +149,31 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                     })) |path| {
                                         var stream = std.io.fixedBufferStream(buffer);
                                         var reader = stream.reader();
-                                        var entry = Index(repo_kind).Entry{
-                                            .ctime_secs = try reader.readInt(u32, .big),
-                                            .ctime_nsecs = try reader.readInt(u32, .big),
-                                            .mtime_secs = try reader.readInt(u32, .big),
-                                            .mtime_nsecs = try reader.readInt(u32, .big),
-                                            .dev = try reader.readInt(u32, .big),
-                                            .ino = try reader.readInt(u32, .big),
-                                            .mode = @bitCast(try reader.readInt(u32, .big)),
-                                            .uid = try reader.readInt(u32, .big),
-                                            .gid = try reader.readInt(u32, .big),
-                                            .file_size = try reader.readInt(u32, .big),
-                                            .oid = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN),
-                                            .flags = @bitCast(try reader.readInt(u16, .big)),
-                                            .extended_flags = null, // TODO: read this if necessary
-                                            .path = path,
-                                        };
-                                        if (entry.mode.unix_permission != 0o755) { // ensure mode is valid
-                                            entry.mode.unix_permission = 0o644;
+                                        while (try stream.getPos() < buffer.len) {
+                                            var entry = Entry{
+                                                .ctime_secs = try reader.readInt(u32, .big),
+                                                .ctime_nsecs = try reader.readInt(u32, .big),
+                                                .mtime_secs = try reader.readInt(u32, .big),
+                                                .mtime_nsecs = try reader.readInt(u32, .big),
+                                                .dev = try reader.readInt(u32, .big),
+                                                .ino = try reader.readInt(u32, .big),
+                                                .mode = @bitCast(try reader.readInt(u32, .big)),
+                                                .uid = try reader.readInt(u32, .big),
+                                                .gid = try reader.readInt(u32, .big),
+                                                .file_size = try reader.readInt(u32, .big),
+                                                .oid = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN),
+                                                .flags = @bitCast(try reader.readInt(u16, .big)),
+                                                .extended_flags = null, // TODO: read this if necessary
+                                                .path = path,
+                                            };
+                                            if (entry.mode.unix_permission != 0o755) { // ensure mode is valid
+                                                entry.mode.unix_permission = 0o644;
+                                            }
+                                            if (entry.path.len != entry.flags.name_length) {
+                                                return error.InvalidPathSize;
+                                            }
+                                            try index.addEntry(entry);
                                         }
-                                        if (entry.path.len != entry.flags.name_length) {
-                                            return error.InvalidPathSize;
-                                        }
-                                        try index.addEntry(entry);
                                     } else {
                                         return error.ValueNotFound;
                                     }
@@ -319,7 +323,11 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
         }
 
         fn addEntry(self: *Index(repo_kind), entry: Entry) !void {
-            try self.entries.put(entry.path, entry);
+            if (!self.entries.contains(entry.path)) {
+                try self.entries.put(entry.path, [4]?Entry{ null, null, null, null });
+            }
+            const map_entry = self.entries.getEntry(entry.path) orelse return error.EntryNotFound;
+            map_entry.value_ptr[entry.flags.stage] = entry;
 
             var child = std.fs.path.basename(entry.path);
             var parent_path_maybe = std.fs.path.dirname(entry.path);
@@ -416,28 +424,32 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     h.update(header);
 
                     // write the entries
-                    for (self.entries.values()) |entry| {
-                        var entry_buffer = std.ArrayList(u8).init(allocator);
-                        defer entry_buffer.deinit();
-                        const writer = entry_buffer.writer();
-                        try writer.writeInt(u32, entry.ctime_secs, .big);
-                        try writer.writeInt(u32, entry.ctime_nsecs, .big);
-                        try writer.writeInt(u32, entry.mtime_secs, .big);
-                        try writer.writeInt(u32, entry.mtime_nsecs, .big);
-                        try writer.writeInt(u32, entry.dev, .big);
-                        try writer.writeInt(u32, entry.ino, .big);
-                        try writer.writeInt(u32, @as(u32, @bitCast(entry.mode)), .big);
-                        try writer.writeInt(u32, entry.uid, .big);
-                        try writer.writeInt(u32, entry.gid, .big);
-                        try writer.writeInt(u32, entry.file_size, .big);
-                        try writer.writeAll(&entry.oid);
-                        try writer.writeInt(u16, @as(u16, @bitCast(entry.flags)), .big);
-                        try writer.writeAll(entry.path);
-                        while (entry_buffer.items.len % 8 != 0) {
-                            try writer.print("\x00", .{});
+                    for (self.entries.values()) |*entries_for_path| {
+                        for (entries_for_path) |entry_maybe| {
+                            if (entry_maybe) |entry| {
+                                var entry_buffer = std.ArrayList(u8).init(allocator);
+                                defer entry_buffer.deinit();
+                                const writer = entry_buffer.writer();
+                                try writer.writeInt(u32, entry.ctime_secs, .big);
+                                try writer.writeInt(u32, entry.ctime_nsecs, .big);
+                                try writer.writeInt(u32, entry.mtime_secs, .big);
+                                try writer.writeInt(u32, entry.mtime_nsecs, .big);
+                                try writer.writeInt(u32, entry.dev, .big);
+                                try writer.writeInt(u32, entry.ino, .big);
+                                try writer.writeInt(u32, @as(u32, @bitCast(entry.mode)), .big);
+                                try writer.writeInt(u32, entry.uid, .big);
+                                try writer.writeInt(u32, entry.gid, .big);
+                                try writer.writeInt(u32, entry.file_size, .big);
+                                try writer.writeAll(&entry.oid);
+                                try writer.writeInt(u16, @as(u16, @bitCast(entry.flags)), .big);
+                                try writer.writeAll(entry.path);
+                                while (entry_buffer.items.len % 8 != 0) {
+                                    try writer.print("\x00", .{});
+                                }
+                                try opts.lock_file.writeAll(entry_buffer.items);
+                                h.update(entry_buffer.items);
+                            }
                         }
-                        try opts.lock_file.writeAll(entry_buffer.items);
-                        h.update(entry_buffer.items);
                     }
 
                     // write the checksum
@@ -480,24 +492,29 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                         }
                                     }
 
-                                    for (inner_ctx_self.index.entries.values()) |entry| {
+                                    for (inner_ctx_self.index.entries.keys(), inner_ctx_self.index.entries.values()) |path, *entries_for_path| {
                                         var entry_buffer = std.ArrayList(u8).init(inner_ctx_self.allocator);
                                         defer entry_buffer.deinit();
-                                        const writer = entry_buffer.writer();
-                                        try writer.writeInt(u32, entry.ctime_secs, .big);
-                                        try writer.writeInt(u32, entry.ctime_nsecs, .big);
-                                        try writer.writeInt(u32, entry.mtime_secs, .big);
-                                        try writer.writeInt(u32, entry.mtime_nsecs, .big);
-                                        try writer.writeInt(u32, entry.dev, .big);
-                                        try writer.writeInt(u32, entry.ino, .big);
-                                        try writer.writeInt(u32, @as(u32, @bitCast(entry.mode)), .big);
-                                        try writer.writeInt(u32, entry.uid, .big);
-                                        try writer.writeInt(u32, entry.gid, .big);
-                                        try writer.writeInt(u32, entry.file_size, .big);
-                                        try writer.writeAll(&entry.oid);
-                                        try writer.writeInt(u16, @as(u16, @bitCast(entry.flags)), .big);
 
-                                        const path_hash = hash.hashBuffer(entry.path);
+                                        for (entries_for_path) |entry_maybe| {
+                                            if (entry_maybe) |entry| {
+                                                const writer = entry_buffer.writer();
+                                                try writer.writeInt(u32, entry.ctime_secs, .big);
+                                                try writer.writeInt(u32, entry.ctime_nsecs, .big);
+                                                try writer.writeInt(u32, entry.mtime_secs, .big);
+                                                try writer.writeInt(u32, entry.mtime_nsecs, .big);
+                                                try writer.writeInt(u32, entry.dev, .big);
+                                                try writer.writeInt(u32, entry.ino, .big);
+                                                try writer.writeInt(u32, @as(u32, @bitCast(entry.mode)), .big);
+                                                try writer.writeInt(u32, entry.uid, .big);
+                                                try writer.writeInt(u32, entry.gid, .big);
+                                                try writer.writeInt(u32, entry.file_size, .big);
+                                                try writer.writeAll(&entry.oid);
+                                                try writer.writeInt(u16, @as(u16, @bitCast(entry.flags)), .big);
+                                            }
+                                        }
+
+                                        const path_hash = hash.hashBuffer(path);
 
                                         if (try inner_ctx_self.root_cursor.readBytesAlloc(inner_ctx_self.allocator, void, &[_]xitdb.PathPart(void){
                                             .{ .hash_map_get = hash.hashBuffer("index") },
@@ -509,7 +526,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                             }
                                         }
 
-                                        _ = try inner_ctx_self.root_cursor.writeBytes(entry.path, .once, void, &[_]xitdb.PathPart(void){
+                                        _ = try inner_ctx_self.root_cursor.writeBytes(path, .once, void, &[_]xitdb.PathPart(void){
                                             .{ .hash_map_get = hash.hashBuffer("paths") },
                                             .hash_map_create,
                                             .{ .hash_map_get = path_hash },
