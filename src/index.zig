@@ -218,21 +218,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                         path: []const u8,
 
                         pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
-                            const InnerCtx = struct {
-                                core: *rp.Repo(repo_kind).Core,
-                                index: *Index(repo_kind),
-                                path: []const u8,
-                                root_cursor: *xitdb.Database(.file).Cursor,
-
-                                pub fn run(inner_ctx_self: @This(), inner_cursor: *xitdb.Database(.file).Cursor) !void {
-                                    try inner_ctx_self.index.addPathRecur(inner_ctx_self.core, .{ .root_cursor = inner_ctx_self.root_cursor, .cursor = inner_cursor }, inner_ctx_self.path);
-                                }
-                            };
-                            _ = try cursor.execute(InnerCtx, &[_]xitdb.PathPart(InnerCtx){
-                                .{ .hash_map_get = hash.hashBuffer("objects") },
-                                .hash_map_create,
-                                .{ .ctx = InnerCtx{ .core = ctx_self.core, .index = ctx_self.index, .path = ctx_self.path, .root_cursor = cursor } },
-                            });
+                            try ctx_self.index.addPathRecur(ctx_self.core, .{ .root_cursor = cursor }, ctx_self.path);
                         }
                     };
                     _ = try core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){

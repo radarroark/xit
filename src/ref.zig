@@ -340,7 +340,6 @@ pub fn UpdateOpts(comptime repo_kind: rp.RepoKind) type {
         },
         .xit => struct {
             root_cursor: *xitdb.Database(.file).Cursor,
-            cursor: *xitdb.Database(.file).Cursor,
         },
     };
 }
@@ -405,30 +404,7 @@ pub fn updateRecur(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
 
             // if it's a ref, update it recursively
             if (ref_name_maybe) |ref_name| {
-                const Ctx = struct {
-                    core: *rp.Repo(repo_kind).Core,
-                    allocator: std.mem.Allocator,
-                    file_name: []const u8,
-                    oid_hex: *const [hash.SHA1_HEX_LEN]u8,
-                    root_cursor: *xitdb.Database(.file).Cursor,
-
-                    pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
-                        try updateRecur(repo_kind, ctx_self.core, .{ .root_cursor = ctx_self.root_cursor, .cursor = cursor }, ctx_self.allocator, ctx_self.file_name, ctx_self.oid_hex);
-                    }
-                };
-                _ = try opts.root_cursor.execute(Ctx, &[_]xitdb.PathPart(Ctx){
-                    .{ .hash_map_get = hash.hashBuffer("refs") },
-                    .hash_map_create,
-                    .{ .hash_map_get = hash.hashBuffer("heads") },
-                    .hash_map_create,
-                    .{ .ctx = Ctx{
-                        .core = core,
-                        .allocator = allocator,
-                        .file_name = ref_name,
-                        .oid_hex = oid_hex,
-                        .root_cursor = opts.root_cursor,
-                    } },
-                });
+                try updateRecur(repo_kind, core, opts, allocator, ref_name, oid_hex);
             }
             // otherwise, update it with the oid
             else {
@@ -443,7 +419,11 @@ pub fn updateRecur(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
                     .hash_map_create,
                     .{ .hash_map_get = try hash.hexToHash(oid_hex) },
                 });
-                _ = try opts.cursor.execute(void, &[_]xitdb.PathPart(void){
+                _ = try opts.root_cursor.execute(void, &[_]xitdb.PathPart(void){
+                    .{ .hash_map_get = hash.hashBuffer("refs") },
+                    .hash_map_create,
+                    .{ .hash_map_get = hash.hashBuffer("heads") },
+                    .hash_map_create,
                     .{ .hash_map_get = file_name_hash },
                     .{ .value = .{ .bytes_ptr = oid_ptr } },
                 });

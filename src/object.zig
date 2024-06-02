@@ -71,7 +71,6 @@ pub fn ObjectOpts(comptime repo_kind: rp.RepoKind) type {
         },
         .xit => struct {
             root_cursor: *xitdb.Database(.file).Cursor,
-            cursor: *xitdb.Database(.file).Cursor,
         },
     };
 }
@@ -185,7 +184,9 @@ pub fn writeBlob(
                         }
                         try writer.finish();
 
-                        _ = try ctx_self.opts.cursor.execute(void, &[_]xitdb.PathPart(void){
+                        _ = try ctx_self.opts.root_cursor.execute(void, &[_]xitdb.PathPart(void){
+                            .{ .hash_map_get = hash.hashBuffer("objects") },
+                            .hash_map_create,
                             .{ .hash_map_get = try hash.hexToHash(&ctx_self.sha1_hex) },
                             .{ .value = .{ .bytes_ptr = writer.ptr_position } },
                         });
@@ -294,7 +295,9 @@ fn writeTree(comptime repo_kind: rp.RepoKind, opts: ObjectOpts(repo_kind), alloc
                     });
                 }
             };
-            _ = try opts.cursor.execute(Ctx, &[_]xitdb.PathPart(Ctx){
+            _ = try opts.root_cursor.execute(Ctx, &[_]xitdb.PathPart(Ctx){
+                .{ .hash_map_get = hash.hashBuffer("objects") },
+                .hash_map_create,
                 .{ .hash_map_get = hash.bytesToHash(sha1_bytes_buffer) },
                 .{ .ctx = Ctx{
                     .root_cursor = opts.root_cursor,
@@ -451,71 +454,46 @@ pub fn writeCommit(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
                 allocator: std.mem.Allocator,
 
                 pub fn run(ctx_self: *@This(), cursor: *xitdb.Database(.file).Cursor) !void {
-                    const ObjectsCtx = struct {
-                        root_cursor: *xitdb.Database(.file).Cursor,
-                        core: *rp.Repo(repo_kind).Core,
-                        index: idx.Index(repo_kind),
-                        parent_oids: []const [hash.SHA1_HEX_LEN]u8,
-                        message_maybe: ?[]const u8,
-                        commit_sha1_bytes: [hash.SHA1_BYTES_LEN]u8,
-                        allocator: std.mem.Allocator,
+                    // create tree and add index entries
+                    var tree = Tree.init(ctx_self.allocator);
+                    defer tree.deinit();
+                    try addIndexEntries(repo_kind, .{ .root_cursor = cursor }, ctx_self.allocator, &tree, ctx_self.index, "", ctx_self.index.root_children.keys());
 
-                        pub fn run(obj_ctx_self: *@This(), obj_cursor: *xitdb.Database(.file).Cursor) !void {
-                            // create tree and add index entries
-                            var tree = Tree.init(obj_ctx_self.allocator);
-                            defer tree.deinit();
-                            try addIndexEntries(repo_kind, .{ .root_cursor = obj_ctx_self.root_cursor, .cursor = obj_cursor }, obj_ctx_self.allocator, &tree, obj_ctx_self.index, "", obj_ctx_self.index.root_children.keys());
+                    // write and hash tree
+                    var tree_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+                    try writeTree(repo_kind, .{ .root_cursor = cursor }, ctx_self.allocator, &tree, &tree_sha1_bytes_buffer);
+                    const tree_sha1_hex = std.fmt.bytesToHex(tree_sha1_bytes_buffer, .lower);
 
-                            // write and hash tree
-                            var tree_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-                            try writeTree(repo_kind, .{ .root_cursor = obj_ctx_self.root_cursor, .cursor = obj_cursor }, obj_ctx_self.allocator, &tree, &tree_sha1_bytes_buffer);
-                            const tree_sha1_hex = std.fmt.bytesToHex(tree_sha1_bytes_buffer, .lower);
+                    // create commit contents
+                    const commit_contents = try createCommitContents(ctx_self.allocator, tree_sha1_hex, ctx_self.parent_oids, ctx_self.message_maybe);
+                    defer ctx_self.allocator.free(commit_contents);
 
-                            // create commit contents
-                            const commit_contents = try createCommitContents(obj_ctx_self.allocator, tree_sha1_hex, obj_ctx_self.parent_oids, obj_ctx_self.message_maybe);
-                            defer obj_ctx_self.allocator.free(commit_contents);
+                    // create commit
+                    const commit = try std.fmt.allocPrint(ctx_self.allocator, "commit {}\x00{s}", .{ commit_contents.len, commit_contents });
+                    defer ctx_self.allocator.free(commit);
 
-                            // create commit
-                            const commit = try std.fmt.allocPrint(obj_ctx_self.allocator, "commit {}\x00{s}", .{ commit_contents.len, commit_contents });
-                            defer obj_ctx_self.allocator.free(commit);
+                    // calc the sha1 of its contents
+                    try hash.sha1Buffer(commit, &ctx_self.commit_sha1_bytes);
 
-                            // calc the sha1 of its contents
-                            try hash.sha1Buffer(commit, &obj_ctx_self.commit_sha1_bytes);
-
-                            // write commit content
-                            const content_ptr = try obj_ctx_self.root_cursor.writeBytes(commit, .once, void, &[_]xitdb.PathPart(void){
-                                .{ .hash_map_get = hash.hashBuffer("object-values") },
-                                .hash_map_create,
-                                .{ .hash_map_get = hash.bytesToHash(&obj_ctx_self.commit_sha1_bytes) },
-                            });
-
-                            // write commit
-                            _ = try obj_cursor.execute(void, &[_]xitdb.PathPart(void){
-                                .{ .hash_map_get = hash.bytesToHash(&obj_ctx_self.commit_sha1_bytes) },
-                                .{ .value = .{ .bytes_ptr = content_ptr } },
-                            });
-                        }
-                    };
-                    var obj_ctx = ObjectsCtx{
-                        .root_cursor = cursor,
-                        .core = ctx_self.core,
-                        .index = ctx_self.index,
-                        .parent_oids = ctx_self.parent_oids,
-                        .message_maybe = ctx_self.message_maybe,
-                        .commit_sha1_bytes = undefined,
-                        .allocator = ctx_self.allocator,
-                    };
-                    _ = try cursor.execute(*ObjectsCtx, &[_]xitdb.PathPart(*ObjectsCtx){
-                        .{ .hash_map_get = hash.hashBuffer("objects") },
+                    // write commit content
+                    const content_ptr = try cursor.writeBytes(commit, .once, void, &[_]xitdb.PathPart(void){
+                        .{ .hash_map_get = hash.hashBuffer("object-values") },
                         .hash_map_create,
-                        .{ .ctx = &obj_ctx },
+                        .{ .hash_map_get = hash.bytesToHash(&ctx_self.commit_sha1_bytes) },
                     });
 
-                    ctx_self.commit_sha1_bytes = obj_ctx.commit_sha1_bytes;
-                    const commit_sha1_hex = std.fmt.bytesToHex(obj_ctx.commit_sha1_bytes, .lower);
+                    // write commit
+                    _ = try cursor.execute(void, &[_]xitdb.PathPart(void){
+                        .{ .hash_map_get = hash.hashBuffer("objects") },
+                        .hash_map_create,
+                        .{ .hash_map_get = hash.bytesToHash(&ctx_self.commit_sha1_bytes) },
+                        .{ .value = .{ .bytes_ptr = content_ptr } },
+                    });
+
+                    const commit_sha1_hex = std.fmt.bytesToHex(ctx_self.commit_sha1_bytes, .lower);
 
                     // write commit id to HEAD
-                    try ref.updateRecur(repo_kind, ctx_self.core, .{ .root_cursor = cursor, .cursor = cursor }, ctx_self.allocator, "HEAD", &commit_sha1_hex);
+                    try ref.updateRecur(repo_kind, ctx_self.core, .{ .root_cursor = cursor }, ctx_self.allocator, "HEAD", &commit_sha1_hex);
                 }
             };
             var ctx = Ctx{

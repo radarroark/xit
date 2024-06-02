@@ -83,22 +83,7 @@ fn writeBlobWithConflict(
                 oid: *[hash.SHA1_BYTES_LEN]u8,
 
                 pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
-                    const InnerCtx = struct {
-                        core: *rp.Repo(repo_kind).Core,
-                        allocator: std.mem.Allocator,
-                        path: []const u8,
-                        oid: *[hash.SHA1_BYTES_LEN]u8,
-                        root_cursor: *xitdb.Database(.file).Cursor,
-
-                        pub fn run(inner_ctx_self: @This(), inner_cursor: *xitdb.Database(.file).Cursor) !void {
-                            try obj.writeBlob(repo_kind, inner_ctx_self.core, .{ .root_cursor = inner_ctx_self.root_cursor, .cursor = inner_cursor }, inner_ctx_self.allocator, inner_ctx_self.path, inner_ctx_self.oid);
-                        }
-                    };
-                    _ = try cursor.execute(InnerCtx, &[_]xitdb.PathPart(InnerCtx){
-                        .{ .hash_map_get = hash.hashBuffer("objects") },
-                        .hash_map_create,
-                        .{ .ctx = InnerCtx{ .core = ctx_self.core, .allocator = ctx_self.allocator, .path = ctx_self.path, .root_cursor = cursor, .oid = ctx_self.oid } },
-                    });
+                    try obj.writeBlob(repo_kind, ctx_self.core, .{ .root_cursor = cursor }, ctx_self.allocator, ctx_self.path, ctx_self.oid);
                 }
             };
             _ = try core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
@@ -281,7 +266,7 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
                     oid: *const [hash.SHA1_HEX_LEN]u8,
 
                     pub fn run(ctx_self: *@This(), cursor: *xitdb.Database(.file).Cursor) !void {
-                        try ref.updateRecur(repo_kind, ctx_self.core, .{ .root_cursor = cursor, .cursor = cursor }, ctx_self.allocator, "HEAD", ctx_self.oid);
+                        try ref.updateRecur(repo_kind, ctx_self.core, .{ .root_cursor = cursor }, ctx_self.allocator, "HEAD", ctx_self.oid);
                     }
                 };
                 var ctx = Ctx{
