@@ -52,7 +52,7 @@ pub const Tree = struct {
     }
 
     pub fn addBlobEntry(self: *Tree, mode: io.Mode, name: []const u8, oid: []const u8) !void {
-        const entry = try std.fmt.allocPrint(self.allocator, "{s} {s}\x00{s}", .{ mode.to_str(), name, oid });
+        const entry = try std.fmt.allocPrint(self.allocator, "{s} {s}\x00{s}", .{ mode.toStr(), name, oid });
         errdefer self.allocator.free(entry);
         try self.entries.put(name, entry);
     }
@@ -81,7 +81,14 @@ pub fn ObjectOpts(comptime repo_kind: rp.RepoKind) type {
 /// on windows files are never marked as executable because
 /// apparently i can't even check if they are...
 /// maybe i'll figure that out later.
-pub fn writeBlob(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, opts: ObjectOpts(repo_kind), allocator: std.mem.Allocator, path: []const u8, sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8) !void {
+pub fn writeBlob(
+    comptime repo_kind: rp.RepoKind,
+    core: *rp.Repo(repo_kind).Core,
+    opts: ObjectOpts(repo_kind),
+    allocator: std.mem.Allocator,
+    path: []const u8,
+    sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8,
+) !void {
     // get absolute path of the file
     var path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
     const file_path = try core.repo_dir.realpath(path, &path_buffer);
@@ -542,7 +549,7 @@ pub const TreeEntry = struct {
     mode: io.Mode,
 
     pub fn eql(self: TreeEntry, other: TreeEntry) bool {
-        return std.mem.eql(u8, &self.oid, &other.oid) and io.modeEquals(self.mode, other.mode);
+        return std.mem.eql(u8, &self.oid, &other.oid) and self.mode.eql(other.mode);
     }
 };
 
@@ -760,7 +767,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
 
 pub fn TreeDiff(comptime repo_kind: rp.RepoKind) type {
     return struct {
-        changes: std.StringHashMap(Change),
+        changes: std.StringArrayHashMap(Change),
         arena: std.heap.ArenaAllocator,
 
         pub const Change = struct {
@@ -770,7 +777,7 @@ pub fn TreeDiff(comptime repo_kind: rp.RepoKind) type {
 
         pub fn init(allocator: std.mem.Allocator) TreeDiff(repo_kind) {
             return TreeDiff(repo_kind){
-                .changes = std.StringHashMap(Change).init(allocator),
+                .changes = std.StringArrayHashMap(Change).init(allocator),
                 .arena = std.heap.ArenaAllocator.init(allocator),
             };
         }

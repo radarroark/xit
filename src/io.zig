@@ -51,8 +51,12 @@ pub const Mode = packed struct(u32) {
     object_type: ObjectType,
     padding: u16 = 0,
 
-    pub fn to_str(self: Mode) []const u8 {
+    pub fn toStr(self: Mode) []const u8 {
         return if (self.unix_permission == 0o755) "100755" else "100644";
+    }
+
+    pub fn eql(self: Mode, m2: Mode) bool {
+        return @as(u32, @bitCast(self)) == @as(u32, @bitCast(m2));
     }
 };
 
@@ -65,10 +69,6 @@ pub fn getMode(meta: std.fs.File.Metadata) Mode {
         .unix_permission = if (is_executable) 0o755 else 0o644,
         .object_type = .regular_file,
     };
-}
-
-pub fn modeEquals(m1: Mode, m2: Mode) bool {
-    return @as(u32, @bitCast(m1)) == @as(u32, @bitCast(m2));
 }
 
 pub const Times = struct {

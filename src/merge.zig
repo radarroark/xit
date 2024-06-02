@@ -8,6 +8,109 @@ const chk = @import("./checkout.zig");
 const io = @import("./io.zig");
 const rp = @import("./repo.zig");
 
+fn ThreeWayMergeResult(comptime T: type) type {
+    return struct {
+        ok: bool,
+        value: T,
+    };
+}
+
+fn threeWayMerge(comptime T: type, common_maybe: ?T, current_maybe: ?T, source_maybe: ?T) ?ThreeWayMergeResult(T) {
+    if (current_maybe) |current| {
+        if (source_maybe) |source| {
+            if (current.eql(source)) {
+                return .{
+                    .ok = true,
+                    .value = current,
+                };
+            } else if (common_maybe) |common| {
+                if (common.eql(current)) {
+                    return .{
+                        .ok = true,
+                        .value = source,
+                    };
+                } else if (common.eql(source)) {
+                    return .{
+                        .ok = true,
+                        .value = current,
+                    };
+                }
+            }
+
+            return null;
+        } else {
+            return .{
+                .ok = false,
+                .value = current,
+            };
+        }
+    } else {
+        if (source_maybe) |source| {
+            return .{
+                .ok = true,
+                .value = source,
+            };
+        } else {
+            // should never get here, one of source or current should be non-null
+            return null;
+        }
+    }
+}
+
+fn writeBlobWithConflict(
+    comptime repo_kind: rp.RepoKind,
+    core: *rp.Repo(repo_kind).Core,
+    allocator: std.mem.Allocator,
+    path: []const u8,
+) ![hash.SHA1_BYTES_LEN]u8 {
+    // TODO: actually write the blob with conflict markers correctly
+    switch (repo_kind) {
+        .git => {
+            var objects_dir = try core.git_dir.openDir("objects", .{});
+            defer objects_dir.close();
+
+            // write the object
+            var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+            try obj.writeBlob(repo_kind, core, .{ .objects_dir = objects_dir }, allocator, path, &oid);
+            return oid;
+        },
+        .xit => {
+            var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+            const Ctx = struct {
+                core: *rp.Repo(repo_kind).Core,
+                allocator: std.mem.Allocator,
+                path: []const u8,
+                oid: *[hash.SHA1_BYTES_LEN]u8,
+
+                pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
+                    const InnerCtx = struct {
+                        core: *rp.Repo(repo_kind).Core,
+                        allocator: std.mem.Allocator,
+                        path: []const u8,
+                        oid: *[hash.SHA1_BYTES_LEN]u8,
+                        root_cursor: *xitdb.Database(.file).Cursor,
+
+                        pub fn run(inner_ctx_self: @This(), inner_cursor: *xitdb.Database(.file).Cursor) !void {
+                            try obj.writeBlob(repo_kind, inner_ctx_self.core, .{ .root_cursor = inner_ctx_self.root_cursor, .cursor = inner_cursor }, inner_ctx_self.allocator, inner_ctx_self.path, inner_ctx_self.oid);
+                        }
+                    };
+                    _ = try cursor.execute(InnerCtx, &[_]xitdb.PathPart(InnerCtx){
+                        .{ .hash_map_get = hash.hashBuffer("objects") },
+                        .hash_map_create,
+                        .{ .ctx = InnerCtx{ .core = ctx_self.core, .allocator = ctx_self.allocator, .path = ctx_self.path, .root_cursor = cursor, .oid = ctx_self.oid } },
+                    });
+                }
+            };
+            _ = try core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
+                .{ .array_list_get = .append_copy },
+                .hash_map_create,
+                .{ .ctx = Ctx{ .core = core, .allocator = allocator, .path = path, .oid = &oid } },
+            });
+            return oid;
+        },
+    }
+}
+
 pub const MergeResultData = union(enum) {
     success: struct {
         oid: [hash.SHA1_HEX_LEN]u8,
@@ -34,10 +137,104 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
         return .{ .data = .nothing };
     }
 
-    // compare the commits
-    var tree_diff = obj.TreeDiff(repo_kind).init(allocator);
-    defer tree_diff.deinit();
-    try tree_diff.compare(core, common_oid, source_oid, null);
+    // diff the common ancestor with the current oid
+    var current_diff = obj.TreeDiff(repo_kind).init(allocator);
+    defer current_diff.deinit();
+    try current_diff.compare(core, common_oid, current_oid, null);
+
+    // diff the common ancestor with the source oid
+    var source_diff = obj.TreeDiff(repo_kind).init(allocator);
+    defer source_diff.deinit();
+    try source_diff.compare(core, common_oid, source_oid, null);
+
+    // build a diff that can be applied cleanly,
+    // and separately keep track of conflicts
+    var clean_diff = obj.TreeDiff(repo_kind).init(allocator);
+    defer clean_diff.deinit();
+    var conflicts = std.ArrayList(obj.TreeEntry).init(allocator);
+    defer conflicts.deinit();
+    for (source_diff.changes.keys(), source_diff.changes.values()) |path, source_change| {
+        if (current_diff.changes.get(path)) |current_change| {
+            const Oid = struct {
+                data: [hash.SHA1_BYTES_LEN]u8,
+
+                fn eql(self: @This(), other: @This()) bool {
+                    return std.mem.eql(u8, &self.data, &other.data);
+                }
+            };
+
+            const common_entry_maybe = source_change.old;
+
+            if (source_change.new) |source_entry| {
+                if (current_change.new) |current_entry| {
+                    if (source_entry.eql(current_entry)) {
+                        // the source and current changes are the same,
+                        // so no need to do anything
+                        continue;
+                    }
+                }
+
+                const oid_result_maybe = threeWayMerge(
+                    Oid,
+                    if (common_entry_maybe) |old| .{ .data = old.oid } else null,
+                    if (current_change.new) |new| .{ .data = new.oid } else null,
+                    .{ .data = source_entry.oid },
+                );
+                const mode_result_maybe = threeWayMerge(
+                    io.Mode,
+                    if (common_entry_maybe) |old| old.mode else null,
+                    if (current_change.new) |new| new.mode else null,
+                    source_entry.mode,
+                );
+
+                const oid_result: ThreeWayMergeResult(Oid) = oid_result_maybe orelse .{
+                    .ok = false,
+                    .value = .{ .data = try writeBlobWithConflict(repo_kind, core, allocator, path) },
+                };
+                const mode_result: ThreeWayMergeResult(io.Mode) = mode_result_maybe orelse .{
+                    .ok = false,
+                    .value = if (current_change.new) |current_entry| current_entry.mode else source_entry.mode,
+                };
+                try clean_diff.changes.put(path, .{
+                    .old = current_change.new,
+                    .new = .{ .oid = oid_result.value.data, .mode = mode_result.value },
+                });
+            } else {
+                if (current_change.new) |current_entry| {
+                    const oid_result_maybe = threeWayMerge(
+                        Oid,
+                        if (common_entry_maybe) |old| .{ .data = old.oid } else null,
+                        .{ .data = current_entry.oid },
+                        null,
+                    );
+                    const mode_result_maybe = threeWayMerge(
+                        io.Mode,
+                        if (common_entry_maybe) |old| old.mode else null,
+                        current_entry.mode,
+                        null,
+                    );
+
+                    const oid_result: ThreeWayMergeResult(Oid) = oid_result_maybe orelse .{
+                        .ok = false,
+                        .value = .{ .data = try writeBlobWithConflict(repo_kind, core, allocator, path) },
+                    };
+                    const mode_result: ThreeWayMergeResult(io.Mode) = mode_result_maybe orelse .{ .ok = false, .value = current_entry.mode };
+                    try clean_diff.changes.put(path, .{
+                        .old = current_change.new,
+                        .new = .{ .oid = oid_result.value.data, .mode = mode_result.value },
+                    });
+                } else {
+                    // deleted in source and current change,
+                    // so no need to do anything
+                    continue;
+                }
+            }
+        } else {
+            // the current diff doesn't touch this path, so there
+            // can't be a conflict
+            try clean_diff.changes.put(path, source_change);
+        }
+    }
 
     switch (repo_kind) {
         .git => {
@@ -50,7 +247,7 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
             defer index.deinit();
 
             // update the working tree
-            try chk.migrate(repo_kind, core, allocator, tree_diff, &index, null);
+            try chk.migrate(repo_kind, core, allocator, clean_diff, &index, null);
 
             // update the index
             try index.write(allocator, .{ .lock_file = lock.lock_file });
@@ -64,7 +261,7 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
             defer index.deinit();
 
             // update the working tree
-            try chk.migrate(repo_kind, core, allocator, tree_diff, &index, null);
+            try chk.migrate(repo_kind, core, allocator, clean_diff, &index, null);
 
             // update the index
             try index.write(allocator, .{ .db = &core.db });

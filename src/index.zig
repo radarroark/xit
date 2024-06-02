@@ -562,7 +562,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
 }
 
 pub fn indexDiffersFromWorkspace(comptime repo_kind: rp.RepoKind, entry: Index(repo_kind).Entry, file: std.fs.File, meta: std.fs.File.Metadata) !bool {
-    if (meta.size() != entry.file_size or !io.modeEquals(io.getMode(meta), entry.mode)) {
+    if (meta.size() != entry.file_size or !io.getMode(meta).eql(entry.mode)) {
         return true;
     } else {
         const times = io.getTimes(meta);

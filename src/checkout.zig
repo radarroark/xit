@@ -281,7 +281,7 @@ pub const TreeToIndexChange = enum {
 fn compareTreeToIndex(comptime repo_kind: rp.RepoKind, item_maybe: ?obj.TreeEntry, entry_maybe: ?idx.Index(repo_kind).Entry) TreeToIndexChange {
     if (item_maybe) |item| {
         if (entry_maybe) |entry| {
-            if (!io.modeEquals(entry.mode, item.mode) or !std.mem.eql(u8, &entry.oid, &item.oid)) {
+            if (!entry.mode.eql(item.mode) or !std.mem.eql(u8, &entry.oid, &item.oid)) {
                 return .modified;
             } else {
                 return .none;

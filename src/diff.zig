@@ -376,17 +376,17 @@ pub fn Diff(comptime repo_kind: rp.RepoKind) type {
             if (a.mode) |a_mode| {
                 if (b.mode) |b_mode| {
                     if (a_mode.unix_permission != b_mode.unix_permission) {
-                        try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "old mode {s}", .{a_mode.to_str()}));
-                        try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "new mode {s}", .{b_mode.to_str()}));
+                        try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "old mode {s}", .{a_mode.toStr()}));
+                        try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "new mode {s}", .{b_mode.toStr()}));
                     } else {
                         mode_maybe = a_mode;
                     }
                 } else {
-                    try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "deleted file mode {s}", .{a_mode.to_str()}));
+                    try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "deleted file mode {s}", .{a_mode.toStr()}));
                 }
             } else {
                 if (b.mode) |b_mode| {
-                    try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "new file mode {s}", .{b_mode.to_str()}));
+                    try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "new file mode {s}", .{b_mode.toStr()}));
                 }
             }
 
@@ -405,7 +405,7 @@ pub fn Diff(comptime repo_kind: rp.RepoKind) type {
                     try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "index {s}..{s} {s}", .{
                         a.oid_hex[0..7],
                         b.oid_hex[0..7],
-                        mode.to_str(),
+                        mode.toStr(),
                     }));
                 } else {
                     try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "index {s}..{s}", .{

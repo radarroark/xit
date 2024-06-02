@@ -73,7 +73,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind) type {
             for (index.entries.values()) |*index_entries_for_path| {
                 const index_entry = index_entries_for_path[0] orelse return error.NullEntry;
                 if (head_tree.entries.get(index_entry.path)) |head_entry| {
-                    if (!io.modeEquals(index_entry.mode, head_entry.mode) or !std.mem.eql(u8, &index_entry.oid, &head_entry.oid)) {
+                    if (!index_entry.mode.eql(head_entry.mode) or !std.mem.eql(u8, &index_entry.oid, &head_entry.oid)) {
                         try index_modified.append(index_entry.path);
                     }
                 } else {
