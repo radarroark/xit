@@ -68,20 +68,28 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             git_dir: std.fs.Dir,
         },
         .xit => struct {
-            xit_file: std.fs.File,
+            xit_dir: std.fs.Dir,
+            db_file: std.fs.File,
         },
     };
     var state: State = switch (repo_kind) {
         .git => .{
             .git_dir = try repo_dir.openDir(".git", .{}),
         },
-        .xit => .{
-            .xit_file = try repo_dir.openFile(".xit", .{ .mode = .read_write }),
+        .xit => blk: {
+            const xit_dir = try repo_dir.openDir(".xit", .{});
+            break :blk .{
+                .xit_dir = xit_dir,
+                .db_file = try xit_dir.openFile("db", .{ .mode = .read_write }),
+            };
         },
     };
     defer switch (repo_kind) {
         .git => state.git_dir.close(),
-        .xit => state.xit_file.close(),
+        .xit => {
+            state.db_file.close();
+            state.xit_dir.close();
+        },
     };
 
     // change the cwd
@@ -94,7 +102,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
 
     // make sure we can get status before first commit
     {
-        var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+        var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var status = try repo.status();
         defer status.deinit();
@@ -169,7 +177,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             .git => {
                 // check that the commit object was created
                 {
-                    var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+                    var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                     defer repo.deinit();
                     const head_file_buffer = try ref.readHead(repo_kind, &repo.core);
                     var objects_dir = try state.git_dir.openDir("objects", .{});
@@ -218,7 +226,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             },
             .xit => {
                 // check that the commit object was created
-                var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+                var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
                 const head_file_buffer = try ref.readHead(repo_kind, &repo.core);
                 var db_buffer = [_]u8{0} ** 1024;
@@ -234,7 +242,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
 
     // get HEAD contents
     const commit1 = blk: {
-        var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+        var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         break :blk try ref.readHead(repo_kind, &repo.core);
     };
@@ -292,7 +300,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
 
         // workspace diff
         {
-            var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+            var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
             var diff_iter = try repo.diff(.workspace);
             defer diff_iter.deinit();
@@ -375,7 +383,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
 
         // index diff
         {
-            var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+            var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
             var diff_iter = try repo.diff(.index);
             defer diff_iter.deinit();
@@ -426,7 +434,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             .git => {
                 // check that the commit object was created
                 {
-                    var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+                    var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                     defer repo.deinit();
                     const head_file_buffer = try ref.readHead(repo_kind, &repo.core);
                     var objects_dir = try state.git_dir.openDir("objects", .{});
@@ -455,7 +463,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             },
             .xit => {
                 // check that the commit object was created
-                var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+                var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
                 const head_file_buffer = try ref.readHead(repo_kind, &repo.core);
                 var db_buffer = [_]u8{0} ** 1024;
@@ -471,7 +479,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
 
     // get HEAD contents
     const commit2 = blk: {
-        var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+        var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         break :blk try ref.readHead(repo_kind, &repo.core);
     };
@@ -492,7 +500,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
 
             // check out commit1 and make sure the conflict is found
             {
-                var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+                var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
                 var result = try chk.switch_head(repo_kind, &repo.core, allocator, &commit1);
                 defer result.deinit();
@@ -520,7 +528,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
 
             // check out commit1 and make sure the conflict is found
             {
-                var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+                var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
                 var result = try chk.switch_head(repo_kind, &repo.core, allocator, &commit1);
                 defer result.deinit();
@@ -543,7 +551,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
 
             // check out commit1 and make sure the conflict is found
             {
-                var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+                var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
                 var result = try chk.switch_head(repo_kind, &repo.core, allocator, &commit1);
                 defer result.deinit();
@@ -572,7 +580,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
 
             // check out commit1 and make sure the conflict is found
             {
-                var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+                var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
                 var result = try chk.switch_head(repo_kind, &repo.core, allocator, &commit1);
                 defer result.deinit();
@@ -640,7 +648,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
 
         // read index
         {
-            var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+            var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
             var index = try idx.Index(repo_kind).init(allocator, &repo.core);
             defer index.deinit();
@@ -667,7 +675,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             .xit => {
                 // read the index in xitdb
                 // TODO: use more efficient way to get map size
-                var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+                var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
                 var count: u32 = 0;
                 if (try repo.core.db.rootCursor().readCursor(void, &[_]xitdb.PathPart(void){
@@ -699,7 +707,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
 
         // read index
         {
-            var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+            var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
             var index = try idx.Index(repo_kind).init(allocator, &repo.core);
             defer index.deinit();
@@ -725,7 +733,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             .xit => {
                 // read the index in xitdb
                 // TODO: use more efficient way to get map size
-                var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+                var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
                 var count: u32 = 0;
                 if (try repo.core.db.rootCursor().readCursor(void, &[_]xitdb.PathPart(void){
@@ -795,7 +803,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         // workspace changes
         {
             // get status
-            var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+            var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
             var status = try repo.status();
             defer status.deinit();
@@ -862,7 +870,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             try main.xitMain(repo_kind, allocator, &args);
 
             // get status
-            var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+            var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
             var status = try repo.status();
             defer status.deinit();
@@ -899,7 +907,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     {
         // there are two modified and one deleted files remaining
         {
-            var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+            var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
             var status = try repo.status();
             defer status.deinit();
@@ -945,7 +953,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
 
         // there are no modified or deleted files remaining
         {
-            var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+            var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
             var status = try repo.status();
             defer status.deinit();
@@ -962,7 +970,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
 
     // parse objects
     {
-        var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+        var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         // read commit
         var commit_object = try obj.Object(repo_kind).init(allocator, &repo.core, commit2);
@@ -989,7 +997,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
 
     // check the refs
     {
-        var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+        var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         try expectEqual(commit2, try ref.readHead(repo_kind, &repo.core));
         try expectEqual(commit2, try ref.resolve(repo_kind, &repo.core, "stuff"));
@@ -997,7 +1005,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
 
     // list all branches
     {
-        var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+        var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var ref_list = try ref.RefList.init(repo_kind, &repo.core, allocator, "heads");
         defer ref_list.deinit();
@@ -1006,7 +1014,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
 
     // get the current branch
     {
-        var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+        var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, &repo.core, allocator, "HEAD");
         defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
@@ -1027,7 +1035,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
 
     // can't delete current branch
     {
-        var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+        var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         try expectEqual(error.CannotDeleteCurrentBranch, bch.delete(repo_kind, &repo.core, allocator, "stuff"));
     }
@@ -1074,7 +1082,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
 
     // get HEAD contents
     const commit4_stuff = blk: {
-        var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+        var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         break :blk try ref.readHead(repo_kind, &repo.core);
     };
@@ -1093,7 +1101,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
 
     // list all branches
     {
-        var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+        var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var ref_list = try ref.RefList.init(repo_kind, &repo.core, allocator, "heads");
         defer ref_list.deinit();
@@ -1110,7 +1118,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
 
     // delete the branch
     {
-        var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+        var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         try bch.delete(repo_kind, &repo.core, allocator, "a/b/c");
     }
@@ -1150,21 +1158,21 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
 
     // get HEAD contents
     const commit3 = blk: {
-        var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+        var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         break :blk try ref.readHead(repo_kind, &repo.core);
     };
 
     // make sure the most recent branch name points to the most recent commit
     {
-        var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+        var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         try expectEqual(commit3, try ref.resolve(repo_kind, &repo.core, "master"));
     }
 
     // log
     {
-        var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+        var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var iter = try repo.log(commit3);
         defer iter.deinit();
@@ -1186,7 +1194,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
 
     // common ancestor
     {
-        var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+        var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
 
         const ancestor_commit = try obj.commonAncestor(repo_kind, allocator, &repo.core, &commit3, &commit4_stuff);
@@ -1221,7 +1229,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
 
     // get HEAD contents
     const commit4 = blk: {
-        var repo = (try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir })).?;
+        var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         break :blk try ref.readHead(repo_kind, &repo.core);
     };
