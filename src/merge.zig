@@ -15,21 +15,29 @@ fn ThreeWayMergeResult(comptime T: type) type {
     };
 }
 
+fn eql(comptime T: type, a: T, b: T) bool {
+    if (T == [hash.SHA1_BYTES_LEN]u8) {
+        return std.mem.eql(u8, &a, &b);
+    } else {
+        return a.eql(b);
+    }
+}
+
 fn threeWayMerge(comptime T: type, common_maybe: ?T, current_maybe: ?T, source_maybe: ?T) ?ThreeWayMergeResult(T) {
     if (current_maybe) |current| {
         if (source_maybe) |source| {
-            if (current.eql(source)) {
+            if (eql(T, current, source)) {
                 return .{
                     .ok = true,
                     .value = current,
                 };
             } else if (common_maybe) |common| {
-                if (common.eql(current)) {
+                if (eql(T, common, current)) {
                     return .{
                         .ok = true,
                         .value = source,
                     };
-                } else if (common.eql(source)) {
+                } else if (eql(T, common, source)) {
                     return .{
                         .ok = true,
                         .value = current,
@@ -140,14 +148,6 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
     defer conflicts.deinit();
     for (source_diff.changes.keys(), source_diff.changes.values()) |path, source_change| {
         if (current_diff.changes.get(path)) |current_change| {
-            const Oid = struct {
-                data: [hash.SHA1_BYTES_LEN]u8,
-
-                fn eql(self: @This(), other: @This()) bool {
-                    return std.mem.eql(u8, &self.data, &other.data);
-                }
-            };
-
             const common_entry_maybe = source_change.old;
 
             if (source_change.new) |source_entry| {
@@ -160,10 +160,10 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
                 }
 
                 const oid_result_maybe = threeWayMerge(
-                    Oid,
-                    if (common_entry_maybe) |old| .{ .data = old.oid } else null,
-                    if (current_change.new) |new| .{ .data = new.oid } else null,
-                    .{ .data = source_entry.oid },
+                    [hash.SHA1_BYTES_LEN]u8,
+                    if (common_entry_maybe) |old| old.oid else null,
+                    if (current_change.new) |new| new.oid else null,
+                    source_entry.oid,
                 );
                 const mode_result_maybe = threeWayMerge(
                     io.Mode,
@@ -172,9 +172,9 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
                     source_entry.mode,
                 );
 
-                const oid_result: ThreeWayMergeResult(Oid) = oid_result_maybe orelse .{
+                const oid_result: ThreeWayMergeResult([hash.SHA1_BYTES_LEN]u8) = oid_result_maybe orelse .{
                     .ok = false,
-                    .value = .{ .data = try writeBlobWithConflict(repo_kind, core, allocator, path) },
+                    .value = try writeBlobWithConflict(repo_kind, core, allocator, path),
                 };
                 const mode_result: ThreeWayMergeResult(io.Mode) = mode_result_maybe orelse .{
                     .ok = false,
@@ -182,14 +182,14 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
                 };
                 try clean_diff.changes.put(path, .{
                     .old = current_change.new,
-                    .new = .{ .oid = oid_result.value.data, .mode = mode_result.value },
+                    .new = .{ .oid = oid_result.value, .mode = mode_result.value },
                 });
             } else {
                 if (current_change.new) |current_entry| {
                     const oid_result_maybe = threeWayMerge(
-                        Oid,
-                        if (common_entry_maybe) |old| .{ .data = old.oid } else null,
-                        .{ .data = current_entry.oid },
+                        [hash.SHA1_BYTES_LEN]u8,
+                        if (common_entry_maybe) |old| old.oid else null,
+                        current_entry.oid,
                         null,
                     );
                     const mode_result_maybe = threeWayMerge(
@@ -199,14 +199,14 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
                         null,
                     );
 
-                    const oid_result: ThreeWayMergeResult(Oid) = oid_result_maybe orelse .{
+                    const oid_result: ThreeWayMergeResult([hash.SHA1_BYTES_LEN]u8) = oid_result_maybe orelse .{
                         .ok = false,
-                        .value = .{ .data = try writeBlobWithConflict(repo_kind, core, allocator, path) },
+                        .value = try writeBlobWithConflict(repo_kind, core, allocator, path),
                     };
                     const mode_result: ThreeWayMergeResult(io.Mode) = mode_result_maybe orelse .{ .ok = false, .value = current_entry.mode };
                     try clean_diff.changes.put(path, .{
                         .old = current_change.new,
-                        .new = .{ .oid = oid_result.value.data, .mode = mode_result.value },
+                        .new = .{ .oid = oid_result.value, .mode = mode_result.value },
                     });
                 } else {
                     // deleted in source and current change,
