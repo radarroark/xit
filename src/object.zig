@@ -543,6 +543,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
         arena: std.heap.ArenaAllocator,
         content: ObjectContent,
         oid: [hash.SHA1_HEX_LEN]u8,
+        len: u64,
 
         pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core, oid: [hash.SHA1_HEX_LEN]u8) !Object(repo_kind) {
             var state = blk: {
@@ -620,10 +621,10 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
             const object_kind = try state.reader.readUntilDelimiterAlloc(allocator, ' ', MAX_FILE_READ_BYTES);
             defer allocator.free(object_kind);
 
-            // read the length (currently unused)
-            const object_len = try state.reader.readUntilDelimiterAlloc(allocator, 0, MAX_FILE_READ_BYTES);
-            defer allocator.free(object_len);
-            _ = try std.fmt.parseInt(usize, object_len, 10);
+            // read the length
+            const object_len_str = try state.reader.readUntilDelimiterAlloc(allocator, 0, MAX_FILE_READ_BYTES);
+            defer allocator.free(object_len_str);
+            const object_len = try std.fmt.parseInt(usize, object_len_str, 10);
 
             if (std.mem.eql(u8, "blob", object_kind)) {
                 return Object(repo_kind){
@@ -631,6 +632,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                     .arena = std.heap.ArenaAllocator.init(allocator),
                     .content = ObjectContent{ .blob = {} },
                     .oid = oid,
+                    .len = object_len,
                 };
             } else if (std.mem.eql(u8, "tree", object_kind)) {
                 var arena = std.heap.ArenaAllocator.init(allocator);
@@ -656,6 +658,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                     .arena = arena,
                     .content = ObjectContent{ .tree = .{ .entries = entries } },
                     .oid = oid,
+                    .len = object_len,
                 };
             } else if (std.mem.eql(u8, "commit", object_kind)) {
                 // read the content kind
@@ -719,6 +722,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                     .arena = arena,
                     .content = content,
                     .oid = oid,
+                    .len = object_len,
                 };
             } else {
                 return error.InvalidObjectKind;
