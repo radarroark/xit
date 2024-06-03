@@ -65,27 +65,29 @@ fn writeBlobWithConflict(
     comptime repo_kind: rp.RepoKind,
     core: *rp.Repo(repo_kind).Core,
     allocator: std.mem.Allocator,
-    path: []const u8,
+    current_oid: [hash.SHA1_BYTES_LEN]u8,
+    source_oid: [hash.SHA1_BYTES_LEN]u8,
+    source_name: []const u8,
 ) ![hash.SHA1_BYTES_LEN]u8 {
-    // TODO: actually write the blob with conflict markers correctly
+    const current_name = try ref.readHeadName(repo_kind, core, allocator);
+    defer allocator.free(current_name);
+
+    // TODO: don't read it all into memory
+    var current_buf = [_]u8{0} ** 1024;
+    const current_content = try chk.objectToBuffer(repo_kind, core, std.fmt.bytesToHex(current_oid, .lower), &current_buf);
+    var source_buf = [_]u8{0} ** 1024;
+    const source_content = try chk.objectToBuffer(repo_kind, core, std.fmt.bytesToHex(source_oid, .lower), &source_buf);
+    const content = try std.fmt.allocPrint(allocator, "<<<<<<< {s}\n{s}\n=======\n{s}\n>>>>>>> {s}", .{ current_name, current_content, source_content, source_name });
+    defer allocator.free(content);
+    var stream = std.io.fixedBufferStream(content);
+
     switch (repo_kind) {
         .git => {
             var objects_dir = try core.git_dir.openDir("objects", .{});
             defer objects_dir.close();
 
-            var file = try core.repo_dir.openFile(path, .{ .mode = .read_only });
-            defer file.close();
-
-            // get file size
-            const meta = try file.metadata();
-            if (meta.kind() != std.fs.File.Kind.file) {
-                return error.NotAFile;
-            }
-            const file_size = meta.size();
-
-            // write the object
             var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-            try obj.writeBlob(repo_kind, .{ .objects_dir = objects_dir }, allocator, file, file_size, std.fs.File.Reader, &oid);
+            try obj.writeBlob(repo_kind, .{ .objects_dir = objects_dir }, allocator, &stream, content.len, std.io.FixedBufferStream([]u8).Reader, &oid);
             return oid;
         },
         .xit => {
@@ -93,27 +95,18 @@ fn writeBlobWithConflict(
             const Ctx = struct {
                 core: *rp.Repo(repo_kind).Core,
                 allocator: std.mem.Allocator,
-                path: []const u8,
                 oid: *[hash.SHA1_BYTES_LEN]u8,
+                stream: *std.io.FixedBufferStream([]u8),
+                content: []const u8,
 
                 pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
-                    var file = try ctx_self.core.repo_dir.openFile(ctx_self.path, .{ .mode = .read_only });
-                    defer file.close();
-
-                    // get file size
-                    const meta = try file.metadata();
-                    if (meta.kind() != std.fs.File.Kind.file) {
-                        return error.NotAFile;
-                    }
-                    const file_size = meta.size();
-
-                    try obj.writeBlob(repo_kind, .{ .root_cursor = cursor }, ctx_self.allocator, file, file_size, std.fs.File.Reader, ctx_self.oid);
+                    try obj.writeBlob(repo_kind, .{ .root_cursor = cursor }, ctx_self.allocator, ctx_self.stream, ctx_self.content.len, std.io.FixedBufferStream([]u8).Reader, ctx_self.oid);
                 }
             };
             _ = try core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
                 .{ .array_list_get = .append_copy },
                 .hash_map_create,
-                .{ .ctx = Ctx{ .core = core, .allocator = allocator, .path = path, .oid = &oid } },
+                .{ .ctx = Ctx{ .core = core, .allocator = allocator, .oid = &oid, .stream = &stream, .content = content } },
             });
             return oid;
         },
@@ -180,7 +173,7 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
                         source_entry.oid,
                     ) orelse ThreeWayMergeResult([hash.SHA1_BYTES_LEN]u8){
                         .ok = false,
-                        .value = try writeBlobWithConflict(repo_kind, core, allocator, path),
+                        .value = try writeBlobWithConflict(repo_kind, core, allocator, current_entry.oid, source_entry.oid, source),
                     };
                     const mode_result = threeWayMergeMode(
                         if (common_entry_maybe) |old| old.mode else null,

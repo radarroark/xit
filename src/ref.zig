@@ -230,6 +230,21 @@ pub fn readHead(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core)
     }
 }
 
+pub fn readHeadName(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator) ![]u8 {
+    var buffer = [_]u8{0} ** MAX_READ_BYTES;
+    const content = try read(repo_kind, core, "HEAD", &buffer);
+    if (std.mem.startsWith(u8, content, REF_START_STR) and content.len > REF_START_STR.len) {
+        const ref_name = content[REF_START_STR.len..];
+        const buf = try allocator.alloc(u8, ref_name.len);
+        @memcpy(buf, ref_name);
+        return buf;
+    } else {
+        const buf = try allocator.alloc(u8, content.len);
+        @memcpy(buf, content);
+        return buf;
+    }
+}
+
 pub fn writeHead(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, target: []const u8, oid_hex_maybe: ?[hash.SHA1_HEX_LEN]u8) !void {
     switch (repo_kind) {
         .git => {

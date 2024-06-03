@@ -153,7 +153,6 @@ pub fn writeBlob(
 
             const Ctx = struct {
                 opts: ObjectOpts(repo_kind),
-                file: std.fs.File,
                 reader: *const FileReaderType,
                 sha1_hex: [hash.SHA1_HEX_LEN]u8,
                 header: []const u8,
@@ -185,7 +184,7 @@ pub fn writeBlob(
                 .{ .hash_map_get = hash.hashBuffer("file-values") },
                 .hash_map_create,
                 .{ .hash_map_get = file_hash },
-                .{ .ctx = Ctx{ .opts = opts, .file = file, .reader = &reader, .sha1_hex = sha1_hex, .header = header } },
+                .{ .ctx = Ctx{ .opts = opts, .reader = &reader, .sha1_hex = sha1_hex, .header = header } },
             });
         },
     }
