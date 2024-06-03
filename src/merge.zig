@@ -8,59 +8,6 @@ const chk = @import("./checkout.zig");
 const io = @import("./io.zig");
 const rp = @import("./repo.zig");
 
-fn ThreeWayMergeResult(comptime T: type) type {
-    return struct {
-        ok: bool,
-        value: T,
-    };
-}
-
-fn threeWayMergeOid(common_maybe: ?[hash.SHA1_BYTES_LEN]u8, current: [hash.SHA1_BYTES_LEN]u8, source: [hash.SHA1_BYTES_LEN]u8) ?ThreeWayMergeResult([hash.SHA1_BYTES_LEN]u8) {
-    if (std.mem.eql(u8, &current, &source)) {
-        return .{
-            .ok = true,
-            .value = current,
-        };
-    } else if (common_maybe) |common| {
-        if (std.mem.eql(u8, &common, &current)) {
-            return .{
-                .ok = true,
-                .value = source,
-            };
-        } else if (std.mem.eql(u8, &common, &source)) {
-            return .{
-                .ok = true,
-                .value = current,
-            };
-        }
-    }
-
-    return null;
-}
-
-fn threeWayMergeMode(common_maybe: ?io.Mode, current: io.Mode, source: io.Mode) ?ThreeWayMergeResult(io.Mode) {
-    if (current.eql(source)) {
-        return .{
-            .ok = true,
-            .value = current,
-        };
-    } else if (common_maybe) |common| {
-        if (common.eql(current)) {
-            return .{
-                .ok = true,
-                .value = source,
-            };
-        } else if (common.eql(source)) {
-            return .{
-                .ok = true,
-                .value = current,
-            };
-        }
-    }
-
-    return null;
-}
-
 fn writeBlobWithConflict(
     comptime repo_kind: rp.RepoKind,
     core: *rp.Repo(repo_kind).Core,
@@ -153,64 +100,106 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
     // and separately keep track of conflicts
     var clean_diff = obj.TreeDiff(repo_kind).init(allocator);
     defer clean_diff.deinit();
-    var conflicts = std.ArrayList(obj.TreeEntry).init(allocator);
+    const Conflict = struct {
+        common: ?obj.TreeEntry,
+        current: ?obj.TreeEntry,
+        source: ?obj.TreeEntry,
+    };
+    var conflicts = std.StringArrayHashMap(Conflict).init(allocator);
     defer conflicts.deinit();
     for (source_diff.changes.keys(), source_diff.changes.values()) |path, source_change| {
         if (current_diff.changes.get(path)) |current_change| {
             const common_entry_maybe = source_change.old;
 
-            if (source_change.new) |source_entry| {
-                if (current_change.new) |current_entry| {
-                    if (source_entry.eql(current_entry)) {
-                        // the source and current changes are the same,
+            if (current_change.new) |current_entry| {
+                if (source_change.new) |source_entry| {
+                    if (current_entry.eql(source_entry)) {
+                        // the current and source changes are the same,
                         // so no need to do anything
                         continue;
                     }
 
-                    const oid_result = threeWayMergeOid(
-                        if (common_entry_maybe) |old| old.oid else null,
-                        current_entry.oid,
-                        source_entry.oid,
-                    ) orelse ThreeWayMergeResult([hash.SHA1_BYTES_LEN]u8){
-                        .ok = false,
-                        .value = try writeBlobWithConflict(repo_kind, core, allocator, current_entry.oid, source_entry.oid, source),
-                    };
-                    const mode_result = threeWayMergeMode(
-                        if (common_entry_maybe) |old| old.mode else null,
-                        current_entry.mode,
-                        source_entry.mode,
-                    ) orelse ThreeWayMergeResult(io.Mode){
-                        .ok = false,
-                        .value = current_entry.mode,
+                    // three-way merge of the oids
+                    const oid_maybe = blk: {
+                        if (std.mem.eql(u8, &current_entry.oid, &source_entry.oid)) {
+                            break :blk current_entry.oid;
+                        } else if (common_entry_maybe) |common_entry| {
+                            if (std.mem.eql(u8, &common_entry.oid, &current_entry.oid)) {
+                                break :blk source_entry.oid;
+                            } else if (std.mem.eql(u8, &common_entry.oid, &source_entry.oid)) {
+                                break :blk current_entry.oid;
+                            }
+                        }
+                        break :blk null;
                     };
 
+                    // three-way merge of the modes
+                    const mode_maybe = blk: {
+                        if (current_entry.mode.eql(source_entry.mode)) {
+                            break :blk current_entry.mode;
+                        } else if (common_entry_maybe) |common_entry| {
+                            if (common_entry.mode.eql(current_entry.mode)) {
+                                break :blk source_entry.mode;
+                            } else if (common_entry.mode.eql(source_entry.mode)) {
+                                break :blk current_entry.mode;
+                            }
+                        }
+                        break :blk null;
+                    };
+
+                    // add the change that should be made to the working tree
+                    const oid = oid_maybe orelse try writeBlobWithConflict(repo_kind, core, allocator, current_entry.oid, source_entry.oid, source);
+                    const mode = mode_maybe orelse current_entry.mode;
                     try clean_diff.changes.put(path, .{
                         .old = current_change.new,
-                        .new = .{ .oid = oid_result.value, .mode = mode_result.value },
+                        .new = .{ .oid = oid, .mode = mode },
                     });
+
+                    // record the conflict if there is one
+                    if (oid_maybe == null or mode_maybe == null) {
+                        try conflicts.put(path, .{
+                            .common = common_entry_maybe,
+                            .current = current_entry,
+                            .source = source_entry,
+                        });
+                    }
                 } else {
-                    // current is null so we just use the source oid and mode
-                    try clean_diff.changes.put(path, .{
-                        .old = current_change.new,
-                        .new = .{ .oid = source_entry.oid, .mode = source_entry.mode },
-                    });
-                }
-            } else {
-                if (current_change.new) |current_entry| {
-                    // source is null so we just use the current oid and mode
+                    // add the change that should be made to the working tree
+                    // (source is null so we just use the current oid and mode)
                     try clean_diff.changes.put(path, .{
                         .old = current_change.new,
                         .new = .{ .oid = current_entry.oid, .mode = current_entry.mode },
                     });
+                    // record the conflict
+                    try conflicts.put(path, .{
+                        .common = common_entry_maybe,
+                        .current = current_entry,
+                        .source = null,
+                    });
+                }
+            } else {
+                if (source_change.new) |source_entry| {
+                    // add the change that should be made to the working tree
+                    // (current is null so we just use the source oid and mode)
+                    try clean_diff.changes.put(path, .{
+                        .old = current_change.new,
+                        .new = .{ .oid = source_entry.oid, .mode = source_entry.mode },
+                    });
+                    // record the conflict
+                    try conflicts.put(path, .{
+                        .common = common_entry_maybe,
+                        .current = null,
+                        .source = source_entry,
+                    });
                 } else {
-                    // deleted in source and current change,
+                    // deleted in current and source change,
                     // so no need to do anything
                     continue;
                 }
             }
         } else {
-            // the current diff doesn't touch this path, so there
-            // can't be a conflict
+            // add the change that should be made to the working tree
+            // (no conflict because the current diff doesn't touch this path)
             try clean_diff.changes.put(path, source_change);
         }
     }
