@@ -213,7 +213,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                     defer allocator.free(header);
 
                     var sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-                    try hash.sha1File(readme, header, &sha1_bytes_buffer);
+                    try hash.sha1Reader(readme.reader(), header, &sha1_bytes_buffer);
                     const sha1_hex = std.fmt.bytesToHex(&sha1_bytes_buffer, .lower);
 
                     var oid: c.git_oid = undefined;

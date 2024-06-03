@@ -15,54 +15,50 @@ fn ThreeWayMergeResult(comptime T: type) type {
     };
 }
 
-fn eql(comptime T: type, a: T, b: T) bool {
-    if (T == [hash.SHA1_BYTES_LEN]u8) {
-        return std.mem.eql(u8, &a, &b);
-    } else {
-        return a.eql(b);
-    }
-}
-
-fn threeWayMerge(comptime T: type, common_maybe: ?T, current_maybe: ?T, source_maybe: ?T) ?ThreeWayMergeResult(T) {
-    if (current_maybe) |current| {
-        if (source_maybe) |source| {
-            if (eql(T, current, source)) {
-                return .{
-                    .ok = true,
-                    .value = current,
-                };
-            } else if (common_maybe) |common| {
-                if (eql(T, common, current)) {
-                    return .{
-                        .ok = true,
-                        .value = source,
-                    };
-                } else if (eql(T, common, source)) {
-                    return .{
-                        .ok = true,
-                        .value = current,
-                    };
-                }
-            }
-
-            return null;
-        } else {
-            return .{
-                .ok = false,
-                .value = current,
-            };
-        }
-    } else {
-        if (source_maybe) |source| {
+fn threeWayMergeOid(common_maybe: ?[hash.SHA1_BYTES_LEN]u8, current: [hash.SHA1_BYTES_LEN]u8, source: [hash.SHA1_BYTES_LEN]u8) ?ThreeWayMergeResult([hash.SHA1_BYTES_LEN]u8) {
+    if (std.mem.eql(u8, &current, &source)) {
+        return .{
+            .ok = true,
+            .value = current,
+        };
+    } else if (common_maybe) |common| {
+        if (std.mem.eql(u8, &common, &current)) {
             return .{
                 .ok = true,
                 .value = source,
             };
-        } else {
-            // should never get here, one of source or current should be non-null
-            return null;
+        } else if (std.mem.eql(u8, &common, &source)) {
+            return .{
+                .ok = true,
+                .value = current,
+            };
         }
     }
+
+    return null;
+}
+
+fn threeWayMergeMode(common_maybe: ?io.Mode, current: io.Mode, source: io.Mode) ?ThreeWayMergeResult(io.Mode) {
+    if (current.eql(source)) {
+        return .{
+            .ok = true,
+            .value = current,
+        };
+    } else if (common_maybe) |common| {
+        if (common.eql(current)) {
+            return .{
+                .ok = true,
+                .value = source,
+            };
+        } else if (common.eql(source)) {
+            return .{
+                .ok = true,
+                .value = current,
+            };
+        }
+    }
+
+    return null;
 }
 
 fn writeBlobWithConflict(
@@ -77,9 +73,19 @@ fn writeBlobWithConflict(
             var objects_dir = try core.git_dir.openDir("objects", .{});
             defer objects_dir.close();
 
+            var file = try core.repo_dir.openFile(path, .{ .mode = .read_only });
+            defer file.close();
+
+            // get file size
+            const meta = try file.metadata();
+            if (meta.kind() != std.fs.File.Kind.file) {
+                return error.NotAFile;
+            }
+            const file_size = meta.size();
+
             // write the object
             var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-            try obj.writeBlob(repo_kind, core, .{ .objects_dir = objects_dir }, allocator, path, &oid);
+            try obj.writeBlob(repo_kind, .{ .objects_dir = objects_dir }, allocator, file, file_size, std.fs.File.Reader, &oid);
             return oid;
         },
         .xit => {
@@ -91,7 +97,17 @@ fn writeBlobWithConflict(
                 oid: *[hash.SHA1_BYTES_LEN]u8,
 
                 pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
-                    try obj.writeBlob(repo_kind, ctx_self.core, .{ .root_cursor = cursor }, ctx_self.allocator, ctx_self.path, ctx_self.oid);
+                    var file = try ctx_self.core.repo_dir.openFile(ctx_self.path, .{ .mode = .read_only });
+                    defer file.close();
+
+                    // get file size
+                    const meta = try file.metadata();
+                    if (meta.kind() != std.fs.File.Kind.file) {
+                        return error.NotAFile;
+                    }
+                    const file_size = meta.size();
+
+                    try obj.writeBlob(repo_kind, .{ .root_cursor = cursor }, ctx_self.allocator, file, file_size, std.fs.File.Reader, ctx_self.oid);
                 }
             };
             _ = try core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
@@ -157,56 +173,41 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
                         // so no need to do anything
                         continue;
                     }
-                }
 
-                const oid_result_maybe = threeWayMerge(
-                    [hash.SHA1_BYTES_LEN]u8,
-                    if (common_entry_maybe) |old| old.oid else null,
-                    if (current_change.new) |new| new.oid else null,
-                    source_entry.oid,
-                );
-                const mode_result_maybe = threeWayMerge(
-                    io.Mode,
-                    if (common_entry_maybe) |old| old.mode else null,
-                    if (current_change.new) |new| new.mode else null,
-                    source_entry.mode,
-                );
-
-                const oid_result: ThreeWayMergeResult([hash.SHA1_BYTES_LEN]u8) = oid_result_maybe orelse .{
-                    .ok = false,
-                    .value = try writeBlobWithConflict(repo_kind, core, allocator, path),
-                };
-                const mode_result: ThreeWayMergeResult(io.Mode) = mode_result_maybe orelse .{
-                    .ok = false,
-                    .value = if (current_change.new) |current_entry| current_entry.mode else source_entry.mode,
-                };
-                try clean_diff.changes.put(path, .{
-                    .old = current_change.new,
-                    .new = .{ .oid = oid_result.value, .mode = mode_result.value },
-                });
-            } else {
-                if (current_change.new) |current_entry| {
-                    const oid_result_maybe = threeWayMerge(
-                        [hash.SHA1_BYTES_LEN]u8,
+                    const oid_result = threeWayMergeOid(
                         if (common_entry_maybe) |old| old.oid else null,
                         current_entry.oid,
-                        null,
-                    );
-                    const mode_result_maybe = threeWayMerge(
-                        io.Mode,
-                        if (common_entry_maybe) |old| old.mode else null,
-                        current_entry.mode,
-                        null,
-                    );
-
-                    const oid_result: ThreeWayMergeResult([hash.SHA1_BYTES_LEN]u8) = oid_result_maybe orelse .{
+                        source_entry.oid,
+                    ) orelse ThreeWayMergeResult([hash.SHA1_BYTES_LEN]u8){
                         .ok = false,
                         .value = try writeBlobWithConflict(repo_kind, core, allocator, path),
                     };
-                    const mode_result: ThreeWayMergeResult(io.Mode) = mode_result_maybe orelse .{ .ok = false, .value = current_entry.mode };
+                    const mode_result = threeWayMergeMode(
+                        if (common_entry_maybe) |old| old.mode else null,
+                        current_entry.mode,
+                        source_entry.mode,
+                    ) orelse ThreeWayMergeResult(io.Mode){
+                        .ok = false,
+                        .value = current_entry.mode,
+                    };
+
                     try clean_diff.changes.put(path, .{
                         .old = current_change.new,
                         .new = .{ .oid = oid_result.value, .mode = mode_result.value },
+                    });
+                } else {
+                    // current is null so we just use the source oid and mode
+                    try clean_diff.changes.put(path, .{
+                        .old = current_change.new,
+                        .new = .{ .oid = source_entry.oid, .mode = source_entry.mode },
+                    });
+                }
+            } else {
+                if (current_change.new) |current_entry| {
+                    // source is null so we just use the current oid and mode
+                    try clean_diff.changes.put(path, .{
+                        .old = current_change.new,
+                        .new = .{ .oid = current_entry.oid, .mode = current_entry.mode },
                     });
                 } else {
                     // deleted in source and current change,

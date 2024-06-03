@@ -82,32 +82,24 @@ pub fn ObjectOpts(comptime repo_kind: rp.RepoKind) type {
 /// maybe i'll figure that out later.
 pub fn writeBlob(
     comptime repo_kind: rp.RepoKind,
-    core: *rp.Repo(repo_kind).Core,
     opts: ObjectOpts(repo_kind),
     allocator: std.mem.Allocator,
-    path: []const u8,
+    file: anytype,
+    file_size: u64,
+    comptime FileReaderType: type,
     sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8,
 ) !void {
-    // get absolute path of the file
-    var path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
-    const file_path = try core.repo_dir.realpath(path, &path_buffer);
-    var file = try std.fs.openFileAbsolute(file_path, .{ .mode = std.fs.File.OpenMode.read_only });
-    defer file.close();
-
-    // exit early if it's not a file
-    const meta = try file.metadata();
-    if (meta.kind() != std.fs.File.Kind.file) {
-        return;
-    }
-
     // create blob header
-    const file_size = meta.size();
     const header = try std.fmt.allocPrint(allocator, "blob {}\x00", .{file_size});
     defer allocator.free(header);
 
     // calc the sha1 of its contents
-    try hash.sha1File(file, header, sha1_bytes_buffer);
+    const reader = file.reader();
+    try hash.sha1Reader(reader, header, sha1_bytes_buffer);
     const sha1_hex = std.fmt.bytesToHex(sha1_bytes_buffer, .lower);
+
+    // reset seek pos so we can reuse the reader for copying
+    try file.seekTo(0);
 
     switch (repo_kind) {
         .git => {
@@ -136,10 +128,8 @@ pub fn writeBlob(
 
             // copy file into temp file
             var read_buffer = [_]u8{0} ** MAX_FILE_READ_BYTES;
-            var offset: u64 = 0;
             while (true) {
-                const size = try file.pread(&read_buffer, offset);
-                offset += size;
+                const size = try reader.read(&read_buffer);
                 if (size == 0) {
                     break;
                 }
@@ -164,19 +154,17 @@ pub fn writeBlob(
             const Ctx = struct {
                 opts: ObjectOpts(repo_kind),
                 file: std.fs.File,
+                reader: *const FileReaderType,
                 sha1_hex: [hash.SHA1_HEX_LEN]u8,
                 header: []const u8,
 
                 pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
                     if (cursor.pointer() == null) {
                         var writer = try cursor.writer(void, &[_]xitdb.PathPart(void){});
-
                         try writer.writeAll(ctx_self.header);
                         var read_buffer = [_]u8{0} ** MAX_FILE_READ_BYTES;
-                        var offset: u64 = 0;
                         while (true) {
-                            const size = try ctx_self.file.pread(&read_buffer, offset);
-                            offset += size;
+                            const size = try ctx_self.reader.read(&read_buffer);
                             if (size == 0) {
                                 break;
                             }
@@ -197,7 +185,7 @@ pub fn writeBlob(
                 .{ .hash_map_get = hash.hashBuffer("file-values") },
                 .hash_map_create,
                 .{ .hash_map_get = file_hash },
-                .{ .ctx = Ctx{ .opts = opts, .file = file, .sha1_hex = sha1_hex, .header = header } },
+                .{ .ctx = Ctx{ .opts = opts, .file = file, .reader = &reader, .sha1_hex = sha1_hex, .header = header } },
             });
         },
     }

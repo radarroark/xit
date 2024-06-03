@@ -261,7 +261,7 @@ pub fn Target(comptime repo_kind: rp.RepoKind) type {
             const file_size = (try file.metadata()).size();
             const header = try std.fmt.allocPrint(allocator, "blob {}\x00", .{file_size});
             defer allocator.free(header);
-            try hash.sha1File(file, header, &target.oid);
+            try hash.sha1Reader(file.reader(), header, &target.oid);
             target.oid_hex = std.fmt.bytesToHex(&target.oid, .lower);
 
             return target;

@@ -251,7 +251,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                 std.fs.File.Kind.file => {
                     // write the object
                     var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-                    try obj.writeBlob(repo_kind, core, opts, self.allocator, path, &oid);
+                    try obj.writeBlob(repo_kind, opts, self.allocator, file, meta.size(), std.fs.File.Reader, &oid);
                     // add the entry
                     const times = io.getTimes(meta);
                     const stat = try io.getStat(file);
@@ -563,7 +563,7 @@ pub fn indexDiffersFromWorkspace(comptime repo_kind: rp.RepoKind, entry: Index(r
             const header = try std.fmt.bufPrint(&header_buffer, "blob {}\x00", .{file_size});
 
             var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-            try hash.sha1File(file, header, &oid);
+            try hash.sha1Reader(file.reader(), header, &oid);
             if (!std.mem.eql(u8, &entry.oid, &oid)) {
                 return true;
             }
