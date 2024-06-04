@@ -442,9 +442,18 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     // start the checksum
                     var h = std.crypto.hash.Sha1.init(.{});
 
+                    // calculate entry count
+                    var entry_count: u32 = 0;
+                    for (self.entries.values()) |*entries_for_path| {
+                        for (entries_for_path) |entry_maybe| {
+                            if (entry_maybe != null) {
+                                entry_count += 1;
+                            }
+                        }
+                    }
+
                     // write the header
                     const version: u32 = 2;
-                    const entry_count: u32 = @intCast(self.entries.count());
                     const header = try std.fmt.allocPrint(allocator, "DIRC{s}{s}", .{
                         std.mem.asBytes(&std.mem.nativeToBig(u32, version)),
                         std.mem.asBytes(&std.mem.nativeToBig(u32, entry_count)),
