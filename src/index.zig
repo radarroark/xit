@@ -381,15 +381,6 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
             }
         }
 
-        pub fn hasConflict(self: Index(repo_kind)) bool {
-            for (self.entries.values()) |*entries_for_path| {
-                if (entries_for_path[1] != null or entries_for_path[2] != null or entries_for_path[3] != null) {
-                    return true;
-                }
-            }
-            return false;
-        }
-
         pub fn removePath(self: *Index(repo_kind), path: []const u8) void {
             _ = self.entries.orderedRemove(path);
             var parent_path_maybe = std.fs.path.dirname(path);

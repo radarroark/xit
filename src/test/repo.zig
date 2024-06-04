@@ -49,6 +49,9 @@ fn execActions(
     for (actions) |action| {
         switch (action) {
             .add_file => {
+                if (std.fs.path.dirname(action.add_file.path)) |parent_path| {
+                    try repo.core.repo_dir.makePath(parent_path);
+                }
                 const file = try repo.core.repo_dir.createFile(action.add_file.path, .{ .truncate = true });
                 defer file.close();
                 try file.writeAll(action.add_file.content);
@@ -257,32 +260,103 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
-    var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } });
-    defer repo.deinit();
+    // same file conflict
+    {
+        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "same-file-conflict" } });
+        defer repo.deinit();
 
-    const CommitName = enum { a, b, c, d };
+        const CommitName = enum { a, b, c, d };
 
-    // A --- B --- M [master]
-    //  \         /
-    //   \       /
-    //    `---- C [foo]
-    const actions = &[_]Action(CommitName){
-        .{ .add_file = .{ .path = "f.txt", .content = "1" } },
-        .{ .commit = .{ .name = .a } },
-        .{ .create_branch = .{ .name = "foo" } },
-        .{ .add_file = .{ .path = "f.txt", .content = "2" } },
-        .{ .commit = .{ .name = .b } },
-        .{ .switch_head = .{ .target = "foo" } },
-        .{ .add_file = .{ .path = "f.txt", .content = "3" } },
-        .{ .commit = .{ .name = .d } },
-        .{ .switch_head = .{ .target = "master" } },
-        .{ .merge = .{ .name = .c, .source = "foo" } },
-    };
+        // A --- B --- D [master]
+        //  \         /
+        //   \       /
+        //    `---- C [foo]
+        const actions = &[_]Action(CommitName){
+            .{ .add_file = .{ .path = "f.txt", .content = "1" } },
+            .{ .commit = .{ .name = .a } },
+            .{ .create_branch = .{ .name = "foo" } },
+            .{ .add_file = .{ .path = "f.txt", .content = "2" } },
+            .{ .commit = .{ .name = .b } },
+            .{ .switch_head = .{ .target = "foo" } },
+            .{ .add_file = .{ .path = "f.txt", .content = "3" } },
+            .{ .commit = .{ .name = .d } },
+            .{ .switch_head = .{ .target = "master" } },
+            .{ .merge = .{ .name = .c, .source = "foo" } },
+        };
 
-    var commit_name_to_oid = std.AutoArrayHashMap(CommitName, [hash.SHA1_HEX_LEN]u8).init(allocator);
-    defer commit_name_to_oid.deinit();
+        var commit_name_to_oid = std.AutoArrayHashMap(CommitName, [hash.SHA1_HEX_LEN]u8).init(allocator);
+        defer commit_name_to_oid.deinit();
 
-    try execActions(repo_kind, &repo, CommitName, actions, &commit_name_to_oid);
+        try execActions(repo_kind, &repo, CommitName, actions, &commit_name_to_oid);
+    }
+
+    // file/dir conflict (current has file, source has dir)
+    {
+        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "current-file-source-dir-conflict" } });
+        defer repo.deinit();
+
+        const CommitName = enum { a, b, c, d };
+
+        // A --- B --- D [master]
+        //  \         /
+        //   \       /
+        //    `---- C [foo]
+        const actions = &[_]Action(CommitName){
+            .{ .add_file = .{ .path = "hi.txt", .content = "hi" } },
+            .{ .commit = .{ .name = .a } },
+            .{ .create_branch = .{ .name = "foo" } },
+            .{ .add_file = .{ .path = "f.txt", .content = "hi" } },
+            .{ .commit = .{ .name = .b } },
+            .{ .switch_head = .{ .target = "foo" } },
+            .{ .add_file = .{ .path = "f.txt/g.txt", .content = "hi" } },
+            .{ .commit = .{ .name = .c } },
+            .{ .switch_head = .{ .target = "master" } },
+            .{ .merge = .{ .name = .d, .source = "foo" } },
+        };
+
+        var commit_name_to_oid = std.AutoArrayHashMap(CommitName, [hash.SHA1_HEX_LEN]u8).init(allocator);
+        defer commit_name_to_oid.deinit();
+
+        try execActions(repo_kind, &repo, CommitName, actions, &commit_name_to_oid);
+
+        // make sure renamed file exists
+        var renamed_file = try repo.core.repo_dir.openFile("f.txt~master", .{});
+        defer renamed_file.close();
+    }
+
+    // file/dir conflict (source has file, current has dir)
+    {
+        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "source-file-current-dir-conflict" } });
+        defer repo.deinit();
+
+        const CommitName = enum { a, b, c, d };
+
+        // A --- B --- D [master]
+        //  \         /
+        //   \       /
+        //    `---- C [foo]
+        const actions = &[_]Action(CommitName){
+            .{ .add_file = .{ .path = "hi.txt", .content = "hi" } },
+            .{ .commit = .{ .name = .a } },
+            .{ .create_branch = .{ .name = "foo" } },
+            .{ .add_file = .{ .path = "f.txt/g.txt", .content = "hi" } },
+            .{ .commit = .{ .name = .b } },
+            .{ .switch_head = .{ .target = "foo" } },
+            .{ .add_file = .{ .path = "f.txt", .content = "hi" } },
+            .{ .commit = .{ .name = .c } },
+            .{ .switch_head = .{ .target = "master" } },
+            .{ .merge = .{ .name = .d, .source = "foo" } },
+        };
+
+        var commit_name_to_oid = std.AutoArrayHashMap(CommitName, [hash.SHA1_HEX_LEN]u8).init(allocator);
+        defer commit_name_to_oid.deinit();
+
+        try execActions(repo_kind, &repo, CommitName, actions, &commit_name_to_oid);
+
+        // make sure renamed file exists
+        var renamed_file = try repo.core.repo_dir.openFile("f.txt~foo", .{});
+        defer renamed_file.close();
+    }
 }
 
 test "merge conflict" {

@@ -64,7 +64,7 @@ pub const SwitchResult = struct {
     }
 };
 
-fn objectToFile(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, path: []const u8, tree_entry: obj.TreeEntry) !void {
+pub fn objectToFile(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, path: []const u8, tree_entry: obj.TreeEntry) !void {
     const oid_hex = std.fmt.bytesToHex(tree_entry.oid, .lower);
 
     switch (tree_entry.mode.object_type) {
