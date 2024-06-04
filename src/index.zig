@@ -54,7 +54,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
         pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core) !Index(repo_kind) {
             var index = Index(repo_kind){
                 .version = 2,
-                .entries = std.StringArrayHashMap([4]?Index(repo_kind).Entry).init(allocator),
+                .entries = std.StringArrayHashMap([4]?Entry).init(allocator),
                 .dir_to_paths = std.StringArrayHashMap(std.StringArrayHashMap(void)).init(allocator),
                 .dir_to_children = std.StringArrayHashMap(std.StringArrayHashMap(void)).init(allocator),
                 .root_children = std.StringArrayHashMap(void).init(allocator),
@@ -92,7 +92,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     while (entry_count > 0) {
                         entry_count -= 1;
                         const start_pos = try reader.context.getPos();
-                        var entry = Index(repo_kind).Entry{
+                        var entry = Entry{
                             .ctime_secs = try reader.readInt(u32, .big),
                             .ctime_nsecs = try reader.readInt(u32, .big),
                             .mtime_secs = try reader.readInt(u32, .big),
@@ -255,7 +255,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     // add the entry
                     const times = io.getTimes(meta);
                     const stat = try io.getStat(file);
-                    const entry = Index(repo_kind).Entry{
+                    const entry = Entry{
                         .ctime_secs = times.ctime_secs,
                         .ctime_nsecs = times.ctime_nsecs,
                         .mtime_secs = times.mtime_secs,
@@ -344,6 +344,50 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
             }
 
             try self.root_children.put(child, {});
+        }
+
+        pub fn addConflictEntries(self: *Index(repo_kind), path: []const u8, tree_entries: [3]?obj.TreeEntry) !void {
+            // if there is an existing stage 0 entry, remove it
+            if (self.entries.getEntry(path)) |map_entry| {
+                map_entry.value_ptr[0] = null;
+            }
+            // add the conflict entries
+            const owned_path = try std.fmt.allocPrint(self.arena.allocator(), "{s}", .{path});
+            for (tree_entries, 1..) |tree_entry_maybe, stage| {
+                if (tree_entry_maybe) |tree_entry| {
+                    const entry = Entry{
+                        .ctime_secs = 0,
+                        .ctime_nsecs = 0,
+                        .mtime_secs = 0,
+                        .mtime_nsecs = 0,
+                        .dev = 0,
+                        .ino = 0,
+                        .mode = tree_entry.mode,
+                        .uid = 0,
+                        .gid = 0,
+                        .file_size = 0,
+                        .oid = tree_entry.oid,
+                        .flags = .{
+                            .name_length = @intCast(owned_path.len),
+                            .stage = @intCast(stage),
+                            .extended = false,
+                            .assume_valid = false,
+                        },
+                        .extended_flags = null,
+                        .path = owned_path,
+                    };
+                    try self.addEntry(entry);
+                }
+            }
+        }
+
+        pub fn hasConflict(self: Index(repo_kind)) bool {
+            for (self.entries.values()) |*entries_for_path| {
+                if (entries_for_path[1] != null or entries_for_path[2] != null or entries_for_path[3] != null) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         pub fn removePath(self: *Index(repo_kind), path: []const u8) void {

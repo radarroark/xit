@@ -100,12 +100,7 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
     // and separately keep track of conflicts
     var clean_diff = obj.TreeDiff(repo_kind).init(allocator);
     defer clean_diff.deinit();
-    const Conflict = struct {
-        common: ?obj.TreeEntry,
-        current: ?obj.TreeEntry,
-        source: ?obj.TreeEntry,
-    };
-    var conflicts = std.StringArrayHashMap(Conflict).init(allocator);
+    var conflicts = std.StringArrayHashMap([3]?obj.TreeEntry).init(allocator);
     defer conflicts.deinit();
     for (source_diff.changes.keys(), source_diff.changes.values()) |path, source_change| {
         if (current_diff.changes.get(path)) |current_change| {
@@ -158,9 +153,9 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
                     // record the conflict if there is one
                     if (oid_maybe == null or mode_maybe == null) {
                         try conflicts.put(path, .{
-                            .common = common_entry_maybe,
-                            .current = current_entry,
-                            .source = source_entry,
+                            common_entry_maybe,
+                            current_entry,
+                            source_entry,
                         });
                     }
                 } else {
@@ -172,9 +167,9 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
                     });
                     // record the conflict
                     try conflicts.put(path, .{
-                        .common = common_entry_maybe,
-                        .current = current_entry,
-                        .source = null,
+                        common_entry_maybe,
+                        current_entry,
+                        null,
                     });
                 }
             } else {
@@ -187,9 +182,9 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
                     });
                     // record the conflict
                     try conflicts.put(path, .{
-                        .common = common_entry_maybe,
-                        .current = null,
-                        .source = source_entry,
+                        common_entry_maybe,
+                        null,
+                        source_entry,
                     });
                 } else {
                     // deleted in current and source change,
@@ -214,25 +209,55 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
             var index = try idx.Index(repo_kind).init(allocator, core);
             defer index.deinit();
 
+            // throw error if there is already a conflict
+            if (index.hasConflict()) {
+                return .{ .data = .conflict };
+            }
+
             // update the working tree
             try chk.migrate(repo_kind, core, allocator, clean_diff, &index, null);
+
+            // add conflicts to index
+            for (conflicts.keys(), conflicts.values()) |path, conflict_entries| {
+                try index.addConflictEntries(path, conflict_entries);
+            }
 
             // update the index
             try index.write(allocator, .{ .lock_file = lock.lock_file });
 
             // finish lock
             lock.success = true;
+
+            // exit early if there is a conflict
+            if (index.hasConflict()) {
+                return .{ .data = .conflict };
+            }
         },
         .xit => {
             // read index
             var index = try idx.Index(repo_kind).init(allocator, core);
             defer index.deinit();
 
+            // throw error if there is already a conflict
+            if (index.hasConflict()) {
+                return .{ .data = .conflict };
+            }
+
             // update the working tree
             try chk.migrate(repo_kind, core, allocator, clean_diff, &index, null);
 
+            // add conflicts to index
+            for (conflicts.keys(), conflicts.values()) |path, conflict_entries| {
+                try index.addConflictEntries(path, conflict_entries);
+            }
+
             // update the index
             try index.write(allocator, .{ .db = &core.db });
+
+            // exit early if there is a conflict
+            if (index.hasConflict()) {
+                return .{ .data = .conflict };
+            }
         },
     }
 
