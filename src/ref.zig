@@ -245,6 +245,7 @@ pub fn readHeadName(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).C
     }
 }
 
+/// makes HEAD point to a new ref
 pub fn writeHead(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, target: []const u8, oid_hex_maybe: ?[hash.SHA1_HEX_LEN]u8) !void {
     switch (repo_kind) {
         .git => {
@@ -343,6 +344,36 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core
                 .{ .array_list_get = .append_copy },
                 .hash_map_create,
                 .{ .ctx = Ctx{ .allocator = allocator, .target = target, .oid_hex_maybe = oid_hex_maybe } },
+            });
+        },
+    }
+}
+
+/// updates HEAD to point to the oid, following ref if there is one
+pub fn updateHead(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, oid_hex: *const [hash.SHA1_HEX_LEN]u8) !void {
+    switch (repo_kind) {
+        .git => {
+            try updateRecur(repo_kind, core, .{ .dir = core.git_dir }, allocator, "HEAD", oid_hex);
+        },
+        .xit => {
+            const Ctx = struct {
+                core: *rp.Repo(repo_kind).Core,
+                allocator: std.mem.Allocator,
+                oid: *const [hash.SHA1_HEX_LEN]u8,
+
+                pub fn run(ctx_self: *@This(), cursor: *xitdb.Database(.file).Cursor) !void {
+                    try updateRecur(repo_kind, ctx_self.core, .{ .root_cursor = cursor }, ctx_self.allocator, "HEAD", ctx_self.oid);
+                }
+            };
+            var ctx = Ctx{
+                .core = core,
+                .allocator = allocator,
+                .oid = oid_hex,
+            };
+            _ = try core.db.rootCursor().execute(*Ctx, &[_]xitdb.PathPart(*Ctx){
+                .{ .array_list_get = .append_copy },
+                .hash_map_create,
+                .{ .ctx = &ctx },
             });
         },
     }

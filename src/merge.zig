@@ -362,33 +362,8 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
 
     if (std.mem.eql(u8, &current_oid, &common_oid)) {
         // the common ancestor is the current oid, so just update HEAD
-        switch (repo_kind) {
-            .git => {
-                try ref.updateRecur(repo_kind, core, .{ .dir = core.git_dir }, allocator, "HEAD", &source_oid);
-            },
-            .xit => {
-                const Ctx = struct {
-                    core: *rp.Repo(repo_kind).Core,
-                    allocator: std.mem.Allocator,
-                    oid: *const [hash.SHA1_HEX_LEN]u8,
-
-                    pub fn run(ctx_self: *@This(), cursor: *xitdb.Database(.file).Cursor) !void {
-                        try ref.updateRecur(repo_kind, ctx_self.core, .{ .root_cursor = cursor }, ctx_self.allocator, "HEAD", ctx_self.oid);
-                    }
-                };
-                var ctx = Ctx{
-                    .core = core,
-                    .allocator = allocator,
-                    .oid = &source_oid,
-                };
-                // TODO: do the index.write above in the same transaction as this
-                _ = try core.db.rootCursor().execute(*Ctx, &[_]xitdb.PathPart(*Ctx){
-                    .{ .array_list_get = .append_copy },
-                    .hash_map_create,
-                    .{ .ctx = &ctx },
-                });
-            },
-        }
+        // TODO: for .xit, should this be in the same transaction as the index.write above?
+        try ref.updateHead(repo_kind, core, allocator, &source_oid);
         return .{ .data = .fast_forward };
     } else {
         // create commit message
