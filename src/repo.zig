@@ -111,13 +111,17 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
             switch (repo_kind) {
                 .git => {
+                    // return if dir already exists
+                    {
+                        var git_dir_or_err = repo_dir.openDir(".git", .{});
+                        if (git_dir_or_err) |*git_dir| {
+                            git_dir.close();
+                            return error.RepoAlreadyExists;
+                        } else |_| {}
+                    }
+
                     // make the .git dir
-                    var git_dir = repo_dir.makeOpenPath(".git", .{}) catch |err| {
-                        switch (err) {
-                            error.PathAlreadyExists => return error.RepoAlreadyExists,
-                            else => return err,
-                        }
-                    };
+                    var git_dir = try repo_dir.makeOpenPath(".git", .{});
                     errdefer git_dir.close();
 
                     // make a few dirs inside of .git
@@ -143,13 +147,17 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     return self;
                 },
                 .xit => {
+                    // return if dir already exists
+                    {
+                        var xit_dir_or_err = repo_dir.openDir(".xit", .{});
+                        if (xit_dir_or_err) |*xit_dir| {
+                            xit_dir.close();
+                            return error.RepoAlreadyExists;
+                        } else |_| {}
+                    }
+
                     // make the .xit dir
-                    var xit_dir = repo_dir.makeOpenPath(".xit", .{}) catch |err| {
-                        switch (err) {
-                            error.PathAlreadyExists => return error.RepoAlreadyExists,
-                            else => return err,
-                        }
-                    };
+                    var xit_dir = try repo_dir.makeOpenPath(".xit", .{});
                     errdefer xit_dir.close();
 
                     // make the db
@@ -364,15 +372,22 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
                     // read all the new entries
                     for (paths) |path| {
-                        const file = self.core.repo_dir.openFile(path, .{ .mode = .read_only }) catch |err| {
-                            if (err == error.FileNotFound and index.entries.contains(path)) {
-                                index.removePath(path);
-                                continue;
-                            } else {
-                                return err;
+                        if (self.core.repo_dir.openFile(path, .{ .mode = .read_only })) |file| {
+                            file.close();
+                        } else |err| {
+                            switch (err) {
+                                error.IsDir => {}, // only happens on windows
+                                error.FileNotFound => {
+                                    if (index.entries.contains(path)) {
+                                        index.removePath(path);
+                                        continue;
+                                    } else {
+                                        return err;
+                                    }
+                                },
+                                else => return err,
                             }
-                        };
-                        defer file.close();
+                        }
                         try index.addPath(&self.core, path);
                     }
 
@@ -387,15 +402,22 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
                     // read all the new entries
                     for (paths) |path| {
-                        const file = self.core.repo_dir.openFile(path, .{ .mode = .read_only }) catch |err| {
-                            if (err == error.FileNotFound and index.entries.contains(path)) {
-                                index.removePath(path);
-                                continue;
-                            } else {
-                                return err;
+                        if (self.core.repo_dir.openFile(path, .{ .mode = .read_only })) |file| {
+                            file.close();
+                        } else |err| {
+                            switch (err) {
+                                error.IsDir => {}, // only happens on windows
+                                error.FileNotFound => {
+                                    if (index.entries.contains(path)) {
+                                        index.removePath(path);
+                                        continue;
+                                    } else {
+                                        return err;
+                                    }
+                                },
+                                else => return err,
                             }
-                        };
-                        defer file.close();
+                        }
                         try index.addPath(&self.core, path);
                     }
 

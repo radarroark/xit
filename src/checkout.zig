@@ -10,6 +10,7 @@
 //! while the restore fn can be used to restore files.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const xitdb = @import("xitdb");
 const hash = @import("./hash.zig");
 const compress = @import("./compress.zig");
@@ -88,7 +89,11 @@ pub fn objectToFile(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).C
                     }
 
                     // open the out file
-                    const out_file = try core.repo_dir.createFile(path, .{ .mode = @as(u32, @bitCast(tree_entry.mode)) });
+                    const out_flags: std.fs.File.CreateFlags = switch (builtin.os.tag) {
+                        .windows => .{},
+                        else => .{ .mode = @as(u32, @bitCast(tree_entry.mode)) },
+                    };
+                    const out_file = try core.repo_dir.createFile(path, out_flags);
                     defer out_file.close();
 
                     // create the file
@@ -113,7 +118,11 @@ pub fn objectToFile(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).C
                                 }
 
                                 // open the out file
-                                const out_file = try self.core.repo_dir.createFile(self.path, .{ .mode = @as(u32, @bitCast(self.tree_entry.mode)) });
+                                const out_flags: std.fs.File.CreateFlags = switch (builtin.os.tag) {
+                                    .windows => .{},
+                                    else => .{ .mode = @as(u32, @bitCast(self.tree_entry.mode)) },
+                                };
+                                const out_file = try self.core.repo_dir.createFile(self.path, out_flags);
                                 defer out_file.close();
 
                                 var read_buffer = [_]u8{0} ** MAX_FILE_READ_BYTES;
@@ -304,10 +313,8 @@ fn untrackedParent(comptime repo_kind: rp.RepoKind, repo_dir: std.fs.Dir, path: 
     var parent = path;
     while (std.fs.path.dirname(parent)) |next_parent| {
         parent = next_parent;
-        const file = repo_dir.openFile(next_parent, .{ .mode = .read_only }) catch continue;
-        defer file.close();
-        const meta = file.metadata() catch continue;
-        if (meta.kind() != std.fs.File.Kind.file) continue;
+        const meta = io.getMetadata(repo_dir, next_parent) catch continue;
+        if (meta.kind() != .file) continue;
         if (!index.entries.contains(next_parent)) {
             return next_parent;
         }
@@ -318,13 +325,12 @@ fn untrackedParent(comptime repo_kind: rp.RepoKind, repo_dir: std.fs.Dir, path: 
 /// returns true if the given file or one of its descendents (if a dir)
 /// isn't tracked by the index, so it cannot be safely removed by checkout
 fn untrackedFile(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, repo_dir: std.fs.Dir, path: []const u8, index: idx.Index(repo_kind)) !bool {
-    const file = try repo_dir.openFile(path, .{ .mode = .read_only });
-    const meta = try file.metadata();
+    const meta = try io.getMetadata(repo_dir, path);
     switch (meta.kind()) {
-        std.fs.File.Kind.file => {
+        .file => {
             return !index.entries.contains(path);
         },
-        std.fs.File.Kind.directory => {
+        .directory => {
             var dir = try repo_dir.openDir(path, .{ .iterate = true });
             defer dir.close();
             var iter = dir.iterate();
@@ -417,7 +423,7 @@ pub fn migrate(
                 defer file.close();
                 const meta = try file.metadata();
                 switch (meta.kind()) {
-                    std.fs.File.Kind.file => {
+                    .file => {
                         // if the path is a file that differs from the index
                         if (try compareIndexToWorkspace(repo_kind, entry_maybe, file) != .none) {
                             result.conflict(allocator);
@@ -430,7 +436,7 @@ pub fn migrate(
                             }
                         }
                     },
-                    std.fs.File.Kind.directory => {
+                    .directory => {
                         // if the path is a dir with a descendent that isn't in the index
                         if (try untrackedFile(repo_kind, allocator, core.repo_dir, path, index.*)) {
                             result.conflict(allocator);

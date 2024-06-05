@@ -116,11 +116,12 @@ pub fn Status(comptime repo_kind: rp.RepoKind) type {
 }
 
 fn addEntries(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, untracked: *std.ArrayList(Status(repo_kind).Entry), modified: *std.ArrayList(Status(repo_kind).Entry), index: idx.Index(repo_kind), index_bools: *[]bool, repo_dir: std.fs.Dir, path: []const u8) !bool {
-    const file = try repo_dir.openFile(path, .{ .mode = .read_only });
-    defer file.close();
-    const meta = try file.metadata();
+    const meta = try io.getMetadata(repo_dir, path);
     switch (meta.kind()) {
-        std.fs.File.Kind.file => {
+        .file => {
+            const file = try repo_dir.openFile(path, .{ .mode = .read_only });
+            defer file.close();
+
             if (index.entries.getIndex(path)) |entry_index| {
                 index_bools.*[entry_index] = true;
                 if (index.entries.values()[entry_index][0]) |entry| {
@@ -135,7 +136,7 @@ fn addEntries(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, unt
             }
             return true;
         },
-        std.fs.File.Kind.directory => {
+        .directory => {
             const is_untracked = !(std.mem.eql(u8, path, ".") or index.dir_to_paths.contains(path) or index.entries.contains(path));
 
             var dir = try repo_dir.openDir(path, .{ .iterate = true });

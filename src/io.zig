@@ -115,3 +115,21 @@ pub fn getStat(file: std.fs.File) !Stat {
         },
     }
 }
+
+pub fn getMetadata(parent_dir: std.fs.Dir, path: []const u8) !std.fs.File.Metadata {
+    // on windows, openFile returns error.IsDir on a dir.
+    // so we need to call openDir in that case.
+    if (parent_dir.openFile(path, .{ .mode = .read_only })) |file| {
+        defer file.close();
+        return try file.metadata();
+    } else |err| {
+        switch (err) {
+            error.IsDir => {
+                var dir = try parent_dir.openDir(path, .{});
+                defer dir.close();
+                return try dir.metadata();
+            },
+            else => return err,
+        }
+    }
+}

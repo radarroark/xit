@@ -244,11 +244,12 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
             // remove entries that are children of this path (file replaces directory)
             try self.removeChildren(path);
             // read the metadata
-            const file = try core.repo_dir.openFile(path, .{ .mode = .read_only });
-            defer file.close();
-            const meta = try file.metadata();
+            const meta = try io.getMetadata(core.repo_dir, path);
             switch (meta.kind()) {
-                std.fs.File.Kind.file => {
+                .file => {
+                    const file = try core.repo_dir.openFile(path, .{ .mode = .read_only });
+                    defer file.close();
+
                     // write the object
                     var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
                     try obj.writeBlob(repo_kind, opts, self.allocator, file, meta.size(), std.fs.File.Reader, &oid);
@@ -278,7 +279,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     };
                     try self.addEntry(entry);
                 },
-                std.fs.File.Kind.directory => {
+                .directory => {
                     var dir = try core.repo_dir.openDir(path, .{ .iterate = true });
                     defer dir.close();
                     var iter = dir.iterate();
