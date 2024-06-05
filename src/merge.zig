@@ -208,6 +208,24 @@ fn fileDirConflict(
     }
 }
 
+fn writeRenamedFile(
+    comptime repo_kind: rp.RepoKind,
+    core: *rp.Repo(repo_kind).Core,
+    allocator: std.mem.Allocator,
+    current_name: []const u8,
+    source_name: []const u8,
+    path: []const u8,
+    renamed_entry: RenamedEntry,
+) !void {
+    const suffix = switch (renamed_entry.diff_kind) {
+        .current => current_name,
+        .source => source_name,
+    };
+    const new_path = try std.fmt.allocPrint(allocator, "{s}~{s}", .{ path, suffix });
+    defer allocator.free(new_path);
+    try chk.objectToFile(repo_kind, core, allocator, new_path, renamed_entry.tree_entry);
+}
+
 pub const MergeResultData = union(enum) {
     success: struct {
         oid: [hash.SHA1_HEX_LEN]u8,
@@ -278,7 +296,7 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
         }
     }
 
-    var new_conflict = false;
+    // TODO: exit early if working tree is dirty
 
     switch (repo_kind) {
         .git => {
@@ -293,10 +311,14 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
             // update the working tree
             try chk.migrate(repo_kind, core, allocator, clean_diff, &index, null);
 
+            // rename files that conflicted with dir names
+            for (renamed.keys(), renamed.values()) |path, renamed_entry| {
+                try writeRenamedFile(repo_kind, core, allocator, current_name, source_name, path, renamed_entry);
+            }
+
             // add conflicts to index
             for (conflicts.keys(), conflicts.values()) |path, conflict_entries| {
                 try index.addConflictEntries(path, conflict_entries);
-                new_conflict = true;
             }
 
             // update the index
@@ -304,6 +326,11 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
 
             // finish lock
             lock.success = true;
+
+            // exit early if there were conflicts
+            if (conflicts.count() > 0) {
+                return .{ .data = .conflict };
+            }
         },
         .xit => {
             // read index
@@ -313,31 +340,24 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
             // update the working tree
             try chk.migrate(repo_kind, core, allocator, clean_diff, &index, null);
 
+            // rename files that conflicted with dir names
+            for (renamed.keys(), renamed.values()) |path, renamed_entry| {
+                try writeRenamedFile(repo_kind, core, allocator, current_name, source_name, path, renamed_entry);
+            }
+
             // add conflicts to index
             for (conflicts.keys(), conflicts.values()) |path, conflict_entries| {
                 try index.addConflictEntries(path, conflict_entries);
-                new_conflict = true;
             }
 
             // update the index
             try index.write(allocator, .{ .db = &core.db });
+
+            // exit early if there were conflicts
+            if (conflicts.count() > 0) {
+                return .{ .data = .conflict };
+            }
         },
-    }
-
-    // rename files if necessary
-    for (renamed.keys(), renamed.values()) |path, renamed_entry| {
-        const suffix = switch (renamed_entry.diff_kind) {
-            .current => current_name,
-            .source => source_name,
-        };
-        const new_path = try std.fmt.allocPrint(allocator, "{s}~{s}", .{ path, suffix });
-        defer allocator.free(new_path);
-        try chk.objectToFile(repo_kind, core, allocator, new_path, renamed_entry.tree_entry);
-    }
-
-    // exit early if necessary
-    if (new_conflict) {
-        return .{ .data = .conflict };
     }
 
     if (std.mem.eql(u8, &current_oid, &common_oid)) {
