@@ -301,7 +301,7 @@ fn writeTree(comptime repo_kind: rp.RepoKind, opts: ObjectOpts(repo_kind), alloc
 // for it and add that as an entry to the original tree.
 fn addIndexEntries(comptime repo_kind: rp.RepoKind, opts: ObjectOpts(repo_kind), allocator: std.mem.Allocator, tree: *Tree, index: idx.Index(repo_kind), prefix: []const u8, entries: [][]const u8) !void {
     for (entries) |name| {
-        const path = try std.fs.path.join(allocator, &[_][]const u8{ prefix, name });
+        const path = try io.joinPath(allocator, &[_][]const u8{ prefix, name });
         defer allocator.free(path);
         if (index.entries.get(path)) |*entries_for_path| {
             const entry = entries_for_path[0] orelse return error.NullEntry;
@@ -770,7 +770,7 @@ pub fn TreeDiff(comptime repo_kind: rp.RepoKind) type {
                     const old_value = old_entry.value_ptr.*;
                     var path_list = if (path_list_maybe) |path_list| try path_list.clone() else std.ArrayList([]const u8).init(self.arena.allocator());
                     try path_list.append(old_key);
-                    const path = try std.fs.path.join(self.arena.allocator(), path_list.items);
+                    const path = try io.joinPath(self.arena.allocator(), path_list.items);
                     if (new_entries.get(old_key)) |new_value| {
                         if (!old_value.eql(new_value)) {
                             const old_value_tree = isTree(old_value);
@@ -797,7 +797,7 @@ pub fn TreeDiff(comptime repo_kind: rp.RepoKind) type {
                     const new_value = new_entry.value_ptr.*;
                     var path_list = if (path_list_maybe) |path_list| try path_list.clone() else std.ArrayList([]const u8).init(self.arena.allocator());
                     try path_list.append(new_key);
-                    const path = try std.fs.path.join(self.arena.allocator(), path_list.items);
+                    const path = try io.joinPath(self.arena.allocator(), path_list.items);
                     if (old_entries.get(new_key)) |_| {
                         continue;
                     } else if (isTree(new_value)) {

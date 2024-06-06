@@ -632,13 +632,15 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     // replacing file with dir and dir with file
     {
         // replace file with directory
-        try repo_dir.deleteFile("hello.txt");
-        var hello_txt_dir = try repo_dir.makeOpenPath("hello.txt", .{});
-        defer hello_txt_dir.close();
-        var nested_txt = try hello_txt_dir.createFile("nested.txt", .{});
-        defer nested_txt.close();
-        var nested2_txt = try hello_txt_dir.createFile("nested2.txt", .{});
-        defer nested2_txt.close();
+        {
+            try repo_dir.deleteFile("hello.txt");
+            var hello_txt_dir = try repo_dir.makeOpenPath("hello.txt", .{});
+            defer hello_txt_dir.close();
+            var nested_txt = try hello_txt_dir.createFile("nested.txt", .{});
+            defer nested_txt.close();
+            var nested2_txt = try hello_txt_dir.createFile("nested2.txt", .{});
+            defer nested2_txt.close();
+        }
 
         // add the new file
         args.clearAndFree();
@@ -693,8 +695,12 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         }
 
         // replace directory with file
-        try hello_txt_dir.deleteFile("nested.txt");
-        try hello_txt_dir.deleteFile("nested2.txt");
+        {
+            var hello_txt_dir = try repo_dir.openDir("hello.txt", .{});
+            defer hello_txt_dir.close();
+            try hello_txt_dir.deleteFile("nested.txt");
+            try hello_txt_dir.deleteFile("nested2.txt");
+        }
         try repo_dir.deleteDir("hello.txt");
         var hello_txt2 = try repo_dir.createFile("hello.txt", .{});
         defer hello_txt2.close();

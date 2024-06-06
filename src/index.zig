@@ -301,7 +301,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                         const subpath = if (std.mem.eql(u8, path, "."))
                             try std.fmt.allocPrint(self.arena.allocator(), "{s}", .{entry.name})
                         else
-                            try std.fs.path.join(self.arena.allocator(), &[_][]const u8{ path, entry.name });
+                            try io.joinPath(self.arena.allocator(), &[_][]const u8{ path, entry.name });
                         try self.addPathRecur(core, opts, subpath);
                     }
                 },

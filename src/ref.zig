@@ -13,7 +13,7 @@ pub const Ref = struct {
     oid_hex: ?[hash.SHA1_HEX_LEN]u8,
 
     pub fn initWithName(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, dir_name: []const u8, name: []const u8) !Ref {
-        const path = try std.fs.path.join(allocator, &[_][]const u8{ "refs", dir_name, name });
+        const path = try io.joinPath(allocator, &[_][]const u8{ "refs", dir_name, name });
         defer allocator.free(path);
         const content = try std.fmt.allocPrint(allocator, "ref: {s}", .{path});
         defer allocator.free(content);
@@ -131,7 +131,7 @@ pub const RefList = struct {
             try next_path.append(entry.name);
             switch (entry.kind) {
                 .file => {
-                    const name = try std.mem.join(self.arena.allocator(), "/", next_path.items);
+                    const name = try io.joinPath(self.arena.allocator(), next_path.items);
                     const ref = try Ref.initWithName(repo_kind, core, self.arena.allocator(), dir_name, name);
                     try self.refs.append(ref);
                 },

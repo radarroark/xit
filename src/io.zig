@@ -133,3 +133,34 @@ pub fn getMetadata(parent_dir: std.fs.Dir, path: []const u8) !std.fs.File.Metada
         }
     }
 }
+
+pub fn joinPath(allocator: std.mem.Allocator, paths: []const []const u8) ![]u8 {
+    var total_len: usize = 0;
+    for (paths, 0..) |path, i| {
+        if (path.len == 0) {
+            continue;
+        }
+        total_len += path.len;
+        if (i < paths.len - 1) {
+            total_len += 1;
+        }
+    }
+
+    const buf = try allocator.alloc(u8, total_len);
+    errdefer allocator.free(buf);
+
+    var buf_slice = buf[0..];
+    for (paths, 0..) |path, i| {
+        if (path.len == 0) {
+            continue;
+        }
+        @memcpy(buf_slice[0..path.len], path);
+        if (i < paths.len - 1) {
+            // even on windows we want the / separator
+            buf_slice[path.len] = '/';
+            buf_slice = buf_slice[path.len+1..];
+        }
+    }
+
+    return buf;
+}

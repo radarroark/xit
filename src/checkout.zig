@@ -163,7 +163,7 @@ pub fn objectToFile(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).C
 
             // update each entry recursively
             for (tree_object.content.tree.entries.keys(), tree_object.content.tree.entries.values()) |sub_path, entry| {
-                const new_path = try std.fs.path.join(allocator, &[_][]const u8{ path, sub_path });
+                const new_path = try io.joinPath(allocator, &[_][]const u8{ path, sub_path });
                 defer allocator.free(new_path);
                 try objectToFile(repo_kind, core, allocator, new_path, entry);
             }
@@ -335,7 +335,7 @@ fn untrackedFile(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
             defer dir.close();
             var iter = dir.iterate();
             while (try iter.next()) |dir_entry| {
-                const subpath = try std.fs.path.join(allocator, &[_][]const u8{ path, dir_entry.name });
+                const subpath = try io.joinPath(allocator, &[_][]const u8{ path, dir_entry.name });
                 defer allocator.free(subpath);
                 if (try untrackedFile(repo_kind, allocator, repo_dir, subpath, index)) {
                     return true;
@@ -400,7 +400,7 @@ pub fn migrate(
                 result.conflict(allocator);
                 try result.data.conflict.stale_files.put(path, {});
             } else {
-                const file = core.repo_dir.openFile(path, .{ .mode = .read_only }) catch |err| {
+                const meta = io.getMetadata(core.repo_dir, path) catch |err| {
                     switch (err) {
                         error.FileNotFound, error.NotDir => {
                             // if the path doesn't exist in the workspace,
@@ -420,10 +420,10 @@ pub fn migrate(
                         else => return err,
                     }
                 };
-                defer file.close();
-                const meta = try file.metadata();
                 switch (meta.kind()) {
                     .file => {
+                        const file = try core.repo_dir.openFile(path, .{ .mode = .read_only });
+                        defer file.close();
                         // if the path is a file that differs from the index
                         if (try compareIndexToWorkspace(repo_kind, entry_maybe, file) != .none) {
                             result.conflict(allocator);
