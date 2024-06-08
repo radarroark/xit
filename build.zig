@@ -16,7 +16,7 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
     exe.root_module.addAnonymousImport("xitdb", .{
-        .root_source_file = b.path("../xitdb/src/main.zig"),
+        .root_source_file = b.path("../xitdb/src/lib.zig"),
     });
     b.installArtifact(exe);
 
@@ -44,7 +44,7 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
     unit_tests.root_module.addAnonymousImport("xitdb", .{
-        .root_source_file = b.path("../xitdb/src/main.zig"),
+        .root_source_file = b.path("../xitdb/src/lib.zig"),
     });
     unit_tests.linkLibC();
     unit_tests.addIncludePath(b.path("src/test/deps/libgit2/include"));
