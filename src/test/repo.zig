@@ -1,5 +1,5 @@
-//! tests that create repos by generating commits
-//! from an array of structs.
+//! tests that create repos via the Repo struct.
+//! runs with both git and xit modes.
 
 const std = @import("std");
 const hash = @import("../hash.zig");
@@ -13,74 +13,19 @@ fn expectEqual(expected: anytype, actual: anytype) !void {
     try std.testing.expectEqual(@as(@TypeOf(actual), expected), actual);
 }
 
-fn Action(comptime CommitName: type) type {
-    return union(enum) {
-        add_file: struct {
-            path: []const u8,
-            content: []const u8,
-        },
-        remove_file: struct {
-            path: []const u8,
-        },
-        commit: struct {
-            name: CommitName,
-        },
-        create_branch: struct {
-            name: []const u8,
-        },
-        switch_head: struct {
-            target: []const u8,
-        },
-        merge: struct {
-            name: CommitName,
-            source: []const u8,
-        },
-    };
+fn addFile(comptime repo_kind: rp.RepoKind, repo: *rp.Repo(repo_kind), path: []const u8, content: []const u8) !void {
+    if (std.fs.path.dirname(path)) |parent_path| {
+        try repo.core.repo_dir.makePath(parent_path);
+    }
+    const file = try repo.core.repo_dir.createFile(path, .{ .truncate = true });
+    defer file.close();
+    try file.writeAll(content);
+    try repo.add(&[_][]const u8{path});
 }
 
-/// executes the actions on the given repo
-fn execActions(
-    comptime repo_kind: rp.RepoKind,
-    repo: *rp.Repo(repo_kind),
-    comptime CommitName: type,
-    actions: []const Action(CommitName),
-    commit_name_to_oid: *std.AutoArrayHashMap(CommitName, [hash.SHA1_HEX_LEN]u8),
-) !void {
-    for (actions) |action| {
-        switch (action) {
-            .add_file => {
-                if (std.fs.path.dirname(action.add_file.path)) |parent_path| {
-                    try repo.core.repo_dir.makePath(parent_path);
-                }
-                const file = try repo.core.repo_dir.createFile(action.add_file.path, .{ .truncate = true });
-                defer file.close();
-                try file.writeAll(action.add_file.content);
-                try repo.add(&[_][]const u8{action.add_file.path});
-            },
-            .remove_file => {
-                try repo.core.repo_dir.deleteFile(action.remove_file.path);
-                try repo.add(&[_][]const u8{action.remove_file.path});
-            },
-            .commit => {
-                const oid_hex = try repo.commit(null, @tagName(action.commit.name));
-                try commit_name_to_oid.put(action.commit.name, oid_hex);
-            },
-            .create_branch => {
-                try repo.create_branch(action.create_branch.name);
-            },
-            .switch_head => {
-                var result = try repo.switch_head(action.switch_head.target);
-                defer result.deinit();
-            },
-            .merge => {
-                var result = try repo.merge(action.merge.source);
-                defer result.deinit();
-                if (.success == result.data) {
-                    try commit_name_to_oid.put(action.merge.name, result.data.success.oid);
-                }
-            },
-        }
-    }
+fn removeFile(comptime repo_kind: rp.RepoKind, repo: *rp.Repo(repo_kind), path: []const u8) !void {
+    try repo.core.repo_dir.deleteFile(path);
+    try repo.add(&[_][]const u8{path});
 }
 
 fn testSimple(comptime repo_kind: rp.RepoKind) !void {
@@ -100,44 +45,31 @@ fn testSimple(comptime repo_kind: rp.RepoKind) !void {
     var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } });
     defer repo.deinit();
 
-    const CommitName = enum { a, b, c, d };
+    try addFile(repo_kind, &repo, "README.md", "Hello, world!");
+    const commit_a = try repo.commit(null, "a");
+    try addFile(repo_kind, &repo, "README.md", "Goodbye, world!");
+    const commit_b = try repo.commit(null, "b");
+    try removeFile(repo_kind, &repo, "README.md");
+    const commit_c = try repo.commit(null, "c");
+    const commit_d = try repo.commit(null, "d"); // make sure empty commits are possible
 
-    const actions = &[_]Action(CommitName){
-        .{ .add_file = .{ .path = "README.md", .content = "Hello, world!" } },
-        .{ .commit = .{ .name = .a } },
-        .{ .add_file = .{ .path = "README.md", .content = "Goodbye, world!" } },
-        .{ .commit = .{ .name = .b } },
-        .{ .remove_file = .{ .path = "README.md" } },
-        .{ .commit = .{ .name = .c } },
-        // make sure empty commits are possible
-        .{ .commit = .{ .name = .d } },
-    };
+    // put oids in a set
+    var oid_set = std.StringArrayHashMap(void).init(allocator);
+    defer oid_set.deinit();
+    try oid_set.put(&commit_a, {});
+    try oid_set.put(&commit_b, {});
+    try oid_set.put(&commit_c, {});
+    try oid_set.put(&commit_d, {});
 
-    var commit_name_to_oid = std.AutoArrayHashMap(CommitName, [hash.SHA1_HEX_LEN]u8).init(allocator);
-    defer commit_name_to_oid.deinit();
-
-    try execActions(repo_kind, &repo, CommitName, actions, &commit_name_to_oid);
-
-    var oid_to_action = std.StringArrayHashMap(Action(CommitName)).init(allocator);
-    defer oid_to_action.deinit();
-    for (actions) |action| {
-        if (action == .commit) {
-            // we have to use getPtr here or else the oid will be copied to the local
-            // and then destroyed when the scope ends
-            const oid = commit_name_to_oid.getPtr(action.commit.name) orelse return error.CommitNotFound;
-            try oid_to_action.put(oid, action);
-        }
-    }
-
-    // assert that all commits in `actions` have been found in the log
+    // assert that all commits have been found in the log
     const head_oid = try ref.readHead(repo_kind, &repo.core);
     var commit_iter = try repo.log(head_oid);
     defer commit_iter.deinit();
     while (try commit_iter.next()) |commit_object| {
         defer commit_object.deinit();
-        _ = oid_to_action.swapRemove(&commit_object.oid);
+        _ = oid_set.swapRemove(&commit_object.oid);
     }
-    try expectEqual(0, oid_to_action.count());
+    try expectEqual(0, oid_set.count());
 }
 
 test "simple" {
@@ -162,8 +94,6 @@ fn testMerge(comptime repo_kind: rp.RepoKind) !void {
     var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } });
     defer repo.deinit();
 
-    const CommitName = enum { a, b, c, d, e, f, g, h, j, k };
-
     // A --- B --- C --------- J --- K [master]
     //        \               /
     //         \             /
@@ -171,46 +101,55 @@ fn testMerge(comptime repo_kind: rp.RepoKind) !void {
     //           \
     //            \
     //             G --- H [bar]
-    const actions = &[_]Action(CommitName){
-        .{ .add_file = .{ .path = "master.md", .content = "a" } },
-        .{ .commit = .{ .name = .a } },
-        .{ .add_file = .{ .path = "master.md", .content = "b" } },
-        .{ .commit = .{ .name = .b } },
-        .{ .create_branch = .{ .name = "foo" } },
-        .{ .switch_head = .{ .target = "foo" } },
-        .{ .add_file = .{ .path = "foo.md", .content = "d" } },
-        .{ .commit = .{ .name = .d } },
-        .{ .create_branch = .{ .name = "bar" } },
-        .{ .switch_head = .{ .target = "bar" } },
-        .{ .add_file = .{ .path = "bar.md", .content = "g" } },
-        .{ .commit = .{ .name = .g } },
-        .{ .add_file = .{ .path = "bar.md", .content = "h" } },
-        .{ .commit = .{ .name = .h } },
-        .{ .switch_head = .{ .target = "master" } },
-        .{ .add_file = .{ .path = "master.md", .content = "c" } },
-        .{ .commit = .{ .name = .c } },
-        .{ .switch_head = .{ .target = "foo" } },
-        .{ .add_file = .{ .path = "foo.md", .content = "e" } },
-        .{ .commit = .{ .name = .e } },
-        .{ .add_file = .{ .path = "foo.md", .content = "f" } },
-        .{ .commit = .{ .name = .f } },
-        .{ .switch_head = .{ .target = "master" } },
-        .{ .add_file = .{ .path = "master.md", .content = "c" } },
-        .{ .commit = .{ .name = .c } },
-        .{ .merge = .{ .name = .j, .source = "foo" } },
-        .{ .add_file = .{ .path = "master.md", .content = "k" } },
-        .{ .commit = .{ .name = .k } },
+
+    try addFile(repo_kind, &repo, "master.md", "a");
+    _ = try repo.commit(null, "a");
+    try addFile(repo_kind, &repo, "master.md", "b");
+    _ = try repo.commit(null, "b");
+    try repo.create_branch("foo");
+    {
+        var result = try repo.switch_head("foo");
+        defer result.deinit();
+    }
+    try addFile(repo_kind, &repo, "foo.md", "d");
+    const commit_d = try repo.commit(null, "d");
+    try repo.create_branch("bar");
+    {
+        var result = try repo.switch_head("bar");
+        defer result.deinit();
+    }
+    try addFile(repo_kind, &repo, "bar.md", "g");
+    _ = try repo.commit(null, "g");
+    try addFile(repo_kind, &repo, "bar.md", "h");
+    const commit_h = try repo.commit(null, "h");
+    {
+        var result = try repo.switch_head("master");
+        defer result.deinit();
+    }
+    try addFile(repo_kind, &repo, "master.md", "c");
+    _ = try repo.commit(null, "c");
+    {
+        var result = try repo.switch_head("foo");
+        defer result.deinit();
+    }
+    try addFile(repo_kind, &repo, "foo.md", "e");
+    _ = try repo.commit(null, "e");
+    try addFile(repo_kind, &repo, "foo.md", "f");
+    _ = try repo.commit(null, "f");
+    {
+        var result = try repo.switch_head("master");
+        defer result.deinit();
+    }
+    try addFile(repo_kind, &repo, "master.md", "c");
+    _ = try repo.commit(null, "c");
+    const commit_j = blk: {
+        var result = try repo.merge("foo");
+        defer result.deinit();
+        try std.testing.expect(.success == result.data);
+        break :blk result.data.success.oid;
     };
-
-    var commit_name_to_oid = std.AutoArrayHashMap(CommitName, [hash.SHA1_HEX_LEN]u8).init(allocator);
-    defer commit_name_to_oid.deinit();
-
-    try execActions(repo_kind, &repo, CommitName, actions, &commit_name_to_oid);
-
-    const commit_d = commit_name_to_oid.get(.d).?;
-    const commit_h = commit_name_to_oid.get(.h).?;
-    const commit_j = commit_name_to_oid.get(.j).?;
-    const commit_k = commit_name_to_oid.get(.k).?;
+    try addFile(repo_kind, &repo, "master.md", "k");
+    const commit_k = try repo.commit(null, "k");
 
     // there are multiple common ancestors, b and d,
     // but d is the best one because it is a descendent of b
@@ -265,29 +204,31 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "same-file-conflict" } });
         defer repo.deinit();
 
-        const CommitName = enum { a, b, c, d };
-
         // A --- B --- D [master]
         //  \         /
         //   \       /
         //    `---- C [foo]
-        const actions = &[_]Action(CommitName){
-            .{ .add_file = .{ .path = "f.txt", .content = "1" } },
-            .{ .commit = .{ .name = .a } },
-            .{ .create_branch = .{ .name = "foo" } },
-            .{ .add_file = .{ .path = "f.txt", .content = "2" } },
-            .{ .commit = .{ .name = .b } },
-            .{ .switch_head = .{ .target = "foo" } },
-            .{ .add_file = .{ .path = "f.txt", .content = "3" } },
-            .{ .commit = .{ .name = .d } },
-            .{ .switch_head = .{ .target = "master" } },
-            .{ .merge = .{ .name = .c, .source = "foo" } },
-        };
 
-        var commit_name_to_oid = std.AutoArrayHashMap(CommitName, [hash.SHA1_HEX_LEN]u8).init(allocator);
-        defer commit_name_to_oid.deinit();
-
-        try execActions(repo_kind, &repo, CommitName, actions, &commit_name_to_oid);
+        try addFile(repo_kind, &repo, "f.txt", "1");
+        _ = try repo.commit(null, "a");
+        try repo.create_branch("foo");
+        try addFile(repo_kind, &repo, "f.txt", "2");
+        _ = try repo.commit(null, "b");
+        {
+            var result = try repo.switch_head("foo");
+            defer result.deinit();
+        }
+        try addFile(repo_kind, &repo, "f.txt", "3");
+        _ = try repo.commit(null, "d");
+        {
+            var result = try repo.switch_head("master");
+            defer result.deinit();
+        }
+        {
+            var result = try repo.merge("foo");
+            defer result.deinit();
+            try std.testing.expect(.conflict == result.data);
+        }
     }
 
     // file/dir conflict (current has file, source has dir)
@@ -295,29 +236,31 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "current-file-source-dir-conflict" } });
         defer repo.deinit();
 
-        const CommitName = enum { a, b, c, d };
-
         // A --- B --- D [master]
         //  \         /
         //   \       /
         //    `---- C [foo]
-        const actions = &[_]Action(CommitName){
-            .{ .add_file = .{ .path = "hi.txt", .content = "hi" } },
-            .{ .commit = .{ .name = .a } },
-            .{ .create_branch = .{ .name = "foo" } },
-            .{ .add_file = .{ .path = "f.txt", .content = "hi" } },
-            .{ .commit = .{ .name = .b } },
-            .{ .switch_head = .{ .target = "foo" } },
-            .{ .add_file = .{ .path = "f.txt/g.txt", .content = "hi" } },
-            .{ .commit = .{ .name = .c } },
-            .{ .switch_head = .{ .target = "master" } },
-            .{ .merge = .{ .name = .d, .source = "foo" } },
-        };
 
-        var commit_name_to_oid = std.AutoArrayHashMap(CommitName, [hash.SHA1_HEX_LEN]u8).init(allocator);
-        defer commit_name_to_oid.deinit();
-
-        try execActions(repo_kind, &repo, CommitName, actions, &commit_name_to_oid);
+        try addFile(repo_kind, &repo, "hi.txt", "hi");
+        _ = try repo.commit(null, "a");
+        try repo.create_branch("foo");
+        try addFile(repo_kind, &repo, "f.txt", "hi");
+        _ = try repo.commit(null, "b");
+        {
+            var result = try repo.switch_head("foo");
+            defer result.deinit();
+        }
+        try addFile(repo_kind, &repo, "f.txt/g.txt", "hi");
+        _ = try repo.commit(null, "c");
+        {
+            var result = try repo.switch_head("master");
+            defer result.deinit();
+        }
+        {
+            var result = try repo.merge("foo");
+            defer result.deinit();
+            try std.testing.expect(.conflict == result.data);
+        }
 
         // make sure renamed file exists
         var renamed_file = try repo.core.repo_dir.openFile("f.txt~master", .{});
@@ -329,29 +272,31 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "source-file-current-dir-conflict" } });
         defer repo.deinit();
 
-        const CommitName = enum { a, b, c, d };
-
         // A --- B --- D [master]
         //  \         /
         //   \       /
         //    `---- C [foo]
-        const actions = &[_]Action(CommitName){
-            .{ .add_file = .{ .path = "hi.txt", .content = "hi" } },
-            .{ .commit = .{ .name = .a } },
-            .{ .create_branch = .{ .name = "foo" } },
-            .{ .add_file = .{ .path = "f.txt/g.txt", .content = "hi" } },
-            .{ .commit = .{ .name = .b } },
-            .{ .switch_head = .{ .target = "foo" } },
-            .{ .add_file = .{ .path = "f.txt", .content = "hi" } },
-            .{ .commit = .{ .name = .c } },
-            .{ .switch_head = .{ .target = "master" } },
-            .{ .merge = .{ .name = .d, .source = "foo" } },
-        };
 
-        var commit_name_to_oid = std.AutoArrayHashMap(CommitName, [hash.SHA1_HEX_LEN]u8).init(allocator);
-        defer commit_name_to_oid.deinit();
-
-        try execActions(repo_kind, &repo, CommitName, actions, &commit_name_to_oid);
+        try addFile(repo_kind, &repo, "hi.txt", "hi");
+        _ = try repo.commit(null, "a");
+        try repo.create_branch("foo");
+        try addFile(repo_kind, &repo, "f.txt/g.txt", "hi");
+        _ = try repo.commit(null, "b");
+        {
+            var result = try repo.switch_head("foo");
+            defer result.deinit();
+        }
+        try addFile(repo_kind, &repo, "f.txt", "hi");
+        _ = try repo.commit(null, "c");
+        {
+            var result = try repo.switch_head("master");
+            defer result.deinit();
+        }
+        {
+            var result = try repo.merge("foo");
+            defer result.deinit();
+            try std.testing.expect(.conflict == result.data);
+        }
 
         // make sure renamed file exists
         var renamed_file = try repo.core.repo_dir.openFile("f.txt~foo", .{});

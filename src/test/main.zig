@@ -1,5 +1,5 @@
 //! end-to-end test using the main entrypoint (xitMain).
-//! tests both xit and git modes, using libgit2 to
+//! runs with both git and xit modes, using libgit2 to
 //! validate git mode.
 
 const std = @import("std");
