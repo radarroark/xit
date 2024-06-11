@@ -259,6 +259,38 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     for (stat.index_deleted.items) |path| {
                         try writers.out.print("D  {s}\n", .{path});
                     }
+
+                    for (stat.conflicts.keys(), stat.conflicts.values()) |path, conflict| {
+                        if (conflict.common) {
+                            if (conflict.current) {
+                                if (conflict.source) {
+                                    try writers.out.print("UU {s}\n", .{path}); // both modified
+                                } else {
+                                    try writers.out.print("UD {s}\n", .{path}); // deleted by them
+                                }
+                            } else {
+                                if (conflict.source) {
+                                    try writers.out.print("DU {s}\n", .{path}); // deleted by us
+                                } else {
+                                    return error.NoCurrentOrSource;
+                                }
+                            }
+                        } else {
+                            if (conflict.current) {
+                                if (conflict.source) {
+                                    try writers.out.print("AA {s}\n", .{path}); // both added
+                                } else {
+                                    try writers.out.print("AU {s}\n", .{path}); // added by us
+                                }
+                            } else {
+                                if (conflict.source) {
+                                    try writers.out.print("UA {s}\n", .{path}); // added by them
+                                } else {
+                                    return error.NoCurrentOrSource;
+                                }
+                            }
+                        }
+                    }
                 },
                 cmd.CommandData.diff => {
                     var diff_iter = try self.diff(cmd_data.diff.kind);

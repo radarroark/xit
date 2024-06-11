@@ -14,6 +14,12 @@ const ref = @import("./ref.zig");
 const io = @import("./io.zig");
 const rp = @import("./repo.zig");
 
+pub const MergeConflictStatus = struct {
+    common: bool,
+    current: bool,
+    source: bool,
+};
+
 pub fn Status(comptime repo_kind: rp.RepoKind) type {
     return struct {
         untracked: std.ArrayList(Entry),
@@ -22,6 +28,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind) type {
         index_added: std.ArrayList([]const u8),
         index_modified: std.ArrayList([]const u8),
         index_deleted: std.ArrayList([]const u8),
+        conflicts: std.StringArrayHashMap(MergeConflictStatus),
         index: idx.Index(repo_kind),
         head_tree: HeadTree(repo_kind),
         arena: std.heap.ArenaAllocator,
@@ -50,6 +57,9 @@ pub fn Status(comptime repo_kind: rp.RepoKind) type {
             var index_deleted = std.ArrayList([]const u8).init(allocator);
             errdefer index_deleted.deinit();
 
+            var conflicts = std.StringArrayHashMap(MergeConflictStatus).init(allocator);
+            errdefer conflicts.deinit();
+
             var arena = std.heap.ArenaAllocator.init(allocator);
             errdefer arena.deinit();
 
@@ -61,23 +71,31 @@ pub fn Status(comptime repo_kind: rp.RepoKind) type {
 
             _ = try addEntries(repo_kind, arena.allocator(), &untracked, &workspace_modified, index, &index_bools, core.repo_dir, ".");
 
-            for (index_bools, 0..) |exists, i| {
-                if (!exists) {
-                    try workspace_deleted.append(index.entries.keys()[i]);
-                }
-            }
-
             var head_tree = try HeadTree(repo_kind).init(allocator, core);
             errdefer head_tree.deinit();
 
-            for (index.entries.values()) |*index_entries_for_path| {
-                const index_entry = index_entries_for_path[0] orelse return error.NullEntry;
-                if (head_tree.entries.get(index_entry.path)) |head_entry| {
-                    if (!index_entry.mode.eql(head_entry.mode) or !std.mem.eql(u8, &index_entry.oid, &head_entry.oid)) {
-                        try index_modified.append(index_entry.path);
+            // for each entry in the index
+            for (index.entries.keys(), index.entries.values(), 0..) |path, *index_entries_for_path, i| {
+                // if it is a non-conflict entry
+                if (index_entries_for_path[0]) |index_entry| {
+                    if (!index_bools[i]) {
+                        try workspace_deleted.append(path);
                     }
-                } else {
-                    try index_added.append(index_entry.path);
+                    if (head_tree.entries.get(index_entry.path)) |head_entry| {
+                        if (!index_entry.mode.eql(head_entry.mode) or !std.mem.eql(u8, &index_entry.oid, &head_entry.oid)) {
+                            try index_modified.append(index_entry.path);
+                        }
+                    } else {
+                        try index_added.append(index_entry.path);
+                    }
+                }
+                // add to conflicts
+                else {
+                    try conflicts.put(path, .{
+                        .common = index_entries_for_path[1] != null,
+                        .current = index_entries_for_path[2] != null,
+                        .source = index_entries_for_path[3] != null,
+                    });
                 }
             }
 
@@ -95,6 +113,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind) type {
                 .index_added = index_added,
                 .index_modified = index_modified,
                 .index_deleted = index_deleted,
+                .conflicts = conflicts,
                 .index = index,
                 .head_tree = head_tree,
                 .arena = arena,
@@ -108,6 +127,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind) type {
             self.index_added.deinit();
             self.index_modified.deinit();
             self.index_deleted.deinit();
+            self.conflicts.deinit();
             self.index.deinit();
             self.head_tree.deinit();
             self.arena.deinit();
@@ -115,7 +135,16 @@ pub fn Status(comptime repo_kind: rp.RepoKind) type {
     };
 }
 
-fn addEntries(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, untracked: *std.ArrayList(Status(repo_kind).Entry), modified: *std.ArrayList(Status(repo_kind).Entry), index: idx.Index(repo_kind), index_bools: *[]bool, repo_dir: std.fs.Dir, path: []const u8) !bool {
+fn addEntries(
+    comptime repo_kind: rp.RepoKind,
+    allocator: std.mem.Allocator,
+    untracked: *std.ArrayList(Status(repo_kind).Entry),
+    modified: *std.ArrayList(Status(repo_kind).Entry),
+    index: idx.Index(repo_kind),
+    index_bools: *[]bool,
+    repo_dir: std.fs.Dir,
+    path: []const u8,
+) !bool {
     const meta = try io.getMetadata(repo_dir, path);
     switch (meta.kind()) {
         .file => {
@@ -124,12 +153,11 @@ fn addEntries(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, unt
 
             if (index.entries.getIndex(path)) |entry_index| {
                 index_bools.*[entry_index] = true;
-                if (index.entries.values()[entry_index][0]) |entry| {
+                const entries_for_path = index.entries.values()[entry_index];
+                if (entries_for_path[0]) |entry| {
                     if (try idx.indexDiffersFromWorkspace(repo_kind, entry, file, meta)) {
                         try modified.append(Status(repo_kind).Entry{ .path = path, .meta = meta });
                     }
-                } else {
-                    return error.NullEntry;
                 }
             } else {
                 try untracked.append(Status(repo_kind).Entry{ .path = path, .meta = meta });
