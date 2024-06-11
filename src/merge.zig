@@ -247,7 +247,7 @@ pub const MergeResultData = union(enum) {
 pub const MergeResult = struct {
     arena: std.heap.ArenaAllocator,
     changes: std.StringArrayHashMap(obj.Change),
-    auto_merged_conflicts: std.StringArrayHashMap(void),
+    auto_resolved_conflicts: std.StringArrayHashMap(void),
     current_name: []const u8,
     data: MergeResultData,
 
@@ -272,14 +272,14 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
     // they're using the arena because they'll be included in the result.
     var clean_diff = obj.TreeDiff(repo_kind).init(arena.allocator());
     var conflicts = std.StringArrayHashMap(MergeConflict).init(arena.allocator());
-    var auto_merged_conflicts = std.StringArrayHashMap(void).init(arena.allocator());
+    var auto_resolved_conflicts = std.StringArrayHashMap(void).init(arena.allocator());
 
     // if the common ancestor is the source oid, do nothing
     if (std.mem.eql(u8, &source_oid, &common_oid)) {
         return .{
             .arena = arena,
             .changes = clean_diff.changes,
-            .auto_merged_conflicts = auto_merged_conflicts,
+            .auto_resolved_conflicts = auto_resolved_conflicts,
             .current_name = current_name,
             .data = .nothing,
         };
@@ -302,7 +302,7 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
         if (same_path_result.conflict) |conflict| {
             try conflicts.put(path, conflict);
         } else {
-            try auto_merged_conflicts.put(path, {});
+            try auto_resolved_conflicts.put(path, {});
         }
     }
 
@@ -353,7 +353,7 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
                 return .{
                     .arena = arena,
                     .changes = clean_diff.changes,
-                    .auto_merged_conflicts = auto_merged_conflicts,
+                    .auto_resolved_conflicts = auto_resolved_conflicts,
                     .current_name = current_name,
                     .data = .{ .conflict = .{ .conflicts = conflicts } },
                 };
@@ -389,7 +389,7 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
                 return .{
                     .arena = arena,
                     .changes = clean_diff.changes,
-                    .auto_merged_conflicts = auto_merged_conflicts,
+                    .auto_resolved_conflicts = auto_resolved_conflicts,
                     .current_name = current_name,
                     .data = .{ .conflict = .{ .conflicts = conflicts } },
                 };
@@ -404,7 +404,7 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
         return .{
             .arena = arena,
             .changes = clean_diff.changes,
-            .auto_merged_conflicts = auto_merged_conflicts,
+            .auto_resolved_conflicts = auto_resolved_conflicts,
             .current_name = current_name,
             .data = .fast_forward,
         };
@@ -421,7 +421,7 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
         return .{
             .arena = arena,
             .changes = clean_diff.changes,
-            .auto_merged_conflicts = auto_merged_conflicts,
+            .auto_resolved_conflicts = auto_resolved_conflicts,
             .current_name = current_name,
             .data = .{
                 .success = .{

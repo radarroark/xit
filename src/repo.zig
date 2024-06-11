@@ -342,14 +342,13 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 cmd.CommandData.merge => {
                     var result = try self.merge(cmd_data.merge.source);
                     defer result.deinit();
+                    for (result.auto_resolved_conflicts.keys()) |path| {
+                        if (result.changes.contains(path)) {
+                            try writers.out.print("Auto-merging {s}\n", .{path});
+                        }
+                    }
                     switch (result.data) {
-                        .success => {
-                            for (result.auto_merged_conflicts.keys()) |path| {
-                                if (result.changes.contains(path)) {
-                                    try writers.out.print("Auto-merging {s}\n", .{path});
-                                }
-                            }
-                        },
+                        .success => {},
                         .nothing => {
                             try writers.out.print("Already up to date.\n", .{});
                         },
