@@ -122,9 +122,6 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8))
             }
             return CommandData{ .restore = .{ .path = pos_args.items[0] } };
         } else if (std.mem.eql(u8, args.items[0], "log")) {
-            if (pos_args.items.len == 0) {
-                return error.RestorePathMissing;
-            }
             return CommandData{ .log = {} };
         } else if (std.mem.eql(u8, args.items[0], "merge")) {
             if (pos_args.items.len == 0) {
