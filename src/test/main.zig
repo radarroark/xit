@@ -304,7 +304,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         {
             var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
-            var diff_iter = try repo.diff(.workspace);
+            var diff_iter = try repo.diff(.workspace, null);
             defer diff_iter.deinit();
 
             while (try diff_iter.next()) |diff_item| {
@@ -387,7 +387,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         {
             var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
-            var diff_iter = try repo.diff(.index);
+            var diff_iter = try repo.diff(.index, null);
             defer diff_iter.deinit();
 
             while (try diff_iter.next()) |diff_item| {

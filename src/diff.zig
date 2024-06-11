@@ -245,7 +245,7 @@ pub fn Target(comptime repo_kind: rp.RepoKind) type {
                 .lines = undefined,
             };
 
-            var file = try core.repo_dir.openFile(path, .{ .mode = std.fs.File.OpenMode.read_only });
+            var file = try core.repo_dir.openFile(path, .{ .mode = .read_only });
             defer file.close();
             const size = try file.reader().read(target.buffer);
             const buf = target.buffer[0..size];
@@ -492,22 +492,35 @@ pub const DiffKind = enum {
     index,
 };
 
+pub const ConflictDiffKind = enum {
+    common, // base
+    current, // ours
+    source, // theirs
+};
+
 pub fn DiffIterator(comptime repo_kind: rp.RepoKind) type {
     return struct {
         allocator: std.mem.Allocator,
         core: *rp.Repo(repo_kind).Core,
         diff_kind: DiffKind,
+        conflict_diff_kind_maybe: ?ConflictDiffKind,
         status: st.Status(repo_kind),
         diff: Diff(repo_kind),
         next_index: usize,
 
-        pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core, diff_kind: DiffKind) !DiffIterator(repo_kind) {
+        pub fn init(
+            allocator: std.mem.Allocator,
+            core: *rp.Repo(repo_kind).Core,
+            diff_kind: DiffKind,
+            conflict_diff_kind_maybe: ?ConflictDiffKind,
+        ) !DiffIterator(repo_kind) {
             var status = try st.Status(repo_kind).init(allocator, core);
             errdefer status.deinit();
             return .{
                 .allocator = allocator,
                 .core = core,
                 .diff_kind = diff_kind,
+                .conflict_diff_kind_maybe = conflict_diff_kind_maybe,
                 .status = status,
                 .diff = undefined,
                 .next_index = 0,
@@ -518,6 +531,40 @@ pub fn DiffIterator(comptime repo_kind: rp.RepoKind) type {
             var next_index = self.next_index;
             switch (self.diff_kind) {
                 .workspace => {
+                    if (self.conflict_diff_kind_maybe) |conflict_diff_kind| {
+                        if (next_index < self.status.conflicts.count()) {
+                            const path = self.status.conflicts.keys()[next_index];
+                            const meta = try io.getMetadata(self.core.repo_dir, path);
+                            const stage: usize = switch (conflict_diff_kind) {
+                                .common => 1,
+                                .current => 2,
+                                .source => 3,
+                            };
+                            const index_entries_for_path = self.status.index.entries.get(path) orelse return error.EntryNotFound;
+                            // if there is an entry for the stage we are diffing
+                            if (index_entries_for_path[stage]) |index_entry| {
+                                var a = try Target(repo_kind).initFromIndex(self.allocator, self.core, index_entry);
+                                errdefer a.deinit();
+                                var b = switch (meta.kind()) {
+                                    .file => try Target(repo_kind).initFromWorkspace(self.allocator, self.core, path, io.getMode(meta)),
+                                    // in file/dir conflicts, `path` may be a directory which can't be diffed, so just make it nothing
+                                    else => try Target(repo_kind).initFromNothing(self.allocator, path),
+                                };
+                                errdefer b.deinit();
+                                self.diff = try Diff(repo_kind).init(self.allocator, a, b);
+                                self.next_index += 1;
+                                return &self.diff;
+                            }
+                            // there is no entry, so just skip it and call this method recursively
+                            else {
+                                self.next_index += 1;
+                                return try self.next();
+                            }
+                        } else {
+                            next_index -= self.status.conflicts.count();
+                        }
+                    }
+
                     if (next_index < self.status.workspace_modified.items.len) {
                         const entry = self.status.workspace_modified.items[next_index];
                         const index_entries_for_path = self.status.index.entries.get(entry.path) orelse return error.EntryNotFound;

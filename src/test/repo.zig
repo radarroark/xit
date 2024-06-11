@@ -235,6 +235,13 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             defer result.deinit();
             try std.testing.expect(.conflict == result.data);
         }
+
+        // generate diff
+        var diff_iter = try repo.diff(.workspace, .current);
+        defer diff_iter.deinit();
+        while (try diff_iter.next()) |diff_item| {
+            defer diff_item.deinit();
+        }
     }
 
     // modify/delete conflict (current modifies, source deletes)
@@ -266,6 +273,13 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             var result = try repo.merge("foo");
             defer result.deinit();
             try std.testing.expect(.conflict == result.data);
+        }
+
+        // generate diff
+        var diff_iter = try repo.diff(.workspace, .current);
+        defer diff_iter.deinit();
+        while (try diff_iter.next()) |diff_item| {
+            defer diff_item.deinit();
         }
     }
 
@@ -299,6 +313,13 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             defer result.deinit();
             try std.testing.expect(.conflict == result.data);
         }
+
+        // generate diff
+        var diff_iter = try repo.diff(.workspace, .current);
+        defer diff_iter.deinit();
+        while (try diff_iter.next()) |diff_item| {
+            defer diff_item.deinit();
+        }
     }
 
     // file/dir conflict (current has file, source has dir)
@@ -330,6 +351,13 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             var result = try repo.merge("foo");
             defer result.deinit();
             try std.testing.expect(.conflict == result.data);
+        }
+
+        // generate diff
+        var diff_iter = try repo.diff(.workspace, .current);
+        defer diff_iter.deinit();
+        while (try diff_iter.next()) |diff_item| {
+            defer diff_item.deinit();
         }
 
         // make sure renamed file exists
@@ -366,6 +394,13 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             var result = try repo.merge("foo");
             defer result.deinit();
             try std.testing.expect(.conflict == result.data);
+        }
+
+        // generate diff
+        var diff_iter = try repo.diff(.workspace, .current);
+        defer diff_iter.deinit();
+        while (try diff_iter.next()) |diff_item| {
+            defer diff_item.deinit();
         }
 
         // make sure renamed file exists

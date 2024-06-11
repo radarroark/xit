@@ -293,7 +293,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     }
                 },
                 cmd.CommandData.diff => {
-                    var diff_iter = try self.diff(cmd_data.diff.kind);
+                    var diff_iter = try self.diff(cmd_data.diff.diff_kind, cmd_data.diff.conflict_diff_kind_maybe);
                     defer diff_iter.deinit();
 
                     while (try diff_iter.next()) |diff_item| {
@@ -509,8 +509,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             return try st.Status(repo_kind).init(self.allocator, &self.core);
         }
 
-        pub fn diff(self: *Repo(repo_kind), diff_kind: df.DiffKind) !df.DiffIterator(repo_kind) {
-            return try df.DiffIterator(repo_kind).init(self.allocator, &self.core, diff_kind);
+        pub fn diff(self: *Repo(repo_kind), diff_kind: df.DiffKind, conflict_diff_kind_maybe: ?df.ConflictDiffKind) !df.DiffIterator(repo_kind) {
+            return try df.DiffIterator(repo_kind).init(self.allocator, &self.core, diff_kind, conflict_diff_kind_maybe);
         }
 
         pub fn create_branch(self: *Repo(repo_kind), name: []const u8) !void {
