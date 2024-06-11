@@ -80,7 +80,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             }
         }
 
-        pub fn initWithCommand(allocator: std.mem.Allocator, opts: InitOpts, cmd_data: cmd.CommandData, comptime should_print: bool) !Repo(repo_kind) {
+        pub fn initWithCommand(allocator: std.mem.Allocator, opts: InitOpts, cmd_data: cmd.CommandData, writers: anytype) !Repo(repo_kind) {
             var repo = Repo(repo_kind).init(allocator, opts) catch |err| switch (err) {
                 error.RepoDoesNotExist => {
                     if (cmd_data == .init) {
@@ -88,7 +88,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                             .git => Repo(repo_kind){ .allocator = allocator, .core = undefined, .init_opts = opts },
                             .xit => Repo(repo_kind){ .allocator = allocator, .core = undefined, .init_opts = opts },
                         };
-                        try repo.command(cmd_data, should_print);
+                        try repo.command(cmd_data, writers);
                         return repo;
                     } else {
                         return error.NotARepo;
@@ -97,7 +97,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 else => return err,
             };
             errdefer repo.deinit();
-            try repo.command(cmd_data, should_print);
+            try repo.command(cmd_data, writers);
             return repo;
         }
 
@@ -200,17 +200,14 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             }
         }
 
-        fn command(self: *Repo(repo_kind), cmd_data: cmd.CommandData, comptime should_print: bool) !void {
-            const stdout = if (should_print) std.io.getStdOut().writer() else std.io.null_writer;
-            const stderr = if (should_print) std.io.getStdErr().writer() else std.io.null_writer;
-
+        fn command(self: *Repo(repo_kind), cmd_data: cmd.CommandData, writers: anytype) !void {
             switch (cmd_data) {
                 cmd.CommandData.invalid => {
-                    try stderr.print("\"{s}\" is not a valid command\n", .{cmd_data.invalid.name});
+                    try writers.err.print("\"{s}\" is not a valid command\n", .{cmd_data.invalid.name});
                     return;
                 },
                 cmd.CommandData.usage => {
-                    try stdout.print(
+                    try writers.out.print(
                         \\usage: xit
                         \\
                         \\start a working area:
@@ -222,7 +219,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     self.* = Repo(repo_kind).initNew(self.allocator, self.init_opts.cwd, cmd_data.init.dir) catch |err| {
                         switch (err) {
                             error.RepoAlreadyExists => {
-                                try stderr.print("{s} is already a repository\n", .{cmd_data.init.dir});
+                                try writers.err.print("{s} is already a repository\n", .{cmd_data.init.dir});
                                 return;
                             },
                             else => return err,
@@ -240,27 +237,27 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     defer stat.deinit();
 
                     for (stat.untracked.items) |entry| {
-                        try stdout.print("?? {s}\n", .{entry.path});
+                        try writers.out.print("?? {s}\n", .{entry.path});
                     }
 
                     for (stat.workspace_modified.items) |entry| {
-                        try stdout.print(" M {s}\n", .{entry.path});
+                        try writers.out.print(" M {s}\n", .{entry.path});
                     }
 
                     for (stat.workspace_deleted.items) |path| {
-                        try stdout.print(" D {s}\n", .{path});
+                        try writers.out.print(" D {s}\n", .{path});
                     }
 
                     for (stat.index_added.items) |path| {
-                        try stdout.print("A  {s}\n", .{path});
+                        try writers.out.print("A  {s}\n", .{path});
                     }
 
                     for (stat.index_modified.items) |path| {
-                        try stdout.print("M  {s}\n", .{path});
+                        try writers.out.print("M  {s}\n", .{path});
                     }
 
                     for (stat.index_deleted.items) |path| {
-                        try stdout.print("D  {s}\n", .{path});
+                        try writers.out.print("D  {s}\n", .{path});
                     }
                 },
                 cmd.CommandData.diff => {
@@ -270,18 +267,18 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     while (try diff_iter.next()) |diff_item| {
                         defer diff_item.deinit();
                         for (diff_item.header_lines.items) |header_line| {
-                            try stdout.print("{s}\n", .{header_line});
+                            try writers.out.print("{s}\n", .{header_line});
                         }
                         for (diff_item.hunks.items) |hunk| {
                             const offsets = hunk.offsets();
-                            try stdout.print("@@ -{},{} +{},{} @@\n", .{
+                            try writers.out.print("@@ -{},{} +{},{} @@\n", .{
                                 offsets.del_start,
                                 offsets.del_count,
                                 offsets.ins_start,
                                 offsets.ins_count,
                             });
                             for (hunk.edits) |edit| {
-                                try stdout.print("{s} {s}\n", .{
+                                try writers.out.print("{s} {s}\n", .{
                                     switch (edit) {
                                         .eql => " ",
                                         .ins => "+",
@@ -312,7 +309,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                                 std.mem.eql(u8, current_branch.name, r.name)
                             else
                                 false;
-                            try stdout.print("{s} {s}\n", .{ if (is_current_branch) "*" else " ", r.name });
+                            try writers.out.print("{s} {s}\n", .{ if (is_current_branch) "*" else " ", r.name });
                         }
                     }
                 },
@@ -329,16 +326,16 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         defer commit_iter.deinit();
                         while (try commit_iter.next()) |commit_object| {
                             defer commit_object.deinit();
-                            try stdout.print("commit {s}\n", .{commit_object.oid});
+                            try writers.out.print("commit {s}\n", .{commit_object.oid});
                             if (commit_object.content.commit.author) |author| {
-                                try stdout.print("Author {s}\n", .{author});
+                                try writers.out.print("Author {s}\n", .{author});
                             }
-                            try stdout.print("\n", .{});
+                            try writers.out.print("\n", .{});
                             var split_iter = std.mem.split(u8, commit_object.content.commit.message, "\n");
                             while (split_iter.next()) |line| {
-                                try stdout.print("    {s}\n", .{line});
+                                try writers.out.print("    {s}\n", .{line});
                             }
-                            try stdout.print("\n", .{});
+                            try writers.out.print("\n", .{});
                         }
                     }
                 },
@@ -349,15 +346,15 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         .success => {
                             for (result.auto_merged_conflicts.keys()) |path| {
                                 if (result.changes.contains(path)) {
-                                    try stdout.print("Auto-merging {s}\n", .{path});
+                                    try writers.out.print("Auto-merging {s}\n", .{path});
                                 }
                             }
                         },
                         .nothing => {
-                            try stdout.print("Already up to date.\n", .{});
+                            try writers.out.print("Already up to date.\n", .{});
                         },
                         .fast_forward => {
-                            try stdout.print("Fast-forward\n", .{});
+                            try writers.out.print("Fast-forward\n", .{});
                         },
                         .conflict => {
                             for (result.data.conflict.conflicts.keys(), result.data.conflict.conflicts.values()) |path, conflict| {
@@ -370,17 +367,17 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                                         cmd_data.merge.source
                                     else
                                         result.current_name;
-                                    try stderr.print("CONFLICT ({s}): There is a directory with name {s} in {s}. Adding {s} as {s}\n", .{ conflict_type, path, dir_branch_name, path, renamed.path });
+                                    try writers.err.print("CONFLICT ({s}): There is a directory with name {s} in {s}. Adding {s} as {s}\n", .{ conflict_type, path, dir_branch_name, path, renamed.path });
                                 } else {
                                     if (result.changes.contains(path)) {
-                                        try stdout.print("Auto-merging {s}\n", .{path});
+                                        try writers.out.print("Auto-merging {s}\n", .{path});
                                     }
                                     if (conflict.current != null and conflict.source != null) {
                                         const conflict_type = if (conflict.common != null)
                                             "content"
                                         else
                                             "add/add";
-                                        try stderr.print("CONFLICT ({s}): Merge conflict in {s}\n", .{ conflict_type, path });
+                                        try writers.err.print("CONFLICT ({s}): Merge conflict in {s}\n", .{ conflict_type, path });
                                     } else {
                                         const conflict_type = if (conflict.current != null)
                                             "modify/delete"
@@ -390,7 +387,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                                             .{ cmd_data.merge.source, result.current_name }
                                         else
                                             .{ result.current_name, cmd_data.merge.source };
-                                        try stderr.print("CONFLICT ({s}): {s} deleted in {s} and modified in {s}\n", .{ conflict_type, path, deleted_branch_name, modified_branch_name });
+                                        try writers.err.print("CONFLICT ({s}): {s} deleted in {s} and modified in {s}\n", .{ conflict_type, path, deleted_branch_name, modified_branch_name });
                                     }
                                 }
                             }

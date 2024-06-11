@@ -52,11 +52,13 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
+    const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
+
     // init repo
     args.clearAndFree();
     try args.append("init");
     try args.append(temp_dir_name ++ "/repo");
-    try main.xitMain(repo_kind, allocator, &args, false);
+    try main.xitMain(repo_kind, allocator, &args, writers);
 
     // get the main dir
     var repo_dir = try temp_dir.openDir("repo", .{});
@@ -164,14 +166,14 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         args.clearAndFree();
         try args.append("add");
         try args.append(".");
-        try main.xitMain(repo_kind, allocator, &args, false);
+        try main.xitMain(repo_kind, allocator, &args, writers);
 
         // make a commit
         args.clearAndFree();
         try args.append("commit");
         try args.append("-m");
         try args.append("first commit");
-        try main.xitMain(repo_kind, allocator, &args, false);
+        try main.xitMain(repo_kind, allocator, &args, writers);
 
         switch (repo_kind) {
             .git => {
@@ -364,14 +366,14 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         args.clearAndFree();
         try args.append("add");
         try args.append("LICENSE");
-        try main.xitMain(repo_kind, allocator, &args, false);
+        try main.xitMain(repo_kind, allocator, &args, writers);
 
         // delete a file and dir
         try repo_dir.deleteTree("docs");
         args.clearAndFree();
         try args.append("add");
         try args.append("docs/design.md");
-        try main.xitMain(repo_kind, allocator, &args, false);
+        try main.xitMain(repo_kind, allocator, &args, writers);
 
         // add new and modified files
         args.clearAndFree();
@@ -379,7 +381,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         try args.append("hello.txt");
         try args.append("run.sh");
         try args.append("src/zig/main.zig");
-        try main.xitMain(repo_kind, allocator, &args, false);
+        try main.xitMain(repo_kind, allocator, &args, writers);
 
         // index diff
         {
@@ -421,14 +423,14 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         args.clearAndFree();
         try args.append("add");
         try args.append(".");
-        try main.xitMain(repo_kind, allocator, &args, false);
+        try main.xitMain(repo_kind, allocator, &args, writers);
 
         // make another commit
         args.clearAndFree();
         try args.append("commit");
         try args.append("-m");
         try args.append("second commit");
-        try main.xitMain(repo_kind, allocator, &args, false);
+        try main.xitMain(repo_kind, allocator, &args, writers);
 
         switch (repo_kind) {
             .git => {
@@ -495,7 +497,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 args.clearAndFree();
                 try args.append("add");
                 try args.append("LICENSE");
-                try main.xitMain(repo_kind, allocator, &args, false);
+                try main.xitMain(repo_kind, allocator, &args, writers);
             }
 
             // check out commit1 and make sure the conflict is found
@@ -514,7 +516,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 args.clearAndFree();
                 try args.append("add");
                 try args.append("LICENSE");
-                try main.xitMain(repo_kind, allocator, &args, false);
+                try main.xitMain(repo_kind, allocator, &args, writers);
             }
         }
 
@@ -597,7 +599,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     args.clearAndFree();
     try args.append("switch");
     try args.append(&commit1);
-    try main.xitMain(repo_kind, allocator, &args, false);
+    try main.xitMain(repo_kind, allocator, &args, writers);
 
     // the working tree was updated
     {
@@ -615,7 +617,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     args.clearAndFree();
     try args.append("switch");
     try args.append("master");
-    try main.xitMain(repo_kind, allocator, &args, false);
+    try main.xitMain(repo_kind, allocator, &args, writers);
 
     // the working tree was updated
     {
@@ -646,7 +648,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         args.clearAndFree();
         try args.append("add");
         try args.append(".");
-        try main.xitMain(repo_kind, allocator, &args, false);
+        try main.xitMain(repo_kind, allocator, &args, writers);
 
         // read index
         {
@@ -709,7 +711,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         args.clearAndFree();
         try args.append("add");
         try args.append(".");
-        try main.xitMain(repo_kind, allocator, &args, false);
+        try main.xitMain(repo_kind, allocator, &args, writers);
 
         // read index
         {
@@ -760,7 +762,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         args.clearAndFree();
         try args.append("add");
         try args.append("no-such-file");
-        try expectEqual(error.FileNotFound, main.xitMain(repo_kind, allocator, &args, false));
+        try expectEqual(error.FileNotFound, main.xitMain(repo_kind, allocator, &args, writers));
 
         // a stale index lock file isn't hanging around
         if (repo_kind == .git) {
@@ -867,13 +869,13 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             args.clearAndFree();
             try args.append("add");
             try args.append("c/d.txt");
-            try main.xitMain(repo_kind, allocator, &args, false);
+            try main.xitMain(repo_kind, allocator, &args, writers);
 
             // remove file from index
             args.clearAndFree();
             try args.append("add");
             try args.append("src/zig/main.zig");
-            try main.xitMain(repo_kind, allocator, &args, false);
+            try main.xitMain(repo_kind, allocator, &args, writers);
 
             // get status
             var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
@@ -930,32 +932,32 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         args.clearAndFree();
         try args.append("restore");
         try args.append("README");
-        try main.xitMain(repo_kind, allocator, &args, false);
+        try main.xitMain(repo_kind, allocator, &args, writers);
 
         args.clearAndFree();
         try args.append("restore");
         try args.append("hello.txt");
-        try main.xitMain(repo_kind, allocator, &args, false);
+        try main.xitMain(repo_kind, allocator, &args, writers);
 
         // directories can be restored
         args.clearAndFree();
         try args.append("restore");
         try args.append("src");
-        try main.xitMain(repo_kind, allocator, &args, false);
+        try main.xitMain(repo_kind, allocator, &args, writers);
 
         // nested paths can be restored
         try repo_dir.deleteTree("src");
         args.clearAndFree();
         try args.append("restore");
         try args.append("src/zig/main.zig");
-        try main.xitMain(repo_kind, allocator, &args, false);
+        try main.xitMain(repo_kind, allocator, &args, writers);
 
         // remove changes to index
         args.clearAndFree();
         try args.append("add");
         try args.append("hello.txt");
         try args.append("src");
-        try main.xitMain(repo_kind, allocator, &args, false);
+        try main.xitMain(repo_kind, allocator, &args, writers);
 
         // there are no modified or deleted files remaining
         {
@@ -993,13 +995,13 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     args.clearAndFree();
     try args.append("branch");
     try args.append("stuff");
-    try main.xitMain(repo_kind, allocator, &args, false);
+    try main.xitMain(repo_kind, allocator, &args, writers);
 
     // switch to the branch
     args.clearAndFree();
     try args.append("switch");
     try args.append("stuff");
-    try main.xitMain(repo_kind, allocator, &args, false);
+    try main.xitMain(repo_kind, allocator, &args, writers);
 
     // check the refs
     {
@@ -1059,14 +1061,14 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         args.clearAndFree();
         try args.append("add");
         try args.append("hello.txt");
-        try main.xitMain(repo_kind, allocator, &args, false);
+        try main.xitMain(repo_kind, allocator, &args, writers);
 
         // make a commit
         args.clearAndFree();
         try args.append("commit");
         try args.append("-m");
         try args.append("third commit");
-        try main.xitMain(repo_kind, allocator, &args, false);
+        try main.xitMain(repo_kind, allocator, &args, writers);
 
         try hello_txt.seekTo(0);
         try hello_txt.writeAll("hello, world on the stuff branch, commit 4!");
@@ -1076,14 +1078,14 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         args.clearAndFree();
         try args.append("add");
         try args.append("hello.txt");
-        try main.xitMain(repo_kind, allocator, &args, false);
+        try main.xitMain(repo_kind, allocator, &args, writers);
 
         // make a commit
         args.clearAndFree();
         try args.append("commit");
         try args.append("-m");
         try args.append("fourth commit");
-        try main.xitMain(repo_kind, allocator, &args, false);
+        try main.xitMain(repo_kind, allocator, &args, writers);
     }
 
     // get HEAD contents
@@ -1097,7 +1099,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     args.clearAndFree();
     try args.append("branch");
     try args.append("a/b/c");
-    try main.xitMain(repo_kind, allocator, &args, false);
+    try main.xitMain(repo_kind, allocator, &args, writers);
 
     // make sure the ref is created with subdirs
     if (repo_kind == .git) {
@@ -1140,7 +1142,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     args.clearAndFree();
     try args.append("switch");
     try args.append("master");
-    try main.xitMain(repo_kind, allocator, &args, false);
+    try main.xitMain(repo_kind, allocator, &args, writers);
 
     // modify file and commit
     {
@@ -1152,14 +1154,14 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         args.clearAndFree();
         try args.append("add");
         try args.append("goodbye.txt");
-        try main.xitMain(repo_kind, allocator, &args, false);
+        try main.xitMain(repo_kind, allocator, &args, writers);
 
         // make a commit
         args.clearAndFree();
         try args.append("commit");
         try args.append("-m");
         try args.append("third commit");
-        try main.xitMain(repo_kind, allocator, &args, false);
+        try main.xitMain(repo_kind, allocator, &args, writers);
     }
 
     // get HEAD contents
@@ -1212,7 +1214,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         args.clearAndFree();
         try args.append("merge");
         try args.append("stuff");
-        try main.xitMain(repo_kind, allocator, &args, false);
+        try main.xitMain(repo_kind, allocator, &args, writers);
 
         // change from stuff exists
         {

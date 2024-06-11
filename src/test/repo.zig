@@ -42,7 +42,9 @@ fn testSimple(comptime repo_kind: rp.RepoKind) !void {
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
-    var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, false);
+    const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
+
+    var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, writers);
     defer repo.deinit();
 
     try addFile(repo_kind, &repo, "README.md", "Hello, world!");
@@ -91,7 +93,9 @@ fn testMerge(comptime repo_kind: rp.RepoKind) !void {
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
-    var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, false);
+    const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
+
+    var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, writers);
     defer repo.deinit();
 
     // A --- B --- C --------- J --- K [master]
@@ -199,9 +203,11 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
+    const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
+
     // same file conflict
     {
-        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "same-file-conflict" } }, false);
+        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "same-file-conflict" } }, writers);
         defer repo.deinit();
 
         // A --- B --- D [master]
@@ -233,7 +239,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
 
     // modify/delete conflict (current modifies, source deletes)
     {
-        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "modify-delete-conflict" } }, false);
+        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "modify-delete-conflict" } }, writers);
         defer repo.deinit();
 
         // A --- B --- D [master]
@@ -265,7 +271,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
 
     // modify/delete conflict (current deletes, source modifies)
     {
-        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "delete-modify-conflict" } }, false);
+        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "delete-modify-conflict" } }, writers);
         defer repo.deinit();
 
         // A --- B --- D [master]
@@ -297,7 +303,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
 
     // file/dir conflict (current has file, source has dir)
     {
-        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "file-dir-conflict" } }, false);
+        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "file-dir-conflict" } }, writers);
         defer repo.deinit();
 
         // A --- B --- D [master]
@@ -333,7 +339,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
 
     // dir/file conflict (current has dir, source has file)
     {
-        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "dir-file-conflict" } }, false);
+        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "dir-file-conflict" } }, writers);
         defer repo.deinit();
 
         // A --- B --- D [master]

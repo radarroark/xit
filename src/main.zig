@@ -36,7 +36,7 @@ fn appendArgs(out: *std.ArrayList([]const u8)) !void {
 /// you can call as well, but if you just want to pass the CLI args and
 /// have it behave just like the standalone xit client than this is
 /// where it's at, homie.
-pub fn xitMain(comptime kind: rp.RepoKind, allocator: std.mem.Allocator, args: *std.ArrayList([]const u8), comptime should_print: bool) !void {
+pub fn xitMain(comptime kind: rp.RepoKind, allocator: std.mem.Allocator, args: *std.ArrayList([]const u8), writers: anytype) !void {
     var command = try cmd.Command.init(allocator, args);
     defer command.deinit();
 
@@ -46,7 +46,7 @@ pub fn xitMain(comptime kind: rp.RepoKind, allocator: std.mem.Allocator, args: *
     var cwd = try std.fs.openDirAbsolute(cwd_path, .{});
     defer cwd.close();
 
-    var repo = try rp.Repo(kind).initWithCommand(allocator, .{ .cwd = cwd }, command.data, should_print);
+    var repo = try rp.Repo(kind).initWithCommand(allocator, .{ .cwd = cwd }, command.data, writers);
     defer repo.deinit();
 }
 
@@ -63,5 +63,5 @@ pub fn main() !void {
     defer args.deinit();
 
     try appendArgs(&args);
-    try xitMain(.xit, allocator, &args, true);
+    try xitMain(.xit, allocator, &args, .{ .out = std.io.getStdOut().writer(), .err = std.io.getStdErr().writer() });
 }
