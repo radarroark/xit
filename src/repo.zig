@@ -80,7 +80,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             }
         }
 
-        pub fn initWithCommand(allocator: std.mem.Allocator, opts: InitOpts, cmd_data: cmd.CommandData) !Repo(repo_kind) {
+        pub fn initWithCommand(allocator: std.mem.Allocator, opts: InitOpts, cmd_data: cmd.CommandData, comptime should_print: bool) !Repo(repo_kind) {
             var repo = Repo(repo_kind).init(allocator, opts) catch |err| switch (err) {
                 error.RepoDoesNotExist => {
                     if (cmd_data == .init) {
@@ -88,7 +88,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                             .git => Repo(repo_kind){ .allocator = allocator, .core = undefined, .init_opts = opts },
                             .xit => Repo(repo_kind){ .allocator = allocator, .core = undefined, .init_opts = opts },
                         };
-                        try repo.command(cmd_data);
+                        try repo.command(cmd_data, should_print);
                         return repo;
                     } else {
                         return error.NotARepo;
@@ -97,7 +97,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 else => return err,
             };
             errdefer repo.deinit();
-            try repo.command(cmd_data);
+            try repo.command(cmd_data, should_print);
             return repo;
         }
 
@@ -200,9 +200,9 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             }
         }
 
-        fn command(self: *Repo(repo_kind), cmd_data: cmd.CommandData) !void {
-            const stdout = std.io.getStdOut().writer();
-            const stderr = std.io.getStdErr().writer();
+        fn command(self: *Repo(repo_kind), cmd_data: cmd.CommandData, comptime should_print: bool) !void {
+            const stdout = if (should_print) std.io.getStdOut().writer() else std.io.null_writer;
+            const stderr = if (should_print) std.io.getStdErr().writer() else std.io.null_writer;
 
             switch (cmd_data) {
                 cmd.CommandData.invalid => {
@@ -345,6 +345,57 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 cmd.CommandData.merge => {
                     var result = try self.merge(cmd_data.merge.source);
                     defer result.deinit();
+                    switch (result.data) {
+                        .success => {
+                            for (result.auto_merged_conflicts.keys()) |path| {
+                                if (result.changes.contains(path)) {
+                                    try stdout.print("Auto-merging {s}\n", .{path});
+                                }
+                            }
+                        },
+                        .nothing => {
+                            try stdout.print("Already up to date.\n", .{});
+                        },
+                        .fast_forward => {
+                            try stdout.print("Fast-forward\n", .{});
+                        },
+                        .conflict => {
+                            for (result.data.conflict.conflicts.keys(), result.data.conflict.conflicts.values()) |path, conflict| {
+                                if (conflict.renamed) |renamed| {
+                                    const conflict_type = if (conflict.current != null)
+                                        "file/directory"
+                                    else
+                                        "directory/file";
+                                    const dir_branch_name = if (conflict.current != null)
+                                        cmd_data.merge.source
+                                    else
+                                        result.current_name;
+                                    try stderr.print("CONFLICT ({s}): There is a directory with name {s} in {s}. Adding {s} as {s}\n", .{ conflict_type, path, dir_branch_name, path, renamed.path });
+                                } else {
+                                    if (result.changes.contains(path)) {
+                                        try stdout.print("Auto-merging {s}\n", .{path});
+                                    }
+                                    if (conflict.current != null and conflict.source != null) {
+                                        const conflict_type = if (conflict.common != null)
+                                            "content"
+                                        else
+                                            "add/add";
+                                        try stderr.print("CONFLICT ({s}): Merge conflict in {s}\n", .{ conflict_type, path });
+                                    } else {
+                                        const conflict_type = if (conflict.current != null)
+                                            "modify/delete"
+                                        else
+                                            "delete/modify";
+                                        const deleted_branch_name, const modified_branch_name = if (conflict.current != null)
+                                            .{ cmd_data.merge.source, result.current_name }
+                                        else
+                                            .{ result.current_name, cmd_data.merge.source };
+                                        try stderr.print("CONFLICT ({s}): {s} deleted in {s} and modified in {s}\n", .{ conflict_type, path, deleted_branch_name, modified_branch_name });
+                                    }
+                                }
+                            }
+                        },
+                    }
                 },
             }
         }

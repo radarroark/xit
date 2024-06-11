@@ -734,15 +734,15 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
     };
 }
 
+pub const Change = struct {
+    old: ?TreeEntry,
+    new: ?TreeEntry,
+};
+
 pub fn TreeDiff(comptime repo_kind: rp.RepoKind) type {
     return struct {
         changes: std.StringArrayHashMap(Change),
         arena: std.heap.ArenaAllocator,
-
-        pub const Change = struct {
-            old: ?TreeEntry,
-            new: ?TreeEntry,
-        };
 
         pub fn init(allocator: std.mem.Allocator) TreeDiff(repo_kind) {
             return TreeDiff(repo_kind){

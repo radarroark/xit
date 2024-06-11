@@ -8,11 +8,9 @@ const chk = @import("./checkout.zig");
 const io = @import("./io.zig");
 const rp = @import("./repo.zig");
 
-pub const DiffKind = enum { current, source };
 pub const RenamedEntry = struct {
     path: []const u8,
     tree_entry: obj.TreeEntry,
-    diff_kind: DiffKind,
 };
 pub const MergeConflict = struct {
     common: ?obj.TreeEntry,
@@ -71,12 +69,10 @@ fn writeBlobWithConflict(
     }
 }
 
-fn SamePathConflictResult(comptime repo_kind: rp.RepoKind) type {
-    return struct {
-        change: ?obj.TreeDiff(repo_kind).Change,
-        conflict: ?MergeConflict,
-    };
-}
+pub const SamePathConflictResult = struct {
+    change: ?obj.Change,
+    conflict: ?MergeConflict,
+};
 
 fn samePathConflict(
     comptime repo_kind: rp.RepoKind,
@@ -84,9 +80,9 @@ fn samePathConflict(
     allocator: std.mem.Allocator,
     current_name: []const u8,
     source_name: []const u8,
-    current_change_maybe: ?obj.TreeDiff(repo_kind).Change,
-    source_change: obj.TreeDiff(repo_kind).Change,
-) !SamePathConflictResult(repo_kind) {
+    current_change_maybe: ?obj.Change,
+    source_change: obj.Change,
+) !SamePathConflictResult {
     if (current_change_maybe) |current_change| {
         const common_entry_maybe = source_change.old;
 
@@ -191,8 +187,8 @@ fn fileDirConflict(
     comptime repo_kind: rp.RepoKind,
     path: []const u8,
     diff: *obj.TreeDiff(repo_kind),
-    diff_kind: DiffKind,
-    ref_name: []const u8,
+    diff_kind: enum { current, source },
+    branch_name: []const u8,
     conflicts: *std.StringArrayHashMap(MergeConflict),
     clean_diff: *obj.TreeDiff(repo_kind),
 ) !void {
@@ -200,7 +196,7 @@ fn fileDirConflict(
     while (parent_path_maybe) |parent_path| {
         if (diff.changes.get(parent_path)) |change| {
             if (change.new) |new| {
-                const new_path = try std.fmt.allocPrint(arena.allocator(), "{s}~{s}", .{ parent_path, ref_name });
+                const new_path = try std.fmt.allocPrint(arena.allocator(), "{s}~{s}", .{ parent_path, branch_name });
                 switch (diff_kind) {
                     .current => {
                         // add the conflict
@@ -211,7 +207,6 @@ fn fileDirConflict(
                             .renamed = .{
                                 .path = new_path,
                                 .tree_entry = new,
-                                .diff_kind = diff_kind,
                             },
                         });
                         // remove from the working tree
@@ -226,7 +221,6 @@ fn fileDirConflict(
                             .renamed = .{
                                 .path = new_path,
                                 .tree_entry = new,
-                                .diff_kind = diff_kind,
                             },
                         });
                         // prevent from being added to working tree
@@ -252,6 +246,9 @@ pub const MergeResultData = union(enum) {
 
 pub const MergeResult = struct {
     arena: std.heap.ArenaAllocator,
+    changes: std.StringArrayHashMap(obj.Change),
+    auto_merged_conflicts: std.StringArrayHashMap(void),
+    current_name: []const u8,
     data: MergeResultData,
 
     pub fn deinit(self: *MergeResult) void {
@@ -269,12 +266,23 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
     const common_oid = try obj.commonAncestor(repo_kind, allocator, core, &current_oid, &source_oid);
 
     // get the name of HEAD
-    const current_name = try ref.readHeadName(repo_kind, core, allocator);
-    defer allocator.free(current_name);
+    const current_name = try ref.readHeadName(repo_kind, core, arena.allocator());
+
+    // init the diff that we will use for the migration and the conflicts maps.
+    // they're using the arena because they'll be included in the result.
+    var clean_diff = obj.TreeDiff(repo_kind).init(arena.allocator());
+    var conflicts = std.StringArrayHashMap(MergeConflict).init(arena.allocator());
+    var auto_merged_conflicts = std.StringArrayHashMap(void).init(arena.allocator());
 
     // if the common ancestor is the source oid, do nothing
     if (std.mem.eql(u8, &source_oid, &common_oid)) {
-        return .{ .arena = arena, .data = .nothing };
+        return .{
+            .arena = arena,
+            .changes = clean_diff.changes,
+            .auto_merged_conflicts = auto_merged_conflicts,
+            .current_name = current_name,
+            .data = .nothing,
+        };
     }
 
     // diff the common ancestor with the current oid
@@ -285,17 +293,6 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
     var source_diff = obj.TreeDiff(repo_kind).init(arena.allocator());
     try source_diff.compare(core, common_oid, source_oid, null);
 
-    // init the diff that we will use for the migration.
-    // it's not using the arena because it will be cleared
-    // at the end of this function.
-    var clean_diff = obj.TreeDiff(repo_kind).init(allocator);
-    defer clean_diff.deinit();
-
-    // init the conflicts map.
-    // this is using the arena because it will be included in the result
-    // if there are any conflicts.
-    var conflicts = std.StringArrayHashMap(MergeConflict).init(arena.allocator());
-
     // look for same path conflicts while populating the clean diff
     for (source_diff.changes.keys(), source_diff.changes.values()) |path, source_change| {
         const same_path_result = try samePathConflict(repo_kind, core, allocator, current_name, source_name, current_diff.changes.get(path), source_change);
@@ -304,6 +301,8 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
         }
         if (same_path_result.conflict) |conflict| {
             try conflicts.put(path, conflict);
+        } else {
+            try auto_merged_conflicts.put(path, {});
         }
     }
 
@@ -351,7 +350,13 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
 
             // exit early if there were conflicts
             if (conflicts.count() > 0) {
-                return .{ .arena = arena, .data = .{ .conflict = .{ .conflicts = conflicts } } };
+                return .{
+                    .arena = arena,
+                    .changes = clean_diff.changes,
+                    .auto_merged_conflicts = auto_merged_conflicts,
+                    .current_name = current_name,
+                    .data = .{ .conflict = .{ .conflicts = conflicts } },
+                };
             }
         },
         .xit => {
@@ -381,7 +386,13 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
 
             // exit early if there were conflicts
             if (conflicts.count() > 0) {
-                return .{ .arena = arena, .data = .{ .conflict = .{ .conflicts = conflicts } } };
+                return .{
+                    .arena = arena,
+                    .changes = clean_diff.changes,
+                    .auto_merged_conflicts = auto_merged_conflicts,
+                    .current_name = current_name,
+                    .data = .{ .conflict = .{ .conflicts = conflicts } },
+                };
             }
         },
     }
@@ -390,7 +401,13 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
         // the common ancestor is the current oid, so just update HEAD
         // TODO: for .xit, should this be in the same transaction as the index.write above?
         try ref.updateHead(repo_kind, core, allocator, &source_oid);
-        return .{ .arena = arena, .data = .fast_forward };
+        return .{
+            .arena = arena,
+            .changes = clean_diff.changes,
+            .auto_merged_conflicts = auto_merged_conflicts,
+            .current_name = current_name,
+            .data = .fast_forward,
+        };
     } else {
         // create commit message
         const commit_message = try std.fmt.allocPrint(allocator, "merge from {s}", .{source_name});
@@ -401,6 +418,16 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
         var sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
         try obj.writeCommit(repo_kind, core, allocator, parent_oids, commit_message, &sha1_bytes_buffer);
 
-        return .{ .arena = arena, .data = .{ .success = .{ .oid = std.fmt.bytesToHex(sha1_bytes_buffer, .lower) } } };
+        return .{
+            .arena = arena,
+            .changes = clean_diff.changes,
+            .auto_merged_conflicts = auto_merged_conflicts,
+            .current_name = current_name,
+            .data = .{
+                .success = .{
+                    .oid = std.fmt.bytesToHex(sha1_bytes_buffer, .lower),
+                },
+            },
+        };
     }
 }

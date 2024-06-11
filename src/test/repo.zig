@@ -42,7 +42,7 @@ fn testSimple(comptime repo_kind: rp.RepoKind) !void {
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
-    var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } });
+    var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, false);
     defer repo.deinit();
 
     try addFile(repo_kind, &repo, "README.md", "Hello, world!");
@@ -91,7 +91,7 @@ fn testMerge(comptime repo_kind: rp.RepoKind) !void {
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
-    var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } });
+    var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, false);
     defer repo.deinit();
 
     // A --- B --- C --------- J --- K [master]
@@ -201,7 +201,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
 
     // same file conflict
     {
-        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "same-file-conflict" } });
+        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "same-file-conflict" } }, false);
         defer repo.deinit();
 
         // A --- B --- D [master]
@@ -231,9 +231,73 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         }
     }
 
+    // modify/delete conflict (current modifies, source deletes)
+    {
+        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "modify-delete-conflict" } }, false);
+        defer repo.deinit();
+
+        // A --- B --- D [master]
+        //  \         /
+        //   \       /
+        //    `---- C [foo]
+
+        try addFile(repo_kind, &repo, "f.txt", "1");
+        _ = try repo.commit(null, "a");
+        try repo.create_branch("foo");
+        try addFile(repo_kind, &repo, "f.txt", "2");
+        _ = try repo.commit(null, "b");
+        {
+            var result = try repo.switch_head("foo");
+            defer result.deinit();
+        }
+        try removeFile(repo_kind, &repo, "f.txt");
+        _ = try repo.commit(null, "d");
+        {
+            var result = try repo.switch_head("master");
+            defer result.deinit();
+        }
+        {
+            var result = try repo.merge("foo");
+            defer result.deinit();
+            try std.testing.expect(.conflict == result.data);
+        }
+    }
+
+    // modify/delete conflict (current deletes, source modifies)
+    {
+        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "delete-modify-conflict" } }, false);
+        defer repo.deinit();
+
+        // A --- B --- D [master]
+        //  \         /
+        //   \       /
+        //    `---- C [foo]
+
+        try addFile(repo_kind, &repo, "f.txt", "1");
+        _ = try repo.commit(null, "a");
+        try repo.create_branch("foo");
+        try removeFile(repo_kind, &repo, "f.txt");
+        _ = try repo.commit(null, "b");
+        {
+            var result = try repo.switch_head("foo");
+            defer result.deinit();
+        }
+        try addFile(repo_kind, &repo, "f.txt", "2");
+        _ = try repo.commit(null, "d");
+        {
+            var result = try repo.switch_head("master");
+            defer result.deinit();
+        }
+        {
+            var result = try repo.merge("foo");
+            defer result.deinit();
+            try std.testing.expect(.conflict == result.data);
+        }
+    }
+
     // file/dir conflict (current has file, source has dir)
     {
-        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "current-file-source-dir-conflict" } });
+        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "file-dir-conflict" } }, false);
         defer repo.deinit();
 
         // A --- B --- D [master]
@@ -267,9 +331,9 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         defer renamed_file.close();
     }
 
-    // file/dir conflict (source has file, current has dir)
+    // dir/file conflict (current has dir, source has file)
     {
-        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "source-file-current-dir-conflict" } });
+        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "dir-file-conflict" } }, false);
         defer repo.deinit();
 
         // A --- B --- D [master]
