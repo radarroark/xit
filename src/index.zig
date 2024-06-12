@@ -310,11 +310,25 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
         }
 
         fn addEntry(self: *Index(repo_kind), entry: Entry) !void {
-            if (!self.entries.contains(entry.path)) {
-                try self.entries.put(entry.path, [4]?Entry{ null, null, null, null });
+            if (self.entries.getEntry(entry.path)) |map_entry| {
+                // there is an existing slot for the given path,
+                // so evict entries to ensure zero and non-zero stages don't coexist
+                if (0 == entry.flags.stage) {
+                    map_entry.value_ptr[1] = null;
+                    map_entry.value_ptr[2] = null;
+                    map_entry.value_ptr[3] = null;
+                } else {
+                    map_entry.value_ptr[0] = null;
+                }
+                // add the new entry
+                map_entry.value_ptr[entry.flags.stage] = entry;
+            } else {
+                // there is no existing slot for the given path,
+                // so create a new one with the entry included
+                var entries_for_path = [4]?Entry{ null, null, null, null };
+                entries_for_path[entry.flags.stage] = entry;
+                try self.entries.put(entry.path, entries_for_path);
             }
-            const map_entry = self.entries.getEntry(entry.path) orelse return error.EntryNotFound;
-            map_entry.value_ptr[entry.flags.stage] = entry;
 
             var child = std.fs.path.basename(entry.path);
             var parent_path_maybe = std.fs.path.dirname(entry.path);
@@ -348,10 +362,6 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
         }
 
         pub fn addConflictEntries(self: *Index(repo_kind), path: []const u8, tree_entries: [3]?obj.TreeEntry) !void {
-            // if there is an existing stage 0 entry, remove it
-            if (self.entries.getEntry(path)) |map_entry| {
-                map_entry.value_ptr[0] = null;
-            }
             // add the conflict entries
             const owned_path = try std.fmt.allocPrint(self.arena.allocator(), "{s}", .{path});
             for (tree_entries, 1..) |tree_entry_maybe, stage| {
