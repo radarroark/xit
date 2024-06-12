@@ -181,6 +181,13 @@ fn testMerge(comptime repo_kind: rp.RepoKind) !void {
 
         const head_oid = try ref.readHead(repo_kind, &repo.core);
         try expectEqual(commit_k, head_oid);
+
+        // make sure file from commit k exists
+        var master_md = try repo.core.repo_dir.openFile("master.md", .{});
+        defer master_md.close();
+        const master_md_content = try master_md.readToEndAlloc(allocator, 1024);
+        defer allocator.free(master_md_content);
+        try std.testing.expectEqualStrings("k", master_md_content);
     }
 }
 
