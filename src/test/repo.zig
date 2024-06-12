@@ -239,8 +239,11 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         // generate diff
         var diff_iter = try repo.diff(.workspace, .current);
         defer diff_iter.deinit();
-        while (try diff_iter.next()) |diff_item| {
+        if (try diff_iter.next()) |diff_item| {
             defer diff_item.deinit();
+            try std.testing.expectEqualStrings("f.txt", diff_item.path);
+        } else {
+            return error.DiffResultExpected;
         }
     }
 
@@ -278,8 +281,11 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         // generate diff
         var diff_iter = try repo.diff(.workspace, .current);
         defer diff_iter.deinit();
-        while (try diff_iter.next()) |diff_item| {
+        if (try diff_iter.next()) |diff_item| {
             defer diff_item.deinit();
+            try std.testing.expectEqualStrings("f.txt", diff_item.path);
+        } else {
+            return error.DiffResultExpected;
         }
     }
 
@@ -317,8 +323,9 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         // generate diff
         var diff_iter = try repo.diff(.workspace, .current);
         defer diff_iter.deinit();
-        while (try diff_iter.next()) |diff_item| {
+        if (try diff_iter.next()) |diff_item| {
             defer diff_item.deinit();
+            return error.DiffResultNotExpected;
         }
     }
 
@@ -356,8 +363,11 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         // generate diff
         var diff_iter = try repo.diff(.workspace, .current);
         defer diff_iter.deinit();
-        while (try diff_iter.next()) |diff_item| {
+        if (try diff_iter.next()) |diff_item| {
             defer diff_item.deinit();
+            try std.testing.expectEqualStrings("f.txt", diff_item.path);
+        } else {
+            return error.DiffResultExpected;
         }
 
         // make sure renamed file exists
@@ -399,8 +409,9 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         // generate diff
         var diff_iter = try repo.diff(.workspace, .current);
         defer diff_iter.deinit();
-        while (try diff_iter.next()) |diff_item| {
+        if (try diff_iter.next()) |diff_item| {
             defer diff_item.deinit();
+            return error.DiffResultNotExpected;
         }
 
         // make sure renamed file exists
