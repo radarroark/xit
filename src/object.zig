@@ -436,7 +436,7 @@ pub fn writeCommit(
             try std.fs.rename(commit_hash_prefix_dir, commit_comp_tmp_file_name, commit_hash_prefix_dir, commit_hash_suffix);
 
             // write commit id to HEAD
-            try ref.updateRecur(repo_kind, core, .{ .dir = core.git_dir }, allocator, "HEAD", &commit_sha1_hex);
+            try ref.updateRecur(repo_kind, .{ .core = core }, allocator, &[_][]const u8{"HEAD"}, &commit_sha1_hex);
 
             // update out param
             if (sha1_bytes_out_maybe) |sha1_bytes_out| sha1_bytes_out.* = commit_sha1_bytes_buffer;
@@ -490,7 +490,7 @@ pub fn writeCommit(
                     const commit_sha1_hex = std.fmt.bytesToHex(ctx_self.commit_sha1_bytes, .lower);
 
                     // write commit id to HEAD
-                    try ref.updateRecur(repo_kind, ctx_self.core, .{ .root_cursor = cursor }, ctx_self.allocator, "HEAD", &commit_sha1_hex);
+                    try ref.updateRecur(repo_kind, .{ .core = ctx_self.core, .root_cursor = cursor }, ctx_self.allocator, &[_][]const u8{"HEAD"}, &commit_sha1_hex);
                 }
             };
             var ctx = Ctx{

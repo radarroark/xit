@@ -55,16 +55,11 @@ pub const RefList = struct {
     arena: std.heap.ArenaAllocator,
 
     pub fn init(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, dir_name: []const u8) !RefList {
-        var refs = std.ArrayList(Ref).init(allocator);
-        errdefer refs.deinit();
-
-        var arena = std.heap.ArenaAllocator.init(allocator);
-        errdefer arena.deinit();
-
         var ref_list = RefList{
-            .refs = refs,
-            .arena = arena,
+            .refs = std.ArrayList(Ref).init(allocator),
+            .arena = std.heap.ArenaAllocator.init(allocator),
         };
+        errdefer ref_list.deinit();
 
         switch (repo_kind) {
             .git => {
@@ -353,7 +348,7 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core
 pub fn updateHead(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, oid_hex: *const [hash.SHA1_HEX_LEN]u8) !void {
     switch (repo_kind) {
         .git => {
-            try updateRecur(repo_kind, core, .{ .dir = core.git_dir }, allocator, "HEAD", oid_hex);
+            try updateRecur(repo_kind, .{ .core = core }, allocator, &[_][]const u8{"HEAD"}, oid_hex);
         },
         .xit => {
             const Ctx = struct {
@@ -362,7 +357,7 @@ pub fn updateHead(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Cor
                 oid: *const [hash.SHA1_HEX_LEN]u8,
 
                 pub fn run(ctx_self: *@This(), cursor: *xitdb.Database(.file).Cursor) !void {
-                    try updateRecur(repo_kind, ctx_self.core, .{ .root_cursor = cursor }, ctx_self.allocator, "HEAD", ctx_self.oid);
+                    try updateRecur(repo_kind, .{ .core = ctx_self.core, .root_cursor = cursor }, ctx_self.allocator, &[_][]const u8{"HEAD"}, ctx_self.oid);
                 }
             };
             var ctx = Ctx{
@@ -379,30 +374,28 @@ pub fn updateHead(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Cor
     }
 }
 
-pub fn UpdateOpts(comptime repo_kind: rp.RepoKind) type {
-    return switch (repo_kind) {
-        .git => struct {
-            dir: std.fs.Dir,
-        },
-        .xit => struct {
-            root_cursor: *xitdb.Database(.file).Cursor,
-        },
-    };
-}
-
 /// update the given file with the given oid,
 /// following refs recursively if necessary.
 /// used after a commit is made.
-pub fn updateRecur(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, opts: UpdateOpts(repo_kind), allocator: std.mem.Allocator, file_name: []const u8, oid_hex: *const [hash.SHA1_HEX_LEN]u8) anyerror!void {
+pub fn updateRecur(
+    comptime repo_kind: rp.RepoKind,
+    core_cursor: rp.Repo(repo_kind).CoreCursor,
+    allocator: std.mem.Allocator,
+    path_parts: []const []const u8,
+    oid_hex: *const [hash.SHA1_HEX_LEN]u8,
+) anyerror!void {
     switch (repo_kind) {
         .git => {
-            var lock = try io.LockFile.init(allocator, opts.dir, file_name);
+            const path = try io.joinPath(allocator, path_parts);
+            defer allocator.free(path);
+
+            var lock = try io.LockFile.init(allocator, core_cursor.core.git_dir, path);
             defer lock.deinit();
 
             // read file and get ref name if necessary
             var buffer = [_]u8{0} ** MAX_READ_BYTES;
             const ref_name_maybe = blk: {
-                const old_content = read(repo_kind, core, file_name, &buffer) catch |err| {
+                const old_content = read(repo_kind, core_cursor.core, path, &buffer) catch |err| {
                     switch (err) {
                         error.FileNotFound => break :blk null,
                         else => return err,
@@ -417,11 +410,7 @@ pub fn updateRecur(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
 
             // if it's a ref, update it recursively
             if (ref_name_maybe) |ref_name| {
-                var refs_dir = try core.git_dir.openDir("refs", .{});
-                defer refs_dir.close();
-                var heads_dir = try refs_dir.openDir("heads", .{});
-                defer heads_dir.close();
-                try updateRecur(repo_kind, core, .{ .dir = heads_dir }, allocator, ref_name, oid_hex);
+                try updateRecur(repo_kind, core_cursor, allocator, &[_][]const u8{ "refs", "heads", ref_name }, oid_hex);
             }
             // otherwise, update it with the oid
             else {
@@ -431,49 +420,55 @@ pub fn updateRecur(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
             }
         },
         .xit => {
-            // read file and get ref name if necessary
-            var buffer = [_]u8{0} ** MAX_READ_BYTES;
-            const ref_name_maybe = blk: {
-                // TODO: make `read` use root cursor for tx safety
-                const old_content = read(repo_kind, core, file_name, &buffer) catch |err| {
-                    switch (err) {
-                        error.KeyNotFound => break :blk null,
-                        else => return err,
+            const Ctx = struct {
+                core_cursor: rp.Repo(repo_kind).CoreCursor,
+                allocator: std.mem.Allocator,
+                oid_hex: *const [hash.SHA1_HEX_LEN]u8,
+                file_name: []const u8,
+
+                pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
+                    var buffer = [_]u8{0} ** MAX_READ_BYTES;
+                    if (try cursor.readBytes(&buffer, void, &[_]xitdb.PathPart(void){})) |old_content| {
+                        // if it's a ref, update it recursively
+                        if (std.mem.startsWith(u8, old_content, REF_START_STR) and old_content.len > REF_START_STR.len) {
+                            const ref_name = old_content[REF_START_STR.len..];
+                            try updateRecur(repo_kind, ctx_self.core_cursor, ctx_self.allocator, &[_][]const u8{ "refs", "heads", ref_name }, ctx_self.oid_hex);
+                            return;
+                        }
                     }
-                };
-                if (std.mem.startsWith(u8, old_content, REF_START_STR) and old_content.len > REF_START_STR.len) {
-                    break :blk old_content[REF_START_STR.len..];
-                } else {
-                    break :blk null;
+
+                    // otherwise, update with the oid
+                    const file_name_hash = hash.hashBuffer(ctx_self.file_name);
+                    _ = try ctx_self.core_cursor.root_cursor.writeBytes(ctx_self.file_name, .once, void, &[_]xitdb.PathPart(void){
+                        .{ .hash_map_get = hash.hashBuffer("names") },
+                        .hash_map_create,
+                        .{ .hash_map_get = file_name_hash },
+                    });
+                    const oid_ptr = try ctx_self.core_cursor.root_cursor.writeBytes(ctx_self.oid_hex, .once, void, &[_]xitdb.PathPart(void){
+                        .{ .hash_map_get = hash.hashBuffer("ref-values") },
+                        .hash_map_create,
+                        .{ .hash_map_get = try hash.hexToHash(ctx_self.oid_hex) },
+                    });
+                    _ = try cursor.execute(void, &[_]xitdb.PathPart(void){
+                        .{ .value = .{ .bytes_ptr = oid_ptr } },
+                    });
                 }
             };
-
-            // if it's a ref, update it recursively
-            if (ref_name_maybe) |ref_name| {
-                try updateRecur(repo_kind, core, opts, allocator, ref_name, oid_hex);
+            var db_path_parts = std.ArrayList(xitdb.PathPart(Ctx)).init(allocator);
+            defer db_path_parts.deinit();
+            for (path_parts, 0..) |file_name, i| {
+                try db_path_parts.append(.{ .hash_map_get = hash.hashBuffer(file_name) });
+                if (i < path_parts.len - 1) {
+                    try db_path_parts.append(.hash_map_create);
+                }
             }
-            // otherwise, update it with the oid
-            else {
-                const file_name_hash = hash.hashBuffer(file_name);
-                _ = try opts.root_cursor.writeBytes(file_name, .once, void, &[_]xitdb.PathPart(void){
-                    .{ .hash_map_get = hash.hashBuffer("names") },
-                    .hash_map_create,
-                    .{ .hash_map_get = file_name_hash },
-                });
-                const oid_ptr = try opts.root_cursor.writeBytes(oid_hex, .once, void, &[_]xitdb.PathPart(void){
-                    .{ .hash_map_get = hash.hashBuffer("ref-values") },
-                    .hash_map_create,
-                    .{ .hash_map_get = try hash.hexToHash(oid_hex) },
-                });
-                _ = try opts.root_cursor.execute(void, &[_]xitdb.PathPart(void){
-                    .{ .hash_map_get = hash.hashBuffer("refs") },
-                    .hash_map_create,
-                    .{ .hash_map_get = hash.hashBuffer("heads") },
-                    .hash_map_create,
-                    .{ .hash_map_get = file_name_hash },
-                    .{ .value = .{ .bytes_ptr = oid_ptr } },
-                });
-            }
+            try db_path_parts.append(.{ .ctx = Ctx{
+                .core_cursor = core_cursor,
+                .allocator = allocator,
+                .oid_hex = oid_hex,
+                .file_name = path_parts[path_parts.len - 1],
+            } });
+            _ = try core_cursor.root_cursor.execute(Ctx, db_path_parts.items);
         },
     }
 }
