@@ -64,17 +64,6 @@ pub const Tree = struct {
     }
 };
 
-pub fn ObjectOpts(comptime repo_kind: rp.RepoKind) type {
-    return switch (repo_kind) {
-        .git => struct {
-            objects_dir: std.fs.Dir,
-        },
-        .xit => struct {
-            root_cursor: *xitdb.Database(.file).Cursor,
-        },
-    };
-}
-
 /// writes the file at the given path as a blob.
 /// sha1_bytes_buffer will have the oid when it's done.
 /// on windows files are never marked as executable because
@@ -82,7 +71,7 @@ pub fn ObjectOpts(comptime repo_kind: rp.RepoKind) type {
 /// maybe i'll figure that out later.
 pub fn writeBlob(
     comptime repo_kind: rp.RepoKind,
-    opts: ObjectOpts(repo_kind),
+    core_cursor: rp.Repo(repo_kind).CoreCursor,
     allocator: std.mem.Allocator,
     file: anytype,
     file_size: u64,
@@ -103,8 +92,11 @@ pub fn writeBlob(
 
     switch (repo_kind) {
         .git => {
+            var objects_dir = try core_cursor.core.git_dir.openDir("objects", .{});
+            defer objects_dir.close();
+
             // make the two char dir
-            var hash_prefix_dir = try opts.objects_dir.makeOpenPath(sha1_hex[0..2], .{});
+            var hash_prefix_dir = try objects_dir.makeOpenPath(sha1_hex[0..2], .{});
             defer hash_prefix_dir.close();
             const hash_suffix = sha1_hex[2..];
 
@@ -152,7 +144,7 @@ pub fn writeBlob(
             const file_hash = hash.bytesToHash(sha1_bytes_buffer);
 
             const Ctx = struct {
-                opts: ObjectOpts(repo_kind),
+                core_cursor: rp.Repo(repo_kind).CoreCursor,
                 reader: *const FileReaderType,
                 sha1_hex: [hash.SHA1_HEX_LEN]u8,
                 header: []const u8,
@@ -171,7 +163,7 @@ pub fn writeBlob(
                         }
                         try writer.finish();
 
-                        _ = try ctx_self.opts.root_cursor.execute(void, &[_]xitdb.PathPart(void){
+                        _ = try ctx_self.core_cursor.root_cursor.execute(void, &[_]xitdb.PathPart(void){
                             .{ .hash_map_get = hash.hashBuffer("objects") },
                             .hash_map_create,
                             .{ .hash_map_get = try hash.hexToHash(&ctx_self.sha1_hex) },
@@ -180,17 +172,17 @@ pub fn writeBlob(
                     }
                 }
             };
-            _ = try opts.root_cursor.execute(Ctx, &[_]xitdb.PathPart(Ctx){
+            _ = try core_cursor.root_cursor.execute(Ctx, &[_]xitdb.PathPart(Ctx){
                 .{ .hash_map_get = hash.hashBuffer("file-values") },
                 .hash_map_create,
                 .{ .hash_map_get = file_hash },
-                .{ .ctx = Ctx{ .opts = opts, .reader = &reader, .sha1_hex = sha1_hex, .header = header } },
+                .{ .ctx = Ctx{ .core_cursor = core_cursor, .reader = &reader, .sha1_hex = sha1_hex, .header = header } },
             });
         },
     }
 }
 
-fn writeTree(comptime repo_kind: rp.RepoKind, opts: ObjectOpts(repo_kind), allocator: std.mem.Allocator, tree: *Tree, sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8) !void {
+fn writeTree(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, tree: *Tree, sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8) !void {
     // sort the entries. this is needed for xit,
     // because its index entries are stored as a
     // hash map, thus making their order random.
@@ -220,8 +212,11 @@ fn writeTree(comptime repo_kind: rp.RepoKind, opts: ObjectOpts(repo_kind), alloc
 
     switch (repo_kind) {
         .git => {
+            var objects_dir = try core_cursor.core.git_dir.openDir("objects", .{});
+            defer objects_dir.close();
+
             // make the two char dir
-            var tree_hash_prefix_dir = try opts.objects_dir.makeOpenPath(tree_sha1_hex[0..2], .{});
+            var tree_hash_prefix_dir = try objects_dir.makeOpenPath(tree_sha1_hex[0..2], .{});
             defer tree_hash_prefix_dir.close();
             const tree_hash_suffix = tree_sha1_hex[2..];
 
@@ -282,12 +277,12 @@ fn writeTree(comptime repo_kind: rp.RepoKind, opts: ObjectOpts(repo_kind), alloc
                     });
                 }
             };
-            _ = try opts.root_cursor.execute(Ctx, &[_]xitdb.PathPart(Ctx){
+            _ = try core_cursor.root_cursor.execute(Ctx, &[_]xitdb.PathPart(Ctx){
                 .{ .hash_map_get = hash.hashBuffer("objects") },
                 .hash_map_create,
                 .{ .hash_map_get = hash.bytesToHash(sha1_bytes_buffer) },
                 .{ .ctx = Ctx{
-                    .root_cursor = opts.root_cursor,
+                    .root_cursor = core_cursor.root_cursor,
                     .tree_sha1_bytes = sha1_bytes_buffer,
                     .tree_bytes = tree_bytes,
                 } },
@@ -299,7 +294,15 @@ fn writeTree(comptime repo_kind: rp.RepoKind, opts: ObjectOpts(repo_kind), alloc
 // add each entry to the given tree.
 // if the entry is itself a tree, create a tree object
 // for it and add that as an entry to the original tree.
-fn addIndexEntries(comptime repo_kind: rp.RepoKind, opts: ObjectOpts(repo_kind), allocator: std.mem.Allocator, tree: *Tree, index: idx.Index(repo_kind), prefix: []const u8, entries: [][]const u8) !void {
+fn addIndexEntries(
+    comptime repo_kind: rp.RepoKind,
+    core_cursor: rp.Repo(repo_kind).CoreCursor,
+    allocator: std.mem.Allocator,
+    tree: *Tree,
+    index: idx.Index(repo_kind),
+    prefix: []const u8,
+    entries: [][]const u8,
+) !void {
     for (entries) |name| {
         const path = try io.joinPath(allocator, &[_][]const u8{ prefix, name });
         defer allocator.free(path);
@@ -318,7 +321,7 @@ fn addIndexEntries(comptime repo_kind: rp.RepoKind, opts: ObjectOpts(repo_kind),
 
             try addIndexEntries(
                 repo_kind,
-                opts,
+                core_cursor,
                 allocator,
                 &subtree,
                 index,
@@ -327,7 +330,7 @@ fn addIndexEntries(comptime repo_kind: rp.RepoKind, opts: ObjectOpts(repo_kind),
             );
 
             var tree_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-            try writeTree(repo_kind, opts, allocator, &subtree, &tree_sha1_bytes_buffer);
+            try writeTree(repo_kind, core_cursor, allocator, &subtree, &tree_sha1_bytes_buffer);
 
             try tree.addTreeEntry(name, &tree_sha1_bytes_buffer);
         } else {
@@ -360,7 +363,14 @@ fn createCommitContents(allocator: std.mem.Allocator, tree_sha1_hex: [hash.SHA1_
     return try std.mem.join(allocator, "\n", metadata_lines.items);
 }
 
-pub fn writeCommit(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, parent_oids: []const [hash.SHA1_HEX_LEN]u8, message_maybe: ?[]const u8, sha1_bytes_out_maybe: ?*[hash.SHA1_BYTES_LEN]u8) !void {
+pub fn writeCommit(
+    comptime repo_kind: rp.RepoKind,
+    core: *rp.Repo(repo_kind).Core,
+    allocator: std.mem.Allocator,
+    parent_oids: []const [hash.SHA1_HEX_LEN]u8,
+    message_maybe: ?[]const u8,
+    sha1_bytes_out_maybe: ?*[hash.SHA1_BYTES_LEN]u8,
+) !void {
     // read index
     var index = try idx.Index(repo_kind).init(allocator, core);
     defer index.deinit();
@@ -374,11 +384,11 @@ pub fn writeCommit(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
             // create tree and add index entries
             var tree = Tree.init(allocator);
             defer tree.deinit();
-            try addIndexEntries(repo_kind, .{ .objects_dir = objects_dir }, allocator, &tree, index, "", index.root_children.keys());
+            try addIndexEntries(repo_kind, .{ .core = core }, allocator, &tree, index, "", index.root_children.keys());
 
             // write and hash tree
             var tree_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-            try writeTree(repo_kind, .{ .objects_dir = objects_dir }, allocator, &tree, &tree_sha1_bytes_buffer);
+            try writeTree(repo_kind, .{ .core = core }, allocator, &tree, &tree_sha1_bytes_buffer);
             const tree_sha1_hex = std.fmt.bytesToHex(tree_sha1_bytes_buffer, .lower);
 
             // create commit contents
@@ -444,11 +454,11 @@ pub fn writeCommit(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
                     // create tree and add index entries
                     var tree = Tree.init(ctx_self.allocator);
                     defer tree.deinit();
-                    try addIndexEntries(repo_kind, .{ .root_cursor = cursor }, ctx_self.allocator, &tree, ctx_self.index, "", ctx_self.index.root_children.keys());
+                    try addIndexEntries(repo_kind, .{ .core = ctx_self.core, .root_cursor = cursor }, ctx_self.allocator, &tree, ctx_self.index, "", ctx_self.index.root_children.keys());
 
                     // write and hash tree
                     var tree_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-                    try writeTree(repo_kind, .{ .root_cursor = cursor }, ctx_self.allocator, &tree, &tree_sha1_bytes_buffer);
+                    try writeTree(repo_kind, .{ .core = ctx_self.core, .root_cursor = cursor }, ctx_self.allocator, &tree, &tree_sha1_bytes_buffer);
                     const tree_sha1_hex = std.fmt.bytesToHex(tree_sha1_bytes_buffer, .lower);
 
                     // create commit contents

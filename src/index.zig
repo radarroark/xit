@@ -207,9 +207,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
         pub fn addPath(self: *Index(repo_kind), core: *rp.Repo(repo_kind).Core, path: []const u8) !void {
             switch (repo_kind) {
                 .git => {
-                    var objects_dir = try core.git_dir.openDir("objects", .{});
-                    defer objects_dir.close();
-                    try self.addPathRecur(core, .{ .objects_dir = objects_dir }, path);
+                    try self.addPathRecur(.{ .core = core }, path);
                 },
                 .xit => {
                     const Ctx = struct {
@@ -218,7 +216,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                         path: []const u8,
 
                         pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
-                            try ctx_self.index.addPathRecur(ctx_self.core, .{ .root_cursor = cursor }, ctx_self.path);
+                            try ctx_self.index.addPathRecur(.{ .core = ctx_self.core, .root_cursor = cursor }, ctx_self.path);
                         }
                     };
                     _ = try core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
@@ -230,7 +228,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
             }
         }
 
-        fn addPathRecur(self: *Index(repo_kind), core: *rp.Repo(repo_kind).Core, opts: obj.ObjectOpts(repo_kind), path: []const u8) !void {
+        fn addPathRecur(self: *Index(repo_kind), core_cursor: rp.Repo(repo_kind).CoreCursor, path: []const u8) !void {
             // remove entries that are parents of this path (directory replaces file)
             {
                 var parent_path_maybe = std.fs.path.dirname(path);
@@ -244,15 +242,15 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
             // remove entries that are children of this path (file replaces directory)
             try self.removeChildren(path);
             // read the metadata
-            const meta = try io.getMetadata(core.repo_dir, path);
+            const meta = try io.getMetadata(core_cursor.core.repo_dir, path);
             switch (meta.kind()) {
                 .file => {
-                    const file = try core.repo_dir.openFile(path, .{ .mode = .read_only });
+                    const file = try core_cursor.core.repo_dir.openFile(path, .{ .mode = .read_only });
                     defer file.close();
 
                     // write the object
                     var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-                    try obj.writeBlob(repo_kind, opts, self.allocator, file, meta.size(), std.fs.File.Reader, &oid);
+                    try obj.writeBlob(repo_kind, core_cursor, self.allocator, file, meta.size(), std.fs.File.Reader, &oid);
                     // add the entry
                     const times = io.getTimes(meta);
                     const stat = try io.getStat(file);
@@ -280,7 +278,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     try self.addEntry(entry);
                 },
                 .directory => {
-                    var dir = try core.repo_dir.openDir(path, .{ .iterate = true });
+                    var dir = try core_cursor.core.repo_dir.openDir(path, .{ .iterate = true });
                     defer dir.close();
                     var iter = dir.iterate();
                     while (try iter.next()) |entry| {
@@ -302,7 +300,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                             try std.fmt.allocPrint(self.arena.allocator(), "{s}", .{entry.name})
                         else
                             try io.joinPath(self.arena.allocator(), &[_][]const u8{ path, entry.name });
-                        try self.addPathRecur(core, opts, subpath);
+                        try self.addPathRecur(core_cursor, subpath);
                     }
                 },
                 else => return,

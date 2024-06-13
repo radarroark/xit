@@ -35,6 +35,16 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             },
         };
 
+        pub const CoreCursor = switch (repo_kind) {
+            .git => struct {
+                core: *Core,
+            },
+            .xit => struct {
+                core: *Core,
+                root_cursor: *xitdb.Database(.file).Cursor,
+            },
+        };
+
         pub const InitOpts = struct {
             cwd: std.fs.Dir,
         };

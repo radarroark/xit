@@ -39,11 +39,8 @@ fn writeBlobWithConflict(
 
     switch (repo_kind) {
         .git => {
-            var objects_dir = try core.git_dir.openDir("objects", .{});
-            defer objects_dir.close();
-
             var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-            try obj.writeBlob(repo_kind, .{ .objects_dir = objects_dir }, allocator, &stream, content.len, std.io.FixedBufferStream([]u8).Reader, &oid);
+            try obj.writeBlob(repo_kind, .{ .core = core }, allocator, &stream, content.len, std.io.FixedBufferStream([]u8).Reader, &oid);
             return oid;
         },
         .xit => {
@@ -56,7 +53,7 @@ fn writeBlobWithConflict(
                 content: []const u8,
 
                 pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
-                    try obj.writeBlob(repo_kind, .{ .root_cursor = cursor }, ctx_self.allocator, ctx_self.stream, ctx_self.content.len, std.io.FixedBufferStream([]u8).Reader, ctx_self.oid);
+                    try obj.writeBlob(repo_kind, .{ .core = ctx_self.core, .root_cursor = cursor }, ctx_self.allocator, ctx_self.stream, ctx_self.content.len, std.io.FixedBufferStream([]u8).Reader, ctx_self.oid);
                 }
             };
             _ = try core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
@@ -260,7 +257,7 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
     var arena = std.heap.ArenaAllocator.init(allocator);
     errdefer arena.deinit();
 
-    // get the current oid, source oid, and common oid
+    // get the oids for the three-way merge
     const current_oid = try ref.readHead(repo_kind, core);
     const source_oid = try ref.resolve(repo_kind, core, source_name) orelse return error.InvalidTarget;
     const common_oid = try obj.commonAncestor(repo_kind, allocator, core, &current_oid, &source_oid);
@@ -350,6 +347,13 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
 
             // exit early if there were conflicts
             if (conflicts.count() > 0) {
+                const merge_head = try core.git_dir.createFile("MERGE_HEAD", .{ .exclusive = true, .lock = .exclusive });
+                defer merge_head.close();
+                try merge_head.writeAll(&source_oid);
+
+                const merge_msg = try core.git_dir.createFile("MERGE_MSG", .{ .exclusive = true, .lock = .exclusive });
+                defer merge_msg.close();
+
                 return .{
                     .arena = arena,
                     .changes = clean_diff.changes,
