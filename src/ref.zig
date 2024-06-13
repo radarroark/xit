@@ -4,7 +4,7 @@ const hash = @import("./hash.zig");
 const io = @import("./io.zig");
 const rp = @import("./repo.zig");
 
-const MAX_READ_BYTES = 1024;
+const MAX_READ_BYTES = 1024; // FIXME: this is arbitrary...
 const REF_START_STR = "ref: refs/heads/";
 
 pub const Ref = struct {
@@ -87,7 +87,7 @@ pub const RefList = struct {
                             defer iter.deinit();
                             while (try iter.next()) |*next_cursor| {
                                 if (try next_cursor.readHash(void, &[_]xitdb.PathPart(void){})) |name_hash| {
-                                    if (try cursor.readBytesAlloc(self.ref_list.arena.allocator(), void, &[_]xitdb.PathPart(void){
+                                    if (try cursor.readBytesAlloc(self.ref_list.arena.allocator(), MAX_READ_BYTES, void, &[_]xitdb.PathPart(void){
                                         .{ .hash_map_get = hash.hashBuffer("names") },
                                         .{ .hash_map_get = name_hash },
                                     })) |name| {
@@ -291,7 +291,7 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core
                         .{ .hash_map_get = hash.hashBuffer("HEAD") },
                     });
 
-                    if (try cursor.readBytesAlloc(self.allocator, void, &[_]xitdb.PathPart(void){
+                    if (try cursor.readBytesAlloc(self.allocator, MAX_READ_BYTES, void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = hash.hashBuffer("refs") },
                         .{ .hash_map_get = hash.hashBuffer("heads") },
                         .{ .hash_map_get = hash.hashBuffer(self.target) },

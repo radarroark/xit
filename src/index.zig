@@ -8,6 +8,8 @@ const hash = @import("./hash.zig");
 const io = @import("./io.zig");
 const rp = @import("./repo.zig");
 
+const MAX_READ_BYTES = 1024; // FIXME: this is arbitrary...
+
 pub fn Index(comptime repo_kind: rp.RepoKind) type {
     return struct {
         version: u32,
@@ -139,10 +141,10 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                         var iter = try index_cursor.iter(.hash_map);
                         defer iter.deinit();
                         while (try iter.next()) |*next_cursor| {
-                            if (try next_cursor.readBytesAlloc(index.allocator, void, &[_]xitdb.PathPart(void){})) |buffer| {
+                            if (try next_cursor.readBytesAlloc(index.allocator, MAX_READ_BYTES, void, &[_]xitdb.PathPart(void){})) |buffer| {
                                 defer index.allocator.free(buffer);
                                 if (try next_cursor.readHash(void, &[_]xitdb.PathPart(void){})) |path_hash| {
-                                    if (try core.db.rootCursor().readBytesAlloc(index.arena.allocator(), void, &[_]xitdb.PathPart(void){
+                                    if (try core.db.rootCursor().readBytesAlloc(index.arena.allocator(), MAX_READ_BYTES, void, &[_]xitdb.PathPart(void){
                                         .{ .array_list_get = .{ .index = .{ .index = 0, .reverse = true } } },
                                         .{ .hash_map_get = hash.hashBuffer("paths") },
                                         .{ .hash_map_get = path_hash },
@@ -515,7 +517,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                     defer iter.deinit();
                                     while (try iter.next()) |*next_cursor| {
                                         if (try next_cursor.readHash(void, &[_]xitdb.PathPart(void){})) |path_hash| {
-                                            if (try inner_ctx_self.root_cursor.readBytesAlloc(inner_ctx_self.allocator, void, &[_]xitdb.PathPart(void){
+                                            if (try inner_ctx_self.root_cursor.readBytesAlloc(inner_ctx_self.allocator, MAX_READ_BYTES, void, &[_]xitdb.PathPart(void){
                                                 .{ .hash_map_get = hash.hashBuffer("paths") },
                                                 .{ .hash_map_get = path_hash },
                                             })) |path| {
@@ -555,7 +557,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
 
                                         const path_hash = hash.hashBuffer(path);
 
-                                        if (try inner_ctx_self.root_cursor.readBytesAlloc(inner_ctx_self.allocator, void, &[_]xitdb.PathPart(void){
+                                        if (try inner_ctx_self.root_cursor.readBytesAlloc(inner_ctx_self.allocator, MAX_READ_BYTES, void, &[_]xitdb.PathPart(void){
                                             .{ .hash_map_get = hash.hashBuffer("index") },
                                             .{ .hash_map_get = path_hash },
                                         })) |existing_entry| {

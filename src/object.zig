@@ -13,7 +13,7 @@ const ref = @import("./ref.zig");
 const io = @import("./io.zig");
 const rp = @import("./repo.zig");
 
-const MAX_FILE_READ_BYTES = 1024; // FIXME: this is arbitrary...
+const MAX_READ_BYTES = 1024; // FIXME: this is arbitrary...
 
 /// returns a single random character. just lower case for now.
 /// eventually i'll make it return upper case and maybe numbers too.
@@ -119,7 +119,7 @@ pub fn writeBlob(
             try tmp_file.writeAll(header);
 
             // copy file into temp file
-            var read_buffer = [_]u8{0} ** MAX_FILE_READ_BYTES;
+            var read_buffer = [_]u8{0} ** MAX_READ_BYTES;
             while (true) {
                 const size = try reader.read(&read_buffer);
                 if (size == 0) {
@@ -153,7 +153,7 @@ pub fn writeBlob(
                     if (cursor.pointer() == null) {
                         var writer = try cursor.writer(void, &[_]xitdb.PathPart(void){});
                         try writer.writeAll(ctx_self.header);
-                        var read_buffer = [_]u8{0} ** MAX_FILE_READ_BYTES;
+                        var read_buffer = [_]u8{0} ** MAX_READ_BYTES;
                         while (true) {
                             const size = try ctx_self.reader.read(&read_buffer);
                             if (size == 0) {
@@ -606,7 +606,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                                 self.allocator.free(self.buffer);
                             }
                         };
-                        if (try core.db.rootCursor().readBytesAlloc(allocator, void, &[_]xitdb.PathPart(void){
+                        if (try core.db.rootCursor().readBytesAlloc(allocator, MAX_READ_BYTES, void, &[_]xitdb.PathPart(void){
                             .{ .array_list_get = .{ .index = .{ .index = 0, .reverse = true } } },
                             .{ .hash_map_get = hash.hashBuffer("objects") },
                             .{ .hash_map_get = try hash.hexToHash(&oid) },
@@ -627,11 +627,11 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
             defer state.deinit();
 
             // read the object kind
-            const object_kind = try state.reader.readUntilDelimiterAlloc(allocator, ' ', MAX_FILE_READ_BYTES);
+            const object_kind = try state.reader.readUntilDelimiterAlloc(allocator, ' ', MAX_READ_BYTES);
             defer allocator.free(object_kind);
 
             // read the length
-            const object_len_str = try state.reader.readUntilDelimiterAlloc(allocator, 0, MAX_FILE_READ_BYTES);
+            const object_len_str = try state.reader.readUntilDelimiterAlloc(allocator, 0, MAX_READ_BYTES);
             defer allocator.free(object_len_str);
             const object_len = try std.fmt.parseInt(usize, object_len_str, 10);
 
@@ -650,14 +650,14 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                 var entries = std.StringArrayHashMap(TreeEntry).init(arena.allocator());
 
                 while (true) {
-                    const entry_mode_str = state.reader.readUntilDelimiterAlloc(arena.allocator(), ' ', MAX_FILE_READ_BYTES) catch |err| {
+                    const entry_mode_str = state.reader.readUntilDelimiterAlloc(arena.allocator(), ' ', MAX_READ_BYTES) catch |err| {
                         switch (err) {
                             error.EndOfStream => break,
                             else => return err,
                         }
                     };
                     const entry_mode: io.Mode = @bitCast(try std.fmt.parseInt(u32, entry_mode_str, 8));
-                    const entry_name = try state.reader.readUntilDelimiterAlloc(arena.allocator(), 0, MAX_FILE_READ_BYTES);
+                    const entry_name = try state.reader.readUntilDelimiterAlloc(arena.allocator(), 0, MAX_READ_BYTES);
                     const entry_oid = try state.reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
                     try entries.put(entry_name, TreeEntry{ .oid = entry_oid, .mode = entry_mode });
                 }
@@ -671,7 +671,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                 };
             } else if (std.mem.eql(u8, "commit", object_kind)) {
                 // read the content kind
-                const content_kind = try state.reader.readUntilDelimiterAlloc(allocator, ' ', MAX_FILE_READ_BYTES);
+                const content_kind = try state.reader.readUntilDelimiterAlloc(allocator, ' ', MAX_READ_BYTES);
                 defer allocator.free(content_kind);
                 if (!std.mem.eql(u8, "tree", content_kind)) {
                     return error.InvalidCommitContentKind;
@@ -699,7 +699,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
 
                 // read the metadata
                 while (true) {
-                    const line = try state.reader.readUntilDelimiterAlloc(arena.allocator(), '\n', MAX_FILE_READ_BYTES);
+                    const line = try state.reader.readUntilDelimiterAlloc(arena.allocator(), '\n', MAX_READ_BYTES);
                     if (line.len == 0) {
                         break;
                     }
@@ -724,7 +724,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                 }
 
                 // read the message
-                content.commit.message = try state.reader.readAllAlloc(arena.allocator(), MAX_FILE_READ_BYTES);
+                content.commit.message = try state.reader.readAllAlloc(arena.allocator(), MAX_READ_BYTES);
 
                 return Object(repo_kind){
                     .allocator = allocator,
