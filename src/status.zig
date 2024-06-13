@@ -227,13 +227,11 @@ pub fn HeadTree(comptime repo_kind: rp.RepoKind) type {
         arena: std.heap.ArenaAllocator,
 
         pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core) !HeadTree(repo_kind) {
-            var entries = std.StringHashMap(obj.TreeEntry).init(allocator);
-            errdefer entries.deinit();
-
             var tree = HeadTree(repo_kind){
-                .entries = entries,
+                .entries = std.StringHashMap(obj.TreeEntry).init(allocator),
                 .arena = std.heap.ArenaAllocator.init(allocator),
             };
+            errdefer tree.deinit();
 
             // if head points to a valid object, read it
             if (try ref.readHeadMaybe(repo_kind, core)) |head_file_buffer| {

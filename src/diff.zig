@@ -318,7 +318,7 @@ pub fn Diff(comptime repo_kind: rp.RepoKind) type {
     return struct {
         path: []const u8,
         header_lines: std.ArrayList([]const u8),
-        myers_diff: ?MyersDiff,
+        myers_diff_maybe: ?MyersDiff,
         hunks: std.ArrayList(Hunk), // TODO: turn into iterator
         arena: std.heap.ArenaAllocator,
         target_a: Target(repo_kind),
@@ -390,15 +390,8 @@ pub fn Diff(comptime repo_kind: rp.RepoKind) type {
                 }
             }
 
-            var diff = Diff(repo_kind){
-                .path = a.path,
-                .header_lines = header_lines,
-                .myers_diff = null,
-                .hunks = std.ArrayList(Hunk).init(arena.allocator()),
-                .arena = arena,
-                .target_a = a,
-                .target_b = b,
-            };
+            var hunks = std.ArrayList(Hunk).init(arena.allocator());
+            var myers_diff_maybe: ?MyersDiff = null;
 
             if (!std.mem.eql(u8, &a.oid, &b.oid)) {
                 if (mode_maybe) |mode| {
@@ -462,7 +455,7 @@ pub fn Diff(comptime repo_kind: rp.RepoKind) type {
                         const hunk = Hunk{
                             .edits = myers_diff.edits.items[begin_idx .. end_idx + 1],
                         };
-                        try diff.hunks.append(hunk);
+                        try hunks.append(hunk);
                         found_edit = false;
                         margin = 0;
                         end_idx += 1;
@@ -470,15 +463,23 @@ pub fn Diff(comptime repo_kind: rp.RepoKind) type {
                     }
                 }
 
-                diff.myers_diff = myers_diff;
+                myers_diff_maybe = myers_diff;
             }
 
-            return diff;
+            return Diff(repo_kind){
+                .path = a.path,
+                .header_lines = header_lines,
+                .myers_diff_maybe = myers_diff_maybe,
+                .hunks = hunks,
+                .arena = arena,
+                .target_a = a,
+                .target_b = b,
+            };
         }
 
         pub fn deinit(self: *Diff(repo_kind)) void {
             self.arena.deinit();
-            if (self.myers_diff) |*myers_diff| {
+            if (self.myers_diff_maybe) |*myers_diff| {
                 myers_diff.deinit();
             }
             self.target_a.deinit();
