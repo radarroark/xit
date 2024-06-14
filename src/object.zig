@@ -836,6 +836,8 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind) type {
         }
 
         pub fn next(self: *ObjectIterator(repo_kind)) !?*Object(repo_kind) {
+            // TODO: instead of latest cursor, store the tx id so we always use the
+            // same transaction even if the db is written to while calling next
             var cursor = try self.core.latestCursor();
             const core_cursor = switch (repo_kind) {
                 .git => .{ .core = self.core },
