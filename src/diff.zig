@@ -206,7 +206,7 @@ pub fn Target(comptime repo_kind: rp.RepoKind) type {
         buffer: []u8,
         lines: std.ArrayList([]const u8),
 
-        pub fn initFromIndex(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core, entry: idx.Index(repo_kind).Entry) !Target(repo_kind) {
+        pub fn initFromIndex(allocator: std.mem.Allocator, core_cursor: rp.Repo(repo_kind).CoreCursor, entry: idx.Index(repo_kind).Entry) !Target(repo_kind) {
             const oid_hex = std.fmt.bytesToHex(&entry.oid, .lower);
             const buffer = try allocator.alloc(u8, 1024);
             errdefer allocator.free(buffer);
@@ -219,7 +219,7 @@ pub fn Target(comptime repo_kind: rp.RepoKind) type {
                 .buffer = buffer,
                 .lines = undefined,
             };
-            const buf = try chk.objectToBuffer(repo_kind, core, oid_hex, target.buffer);
+            const buf = try chk.objectToBuffer(repo_kind, core_cursor, oid_hex, target.buffer);
 
             var lines = std.ArrayList([]const u8).init(allocator);
             errdefer lines.deinit();
@@ -232,7 +232,7 @@ pub fn Target(comptime repo_kind: rp.RepoKind) type {
             return target;
         }
 
-        pub fn initFromWorkspace(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core, path: []const u8, mode: io.Mode) !Target(repo_kind) {
+        pub fn initFromWorkspace(allocator: std.mem.Allocator, core_cursor: rp.Repo(repo_kind).CoreCursor, path: []const u8, mode: io.Mode) !Target(repo_kind) {
             const buffer = try allocator.alloc(u8, 1024);
             errdefer allocator.free(buffer);
             var target = Target(repo_kind){
@@ -245,7 +245,7 @@ pub fn Target(comptime repo_kind: rp.RepoKind) type {
                 .lines = undefined,
             };
 
-            var file = try core.repo_dir.openFile(path, .{ .mode = .read_only });
+            var file = try core_cursor.core.repo_dir.openFile(path, .{ .mode = .read_only });
             defer file.close();
             const size = try file.reader().read(target.buffer);
             const buf = target.buffer[0..size];
@@ -281,7 +281,7 @@ pub fn Target(comptime repo_kind: rp.RepoKind) type {
             };
         }
 
-        pub fn initFromHead(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core, path: []const u8, entry: obj.TreeEntry) !Target(repo_kind) {
+        pub fn initFromHead(allocator: std.mem.Allocator, core_cursor: rp.Repo(repo_kind).CoreCursor, path: []const u8, entry: obj.TreeEntry) !Target(repo_kind) {
             const oid_hex = std.fmt.bytesToHex(&entry.oid, .lower);
             const buffer = try allocator.alloc(u8, 1024);
             errdefer allocator.free(buffer);
@@ -294,7 +294,7 @@ pub fn Target(comptime repo_kind: rp.RepoKind) type {
                 .buffer = buffer,
                 .lines = undefined,
             };
-            const buf = try chk.objectToBuffer(repo_kind, core, oid_hex, target.buffer);
+            const buf = try chk.objectToBuffer(repo_kind, core_cursor, oid_hex, target.buffer);
 
             var lines = std.ArrayList([]const u8).init(allocator);
             errdefer lines.deinit();
@@ -528,6 +528,11 @@ pub fn DiffIterator(comptime repo_kind: rp.RepoKind) type {
         }
 
         pub fn next(self: *DiffIterator(repo_kind)) !?*Diff(repo_kind) {
+            var cursor = try self.core.readOnlyCursor();
+            const core_cursor = switch (repo_kind) {
+                .git => .{ .core = self.core },
+                .xit => .{ .core = self.core, .root_cursor = &cursor },
+            };
             var next_index = self.next_index;
             switch (self.diff_kind) {
                 .workspace => {
@@ -543,10 +548,10 @@ pub fn DiffIterator(comptime repo_kind: rp.RepoKind) type {
                             const index_entries_for_path = self.status.index.entries.get(path) orelse return error.EntryNotFound;
                             // if there is an entry for the stage we are diffing
                             if (index_entries_for_path[stage]) |index_entry| {
-                                var a = try Target(repo_kind).initFromIndex(self.allocator, self.core, index_entry);
+                                var a = try Target(repo_kind).initFromIndex(self.allocator, core_cursor, index_entry);
                                 errdefer a.deinit();
                                 var b = switch (meta.kind()) {
-                                    .file => try Target(repo_kind).initFromWorkspace(self.allocator, self.core, path, io.getMode(meta)),
+                                    .file => try Target(repo_kind).initFromWorkspace(self.allocator, core_cursor, path, io.getMode(meta)),
                                     // in file/dir conflicts, `path` may be a directory which can't be diffed, so just make it nothing
                                     else => try Target(repo_kind).initFromNothing(self.allocator, path),
                                 };
@@ -568,9 +573,9 @@ pub fn DiffIterator(comptime repo_kind: rp.RepoKind) type {
                     if (next_index < self.status.workspace_modified.items.len) {
                         const entry = self.status.workspace_modified.items[next_index];
                         const index_entries_for_path = self.status.index.entries.get(entry.path) orelse return error.EntryNotFound;
-                        var a = try Target(repo_kind).initFromIndex(self.allocator, self.core, index_entries_for_path[0] orelse return error.NullEntry);
+                        var a = try Target(repo_kind).initFromIndex(self.allocator, core_cursor, index_entries_for_path[0] orelse return error.NullEntry);
                         errdefer a.deinit();
-                        var b = try Target(repo_kind).initFromWorkspace(self.allocator, self.core, entry.path, io.getMode(entry.meta));
+                        var b = try Target(repo_kind).initFromWorkspace(self.allocator, core_cursor, entry.path, io.getMode(entry.meta));
                         errdefer b.deinit();
                         self.diff = try Diff(repo_kind).init(self.allocator, a, b);
                         self.next_index += 1;
@@ -582,7 +587,7 @@ pub fn DiffIterator(comptime repo_kind: rp.RepoKind) type {
                     if (next_index < self.status.workspace_deleted.items.len) {
                         const path = self.status.workspace_deleted.items[next_index];
                         const index_entries_for_path = self.status.index.entries.get(path) orelse return error.EntryNotFound;
-                        var a = try Target(repo_kind).initFromIndex(self.allocator, self.core, index_entries_for_path[0] orelse return error.NullEntry);
+                        var a = try Target(repo_kind).initFromIndex(self.allocator, core_cursor, index_entries_for_path[0] orelse return error.NullEntry);
                         errdefer a.deinit();
                         var b = try Target(repo_kind).initFromNothing(self.allocator, path);
                         errdefer b.deinit();
@@ -597,7 +602,7 @@ pub fn DiffIterator(comptime repo_kind: rp.RepoKind) type {
                         var a = try Target(repo_kind).initFromNothing(self.allocator, path);
                         errdefer a.deinit();
                         const index_entries_for_path = self.status.index.entries.get(path) orelse return error.EntryNotFound;
-                        var b = try Target(repo_kind).initFromIndex(self.allocator, self.core, index_entries_for_path[0] orelse return error.NullEntry);
+                        var b = try Target(repo_kind).initFromIndex(self.allocator, core_cursor, index_entries_for_path[0] orelse return error.NullEntry);
                         errdefer b.deinit();
                         self.diff = try Diff(repo_kind).init(self.allocator, a, b);
                         self.next_index += 1;
@@ -608,10 +613,10 @@ pub fn DiffIterator(comptime repo_kind: rp.RepoKind) type {
 
                     if (next_index < self.status.index_modified.items.len) {
                         const path = self.status.index_modified.items[next_index];
-                        var a = try Target(repo_kind).initFromHead(self.allocator, self.core, path, self.status.head_tree.entries.get(path) orelse return error.EntryNotFound);
+                        var a = try Target(repo_kind).initFromHead(self.allocator, core_cursor, path, self.status.head_tree.entries.get(path) orelse return error.EntryNotFound);
                         errdefer a.deinit();
                         const index_entries_for_path = self.status.index.entries.get(path) orelse return error.EntryNotFound;
-                        var b = try Target(repo_kind).initFromIndex(self.allocator, self.core, index_entries_for_path[0] orelse return error.NullEntry);
+                        var b = try Target(repo_kind).initFromIndex(self.allocator, core_cursor, index_entries_for_path[0] orelse return error.NullEntry);
                         errdefer b.deinit();
                         self.diff = try Diff(repo_kind).init(self.allocator, a, b);
                         self.next_index += 1;
@@ -622,7 +627,7 @@ pub fn DiffIterator(comptime repo_kind: rp.RepoKind) type {
 
                     if (next_index < self.status.index_deleted.items.len) {
                         const path = self.status.index_deleted.items[next_index];
-                        var a = try Target(repo_kind).initFromHead(self.allocator, self.core, path, self.status.head_tree.entries.get(path) orelse return error.EntryNotFound);
+                        var a = try Target(repo_kind).initFromHead(self.allocator, core_cursor, path, self.status.head_tree.entries.get(path) orelse return error.EntryNotFound);
                         errdefer a.deinit();
                         var b = try Target(repo_kind).initFromNothing(self.allocator, path);
                         errdefer b.deinit();

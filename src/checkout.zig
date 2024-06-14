@@ -160,11 +160,11 @@ pub fn objectToFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_k
     }
 }
 
-pub fn objectToBuffer(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, oid_hex: [hash.SHA1_HEX_LEN]u8, buffer: []u8) ![]u8 {
+pub fn objectToBuffer(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, oid_hex: [hash.SHA1_HEX_LEN]u8, buffer: []u8) ![]u8 {
     switch (repo_kind) {
         .git => {
             // open the internal dirs
-            var objects_dir = try core.git_dir.openDir("objects", .{});
+            var objects_dir = try core_cursor.core.git_dir.openDir("objects", .{});
             defer objects_dir.close();
 
             // open the in file
@@ -182,45 +182,32 @@ pub fn objectToBuffer(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind)
             return buffer[0..size];
         },
         .xit => {
-            const Ctx = struct {
-                core: *rp.Repo(repo_kind).Core,
-                oid_hex: [hash.SHA1_HEX_LEN]u8,
-                buffer: []u8,
-                out_size: u60,
-
-                pub fn run(self: *@This(), cursor: *xitdb.Database(.file).Cursor) !void {
-                    var reader_maybe = try cursor.reader(void, &[_]xitdb.PathPart(void){
-                        .{ .hash_map_get = hash.hashBuffer("objects") },
-                        .{ .hash_map_get = try hash.hexToHash(&self.oid_hex) },
-                    });
-                    if (reader_maybe) |*reader| {
-                        var read_buffer = [_]u8{0} ** 1;
-                        var header_skipped = false;
-                        while (true) {
-                            const size = try reader.read(&read_buffer);
-                            if (size == 0) break;
-                            if (!header_skipped) {
-                                if (read_buffer[0] == 0) {
-                                    header_skipped = true;
-                                    break;
-                                }
-                            }
+            var reader_maybe = try core_cursor.root_cursor.reader(void, &[_]xitdb.PathPart(void){
+                .{ .hash_map_get = hash.hashBuffer("objects") },
+                .{ .hash_map_get = try hash.hexToHash(&oid_hex) },
+            });
+            if (reader_maybe) |*reader| {
+                var read_buffer = [_]u8{0} ** 1;
+                var header_skipped = false;
+                while (true) {
+                    const size = try reader.read(&read_buffer);
+                    if (size == 0) break;
+                    if (!header_skipped) {
+                        if (read_buffer[0] == 0) {
+                            header_skipped = true;
+                            break;
                         }
-                        self.out_size = try reader.read(self.buffer);
-                        if (header_skipped) return;
-
-                        return error.ObjectInvalid;
-                    } else {
-                        return error.ObjectNotFound;
                     }
                 }
-            };
-            var ctx = Ctx{ .core = core, .oid_hex = oid_hex, .buffer = buffer, .out_size = 0 };
-            _ = try core.db.rootCursor().execute(*Ctx, &[_]xitdb.PathPart(*Ctx){
-                .{ .array_list_get = .{ .index = .{ .index = 0, .reverse = true } } },
-                .{ .ctx = &ctx },
-            });
-            return buffer[0..ctx.out_size];
+                if (header_skipped) {
+                    const out_size = try reader.read(buffer);
+                    return buffer[0..out_size];
+                }
+
+                return error.ObjectInvalid;
+            } else {
+                return error.ObjectNotFound;
+            }
         },
     }
 }

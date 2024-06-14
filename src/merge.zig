@@ -30,9 +30,9 @@ fn writeBlobWithConflict(
 ) ![hash.SHA1_BYTES_LEN]u8 {
     // TODO: don't read it all into memory
     var current_buf = [_]u8{0} ** 1024;
-    const current_content = try chk.objectToBuffer(repo_kind, core_cursor.core, std.fmt.bytesToHex(current_oid, .lower), &current_buf);
+    const current_content = try chk.objectToBuffer(repo_kind, core_cursor, std.fmt.bytesToHex(current_oid, .lower), &current_buf);
     var source_buf = [_]u8{0} ** 1024;
-    const source_content = try chk.objectToBuffer(repo_kind, core_cursor.core, std.fmt.bytesToHex(source_oid, .lower), &source_buf);
+    const source_content = try chk.objectToBuffer(repo_kind, core_cursor, std.fmt.bytesToHex(source_oid, .lower), &source_buf);
 
     const content = try std.fmt.allocPrint(allocator, "<<<<<<< {s}\n{s}\n=======\n{s}\n>>>>>>> {s}", .{ current_name, current_content, source_content, source_name });
     defer allocator.free(content);

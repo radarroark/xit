@@ -652,12 +652,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         {
             var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
-            var cursor = switch (repo_kind) {
-                .git => {},
-                .xit => (try repo.core.db.rootCursor().readCursor(void, &[_]xitdb.PathPart(void){
-                    .{ .array_list_get = .{ .index = .{ .index = 0, .reverse = true } } },
-                })) orelse return error.DatabaseEmpty,
-            };
+            var cursor = try repo.core.readOnlyCursor();
             const core_cursor = switch (repo_kind) {
                 .git => .{ .core = &repo.core },
                 .xit => .{ .core = &repo.core, .root_cursor = &cursor },
@@ -725,12 +720,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         {
             var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
-            var cursor = switch (repo_kind) {
-                .git => {},
-                .xit => (try repo.core.db.rootCursor().readCursor(void, &[_]xitdb.PathPart(void){
-                    .{ .array_list_get = .{ .index = .{ .index = 0, .reverse = true } } },
-                })) orelse return error.DatabaseEmpty,
-            };
+            var cursor = try repo.core.readOnlyCursor();
             const core_cursor = switch (repo_kind) {
                 .git => .{ .core = &repo.core },
                 .xit => .{ .core = &repo.core, .root_cursor = &cursor },
