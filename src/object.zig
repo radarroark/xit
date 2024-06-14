@@ -529,12 +529,12 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
         oid: [hash.SHA1_HEX_LEN]u8,
         len: u64,
 
-        pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core, oid: [hash.SHA1_HEX_LEN]u8) !Object(repo_kind) {
+        pub fn init(allocator: std.mem.Allocator, core_cursor: rp.Repo(repo_kind).CoreCursor, oid: [hash.SHA1_HEX_LEN]u8) !Object(repo_kind) {
             var state = blk: {
                 switch (repo_kind) {
                     .git => {
                         // open the objects dir
-                        var objects_dir = try core.git_dir.openDir("objects", .{});
+                        var objects_dir = try core_cursor.core.git_dir.openDir("objects", .{});
                         errdefer objects_dir.close();
 
                         // open the object file
@@ -581,8 +581,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                                 self.allocator.free(self.buffer);
                             }
                         };
-                        if (try core.db.rootCursor().readBytesAlloc(allocator, MAX_READ_BYTES, void, &[_]xitdb.PathPart(void){
-                            .{ .array_list_get = .{ .index = .{ .index = 0, .reverse = true } } },
+                        if (try core_cursor.root_cursor.readBytesAlloc(allocator, MAX_READ_BYTES, void, &[_]xitdb.PathPart(void){
                             .{ .hash_map_get = hash.hashBuffer("objects") },
                             .{ .hash_map_get = try hash.hexToHash(&oid) },
                         })) |bytes| {
@@ -741,12 +740,12 @@ pub fn TreeDiff(comptime repo_kind: rp.RepoKind) type {
             self.changes.deinit();
         }
 
-        pub fn compare(self: *TreeDiff(repo_kind), core: *rp.Repo(repo_kind).Core, old_oid_maybe: ?[hash.SHA1_HEX_LEN]u8, new_oid_maybe: ?[hash.SHA1_HEX_LEN]u8, path_list_maybe: ?std.ArrayList([]const u8)) !void {
+        pub fn compare(self: *TreeDiff(repo_kind), core_cursor: rp.Repo(repo_kind).CoreCursor, old_oid_maybe: ?[hash.SHA1_HEX_LEN]u8, new_oid_maybe: ?[hash.SHA1_HEX_LEN]u8, path_list_maybe: ?std.ArrayList([]const u8)) !void {
             if (old_oid_maybe == null and new_oid_maybe == null) {
                 return;
             }
-            const old_entries = try self.loadTree(core, old_oid_maybe);
-            const new_entries = try self.loadTree(core, new_oid_maybe);
+            const old_entries = try self.loadTree(core_cursor, old_oid_maybe);
+            const new_entries = try self.loadTree(core_cursor, new_oid_maybe);
             // deletions and edits
             {
                 var iter = old_entries.iterator();
@@ -760,14 +759,14 @@ pub fn TreeDiff(comptime repo_kind: rp.RepoKind) type {
                         if (!old_value.eql(new_value)) {
                             const old_value_tree = isTree(old_value);
                             const new_value_tree = isTree(new_value);
-                            try self.compare(core, if (old_value_tree) std.fmt.bytesToHex(&old_value.oid, .lower) else null, if (new_value_tree) std.fmt.bytesToHex(&new_value.oid, .lower) else null, path_list);
+                            try self.compare(core_cursor, if (old_value_tree) std.fmt.bytesToHex(&old_value.oid, .lower) else null, if (new_value_tree) std.fmt.bytesToHex(&new_value.oid, .lower) else null, path_list);
                             if (!old_value_tree or !new_value_tree) {
                                 try self.changes.put(path, Change{ .old = if (old_value_tree) null else old_value, .new = if (new_value_tree) null else new_value });
                             }
                         }
                     } else {
                         if (isTree(old_value)) {
-                            try self.compare(core, std.fmt.bytesToHex(&old_value.oid, .lower), null, path_list);
+                            try self.compare(core_cursor, std.fmt.bytesToHex(&old_value.oid, .lower), null, path_list);
                         } else {
                             try self.changes.put(path, Change{ .old = old_value, .new = null });
                         }
@@ -786,7 +785,7 @@ pub fn TreeDiff(comptime repo_kind: rp.RepoKind) type {
                     if (old_entries.get(new_key)) |_| {
                         continue;
                     } else if (isTree(new_value)) {
-                        try self.compare(core, null, std.fmt.bytesToHex(&new_value.oid, .lower), path_list);
+                        try self.compare(core_cursor, null, std.fmt.bytesToHex(&new_value.oid, .lower), path_list);
                     } else {
                         try self.changes.put(path, Change{ .old = null, .new = new_value });
                     }
@@ -794,13 +793,13 @@ pub fn TreeDiff(comptime repo_kind: rp.RepoKind) type {
             }
         }
 
-        fn loadTree(self: *TreeDiff(repo_kind), core: *rp.Repo(repo_kind).Core, oid_maybe: ?[hash.SHA1_HEX_LEN]u8) !std.StringArrayHashMap(TreeEntry) {
+        fn loadTree(self: *TreeDiff(repo_kind), core_cursor: rp.Repo(repo_kind).CoreCursor, oid_maybe: ?[hash.SHA1_HEX_LEN]u8) !std.StringArrayHashMap(TreeEntry) {
             if (oid_maybe) |oid| {
-                const obj = try Object(repo_kind).init(self.arena.allocator(), core, oid);
+                const obj = try Object(repo_kind).init(self.arena.allocator(), core_cursor, oid);
                 return switch (obj.content) {
                     .blob => std.StringArrayHashMap(TreeEntry).init(self.arena.allocator()),
                     .tree => obj.content.tree.entries,
-                    .commit => self.loadTree(core, obj.content.commit.tree),
+                    .commit => self.loadTree(core_cursor, obj.content.commit.tree),
                 };
             } else {
                 return std.StringArrayHashMap(TreeEntry).init(self.arena.allocator());
@@ -837,10 +836,15 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind) type {
         }
 
         pub fn next(self: *ObjectIterator(repo_kind)) !?*Object(repo_kind) {
+            var cursor = try self.core.readOnlyCursor();
+            const core_cursor = switch (repo_kind) {
+                .git => .{ .core = self.core },
+                .xit => .{ .core = self.core, .root_cursor = &cursor },
+            };
             if (self.oid_queue.popFirst()) |node| {
                 const next_oid = node.data;
                 self.allocator.destroy(node);
-                var commit_object = try Object(repo_kind).init(self.allocator, self.core, next_oid);
+                var commit_object = try Object(repo_kind).init(self.allocator, core_cursor, next_oid);
                 errdefer commit_object.deinit();
                 self.object = commit_object;
                 for (commit_object.content.commit.parents.items) |parent_oid| {
@@ -857,7 +861,7 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind) type {
     };
 }
 
-fn getDescendent(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core, oid1: *const [hash.SHA1_HEX_LEN]u8, oid2: *const [hash.SHA1_HEX_LEN]u8) ![hash.SHA1_HEX_LEN]u8 {
+fn getDescendent(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, core_cursor: rp.Repo(repo_kind).CoreCursor, oid1: *const [hash.SHA1_HEX_LEN]u8, oid2: *const [hash.SHA1_HEX_LEN]u8) ![hash.SHA1_HEX_LEN]u8 {
     if (std.mem.eql(u8, oid1, oid2)) {
         return oid1.*;
     }
@@ -876,7 +880,7 @@ fn getDescendent(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
     var queue = std.DoublyLinkedList(Parent){};
 
     {
-        const object = try Object(repo_kind).init(arena.allocator(), core, oid1.*);
+        const object = try Object(repo_kind).init(arena.allocator(), core_cursor, oid1.*);
         for (object.content.commit.parents.items) |parent_oid| {
             var node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
             node.data = .{ .oid = parent_oid, .kind = .one };
@@ -885,7 +889,7 @@ fn getDescendent(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
     }
 
     {
-        const object = try Object(repo_kind).init(arena.allocator(), core, oid2.*);
+        const object = try Object(repo_kind).init(arena.allocator(), core_cursor, oid2.*);
         for (object.content.commit.parents.items) |parent_oid| {
             var node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
             node.data = .{ .oid = parent_oid, .kind = .two };
@@ -913,7 +917,7 @@ fn getDescendent(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
 
         // TODO: instead of appending to the end, append it in descending order of timestamp
         // so we prioritize more recent commits and avoid wasteful traversal deep in the history.
-        const object = try Object(repo_kind).init(arena.allocator(), core, node.data.oid);
+        const object = try Object(repo_kind).init(arena.allocator(), core_cursor, node.data.oid);
         for (object.content.commit.parents.items) |parent_oid| {
             var new_node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
             new_node.data = .{ .oid = parent_oid, .kind = node.data.kind };
@@ -924,7 +928,7 @@ fn getDescendent(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
     return error.DescendentNotFound;
 }
 
-pub fn commonAncestor(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core, oid1: *const [hash.SHA1_HEX_LEN]u8, oid2: *const [hash.SHA1_HEX_LEN]u8) ![hash.SHA1_HEX_LEN]u8 {
+pub fn commonAncestor(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, core_cursor: rp.Repo(repo_kind).CoreCursor, oid1: *const [hash.SHA1_HEX_LEN]u8, oid2: *const [hash.SHA1_HEX_LEN]u8) ![hash.SHA1_HEX_LEN]u8 {
     if (std.mem.eql(u8, oid1, oid2)) {
         return oid1.*;
     }
@@ -988,7 +992,7 @@ pub fn commonAncestor(comptime repo_kind: rp.RepoKind, allocator: std.mem.Alloca
 
         // TODO: instead of appending to the end, append it in descending order of timestamp
         // so we prioritize more recent commits and avoid wasteful traversal deep in the history.
-        const object = try Object(repo_kind).init(arena.allocator(), core, node.data.oid);
+        const object = try Object(repo_kind).init(arena.allocator(), core_cursor, node.data.oid);
         for (object.content.commit.parents.items) |parent_oid| {
             const is_stale = is_common_ancestor or stale_oids.contains(&parent_oid);
             var new_node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
@@ -1015,7 +1019,7 @@ pub fn commonAncestor(comptime repo_kind: rp.RepoKind, allocator: std.mem.Alloca
     if (common_ancestor_count > 1) {
         var oid = parents_of_both.keys()[0][0..hash.SHA1_HEX_LEN].*;
         for (parents_of_both.keys()[1..]) |next_oid| {
-            oid = try getDescendent(repo_kind, allocator, core, oid[0..hash.SHA1_HEX_LEN], next_oid[0..hash.SHA1_HEX_LEN]);
+            oid = try getDescendent(repo_kind, allocator, core_cursor, oid[0..hash.SHA1_HEX_LEN], next_oid[0..hash.SHA1_HEX_LEN]);
         }
         return oid;
     } else if (common_ancestor_count == 1) {

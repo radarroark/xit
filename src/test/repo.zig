@@ -160,13 +160,19 @@ fn testMerge(comptime repo_kind: rp.RepoKind) !void {
     try addFile(repo_kind, &repo, "master.md", "k");
     const commit_k = try repo.commit(null, "k");
 
+    var cursor = try repo.core.readOnlyCursor();
+    const core_cursor = switch (repo_kind) {
+        .git => .{ .core = &repo.core },
+        .xit => .{ .core = &repo.core, .root_cursor = &cursor },
+    };
+
     // there are multiple common ancestors, b and d,
     // but d is the best one because it is a descendent of b
-    const ancestor_k_h = try obj.commonAncestor(repo_kind, allocator, &repo.core, &commit_k, &commit_h);
+    const ancestor_k_h = try obj.commonAncestor(repo_kind, allocator, core_cursor, &commit_k, &commit_h);
     try std.testing.expectEqualStrings(&commit_d, &ancestor_k_h);
 
     // if one commit is an ancestor of the other, it is the best common ancestor
-    const ancestor_k_j = try obj.commonAncestor(repo_kind, allocator, &repo.core, &commit_k, &commit_j);
+    const ancestor_k_j = try obj.commonAncestor(repo_kind, allocator, core_cursor, &commit_k, &commit_j);
     try std.testing.expectEqualStrings(&commit_j, &ancestor_k_j);
 
     // if we try merging foo again, it does nothing
@@ -184,11 +190,6 @@ fn testMerge(comptime repo_kind: rp.RepoKind) !void {
         defer merge_result.deinit();
         try std.testing.expect(.fast_forward == merge_result.data);
 
-        var cursor = try repo.core.readOnlyCursor();
-        const core_cursor = switch (repo_kind) {
-            .git => .{ .core = &repo.core },
-            .xit => .{ .core = &repo.core, .root_cursor = &cursor },
-        };
         const head_oid = try ref.readHead(repo_kind, core_cursor);
         try expectEqual(commit_k, head_oid);
 

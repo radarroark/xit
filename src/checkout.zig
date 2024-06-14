@@ -145,7 +145,7 @@ pub fn objectToFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_k
         },
         .tree => {
             // load the tree
-            var tree_object = try obj.Object(repo_kind).init(allocator, core_cursor.core, oid_hex);
+            var tree_object = try obj.Object(repo_kind).init(allocator, core_cursor, oid_hex);
             defer tree_object.deinit();
 
             // update each entry recursively
@@ -212,7 +212,7 @@ pub fn objectToBuffer(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo
     }
 }
 
-fn pathToTreeEntry(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, parent: obj.Object(repo_kind), path_parts: []const []const u8) !?obj.TreeEntry {
+fn pathToTreeEntry(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, parent: obj.Object(repo_kind), path_parts: []const []const u8) !?obj.TreeEntry {
     const path_part = path_parts[0];
     const tree_entry = parent.content.tree.entries.get(path_part) orelse return null;
 
@@ -221,12 +221,12 @@ fn pathToTreeEntry(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Co
     }
 
     const oid_hex = std.fmt.bytesToHex(tree_entry.oid, .lower);
-    var tree_object = try obj.Object(repo_kind).init(allocator, core, oid_hex);
+    var tree_object = try obj.Object(repo_kind).init(allocator, core_cursor, oid_hex);
     defer tree_object.deinit();
 
     switch (tree_object.content) {
         .blob => return null,
-        .tree => return pathToTreeEntry(repo_kind, core, allocator, tree_object, path_parts[1..]),
+        .tree => return pathToTreeEntry(repo_kind, core_cursor, allocator, tree_object, path_parts[1..]),
         .commit => return error.ObjectInvalid,
     }
 }
@@ -486,7 +486,7 @@ pub fn switch_head(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_ki
     // compare the commits
     var tree_diff = obj.TreeDiff(repo_kind).init(allocator);
     defer tree_diff.deinit();
-    try tree_diff.compare(core_cursor.core, current_oid, target_oid, null);
+    try tree_diff.compare(core_cursor, current_oid, target_oid, null);
 
     var result = SwitchResult.init();
     errdefer result.deinit();
@@ -545,11 +545,11 @@ pub fn switch_head(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_ki
 pub fn restore(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, path: []const u8) !void {
     // get the current commit
     const current_oid = try ref.readHead(repo_kind, core_cursor);
-    var commit_object = try obj.Object(repo_kind).init(allocator, core_cursor.core, current_oid);
+    var commit_object = try obj.Object(repo_kind).init(allocator, core_cursor, current_oid);
     defer commit_object.deinit();
 
     // get the tree of the current commit
-    var tree_object = try obj.Object(repo_kind).init(allocator, core_cursor.core, commit_object.content.commit.tree);
+    var tree_object = try obj.Object(repo_kind).init(allocator, core_cursor, commit_object.content.commit.tree);
     defer tree_object.deinit();
 
     // get the entry for the given path
@@ -563,7 +563,7 @@ pub fn restore(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).
         }
     }
     try path_parts.append(path[start..]);
-    const tree_entry = try pathToTreeEntry(repo_kind, core_cursor.core, allocator, tree_object, path_parts.items) orelse return error.ObjectNotFound;
+    const tree_entry = try pathToTreeEntry(repo_kind, core_cursor, allocator, tree_object, path_parts.items) orelse return error.ObjectNotFound;
 
     // restore file in the working tree
     try objectToFile(repo_kind, core_cursor, allocator, path, tree_entry);

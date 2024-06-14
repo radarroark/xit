@@ -695,11 +695,11 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
                 var count: u32 = 0;
-                if (try repo.core.db.rootCursor().readCursor(void, &[_]xitdb.PathPart(void){
-                    .{ .array_list_get = .{ .index = .{ .index = 0, .reverse = true } } },
+                var cursor = try repo.core.readOnlyCursor();
+                if (try cursor.readCursor(void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = hash.hashBuffer("index") },
-                })) |cursor| {
-                    var iter = try cursor.iter(.hash_map);
+                })) |index_cursor| {
+                    var iter = try index_cursor.iter(.hash_map);
                     defer iter.deinit();
                     while (try iter.next()) |_| {
                         count += 1;
@@ -762,11 +762,11 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
                 var count: u32 = 0;
-                if (try repo.core.db.rootCursor().readCursor(void, &[_]xitdb.PathPart(void){
-                    .{ .array_list_get = .{ .index = .{ .index = 0, .reverse = true } } },
+                var cursor = try repo.core.readOnlyCursor();
+                if (try cursor.readCursor(void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = hash.hashBuffer("index") },
-                })) |cursor| {
-                    var iter = try cursor.iter(.hash_map);
+                })) |index_cursor| {
+                    var iter = try index_cursor.iter(.hash_map);
                     defer iter.deinit();
                     while (try iter.next()) |_| {
                         count += 1;
@@ -998,13 +998,19 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
+        var cursor = try repo.core.readOnlyCursor();
+        const core_cursor = switch (repo_kind) {
+            .git => .{ .core = &repo.core },
+            .xit => .{ .core = &repo.core, .root_cursor = &cursor },
+        };
+
         // read commit
-        var commit_object = try obj.Object(repo_kind).init(allocator, &repo.core, commit2);
+        var commit_object = try obj.Object(repo_kind).init(allocator, core_cursor, commit2);
         defer commit_object.deinit();
         try std.testing.expectEqualStrings("second commit", commit_object.content.commit.message);
 
         // read tree
-        var tree_object = try obj.Object(repo_kind).init(allocator, &repo.core, commit_object.content.commit.tree);
+        var tree_object = try obj.Object(repo_kind).init(allocator, core_cursor, commit_object.content.commit.tree);
         defer tree_object.deinit();
         try expectEqual(5, tree_object.content.tree.entries.count());
     }
@@ -1257,8 +1263,12 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
-
-        const ancestor_commit = try obj.commonAncestor(repo_kind, allocator, &repo.core, &commit3, &commit4_stuff);
+        var cursor = try repo.core.readOnlyCursor();
+        const core_cursor = switch (repo_kind) {
+            .git => .{ .core = &repo.core },
+            .xit => .{ .core = &repo.core, .root_cursor = &cursor },
+        };
+        const ancestor_commit = try obj.commonAncestor(repo_kind, allocator, core_cursor, &commit3, &commit4_stuff);
         try std.testing.expectEqualStrings(&commit2, &ancestor_commit);
     }
 

@@ -242,7 +242,7 @@ pub fn merge(
     // get the oids for the three-way merge
     const current_oid = try ref.readHead(repo_kind, core_cursor);
     const source_oid = try ref.resolve(repo_kind, core_cursor, source_name) orelse return error.InvalidTarget;
-    const common_oid = try obj.commonAncestor(repo_kind, allocator, core_cursor.core, &current_oid, &source_oid);
+    const common_oid = try obj.commonAncestor(repo_kind, allocator, core_cursor, &current_oid, &source_oid);
 
     // get the name of HEAD
     const current_name = try ref.readHeadName(repo_kind, core_cursor, arena.allocator());
@@ -266,11 +266,11 @@ pub fn merge(
 
     // diff the common ancestor with the current oid
     var current_diff = obj.TreeDiff(repo_kind).init(arena.allocator());
-    try current_diff.compare(core_cursor.core, common_oid, current_oid, null);
+    try current_diff.compare(core_cursor, common_oid, current_oid, null);
 
     // diff the common ancestor with the source oid
     var source_diff = obj.TreeDiff(repo_kind).init(arena.allocator());
-    try source_diff.compare(core_cursor.core, common_oid, source_oid, null);
+    try source_diff.compare(core_cursor, common_oid, source_oid, null);
 
     // look for same path conflicts while populating the clean diff
     for (source_diff.changes.keys(), source_diff.changes.values()) |path, source_change| {

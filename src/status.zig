@@ -235,7 +235,7 @@ pub fn HeadTree(comptime repo_kind: rp.RepoKind) type {
 
             // if head points to a valid object, read it
             if (try ref.readHeadMaybe(repo_kind, core_cursor)) |head_file_buffer| {
-                var commit_object = try obj.Object(repo_kind).init(allocator, core_cursor.core, head_file_buffer);
+                var commit_object = try obj.Object(repo_kind).init(allocator, core_cursor, head_file_buffer);
                 defer commit_object.deinit();
                 try tree.read(core_cursor, "", commit_object.content.commit.tree);
             }
@@ -249,7 +249,7 @@ pub fn HeadTree(comptime repo_kind: rp.RepoKind) type {
         }
 
         fn read(self: *HeadTree(repo_kind), core_cursor: rp.Repo(repo_kind).CoreCursor, prefix: []const u8, oid: [hash.SHA1_HEX_LEN]u8) !void {
-            var object = try obj.Object(repo_kind).init(self.arena.allocator(), core_cursor.core, oid);
+            var object = try obj.Object(repo_kind).init(self.arena.allocator(), core_cursor, oid);
 
             switch (object.content) {
                 .blob => {},
