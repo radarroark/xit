@@ -372,7 +372,7 @@ pub fn writeCommit(
 ) ![hash.SHA1_HEX_LEN]u8 {
     var commit_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
     const parent_oids = if (parent_oids_maybe) |oids| oids else blk: {
-        const head_oid_maybe = try ref.readHeadMaybe(repo_kind, core_cursor.core);
+        const head_oid_maybe = try ref.readHeadMaybe(repo_kind, core_cursor);
         break :blk if (head_oid_maybe) |head_oid| &[_][hash.SHA1_HEX_LEN]u8{head_oid} else &[_][hash.SHA1_HEX_LEN]u8{};
     };
 

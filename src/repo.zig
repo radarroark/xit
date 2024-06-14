@@ -363,10 +363,16 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     if (cmd_data.branch.name) |name| {
                         try self.create_branch(name);
                     } else {
-                        var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, &self.core, self.allocator, "HEAD");
+                        var cursor = try self.core.readOnlyCursor();
+                        const core_cursor = switch (repo_kind) {
+                            .git => .{ .core = &self.core },
+                            .xit => .{ .core = &self.core, .root_cursor = &cursor },
+                        };
+
+                        var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, core_cursor, self.allocator, "HEAD");
                         defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
 
-                        var ref_list = try ref.RefList.init(repo_kind, &self.core, self.allocator, "heads");
+                        var ref_list = try ref.RefList.init(repo_kind, core_cursor, self.allocator, "heads");
                         defer ref_list.deinit();
 
                         for (ref_list.refs.items) |r| {
@@ -386,7 +392,12 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     try self.restore(cmd_data.restore.path);
                 },
                 cmd.CommandData.log => {
-                    if (try ref.readHeadMaybe(repo_kind, &self.core)) |oid| {
+                    var cursor = try self.core.readOnlyCursor();
+                    const core_cursor = switch (repo_kind) {
+                        .git => .{ .core = &self.core },
+                        .xit => .{ .core = &self.core, .root_cursor = &cursor },
+                    };
+                    if (try ref.readHeadMaybe(repo_kind, core_cursor)) |oid| {
                         var commit_iter = try self.log(oid);
                         defer commit_iter.deinit();
                         while (try commit_iter.next()) |commit_object| {

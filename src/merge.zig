@@ -240,12 +240,12 @@ pub fn merge(
     errdefer arena.deinit();
 
     // get the oids for the three-way merge
-    const current_oid = try ref.readHead(repo_kind, core_cursor.core);
-    const source_oid = try ref.resolve(repo_kind, core_cursor.core, source_name) orelse return error.InvalidTarget;
+    const current_oid = try ref.readHead(repo_kind, core_cursor);
+    const source_oid = try ref.resolve(repo_kind, core_cursor, source_name) orelse return error.InvalidTarget;
     const common_oid = try obj.commonAncestor(repo_kind, allocator, core_cursor.core, &current_oid, &source_oid);
 
     // get the name of HEAD
-    const current_name = try ref.readHeadName(repo_kind, core_cursor.core, arena.allocator());
+    const current_name = try ref.readHeadName(repo_kind, core_cursor, arena.allocator());
 
     // init the diff that we will use for the migration and the conflicts maps.
     // they're using the arena because they'll be included in the result.

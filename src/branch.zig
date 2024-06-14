@@ -44,7 +44,7 @@ pub fn create(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).C
             defer lock.deinit();
 
             // get HEAD contents
-            const head_file_buffer = try ref.readHead(repo_kind, core_cursor.core);
+            const head_file_buffer = try ref.readHead(repo_kind, core_cursor);
 
             // write to lock file
             try lock.lock_file.writeAll(&head_file_buffer);
@@ -55,8 +55,7 @@ pub fn create(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).C
         },
         .xit => {
             // get HEAD contents
-            // TODO: make `readHead` use cursor for tx safety
-            const head_file_buffer = try ref.readHead(repo_kind, core_cursor.core);
+            const head_file_buffer = try ref.readHead(repo_kind, core_cursor);
             const name_hash = hash.hashBuffer(name);
             _ = try core_cursor.root_cursor.writeBytes(name, .once, void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = hash.hashBuffer("names") },
@@ -99,7 +98,7 @@ pub fn delete(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).C
             defer head_lock.deinit();
 
             // don't allow current branch to be deleted
-            var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, core_cursor.core, allocator, "HEAD");
+            var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, core_cursor, allocator, "HEAD");
             defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
             if (current_branch_maybe) |current_branch| {
                 if (std.mem.eql(u8, current_branch.name, name)) {
@@ -130,8 +129,7 @@ pub fn delete(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).C
         },
         .xit => {
             // don't allow current branch to be deleted
-            // TODO: make `initFromLink` use cursor for tx safety
-            var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, core_cursor.core, allocator, "HEAD");
+            var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, core_cursor, allocator, "HEAD");
             defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
             if (current_branch_maybe) |current_branch| {
                 if (std.mem.eql(u8, current_branch.name, name)) {

@@ -71,7 +71,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind) type {
 
             _ = try addEntries(repo_kind, arena.allocator(), &untracked, &workspace_modified, index, &index_bools, core_cursor.core.repo_dir, ".");
 
-            var head_tree = try HeadTree(repo_kind).init(allocator, core_cursor.core);
+            var head_tree = try HeadTree(repo_kind).init(allocator, core_cursor);
             errdefer head_tree.deinit();
 
             // for each entry in the index
@@ -226,7 +226,7 @@ pub fn HeadTree(comptime repo_kind: rp.RepoKind) type {
         entries: std.StringHashMap(obj.TreeEntry),
         arena: std.heap.ArenaAllocator,
 
-        pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core) !HeadTree(repo_kind) {
+        pub fn init(allocator: std.mem.Allocator, core_cursor: rp.Repo(repo_kind).CoreCursor) !HeadTree(repo_kind) {
             var tree = HeadTree(repo_kind){
                 .entries = std.StringHashMap(obj.TreeEntry).init(allocator),
                 .arena = std.heap.ArenaAllocator.init(allocator),
@@ -234,10 +234,10 @@ pub fn HeadTree(comptime repo_kind: rp.RepoKind) type {
             errdefer tree.deinit();
 
             // if head points to a valid object, read it
-            if (try ref.readHeadMaybe(repo_kind, core)) |head_file_buffer| {
-                var commit_object = try obj.Object(repo_kind).init(allocator, core, head_file_buffer);
+            if (try ref.readHeadMaybe(repo_kind, core_cursor)) |head_file_buffer| {
+                var commit_object = try obj.Object(repo_kind).init(allocator, core_cursor.core, head_file_buffer);
                 defer commit_object.deinit();
-                try tree.read(core, "", commit_object.content.commit.tree);
+                try tree.read(core_cursor, "", commit_object.content.commit.tree);
             }
 
             return tree;
@@ -248,8 +248,8 @@ pub fn HeadTree(comptime repo_kind: rp.RepoKind) type {
             self.arena.deinit();
         }
 
-        fn read(self: *HeadTree(repo_kind), core: *rp.Repo(repo_kind).Core, prefix: []const u8, oid: [hash.SHA1_HEX_LEN]u8) !void {
-            var object = try obj.Object(repo_kind).init(self.arena.allocator(), core, oid);
+        fn read(self: *HeadTree(repo_kind), core_cursor: rp.Repo(repo_kind).CoreCursor, prefix: []const u8, oid: [hash.SHA1_HEX_LEN]u8) !void {
+            var object = try obj.Object(repo_kind).init(self.arena.allocator(), core_cursor.core, oid);
 
             switch (object.content) {
                 .blob => {},
@@ -260,7 +260,7 @@ pub fn HeadTree(comptime repo_kind: rp.RepoKind) type {
                         const path = try io.joinPath(self.arena.allocator(), &[_][]const u8{ prefix, name });
                         if (obj.isTree(entry.value_ptr.*)) {
                             const oid_hex = std.fmt.bytesToHex(entry.value_ptr.*.oid[0..hash.SHA1_BYTES_LEN], .lower);
-                            try self.read(core, path, oid_hex);
+                            try self.read(core_cursor, path, oid_hex);
                         } else {
                             try self.entries.put(path, entry.value_ptr.*);
                         }

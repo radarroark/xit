@@ -12,7 +12,7 @@ pub const Ref = struct {
     name: []const u8,
     oid_hex: ?[hash.SHA1_HEX_LEN]u8,
 
-    pub fn initWithName(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, dir_name: []const u8, name: []const u8) !Ref {
+    pub fn initWithName(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, dir_name: []const u8, name: []const u8) !Ref {
         const path = try io.joinPath(allocator, &[_][]const u8{ "refs", dir_name, name });
         defer allocator.free(path);
         const content = try std.fmt.allocPrint(allocator, "ref: {s}", .{path});
@@ -21,13 +21,13 @@ pub const Ref = struct {
         return .{
             .allocator = allocator,
             .name = name,
-            .oid_hex = try resolve(repo_kind, core, content),
+            .oid_hex = try resolve(repo_kind, core_cursor, content),
         };
     }
 
-    pub fn initFromLink(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, path: []const u8) !?Ref {
+    pub fn initFromLink(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, path: []const u8) !?Ref {
         var buffer = [_]u8{0} ** MAX_READ_BYTES;
-        const content = try read(repo_kind, core, path, &buffer);
+        const content = try read(repo_kind, core_cursor, path, &buffer);
 
         if (std.mem.startsWith(u8, content, REF_START_STR) and content.len > REF_START_STR.len) {
             const name_len = content.len - REF_START_STR.len;
@@ -38,7 +38,7 @@ pub const Ref = struct {
             return .{
                 .allocator = allocator,
                 .name = name,
-                .oid_hex = try resolve(repo_kind, core, content),
+                .oid_hex = try resolve(repo_kind, core_cursor, content),
             };
         } else {
             return null;
@@ -54,7 +54,7 @@ pub const RefList = struct {
     refs: std.ArrayList(Ref),
     arena: std.heap.ArenaAllocator,
 
-    pub fn init(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, dir_name: []const u8) !RefList {
+    pub fn init(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, dir_name: []const u8) !RefList {
         var ref_list = RefList{
             .refs = std.ArrayList(Ref).init(allocator),
             .arena = std.heap.ArenaAllocator.init(allocator),
@@ -63,48 +63,36 @@ pub const RefList = struct {
 
         switch (repo_kind) {
             .git => {
-                var refs_dir = try core.git_dir.openDir("refs", .{});
+                var refs_dir = try core_cursor.core.git_dir.openDir("refs", .{});
                 defer refs_dir.close();
                 var heads_dir = try refs_dir.openDir("heads", .{});
                 defer heads_dir.close();
 
                 var path = std.ArrayList([]const u8).init(allocator);
                 defer path.deinit();
-                try ref_list.addRefs(repo_kind, core, dir_name, heads_dir, &path);
+                try ref_list.addRefs(repo_kind, core_cursor, dir_name, heads_dir, &path);
             },
             .xit => {
-                const Ctx = struct {
-                    ref_list: *RefList,
-                    core: *rp.Repo(repo_kind).Core,
-                    dir_name: []const u8,
-
-                    pub fn run(self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
-                        if (try cursor.readCursor(void, &[_]xitdb.PathPart(void){
-                            .{ .hash_map_get = hash.hashBuffer("refs") },
-                            .{ .hash_map_get = hash.hashBuffer("heads") },
-                        })) |heads_cursor| {
-                            var iter = try heads_cursor.iter(.hash_map);
-                            defer iter.deinit();
-                            while (try iter.next()) |*next_cursor| {
-                                if (try next_cursor.readHash(void, &[_]xitdb.PathPart(void){})) |name_hash| {
-                                    if (try cursor.readBytesAlloc(self.ref_list.arena.allocator(), MAX_READ_BYTES, void, &[_]xitdb.PathPart(void){
-                                        .{ .hash_map_get = hash.hashBuffer("names") },
-                                        .{ .hash_map_get = name_hash },
-                                    })) |name| {
-                                        const ref = try Ref.initWithName(repo_kind, self.core, self.ref_list.arena.allocator(), self.dir_name, name);
-                                        try self.ref_list.refs.append(ref);
-                                    } else {
-                                        return error.ValueNotFound;
-                                    }
-                                }
+                if (try core_cursor.root_cursor.readCursor(void, &[_]xitdb.PathPart(void){
+                    .{ .hash_map_get = hash.hashBuffer("refs") },
+                    .{ .hash_map_get = hash.hashBuffer("heads") },
+                })) |heads_cursor| {
+                    var iter = try heads_cursor.iter(.hash_map);
+                    defer iter.deinit();
+                    while (try iter.next()) |*next_cursor| {
+                        if (try next_cursor.readHash(void, &[_]xitdb.PathPart(void){})) |name_hash| {
+                            if (try core_cursor.root_cursor.readBytesAlloc(ref_list.arena.allocator(), MAX_READ_BYTES, void, &[_]xitdb.PathPart(void){
+                                .{ .hash_map_get = hash.hashBuffer("names") },
+                                .{ .hash_map_get = name_hash },
+                            })) |name| {
+                                const ref = try Ref.initWithName(repo_kind, core_cursor, ref_list.arena.allocator(), dir_name, name);
+                                try ref_list.refs.append(ref);
+                            } else {
+                                return error.ValueNotFound;
                             }
                         }
                     }
-                };
-                _ = try core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
-                    .{ .array_list_get = .{ .index = .{ .index = 0, .reverse = true } } },
-                    .{ .ctx = Ctx{ .ref_list = &ref_list, .core = core, .dir_name = dir_name } },
-                });
+                }
             },
         }
 
@@ -116,7 +104,7 @@ pub const RefList = struct {
         self.arena.deinit();
     }
 
-    fn addRefs(self: *RefList, comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, dir_name: []const u8, dir: std.fs.Dir, path: *std.ArrayList([]const u8)) !void {
+    fn addRefs(self: *RefList, comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, dir_name: []const u8, dir: std.fs.Dir, path: *std.ArrayList([]const u8)) !void {
         var iter_dir = try dir.openDir(".", .{ .iterate = true });
         defer iter_dir.close();
         var iter = iter_dir.iterate();
@@ -127,13 +115,13 @@ pub const RefList = struct {
             switch (entry.kind) {
                 .file => {
                     const name = try io.joinPath(self.arena.allocator(), next_path.items);
-                    const ref = try Ref.initWithName(repo_kind, core, self.arena.allocator(), dir_name, name);
+                    const ref = try Ref.initWithName(repo_kind, core_cursor, self.arena.allocator(), dir_name, name);
                     try self.refs.append(ref);
                 },
                 .directory => {
                     var next_dir = try dir.openDir(entry.name, .{});
                     defer next_dir.close();
-                    try self.addRefs(repo_kind, core, dir_name, next_dir, &next_path);
+                    try self.addRefs(repo_kind, core_cursor, dir_name, next_dir, &next_path);
                 },
                 else => {},
             }
@@ -141,14 +129,14 @@ pub const RefList = struct {
     }
 };
 
-pub fn resolve(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, content: []const u8) !?[hash.SHA1_HEX_LEN]u8 {
+pub fn resolve(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, content: []const u8) !?[hash.SHA1_HEX_LEN]u8 {
     if (std.mem.startsWith(u8, content, REF_START_STR) and content.len > REF_START_STR.len) {
-        return try resolve(repo_kind, core, content[REF_START_STR.len..]);
+        return try resolve(repo_kind, core_cursor, content[REF_START_STR.len..]);
     }
 
     switch (repo_kind) {
         .git => {
-            var refs_dir = try core.git_dir.openDir("refs", .{});
+            var refs_dir = try core_cursor.core.git_dir.openDir("refs", .{});
             defer refs_dir.close();
             var heads_dir = try refs_dir.openDir("heads", .{});
             defer heads_dir.close();
@@ -158,7 +146,7 @@ pub fn resolve(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, 
                 defer ref_file.close();
                 var buffer = [_]u8{0} ** MAX_READ_BYTES;
                 const size = try ref_file.reader().readAll(&buffer);
-                return try resolve(repo_kind, core, buffer[0..size]);
+                return try resolve(repo_kind, core_cursor, buffer[0..size]);
             }
 
             if (content.len >= hash.SHA1_HEX_LEN) {
@@ -171,13 +159,12 @@ pub fn resolve(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, 
         },
         .xit => {
             var db_buffer = [_]u8{0} ** MAX_READ_BYTES;
-            if (try core.db.rootCursor().readBytes(&db_buffer, void, &[_]xitdb.PathPart(void){
-                .{ .array_list_get = .{ .index = .{ .index = 0, .reverse = true } } },
+            if (try core_cursor.root_cursor.readBytes(&db_buffer, void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = hash.hashBuffer("refs") },
                 .{ .hash_map_get = hash.hashBuffer("heads") },
                 .{ .hash_map_get = hash.hashBuffer(content) },
             })) |bytes| {
-                return try resolve(repo_kind, core, bytes);
+                return try resolve(repo_kind, core_cursor, bytes);
             } else {
                 if (content.len >= hash.SHA1_HEX_LEN) {
                     var buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
@@ -191,17 +178,16 @@ pub fn resolve(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, 
     }
 }
 
-pub fn read(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, path: []const u8, buffer: *[MAX_READ_BYTES]u8) ![]u8 {
+pub fn read(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, path: []const u8, buffer: *[MAX_READ_BYTES]u8) ![]u8 {
     switch (repo_kind) {
         .git => {
-            const head_file = try core.git_dir.openFile(path, .{ .mode = .read_only });
+            const head_file = try core_cursor.core.git_dir.openFile(path, .{ .mode = .read_only });
             defer head_file.close();
             const size = try head_file.reader().readAll(buffer);
             return buffer[0..size];
         },
         .xit => {
-            if (try core.db.rootCursor().readBytes(buffer, void, &[_]xitdb.PathPart(void){
-                .{ .array_list_get = .{ .index = .{ .index = 0, .reverse = true } } },
+            if (try core_cursor.root_cursor.readBytes(buffer, void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = hash.hashBuffer(path) },
             })) |target_bytes| {
                 return target_bytes;
@@ -212,22 +198,22 @@ pub fn read(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, pat
     }
 }
 
-pub fn readHeadMaybe(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core) !?[hash.SHA1_HEX_LEN]u8 {
+pub fn readHeadMaybe(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor) !?[hash.SHA1_HEX_LEN]u8 {
     var buffer = [_]u8{0} ** MAX_READ_BYTES;
-    return try resolve(repo_kind, core, try read(repo_kind, core, "HEAD", &buffer));
+    return try resolve(repo_kind, core_cursor, try read(repo_kind, core_cursor, "HEAD", &buffer));
 }
 
-pub fn readHead(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core) ![hash.SHA1_HEX_LEN]u8 {
-    if (try readHeadMaybe(repo_kind, core)) |buffer| {
+pub fn readHead(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor) ![hash.SHA1_HEX_LEN]u8 {
+    if (try readHeadMaybe(repo_kind, core_cursor)) |buffer| {
         return buffer;
     } else {
         return error.RefInvalidHash;
     }
 }
 
-pub fn readHeadName(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator) ![]u8 {
+pub fn readHeadName(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator) ![]u8 {
     var buffer = [_]u8{0} ** MAX_READ_BYTES;
-    const content = try read(repo_kind, core, "HEAD", &buffer);
+    const content = try read(repo_kind, core_cursor, "HEAD", &buffer);
     if (std.mem.startsWith(u8, content, REF_START_STR) and content.len > REF_START_STR.len) {
         const ref_name = content[REF_START_STR.len..];
         const buf = try allocator.alloc(u8, ref_name.len);
@@ -352,7 +338,7 @@ pub fn updateRecur(
             // read file and get ref name if necessary
             var buffer = [_]u8{0} ** MAX_READ_BYTES;
             const ref_name_maybe = blk: {
-                const old_content = read(repo_kind, core_cursor.core, path, &buffer) catch |err| {
+                const old_content = read(repo_kind, core_cursor, path, &buffer) catch |err| {
                     switch (err) {
                         error.FileNotFound => break :blk null,
                         else => return err,

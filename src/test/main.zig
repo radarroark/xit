@@ -179,7 +179,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 {
                     var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                     defer repo.deinit();
-                    const head_file_buffer = try ref.readHead(repo_kind, &repo.core);
+                    const head_file_buffer = try ref.readHead(repo_kind, .{ .core = &repo.core });
                     var objects_dir = try state.git_dir.openDir("objects", .{});
                     defer objects_dir.close();
                     var hash_prefix_dir = try objects_dir.openDir(head_file_buffer[0..2], .{});
@@ -228,10 +228,10 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 // check that the commit object was created
                 var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
-                const head_file_buffer = try ref.readHead(repo_kind, &repo.core);
+                var cursor = try repo.core.readOnlyCursor();
+                const head_file_buffer = try ref.readHead(repo_kind, .{ .core = &repo.core, .root_cursor = &cursor });
                 var db_buffer = [_]u8{0} ** 1024;
-                const bytes_maybe = try repo.core.db.rootCursor().readBytes(&db_buffer, void, &[_]xitdb.PathPart(void){
-                    .{ .array_list_get = .{ .index = .{ .index = 0, .reverse = true } } },
+                const bytes_maybe = try cursor.readBytes(&db_buffer, void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = hash.hashBuffer("objects") },
                     .{ .hash_map_get = try hash.hexToHash(&head_file_buffer) },
                 });
@@ -244,7 +244,12 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     const commit1 = blk: {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
-        break :blk try ref.readHead(repo_kind, &repo.core);
+        var cursor = try repo.core.readOnlyCursor();
+        const core_cursor = switch (repo_kind) {
+            .git => .{ .core = &repo.core },
+            .xit => .{ .core = &repo.core, .root_cursor = &cursor },
+        };
+        break :blk try ref.readHead(repo_kind, core_cursor);
     };
 
     const new_hello_txt_content =
@@ -436,7 +441,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 {
                     var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                     defer repo.deinit();
-                    const head_file_buffer = try ref.readHead(repo_kind, &repo.core);
+                    const head_file_buffer = try ref.readHead(repo_kind, .{ .core = &repo.core });
                     var objects_dir = try state.git_dir.openDir("objects", .{});
                     defer objects_dir.close();
                     var hash_prefix_dir = try objects_dir.openDir(head_file_buffer[0..2], .{});
@@ -465,10 +470,10 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 // check that the commit object was created
                 var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
-                const head_file_buffer = try ref.readHead(repo_kind, &repo.core);
+                var cursor = try repo.core.readOnlyCursor();
+                const head_file_buffer = try ref.readHead(repo_kind, .{ .core = &repo.core, .root_cursor = &cursor });
                 var db_buffer = [_]u8{0} ** 1024;
-                const bytes_maybe = try repo.core.db.rootCursor().readBytes(&db_buffer, void, &[_]xitdb.PathPart(void){
-                    .{ .array_list_get = .{ .index = .{ .index = 0, .reverse = true } } },
+                const bytes_maybe = try cursor.readBytes(&db_buffer, void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = hash.hashBuffer("objects") },
                     .{ .hash_map_get = try hash.hexToHash(&head_file_buffer) },
                 });
@@ -481,7 +486,12 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     const commit2 = blk: {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
-        break :blk try ref.readHead(repo_kind, &repo.core);
+        var cursor = try repo.core.readOnlyCursor();
+        const core_cursor = switch (repo_kind) {
+            .git => .{ .core = &repo.core },
+            .xit => .{ .core = &repo.core, .root_cursor = &cursor },
+        };
+        break :blk try ref.readHead(repo_kind, core_cursor);
     };
 
     // try to switch to first commit after making conflicting change
@@ -1015,15 +1025,25 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
-        try expectEqual(commit2, try ref.readHead(repo_kind, &repo.core));
-        try expectEqual(commit2, try ref.resolve(repo_kind, &repo.core, "stuff"));
+        var cursor = try repo.core.readOnlyCursor();
+        const core_cursor = switch (repo_kind) {
+            .git => .{ .core = &repo.core },
+            .xit => .{ .core = &repo.core, .root_cursor = &cursor },
+        };
+        try expectEqual(commit2, try ref.readHead(repo_kind, core_cursor));
+        try expectEqual(commit2, try ref.resolve(repo_kind, core_cursor, "stuff"));
     }
 
     // list all branches
     {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
-        var ref_list = try ref.RefList.init(repo_kind, &repo.core, allocator, "heads");
+        var cursor = try repo.core.readOnlyCursor();
+        const core_cursor = switch (repo_kind) {
+            .git => .{ .core = &repo.core },
+            .xit => .{ .core = &repo.core, .root_cursor = &cursor },
+        };
+        var ref_list = try ref.RefList.init(repo_kind, core_cursor, allocator, "heads");
         defer ref_list.deinit();
         try expectEqual(2, ref_list.refs.items.len);
     }
@@ -1032,7 +1052,12 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
-        var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, &repo.core, allocator, "HEAD");
+        var cursor = try repo.core.readOnlyCursor();
+        const core_cursor = switch (repo_kind) {
+            .git => .{ .core = &repo.core },
+            .xit => .{ .core = &repo.core, .root_cursor = &cursor },
+        };
+        var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, core_cursor, allocator, "HEAD");
         defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
         try std.testing.expectEqualStrings("stuff", current_branch_maybe.?.name);
     }
@@ -1100,7 +1125,12 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     const commit4_stuff = blk: {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
-        break :blk try ref.readHead(repo_kind, &repo.core);
+        var cursor = try repo.core.readOnlyCursor();
+        const core_cursor = switch (repo_kind) {
+            .git => .{ .core = &repo.core },
+            .xit => .{ .core = &repo.core, .root_cursor = &cursor },
+        };
+        break :blk try ref.readHead(repo_kind, core_cursor);
     };
 
     // create a branch with slashes
@@ -1119,7 +1149,12 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
-        var ref_list = try ref.RefList.init(repo_kind, &repo.core, allocator, "heads");
+        var cursor = try repo.core.readOnlyCursor();
+        const core_cursor = switch (repo_kind) {
+            .git => .{ .core = &repo.core },
+            .xit => .{ .core = &repo.core, .root_cursor = &cursor },
+        };
+        var ref_list = try ref.RefList.init(repo_kind, core_cursor, allocator, "heads");
         defer ref_list.deinit();
         try expectEqual(3, ref_list.refs.items.len);
         var ref_map = std.StringHashMap(void).init(allocator);
@@ -1176,14 +1211,24 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     const commit3 = blk: {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
-        break :blk try ref.readHead(repo_kind, &repo.core);
+        var cursor = try repo.core.readOnlyCursor();
+        const core_cursor = switch (repo_kind) {
+            .git => .{ .core = &repo.core },
+            .xit => .{ .core = &repo.core, .root_cursor = &cursor },
+        };
+        break :blk try ref.readHead(repo_kind, core_cursor);
     };
 
     // make sure the most recent branch name points to the most recent commit
     {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
-        try expectEqual(commit3, try ref.resolve(repo_kind, &repo.core, "master"));
+        var cursor = try repo.core.readOnlyCursor();
+        const core_cursor = switch (repo_kind) {
+            .git => .{ .core = &repo.core },
+            .xit => .{ .core = &repo.core, .root_cursor = &cursor },
+        };
+        try expectEqual(commit3, try ref.resolve(repo_kind, core_cursor, "master"));
     }
 
     // log
@@ -1247,7 +1292,12 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     const commit4 = blk: {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
-        break :blk try ref.readHead(repo_kind, &repo.core);
+        var cursor = try repo.core.readOnlyCursor();
+        const core_cursor = switch (repo_kind) {
+            .git => .{ .core = &repo.core },
+            .xit => .{ .core = &repo.core, .root_cursor = &cursor },
+        };
+        break :blk try ref.readHead(repo_kind, core_cursor);
     };
 
     return commit4;

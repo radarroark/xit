@@ -480,8 +480,8 @@ pub fn migrate(
 
 pub fn switch_head(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, target: []const u8) !SwitchResult {
     // get the current commit and target oid
-    const current_oid = try ref.readHead(repo_kind, core_cursor.core);
-    const target_oid = try ref.resolve(repo_kind, core_cursor.core, target) orelse return error.InvalidTarget;
+    const current_oid = try ref.readHead(repo_kind, core_cursor);
+    const target_oid = try ref.resolve(repo_kind, core_cursor, target) orelse return error.InvalidTarget;
 
     // compare the commits
     var tree_diff = obj.TreeDiff(repo_kind).init(allocator);
@@ -544,7 +544,7 @@ pub fn switch_head(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_ki
 
 pub fn restore(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, path: []const u8) !void {
     // get the current commit
-    const current_oid = try ref.readHead(repo_kind, core_cursor.core);
+    const current_oid = try ref.readHead(repo_kind, core_cursor);
     var commit_object = try obj.Object(repo_kind).init(allocator, core_cursor.core, current_oid);
     defer commit_object.deinit();
 

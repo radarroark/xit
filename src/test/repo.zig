@@ -64,7 +64,12 @@ fn testSimple(comptime repo_kind: rp.RepoKind) !void {
     try oid_set.put(&commit_d, {});
 
     // assert that all commits have been found in the log
-    const head_oid = try ref.readHead(repo_kind, &repo.core);
+    var cursor = try repo.core.readOnlyCursor();
+    const core_cursor = switch (repo_kind) {
+        .git => .{ .core = &repo.core },
+        .xit => .{ .core = &repo.core, .root_cursor = &cursor },
+    };
+    const head_oid = try ref.readHead(repo_kind, core_cursor);
     var commit_iter = try repo.log(head_oid);
     defer commit_iter.deinit();
     while (try commit_iter.next()) |commit_object| {
@@ -179,7 +184,12 @@ fn testMerge(comptime repo_kind: rp.RepoKind) !void {
         defer merge_result.deinit();
         try std.testing.expect(.fast_forward == merge_result.data);
 
-        const head_oid = try ref.readHead(repo_kind, &repo.core);
+        var cursor = try repo.core.readOnlyCursor();
+        const core_cursor = switch (repo_kind) {
+            .git => .{ .core = &repo.core },
+            .xit => .{ .core = &repo.core, .root_cursor = &cursor },
+        };
+        const head_oid = try ref.readHead(repo_kind, core_cursor);
         try expectEqual(commit_k, head_oid);
 
         // make sure file from commit k exists
