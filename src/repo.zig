@@ -700,13 +700,20 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
                         pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
                             ctx_self.result.* = try mrg.merge(repo_kind, .{ .core = ctx_self.core, .root_cursor = cursor }, ctx_self.allocator, ctx_self.source);
+                            // no need to make a new transaction if nothing was done
+                            if (.nothing == ctx_self.result.data) {
+                                return error.CancelTransaction;
+                            }
                         }
                     };
-                    _ = try self.core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
+                    _ = self.core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
                         .{ .array_list_get = .append_copy },
                         .hash_map_create,
                         .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .source = source, .result = &result } },
-                    });
+                    }) catch |err| switch (err) {
+                        error.CancelTransaction => {},
+                        else => return err,
+                    };
                     return result;
                 },
             }
