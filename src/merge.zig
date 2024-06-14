@@ -21,7 +21,7 @@ pub const MergeConflict = struct {
 
 fn writeBlobWithConflict(
     comptime repo_kind: rp.RepoKind,
-    core: *rp.Repo(repo_kind).Core,
+    core_cursor: rp.Repo(repo_kind).CoreCursor,
     allocator: std.mem.Allocator,
     current_oid: [hash.SHA1_BYTES_LEN]u8,
     source_oid: [hash.SHA1_BYTES_LEN]u8,
@@ -30,40 +30,17 @@ fn writeBlobWithConflict(
 ) ![hash.SHA1_BYTES_LEN]u8 {
     // TODO: don't read it all into memory
     var current_buf = [_]u8{0} ** 1024;
-    const current_content = try chk.objectToBuffer(repo_kind, core, std.fmt.bytesToHex(current_oid, .lower), &current_buf);
+    const current_content = try chk.objectToBuffer(repo_kind, core_cursor.core, std.fmt.bytesToHex(current_oid, .lower), &current_buf);
     var source_buf = [_]u8{0} ** 1024;
-    const source_content = try chk.objectToBuffer(repo_kind, core, std.fmt.bytesToHex(source_oid, .lower), &source_buf);
+    const source_content = try chk.objectToBuffer(repo_kind, core_cursor.core, std.fmt.bytesToHex(source_oid, .lower), &source_buf);
+
     const content = try std.fmt.allocPrint(allocator, "<<<<<<< {s}\n{s}\n=======\n{s}\n>>>>>>> {s}", .{ current_name, current_content, source_content, source_name });
     defer allocator.free(content);
     var stream = std.io.fixedBufferStream(content);
 
-    switch (repo_kind) {
-        .git => {
-            var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-            try obj.writeBlob(repo_kind, .{ .core = core }, allocator, &stream, content.len, std.io.FixedBufferStream([]u8).Reader, &oid);
-            return oid;
-        },
-        .xit => {
-            var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-            const Ctx = struct {
-                core: *rp.Repo(repo_kind).Core,
-                allocator: std.mem.Allocator,
-                oid: *[hash.SHA1_BYTES_LEN]u8,
-                stream: *std.io.FixedBufferStream([]u8),
-                content: []const u8,
-
-                pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
-                    try obj.writeBlob(repo_kind, .{ .core = ctx_self.core, .root_cursor = cursor }, ctx_self.allocator, ctx_self.stream, ctx_self.content.len, std.io.FixedBufferStream([]u8).Reader, ctx_self.oid);
-                }
-            };
-            _ = try core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
-                .{ .array_list_get = .append_copy },
-                .hash_map_create,
-                .{ .ctx = Ctx{ .core = core, .allocator = allocator, .oid = &oid, .stream = &stream, .content = content } },
-            });
-            return oid;
-        },
-    }
+    var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+    try obj.writeBlob(repo_kind, core_cursor, allocator, &stream, content.len, std.io.FixedBufferStream([]u8).Reader, &oid);
+    return oid;
 }
 
 pub const SamePathConflictResult = struct {
@@ -73,7 +50,7 @@ pub const SamePathConflictResult = struct {
 
 fn samePathConflict(
     comptime repo_kind: rp.RepoKind,
-    core: *rp.Repo(repo_kind).Core,
+    core_cursor: rp.Repo(repo_kind).CoreCursor,
     allocator: std.mem.Allocator,
     current_name: []const u8,
     source_name: []const u8,
@@ -119,7 +96,7 @@ fn samePathConflict(
                     break :blk null;
                 };
 
-                const oid = oid_maybe orelse try writeBlobWithConflict(repo_kind, core, allocator, current_entry.oid, source_entry.oid, current_name, source_name);
+                const oid = oid_maybe orelse try writeBlobWithConflict(repo_kind, core_cursor, allocator, current_entry.oid, source_entry.oid, current_name, source_name);
                 const mode = mode_maybe orelse current_entry.mode;
 
                 return .{
@@ -253,17 +230,22 @@ pub const MergeResult = struct {
     }
 };
 
-pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, source_name: []const u8) !MergeResult {
+pub fn merge(
+    comptime repo_kind: rp.RepoKind,
+    core_cursor: rp.Repo(repo_kind).CoreCursor,
+    allocator: std.mem.Allocator,
+    source_name: []const u8,
+) !MergeResult {
     var arena = std.heap.ArenaAllocator.init(allocator);
     errdefer arena.deinit();
 
     // get the oids for the three-way merge
-    const current_oid = try ref.readHead(repo_kind, core);
-    const source_oid = try ref.resolve(repo_kind, core, source_name) orelse return error.InvalidTarget;
-    const common_oid = try obj.commonAncestor(repo_kind, allocator, core, &current_oid, &source_oid);
+    const current_oid = try ref.readHead(repo_kind, core_cursor.core);
+    const source_oid = try ref.resolve(repo_kind, core_cursor.core, source_name) orelse return error.InvalidTarget;
+    const common_oid = try obj.commonAncestor(repo_kind, allocator, core_cursor.core, &current_oid, &source_oid);
 
     // get the name of HEAD
-    const current_name = try ref.readHeadName(repo_kind, core, arena.allocator());
+    const current_name = try ref.readHeadName(repo_kind, core_cursor.core, arena.allocator());
 
     // init the diff that we will use for the migration and the conflicts maps.
     // they're using the arena because they'll be included in the result.
@@ -284,15 +266,15 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
 
     // diff the common ancestor with the current oid
     var current_diff = obj.TreeDiff(repo_kind).init(arena.allocator());
-    try current_diff.compare(core, common_oid, current_oid, null);
+    try current_diff.compare(core_cursor.core, common_oid, current_oid, null);
 
     // diff the common ancestor with the source oid
     var source_diff = obj.TreeDiff(repo_kind).init(arena.allocator());
-    try source_diff.compare(core, common_oid, source_oid, null);
+    try source_diff.compare(core_cursor.core, common_oid, source_oid, null);
 
     // look for same path conflicts while populating the clean diff
     for (source_diff.changes.keys(), source_diff.changes.values()) |path, source_change| {
-        const same_path_result = try samePathConflict(repo_kind, core, allocator, current_name, source_name, current_diff.changes.get(path), source_change);
+        const same_path_result = try samePathConflict(repo_kind, core_cursor, allocator, current_name, source_name, current_diff.changes.get(path), source_change);
         if (same_path_result.change) |change| {
             try clean_diff.changes.put(path, change);
         }
@@ -320,38 +302,38 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
     switch (repo_kind) {
         .git => {
             // create lock file
-            var lock = try io.LockFile.init(allocator, core.git_dir, "index");
+            var lock = try io.LockFile.init(allocator, core_cursor.core.git_dir, "index");
             defer lock.deinit();
 
             // read index
-            var index = try idx.Index(repo_kind).init(allocator, core);
+            var index = try idx.Index(repo_kind).init(allocator, core_cursor);
             defer index.deinit();
 
             // update the working tree
-            try chk.migrate(repo_kind, core, allocator, clean_diff, &index, null);
+            try chk.migrate(repo_kind, core_cursor, allocator, clean_diff, &index, null);
 
             for (conflicts.keys(), conflicts.values()) |path, conflict| {
                 // add conflict to index
                 try index.addConflictEntries(path, .{ conflict.common, conflict.current, conflict.source });
                 // write renamed file if necessary
                 if (conflict.renamed) |renamed| {
-                    try chk.objectToFile(repo_kind, core, allocator, renamed.path, renamed.tree_entry);
+                    try chk.objectToFile(repo_kind, core_cursor, allocator, renamed.path, renamed.tree_entry);
                 }
             }
 
             // update the index
-            try index.write(allocator, .{ .lock_file = lock.lock_file });
+            try index.write(allocator, .{ .core = core_cursor.core, .lock_file_maybe = lock.lock_file });
 
             // finish lock
             lock.success = true;
 
             // exit early if there were conflicts
             if (conflicts.count() > 0) {
-                const merge_head = try core.git_dir.createFile("MERGE_HEAD", .{ .exclusive = true, .lock = .exclusive });
+                const merge_head = try core_cursor.core.git_dir.createFile("MERGE_HEAD", .{ .exclusive = true, .lock = .exclusive });
                 defer merge_head.close();
                 try merge_head.writeAll(&source_oid);
 
-                const merge_msg = try core.git_dir.createFile("MERGE_MSG", .{ .exclusive = true, .lock = .exclusive });
+                const merge_msg = try core_cursor.core.git_dir.createFile("MERGE_MSG", .{ .exclusive = true, .lock = .exclusive });
                 defer merge_msg.close();
 
                 return .{
@@ -365,18 +347,18 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
         },
         .xit => {
             // read index
-            var index = try idx.Index(repo_kind).init(allocator, core);
+            var index = try idx.Index(repo_kind).init(allocator, core_cursor);
             defer index.deinit();
 
             // update the working tree
-            try chk.migrate(repo_kind, core, allocator, clean_diff, &index, null);
+            try chk.migrate(repo_kind, core_cursor, allocator, clean_diff, &index, null);
 
             for (conflicts.keys(), conflicts.values()) |path, conflict| {
                 // add conflict to index
                 try index.addConflictEntries(path, .{ conflict.common, conflict.current, conflict.source });
                 // write renamed file if necessary
                 if (conflict.renamed) |renamed| {
-                    try chk.objectToFile(repo_kind, core, allocator, renamed.path, renamed.tree_entry);
+                    try chk.objectToFile(repo_kind, core_cursor, allocator, renamed.path, renamed.tree_entry);
                 }
             }
 
@@ -386,7 +368,7 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
             }
 
             // update the index
-            try index.write(allocator, .{ .db = &core.db });
+            try index.write(allocator, core_cursor);
 
             // exit early if there were conflicts
             if (conflicts.count() > 0) {
@@ -403,8 +385,7 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
 
     if (std.mem.eql(u8, &current_oid, &common_oid)) {
         // the common ancestor is the current oid, so just update HEAD
-        // TODO: for .xit, should this be in the same transaction as the index.write above?
-        try ref.updateHead(repo_kind, core, allocator, &source_oid);
+        try ref.updateRecur(repo_kind, core_cursor, allocator, &[_][]const u8{"HEAD"}, &source_oid);
         return .{
             .arena = arena,
             .changes = clean_diff.changes,
@@ -419,18 +400,14 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
 
         // commit the change
         const parent_oids = &[_][hash.SHA1_HEX_LEN]u8{ current_oid, source_oid };
-        const commit_oid = try obj.writeCommit(repo_kind, core, allocator, parent_oids, commit_message);
+        const commit_oid = try obj.writeCommit(repo_kind, core_cursor, allocator, parent_oids, commit_message);
 
         return .{
             .arena = arena,
             .changes = clean_diff.changes,
             .auto_resolved_conflicts = auto_resolved_conflicts,
             .current_name = current_name,
-            .data = .{
-                .success = .{
-                    .oid = commit_oid,
-                },
-            },
+            .data = .{ .success = .{ .oid = commit_oid } },
         };
     }
 }

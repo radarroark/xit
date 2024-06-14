@@ -38,6 +38,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
         pub const CoreCursor = switch (repo_kind) {
             .git => struct {
                 core: *Core,
+                lock_file_maybe: ?std.fs.File = null,
             },
             .xit => struct {
                 core: *Core,
@@ -152,7 +153,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     };
 
                     // update HEAD
-                    try ref.writeHead(repo_kind, &self.core, allocator, "master", null);
+                    try ref.writeHead(repo_kind, .{ .core = &self.core }, allocator, "master", null);
 
                     return self;
                 },
@@ -189,7 +190,19 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     };
 
                     // update HEAD
-                    try ref.writeHead(repo_kind, &self.core, allocator, "master", null);
+                    const Ctx = struct {
+                        core: *Repo(repo_kind).Core,
+                        allocator: std.mem.Allocator,
+
+                        pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
+                            try ref.writeHead(repo_kind, .{ .core = ctx_self.core, .root_cursor = cursor }, ctx_self.allocator, "master", null);
+                        }
+                    };
+                    _ = try self.core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
+                        .{ .array_list_get = .append_copy },
+                        .hash_map_create,
+                        .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator } },
+                    });
 
                     return self;
                 },
@@ -360,7 +373,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     defer result.deinit();
                 },
                 cmd.CommandData.restore => {
-                    try chk.restore(repo_kind, &self.core, self.allocator, cmd_data.restore.path);
+                    try self.restore(cmd_data.restore.path);
                 },
                 cmd.CommandData.log => {
                     if (try ref.readHeadMaybe(repo_kind, &self.core)) |oid| {
@@ -439,7 +452,29 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
         }
 
         pub fn commit(self: *Repo(repo_kind), parent_oids_maybe: ?[]const [hash.SHA1_HEX_LEN]u8, message_maybe: ?[]const u8) ![hash.SHA1_HEX_LEN]u8 {
-            return try obj.writeCommit(repo_kind, &self.core, self.allocator, parent_oids_maybe, message_maybe);
+            switch (repo_kind) {
+                .git => return try obj.writeCommit(repo_kind, .{ .core = &self.core }, self.allocator, parent_oids_maybe, message_maybe),
+                .xit => {
+                    var result: [hash.SHA1_HEX_LEN]u8 = undefined;
+                    const Ctx = struct {
+                        core: *Repo(repo_kind).Core,
+                        allocator: std.mem.Allocator,
+                        parent_oids_maybe: ?[]const [hash.SHA1_HEX_LEN]u8,
+                        message_maybe: ?[]const u8,
+                        result: *[hash.SHA1_HEX_LEN]u8,
+
+                        pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
+                            ctx_self.result.* = try obj.writeCommit(repo_kind, .{ .core = ctx_self.core, .root_cursor = cursor }, ctx_self.allocator, ctx_self.parent_oids_maybe, ctx_self.message_maybe);
+                        }
+                    };
+                    _ = try self.core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
+                        .{ .array_list_get = .append_copy },
+                        .hash_map_create,
+                        .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .parent_oids_maybe = parent_oids_maybe, .message_maybe = message_maybe, .result = &result } },
+                    });
+                    return result;
+                },
+            }
         }
 
         pub fn add(self: *Repo(repo_kind), paths: []const []const u8) !void {
@@ -450,7 +485,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     defer lock.deinit();
 
                     // read index
-                    var index = try idx.Index(.git).init(self.allocator, &self.core);
+                    var index = try idx.Index(.git).init(self.allocator, .{ .core = &self.core });
                     defer index.deinit();
 
                     // read all the new entries
@@ -471,58 +506,167 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                                 else => return err,
                             }
                         }
-                        try index.addPath(&self.core, path);
+                        try index.addPath(.{ .core = &self.core }, path);
                     }
 
-                    try index.write(self.allocator, .{ .lock_file = lock.lock_file });
+                    try index.write(self.allocator, .{ .core = &self.core, .lock_file_maybe = lock.lock_file });
 
                     lock.success = true;
                 },
                 .xit => {
-                    // read index
-                    var index = try idx.Index(.xit).init(self.allocator, &self.core);
-                    defer index.deinit();
+                    const Ctx = struct {
+                        core: *Repo(repo_kind).Core,
+                        allocator: std.mem.Allocator,
+                        paths: []const []const u8,
 
-                    // read all the new entries
-                    for (paths) |path| {
-                        if (self.core.repo_dir.openFile(path, .{ .mode = .read_only })) |file| {
-                            file.close();
-                        } else |err| {
-                            switch (err) {
-                                error.IsDir => {}, // only happens on windows
-                                error.FileNotFound => {
-                                    if (index.entries.contains(path)) {
-                                        index.removePath(path);
-                                        continue;
-                                    } else {
-                                        return err;
+                        pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
+                            // read index
+                            var index = try idx.Index(.xit).init(ctx_self.allocator, .{ .core = ctx_self.core, .root_cursor = cursor });
+                            defer index.deinit();
+
+                            // read all the new entries
+                            for (ctx_self.paths) |path| {
+                                if (ctx_self.core.repo_dir.openFile(path, .{ .mode = .read_only })) |file| {
+                                    file.close();
+                                } else |err| {
+                                    switch (err) {
+                                        error.IsDir => {}, // only happens on windows
+                                        error.FileNotFound => {
+                                            if (index.entries.contains(path)) {
+                                                index.removePath(path);
+                                                continue;
+                                            } else {
+                                                return err;
+                                            }
+                                        },
+                                        else => return err,
                                     }
-                                },
-                                else => return err,
+                                }
+                                try index.addPath(.{ .core = ctx_self.core, .root_cursor = cursor }, path);
                             }
-                        }
-                        try index.addPath(&self.core, path);
-                    }
 
-                    try index.write(self.allocator, .{ .db = &self.core.db });
+                            // write index
+                            try index.write(ctx_self.allocator, .{ .core = ctx_self.core, .root_cursor = cursor });
+                        }
+                    };
+                    _ = try self.core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
+                        .{ .array_list_get = .append_copy },
+                        .hash_map_create,
+                        .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .paths = paths } },
+                    });
                 },
             }
         }
 
         pub fn status(self: *Repo(repo_kind)) !st.Status(repo_kind) {
-            return try st.Status(repo_kind).init(self.allocator, &self.core);
+            var cursor = switch (repo_kind) {
+                .git => {},
+                .xit => (try self.core.db.rootCursor().readCursor(void, &[_]xitdb.PathPart(void){
+                    .{ .array_list_get = .{ .index = .{ .index = 0, .reverse = true } } },
+                })) orelse return error.DatabaseEmpty,
+            };
+            const core_cursor = switch (repo_kind) {
+                .git => .{ .core = &self.core },
+                .xit => .{ .core = &self.core, .root_cursor = &cursor },
+            };
+            return try st.Status(repo_kind).init(self.allocator, core_cursor);
         }
 
         pub fn diff(self: *Repo(repo_kind), diff_kind: df.DiffKind, conflict_diff_kind_maybe: ?df.ConflictDiffKind) !df.DiffIterator(repo_kind) {
-            return try df.DiffIterator(repo_kind).init(self.allocator, &self.core, diff_kind, conflict_diff_kind_maybe);
+            var stat = try self.status();
+            errdefer stat.deinit();
+            return try df.DiffIterator(repo_kind).init(self.allocator, &self.core, diff_kind, conflict_diff_kind_maybe, stat);
         }
 
         pub fn create_branch(self: *Repo(repo_kind), name: []const u8) !void {
-            try bch.create(repo_kind, &self.core, self.allocator, name);
+            switch (repo_kind) {
+                .git => try bch.create(repo_kind, .{ .core = &self.core }, self.allocator, name),
+                .xit => {
+                    const Ctx = struct {
+                        core: *Repo(repo_kind).Core,
+                        allocator: std.mem.Allocator,
+                        name: []const u8,
+
+                        pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
+                            try bch.create(repo_kind, .{ .core = ctx_self.core, .root_cursor = cursor }, ctx_self.allocator, ctx_self.name);
+                        }
+                    };
+                    _ = try self.core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
+                        .{ .array_list_get = .append_copy },
+                        .hash_map_create,
+                        .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .name = name } },
+                    });
+                },
+            }
+        }
+
+        pub fn delete_branch(self: *Repo(repo_kind), name: []const u8) !void {
+            switch (repo_kind) {
+                .git => try bch.delete(repo_kind, .{ .core = &self.core }, self.allocator, name),
+                .xit => {
+                    const Ctx = struct {
+                        core: *Repo(repo_kind).Core,
+                        allocator: std.mem.Allocator,
+                        name: []const u8,
+
+                        pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
+                            try bch.delete(repo_kind, .{ .core = ctx_self.core, .root_cursor = cursor }, ctx_self.allocator, ctx_self.name);
+                        }
+                    };
+                    _ = try self.core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
+                        .{ .array_list_get = .append_copy },
+                        .hash_map_create,
+                        .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .name = name } },
+                    });
+                },
+            }
         }
 
         pub fn switch_head(self: *Repo(repo_kind), target: []const u8) !chk.SwitchResult {
-            return try chk.switch_head(repo_kind, &self.core, self.allocator, target);
+            switch (repo_kind) {
+                .git => return try chk.switch_head(repo_kind, .{ .core = &self.core }, self.allocator, target),
+                .xit => {
+                    var result: chk.SwitchResult = undefined;
+                    const Ctx = struct {
+                        core: *Repo(repo_kind).Core,
+                        allocator: std.mem.Allocator,
+                        target: []const u8,
+                        result: *chk.SwitchResult,
+
+                        pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
+                            ctx_self.result.* = try chk.switch_head(repo_kind, .{ .core = ctx_self.core, .root_cursor = cursor }, ctx_self.allocator, ctx_self.target);
+                        }
+                    };
+                    _ = try self.core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
+                        .{ .array_list_get = .append_copy },
+                        .hash_map_create,
+                        .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .target = target, .result = &result } },
+                    });
+                    return result;
+                },
+            }
+        }
+
+        pub fn restore(self: *Repo(repo_kind), path: []const u8) !void {
+            switch (repo_kind) {
+                .git => try chk.restore(repo_kind, .{ .core = &self.core }, self.allocator, path),
+                .xit => {
+                    const Ctx = struct {
+                        core: *Repo(repo_kind).Core,
+                        allocator: std.mem.Allocator,
+                        path: []const u8,
+
+                        pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
+                            try chk.restore(repo_kind, .{ .core = ctx_self.core, .root_cursor = cursor }, ctx_self.allocator, ctx_self.path);
+                        }
+                    };
+                    _ = try self.core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
+                        .{ .array_list_get = .append_copy },
+                        .hash_map_create,
+                        .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .path = path } },
+                    });
+                },
+            }
         }
 
         pub fn log(self: *Repo(repo_kind), oid: [hash.SHA1_HEX_LEN]u8) !obj.ObjectIterator(repo_kind) {
@@ -530,7 +674,28 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
         }
 
         pub fn merge(self: *Repo(repo_kind), source: []const u8) !mrg.MergeResult {
-            return try mrg.merge(repo_kind, &self.core, self.allocator, source);
+            switch (repo_kind) {
+                .git => return try mrg.merge(repo_kind, .{ .core = &self.core }, self.allocator, source),
+                .xit => {
+                    var result: mrg.MergeResult = undefined;
+                    const Ctx = struct {
+                        core: *Repo(repo_kind).Core,
+                        allocator: std.mem.Allocator,
+                        source: []const u8,
+                        result: *mrg.MergeResult,
+
+                        pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
+                            ctx_self.result.* = try mrg.merge(repo_kind, .{ .core = ctx_self.core, .root_cursor = cursor }, ctx_self.allocator, ctx_self.source);
+                        }
+                    };
+                    _ = try self.core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
+                        .{ .array_list_get = .append_copy },
+                        .hash_map_create,
+                        .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .source = source, .result = &result } },
+                    });
+                    return result;
+                },
+            }
         }
     };
 }

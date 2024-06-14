@@ -241,14 +241,14 @@ pub fn readHeadName(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).C
 }
 
 /// makes HEAD point to a new ref
-pub fn writeHead(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, target: []const u8, oid_hex_maybe: ?[hash.SHA1_HEX_LEN]u8) !void {
+pub fn writeHead(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, target: []const u8, oid_hex_maybe: ?[hash.SHA1_HEX_LEN]u8) !void {
     switch (repo_kind) {
         .git => {
-            var lock = try io.LockFile.init(allocator, core.git_dir, "HEAD");
+            var lock = try io.LockFile.init(allocator, core_cursor.core.git_dir, "HEAD");
             defer lock.deinit();
 
             // if the target is a ref, just update HEAD to point to it
-            var refs_dir = try core.git_dir.openDir("refs", .{});
+            var refs_dir = try core_cursor.core.git_dir.openDir("refs", .{});
             defer refs_dir.close();
             var heads_dir = try refs_dir.openDir("heads", .{});
             defer heads_dir.close();
@@ -279,97 +279,54 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core
             lock.success = true;
         },
         .xit => {
-            const Ctx = struct {
-                allocator: std.mem.Allocator,
-                target: []const u8,
-                oid_hex_maybe: ?[hash.SHA1_HEX_LEN]u8,
+            var path_parts = std.ArrayList(xitdb.PathPart(void)).init(allocator);
+            defer path_parts.deinit();
+            try path_parts.appendSlice(&[_]xitdb.PathPart(void){
+                .{ .hash_map_get = hash.hashBuffer("HEAD") },
+            });
 
-                pub fn run(self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
-                    var path_parts = std.ArrayList(xitdb.PathPart(void)).init(self.allocator);
-                    defer path_parts.deinit();
-                    try path_parts.appendSlice(&[_]xitdb.PathPart(void){
-                        .{ .hash_map_get = hash.hashBuffer("HEAD") },
+            if (try core_cursor.root_cursor.readBytesAlloc(allocator, MAX_READ_BYTES, void, &[_]xitdb.PathPart(void){
+                .{ .hash_map_get = hash.hashBuffer("refs") },
+                .{ .hash_map_get = hash.hashBuffer("heads") },
+                .{ .hash_map_get = hash.hashBuffer(target) },
+            })) |target_bytes| {
+                allocator.free(target_bytes);
+
+                // point HEAD at the ref
+                var write_buffer = [_]u8{0} ** MAX_READ_BYTES;
+                const content = try std.fmt.bufPrint(&write_buffer, "ref: refs/heads/{s}", .{target});
+                const content_hash = hash.hashBuffer(content);
+                const content_ptr = try core_cursor.root_cursor.writeBytes(content, .once, void, &[_]xitdb.PathPart(void){
+                    .{ .hash_map_get = hash.hashBuffer("ref-values") },
+                    .hash_map_create,
+                    .{ .hash_map_get = content_hash },
+                });
+                try path_parts.append(.{ .value = .{ .bytes_ptr = content_ptr } });
+                _ = try core_cursor.root_cursor.execute(void, path_parts.items);
+            } else {
+                if (oid_hex_maybe) |oid_hex| {
+                    // the HEAD is detached, so just update it with the oid
+                    const content_ptr = try core_cursor.root_cursor.writeBytes(&oid_hex, .once, void, &[_]xitdb.PathPart(void){
+                        .{ .hash_map_get = hash.hashBuffer("ref-values") },
+                        .hash_map_create,
+                        .{ .hash_map_get = try hash.hexToHash(&oid_hex) },
                     });
-
-                    if (try cursor.readBytesAlloc(self.allocator, MAX_READ_BYTES, void, &[_]xitdb.PathPart(void){
-                        .{ .hash_map_get = hash.hashBuffer("refs") },
-                        .{ .hash_map_get = hash.hashBuffer("heads") },
-                        .{ .hash_map_get = hash.hashBuffer(self.target) },
-                    })) |target_bytes| {
-                        self.allocator.free(target_bytes);
-
-                        // point HEAD at the ref
-                        var write_buffer = [_]u8{0} ** MAX_READ_BYTES;
-                        const content = try std.fmt.bufPrint(&write_buffer, "ref: refs/heads/{s}", .{self.target});
-                        const content_hash = hash.hashBuffer(content);
-                        const content_ptr = try cursor.writeBytes(content, .once, void, &[_]xitdb.PathPart(void){
-                            .{ .hash_map_get = hash.hashBuffer("ref-values") },
-                            .hash_map_create,
-                            .{ .hash_map_get = content_hash },
-                        });
-                        try path_parts.append(.{ .value = .{ .bytes_ptr = content_ptr } });
-                        _ = try cursor.execute(void, path_parts.items);
-                    } else {
-                        if (self.oid_hex_maybe) |oid_hex| {
-                            // the HEAD is detached, so just update it with the oid
-                            const content_ptr = try cursor.writeBytes(&oid_hex, .once, void, &[_]xitdb.PathPart(void){
-                                .{ .hash_map_get = hash.hashBuffer("ref-values") },
-                                .hash_map_create,
-                                .{ .hash_map_get = try hash.hexToHash(&oid_hex) },
-                            });
-                            try path_parts.append(.{ .value = .{ .bytes_ptr = content_ptr } });
-                            _ = try cursor.execute(void, path_parts.items);
-                        } else {
-                            // point HEAD at the ref, even though the ref doesn't exist
-                            var write_buffer = [_]u8{0} ** MAX_READ_BYTES;
-                            const content = try std.fmt.bufPrint(&write_buffer, "ref: refs/heads/{s}", .{self.target});
-                            const content_hash = hash.hashBuffer(content);
-                            const content_ptr = try cursor.writeBytes(content, .once, void, &[_]xitdb.PathPart(void){
-                                .{ .hash_map_get = hash.hashBuffer("ref-values") },
-                                .hash_map_create,
-                                .{ .hash_map_get = content_hash },
-                            });
-                            try path_parts.append(.{ .value = .{ .bytes_ptr = content_ptr } });
-                            _ = try cursor.execute(void, path_parts.items);
-                        }
-                    }
+                    try path_parts.append(.{ .value = .{ .bytes_ptr = content_ptr } });
+                    _ = try core_cursor.root_cursor.execute(void, path_parts.items);
+                } else {
+                    // point HEAD at the ref, even though the ref doesn't exist
+                    var write_buffer = [_]u8{0} ** MAX_READ_BYTES;
+                    const content = try std.fmt.bufPrint(&write_buffer, "ref: refs/heads/{s}", .{target});
+                    const content_hash = hash.hashBuffer(content);
+                    const content_ptr = try core_cursor.root_cursor.writeBytes(content, .once, void, &[_]xitdb.PathPart(void){
+                        .{ .hash_map_get = hash.hashBuffer("ref-values") },
+                        .hash_map_create,
+                        .{ .hash_map_get = content_hash },
+                    });
+                    try path_parts.append(.{ .value = .{ .bytes_ptr = content_ptr } });
+                    _ = try core_cursor.root_cursor.execute(void, path_parts.items);
                 }
-            };
-            _ = try core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
-                .{ .array_list_get = .append_copy },
-                .hash_map_create,
-                .{ .ctx = Ctx{ .allocator = allocator, .target = target, .oid_hex_maybe = oid_hex_maybe } },
-            });
-        },
-    }
-}
-
-/// updates HEAD to point to the oid, following ref if there is one
-pub fn updateHead(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, oid_hex: *const [hash.SHA1_HEX_LEN]u8) !void {
-    switch (repo_kind) {
-        .git => {
-            try updateRecur(repo_kind, .{ .core = core }, allocator, &[_][]const u8{"HEAD"}, oid_hex);
-        },
-        .xit => {
-            const Ctx = struct {
-                core: *rp.Repo(repo_kind).Core,
-                allocator: std.mem.Allocator,
-                oid: *const [hash.SHA1_HEX_LEN]u8,
-
-                pub fn run(ctx_self: *@This(), cursor: *xitdb.Database(.file).Cursor) !void {
-                    try updateRecur(repo_kind, .{ .core = ctx_self.core, .root_cursor = cursor }, ctx_self.allocator, &[_][]const u8{"HEAD"}, ctx_self.oid);
-                }
-            };
-            var ctx = Ctx{
-                .core = core,
-                .allocator = allocator,
-                .oid = oid_hex,
-            };
-            _ = try core.db.rootCursor().execute(*Ctx, &[_]xitdb.PathPart(*Ctx){
-                .{ .array_list_get = .append_copy },
-                .hash_map_create,
-                .{ .ctx = &ctx },
-            });
+            }
         },
     }
 }

@@ -5,7 +5,7 @@ const ref = @import("./ref.zig");
 const io = @import("./io.zig");
 const rp = @import("./repo.zig");
 
-pub fn create(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, name: []const u8) !void {
+pub fn create(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, name: []const u8) !void {
     if (name.len == 0 or
         name[0] == '.' or
         name[0] == '/' or
@@ -20,7 +20,7 @@ pub fn create(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, a
 
     switch (repo_kind) {
         .git => {
-            var refs_dir = try core.git_dir.openDir("refs", .{});
+            var refs_dir = try core_cursor.core.git_dir.openDir("refs", .{});
             defer refs_dir.close();
             var heads_dir = try refs_dir.makeOpenPath("heads", .{});
             defer heads_dir.close();
@@ -44,7 +44,7 @@ pub fn create(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, a
             defer lock.deinit();
 
             // get HEAD contents
-            const head_file_buffer = try ref.readHead(repo_kind, core);
+            const head_file_buffer = try ref.readHead(repo_kind, core_cursor.core);
 
             // write to lock file
             try lock.lock_file.writeAll(&head_file_buffer);
@@ -54,48 +54,36 @@ pub fn create(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, a
             lock.success = true;
         },
         .xit => {
-            const Ctx = struct {
-                core: *rp.Repo(repo_kind).Core,
-                name: []const u8,
-
-                pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
-                    // get HEAD contents
-                    // TODO: make `readHead` use cursor for tx safety
-                    const head_file_buffer = try ref.readHead(repo_kind, ctx_self.core);
-                    const name_hash = hash.hashBuffer(ctx_self.name);
-                    _ = try cursor.writeBytes(ctx_self.name, .once, void, &[_]xitdb.PathPart(void){
-                        .{ .hash_map_get = hash.hashBuffer("names") },
-                        .hash_map_create,
-                        .{ .hash_map_get = name_hash },
-                    });
-                    const buffer_ptr = try cursor.writeBytes(&head_file_buffer, .once, void, &[_]xitdb.PathPart(void){
-                        .{ .hash_map_get = hash.hashBuffer("ref-values") },
-                        .hash_map_create,
-                        .{ .hash_map_get = hash.hashBuffer(&head_file_buffer) },
-                    });
-                    _ = try cursor.execute(void, &[_]xitdb.PathPart(void){
-                        .{ .hash_map_get = hash.hashBuffer("refs") },
-                        .hash_map_create,
-                        .{ .hash_map_get = hash.hashBuffer("heads") },
-                        .hash_map_create,
-                        .{ .hash_map_get = name_hash },
-                        .{ .value = .{ .bytes_ptr = buffer_ptr } },
-                    });
-                }
-            };
-            _ = try core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
-                .{ .array_list_get = .append_copy },
+            // get HEAD contents
+            // TODO: make `readHead` use cursor for tx safety
+            const head_file_buffer = try ref.readHead(repo_kind, core_cursor.core);
+            const name_hash = hash.hashBuffer(name);
+            _ = try core_cursor.root_cursor.writeBytes(name, .once, void, &[_]xitdb.PathPart(void){
+                .{ .hash_map_get = hash.hashBuffer("names") },
                 .hash_map_create,
-                .{ .ctx = Ctx{ .core = core, .name = name } },
+                .{ .hash_map_get = name_hash },
+            });
+            const buffer_ptr = try core_cursor.root_cursor.writeBytes(&head_file_buffer, .once, void, &[_]xitdb.PathPart(void){
+                .{ .hash_map_get = hash.hashBuffer("ref-values") },
+                .hash_map_create,
+                .{ .hash_map_get = hash.hashBuffer(&head_file_buffer) },
+            });
+            _ = try core_cursor.root_cursor.execute(void, &[_]xitdb.PathPart(void){
+                .{ .hash_map_get = hash.hashBuffer("refs") },
+                .hash_map_create,
+                .{ .hash_map_get = hash.hashBuffer("heads") },
+                .hash_map_create,
+                .{ .hash_map_get = name_hash },
+                .{ .value = .{ .bytes_ptr = buffer_ptr } },
             });
         },
     }
 }
 
-pub fn delete(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, allocator: std.mem.Allocator, name: []const u8) !void {
+pub fn delete(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, name: []const u8) !void {
     switch (repo_kind) {
         .git => {
-            var refs_dir = try core.git_dir.openDir("refs", .{});
+            var refs_dir = try core_cursor.core.git_dir.openDir("refs", .{});
             defer refs_dir.close();
             var heads_dir = try refs_dir.makeOpenPath("heads", .{});
             defer heads_dir.close();
@@ -107,11 +95,11 @@ pub fn delete(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, a
             const ref_path = try heads_dir.realpath(name, &ref_buffer);
 
             // create lock file for HEAD
-            var head_lock = try io.LockFile.init(allocator, core.git_dir, "HEAD");
+            var head_lock = try io.LockFile.init(allocator, core_cursor.core.git_dir, "HEAD");
             defer head_lock.deinit();
 
             // don't allow current branch to be deleted
-            var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, core, allocator, "HEAD");
+            var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, core_cursor.core, allocator, "HEAD");
             defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
             if (current_branch_maybe) |current_branch| {
                 if (std.mem.eql(u8, current_branch.name, name)) {
@@ -141,34 +129,21 @@ pub fn delete(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, a
             }
         },
         .xit => {
-            const Ctx = struct {
-                core: *rp.Repo(repo_kind).Core,
-                name: []const u8,
-                allocator: std.mem.Allocator,
-
-                pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
-                    // don't allow current branch to be deleted
-                    // TODO: make `initFromLink` use cursor for tx safety
-                    var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, ctx_self.core, ctx_self.allocator, "HEAD");
-                    defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
-                    if (current_branch_maybe) |current_branch| {
-                        if (std.mem.eql(u8, current_branch.name, ctx_self.name)) {
-                            return error.CannotDeleteCurrentBranch;
-                        }
-                    }
-                    _ = try cursor.execute(void, &[_]xitdb.PathPart(void){
-                        .{ .hash_map_get = hash.hashBuffer("refs") },
-                        .hash_map_create,
-                        .{ .hash_map_get = hash.hashBuffer("heads") },
-                        .hash_map_create,
-                        .{ .hash_map_remove = hash.hashBuffer(ctx_self.name) },
-                    });
+            // don't allow current branch to be deleted
+            // TODO: make `initFromLink` use cursor for tx safety
+            var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, core_cursor.core, allocator, "HEAD");
+            defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
+            if (current_branch_maybe) |current_branch| {
+                if (std.mem.eql(u8, current_branch.name, name)) {
+                    return error.CannotDeleteCurrentBranch;
                 }
-            };
-            _ = try core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
-                .{ .array_list_get = .append_copy },
+            }
+            _ = try core_cursor.root_cursor.execute(void, &[_]xitdb.PathPart(void){
+                .{ .hash_map_get = hash.hashBuffer("refs") },
                 .hash_map_create,
-                .{ .ctx = Ctx{ .core = core, .name = name, .allocator = allocator } },
+                .{ .hash_map_get = hash.hashBuffer("heads") },
+                .hash_map_create,
+                .{ .hash_map_remove = hash.hashBuffer(name) },
             });
         },
     }

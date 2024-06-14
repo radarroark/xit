@@ -365,35 +365,35 @@ fn createCommitContents(allocator: std.mem.Allocator, tree_sha1_hex: [hash.SHA1_
 
 pub fn writeCommit(
     comptime repo_kind: rp.RepoKind,
-    core: *rp.Repo(repo_kind).Core,
+    core_cursor: rp.Repo(repo_kind).CoreCursor,
     allocator: std.mem.Allocator,
     parent_oids_maybe: ?[]const [hash.SHA1_HEX_LEN]u8,
     message_maybe: ?[]const u8,
 ) ![hash.SHA1_HEX_LEN]u8 {
     var commit_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
     const parent_oids = if (parent_oids_maybe) |oids| oids else blk: {
-        const head_oid_maybe = try ref.readHeadMaybe(repo_kind, core);
+        const head_oid_maybe = try ref.readHeadMaybe(repo_kind, core_cursor.core);
         break :blk if (head_oid_maybe) |head_oid| &[_][hash.SHA1_HEX_LEN]u8{head_oid} else &[_][hash.SHA1_HEX_LEN]u8{};
     };
 
     // read index
-    var index = try idx.Index(repo_kind).init(allocator, core);
+    var index = try idx.Index(repo_kind).init(allocator, core_cursor);
     defer index.deinit();
 
     switch (repo_kind) {
         .git => {
             // open the objects dir
-            var objects_dir = try core.git_dir.openDir("objects", .{});
+            var objects_dir = try core_cursor.core.git_dir.openDir("objects", .{});
             defer objects_dir.close();
 
             // create tree and add index entries
             var tree = Tree.init(allocator);
             defer tree.deinit();
-            try addIndexEntries(repo_kind, .{ .core = core }, allocator, &tree, index, "", index.root_children.keys());
+            try addIndexEntries(repo_kind, core_cursor, allocator, &tree, index, "", index.root_children.keys());
 
             // write and hash tree
             var tree_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-            try writeTree(repo_kind, .{ .core = core }, allocator, &tree, &tree_sha1_bytes_buffer);
+            try writeTree(repo_kind, core_cursor, allocator, &tree, &tree_sha1_bytes_buffer);
             const tree_sha1_hex = std.fmt.bytesToHex(tree_sha1_bytes_buffer, .lower);
 
             // create commit contents
@@ -440,72 +440,48 @@ pub fn writeCommit(
             try std.fs.rename(commit_hash_prefix_dir, commit_comp_tmp_file_name, commit_hash_prefix_dir, commit_hash_suffix);
 
             // write commit id to HEAD
-            try ref.updateRecur(repo_kind, .{ .core = core }, allocator, &[_][]const u8{"HEAD"}, &commit_sha1_hex);
+            try ref.updateRecur(repo_kind, core_cursor, allocator, &[_][]const u8{"HEAD"}, &commit_sha1_hex);
         },
         .xit => {
-            const Ctx = struct {
-                core: *rp.Repo(repo_kind).Core,
-                index: idx.Index(repo_kind),
-                parent_oids: []const [hash.SHA1_HEX_LEN]u8,
-                message_maybe: ?[]const u8,
-                commit_sha1_bytes: *[hash.SHA1_BYTES_LEN]u8,
-                allocator: std.mem.Allocator,
+            // create tree and add index entries
+            var tree = Tree.init(allocator);
+            defer tree.deinit();
+            try addIndexEntries(repo_kind, core_cursor, allocator, &tree, index, "", index.root_children.keys());
 
-                pub fn run(ctx_self: *@This(), cursor: *xitdb.Database(.file).Cursor) !void {
-                    // create tree and add index entries
-                    var tree = Tree.init(ctx_self.allocator);
-                    defer tree.deinit();
-                    try addIndexEntries(repo_kind, .{ .core = ctx_self.core, .root_cursor = cursor }, ctx_self.allocator, &tree, ctx_self.index, "", ctx_self.index.root_children.keys());
+            // write and hash tree
+            var tree_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+            try writeTree(repo_kind, core_cursor, allocator, &tree, &tree_sha1_bytes_buffer);
+            const tree_sha1_hex = std.fmt.bytesToHex(tree_sha1_bytes_buffer, .lower);
 
-                    // write and hash tree
-                    var tree_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-                    try writeTree(repo_kind, .{ .core = ctx_self.core, .root_cursor = cursor }, ctx_self.allocator, &tree, &tree_sha1_bytes_buffer);
-                    const tree_sha1_hex = std.fmt.bytesToHex(tree_sha1_bytes_buffer, .lower);
+            // create commit contents
+            const commit_contents = try createCommitContents(allocator, tree_sha1_hex, parent_oids, message_maybe);
+            defer allocator.free(commit_contents);
 
-                    // create commit contents
-                    const commit_contents = try createCommitContents(ctx_self.allocator, tree_sha1_hex, ctx_self.parent_oids, ctx_self.message_maybe);
-                    defer ctx_self.allocator.free(commit_contents);
+            // create commit
+            const commit = try std.fmt.allocPrint(allocator, "commit {}\x00{s}", .{ commit_contents.len, commit_contents });
+            defer allocator.free(commit);
 
-                    // create commit
-                    const commit = try std.fmt.allocPrint(ctx_self.allocator, "commit {}\x00{s}", .{ commit_contents.len, commit_contents });
-                    defer ctx_self.allocator.free(commit);
+            // calc the sha1 of its contents
+            try hash.sha1Buffer(commit, &commit_sha1_bytes_buffer);
+            const commit_sha1_hex = std.fmt.bytesToHex(commit_sha1_bytes_buffer, .lower);
 
-                    // calc the sha1 of its contents
-                    try hash.sha1Buffer(commit, ctx_self.commit_sha1_bytes);
-                    const commit_sha1_hex = std.fmt.bytesToHex(ctx_self.commit_sha1_bytes, .lower);
-
-                    // write commit content
-                    const content_ptr = try cursor.writeBytes(commit, .once, void, &[_]xitdb.PathPart(void){
-                        .{ .hash_map_get = hash.hashBuffer("object-values") },
-                        .hash_map_create,
-                        .{ .hash_map_get = hash.bytesToHash(ctx_self.commit_sha1_bytes) },
-                    });
-
-                    // write commit
-                    _ = try cursor.execute(void, &[_]xitdb.PathPart(void){
-                        .{ .hash_map_get = hash.hashBuffer("objects") },
-                        .hash_map_create,
-                        .{ .hash_map_get = hash.bytesToHash(ctx_self.commit_sha1_bytes) },
-                        .{ .value = .{ .bytes_ptr = content_ptr } },
-                    });
-
-                    // write commit id to HEAD
-                    try ref.updateRecur(repo_kind, .{ .core = ctx_self.core, .root_cursor = cursor }, ctx_self.allocator, &[_][]const u8{"HEAD"}, &commit_sha1_hex);
-                }
-            };
-            var ctx = Ctx{
-                .core = core,
-                .index = index,
-                .parent_oids = parent_oids,
-                .message_maybe = message_maybe,
-                .commit_sha1_bytes = &commit_sha1_bytes_buffer,
-                .allocator = allocator,
-            };
-            _ = try core.db.rootCursor().execute(*Ctx, &[_]xitdb.PathPart(*Ctx){
-                .{ .array_list_get = .append_copy },
+            // write commit content
+            const content_ptr = try core_cursor.root_cursor.writeBytes(commit, .once, void, &[_]xitdb.PathPart(void){
+                .{ .hash_map_get = hash.hashBuffer("object-values") },
                 .hash_map_create,
-                .{ .ctx = &ctx },
+                .{ .hash_map_get = hash.bytesToHash(&commit_sha1_bytes_buffer) },
             });
+
+            // write commit
+            _ = try core_cursor.root_cursor.execute(void, &[_]xitdb.PathPart(void){
+                .{ .hash_map_get = hash.hashBuffer("objects") },
+                .hash_map_create,
+                .{ .hash_map_get = hash.bytesToHash(&commit_sha1_bytes_buffer) },
+                .{ .value = .{ .bytes_ptr = content_ptr } },
+            });
+
+            // write commit id to HEAD
+            try ref.updateRecur(repo_kind, core_cursor, allocator, &[_][]const u8{"HEAD"}, &commit_sha1_hex);
         },
     }
 

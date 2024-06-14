@@ -38,7 +38,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind) type {
             meta: std.fs.File.Metadata,
         };
 
-        pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core) !Status(repo_kind) {
+        pub fn init(allocator: std.mem.Allocator, core_cursor: rp.Repo(repo_kind).CoreCursor) !Status(repo_kind) {
             var untracked = std.ArrayList(Entry).init(allocator);
             errdefer untracked.deinit();
 
@@ -63,15 +63,15 @@ pub fn Status(comptime repo_kind: rp.RepoKind) type {
             var arena = std.heap.ArenaAllocator.init(allocator);
             errdefer arena.deinit();
 
-            var index = try idx.Index(repo_kind).init(allocator, core);
+            var index = try idx.Index(repo_kind).init(allocator, core_cursor);
             errdefer index.deinit();
 
             var index_bools = try allocator.alloc(bool, index.entries.count());
             defer allocator.free(index_bools);
 
-            _ = try addEntries(repo_kind, arena.allocator(), &untracked, &workspace_modified, index, &index_bools, core.repo_dir, ".");
+            _ = try addEntries(repo_kind, arena.allocator(), &untracked, &workspace_modified, index, &index_bools, core_cursor.core.repo_dir, ".");
 
-            var head_tree = try HeadTree(repo_kind).init(allocator, core);
+            var head_tree = try HeadTree(repo_kind).init(allocator, core_cursor.core);
             errdefer head_tree.deinit();
 
             // for each entry in the index

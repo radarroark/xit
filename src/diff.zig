@@ -514,9 +514,8 @@ pub fn DiffIterator(comptime repo_kind: rp.RepoKind) type {
             core: *rp.Repo(repo_kind).Core,
             diff_kind: DiffKind,
             conflict_diff_kind_maybe: ?ConflictDiffKind,
+            status: st.Status(repo_kind),
         ) !DiffIterator(repo_kind) {
-            var status = try st.Status(repo_kind).init(allocator, core);
-            errdefer status.deinit();
             return .{
                 .allocator = allocator,
                 .core = core,

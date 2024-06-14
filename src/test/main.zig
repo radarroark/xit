@@ -10,7 +10,6 @@ const hash = @import("../hash.zig");
 const idx = @import("../index.zig");
 const obj = @import("../object.zig");
 const ref = @import("../ref.zig");
-const bch = @import("../branch.zig");
 const rp = @import("../repo.zig");
 const df = @import("../diff.zig");
 
@@ -653,7 +652,17 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         {
             var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
-            var index = try idx.Index(repo_kind).init(allocator, &repo.core);
+            var cursor = switch (repo_kind) {
+                .git => {},
+                .xit => (try repo.core.db.rootCursor().readCursor(void, &[_]xitdb.PathPart(void){
+                    .{ .array_list_get = .{ .index = .{ .index = 0, .reverse = true } } },
+                })) orelse return error.DatabaseEmpty,
+            };
+            const core_cursor = switch (repo_kind) {
+                .git => .{ .core = &repo.core },
+                .xit => .{ .core = &repo.core, .root_cursor = &cursor },
+            };
+            var index = try idx.Index(repo_kind).init(allocator, core_cursor);
             defer index.deinit();
             try expectEqual(6, index.entries.count());
             try std.testing.expect(index.entries.contains("README"));
@@ -716,7 +725,17 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         {
             var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
-            var index = try idx.Index(repo_kind).init(allocator, &repo.core);
+            var cursor = switch (repo_kind) {
+                .git => {},
+                .xit => (try repo.core.db.rootCursor().readCursor(void, &[_]xitdb.PathPart(void){
+                    .{ .array_list_get = .{ .index = .{ .index = 0, .reverse = true } } },
+                })) orelse return error.DatabaseEmpty,
+            };
+            const core_cursor = switch (repo_kind) {
+                .git => .{ .core = &repo.core },
+                .xit => .{ .core = &repo.core, .root_cursor = &cursor },
+            };
+            var index = try idx.Index(repo_kind).init(allocator, core_cursor);
             defer index.deinit();
             try expectEqual(5, index.entries.count());
             try std.testing.expect(index.entries.contains("README"));
@@ -1044,7 +1063,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
-        try expectEqual(error.CannotDeleteCurrentBranch, bch.delete(repo_kind, &repo.core, allocator, "stuff"));
+        try expectEqual(error.CannotDeleteCurrentBranch, repo.delete_branch("stuff"));
     }
 
     // make a few commits on the stuff branch
@@ -1127,7 +1146,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
-        try bch.delete(repo_kind, &repo.core, allocator, "a/b/c");
+        try repo.delete_branch("a/b/c");
     }
 
     // make sure the subdirs are deleted
