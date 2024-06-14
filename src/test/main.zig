@@ -10,7 +10,6 @@ const hash = @import("../hash.zig");
 const idx = @import("../index.zig");
 const obj = @import("../object.zig");
 const ref = @import("../ref.zig");
-const chk = @import("../checkout.zig");
 const bch = @import("../branch.zig");
 const rp = @import("../repo.zig");
 const df = @import("../diff.zig");
@@ -504,7 +503,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             {
                 var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
-                var result = try chk.switch_head(repo_kind, &repo.core, allocator, &commit1);
+                var result = try repo.switch_head(&commit1);
                 defer result.deinit();
                 try std.testing.expect(result.data == .conflict);
                 try expectEqual(1, result.data.conflict.stale_files.count());
@@ -532,7 +531,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             {
                 var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
-                var result = try chk.switch_head(repo_kind, &repo.core, allocator, &commit1);
+                var result = try repo.switch_head(&commit1);
                 defer result.deinit();
                 try std.testing.expect(result.data == .conflict);
             }
@@ -555,7 +554,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             {
                 var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
-                var result = try chk.switch_head(repo_kind, &repo.core, allocator, &commit1);
+                var result = try repo.switch_head(&commit1);
                 defer result.deinit();
                 try std.testing.expect(result.data == .conflict);
                 try expectEqual(1, result.data.conflict.stale_files.count());
@@ -584,7 +583,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             {
                 var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
-                var result = try chk.switch_head(repo_kind, &repo.core, allocator, &commit1);
+                var result = try repo.switch_head(&commit1);
                 defer result.deinit();
                 try std.testing.expect(result.data == .conflict);
                 try expectEqual(1, result.data.conflict.stale_dirs.count());
