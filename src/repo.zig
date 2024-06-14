@@ -28,16 +28,14 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 repo_dir: std.fs.Dir,
                 git_dir: std.fs.Dir,
 
-                pub fn readOnlyCursor(_: *@This()) !void {
-                    return {};
-                }
+                pub fn latestCursor(_: *@This()) !void {}
             },
             .xit => struct {
                 repo_dir: std.fs.Dir,
                 xit_dir: std.fs.Dir,
                 db: xitdb.Database(.file),
 
-                pub fn readOnlyCursor(self: *@This()) !xitdb.Database(.file).Cursor {
+                pub fn latestCursor(self: *@This()) !xitdb.Database(.file).Cursor {
                     return (try self.db.rootCursor().readCursor(void, &[_]xitdb.PathPart(void){
                         .{ .array_list_get = .{ .index = .{ .index = 0, .reverse = true } } },
                     })) orelse return error.DatabaseEmpty;
@@ -363,7 +361,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     if (cmd_data.branch.name) |name| {
                         try self.create_branch(name);
                     } else {
-                        var cursor = try self.core.readOnlyCursor();
+                        var cursor = try self.core.latestCursor();
                         const core_cursor = switch (repo_kind) {
                             .git => .{ .core = &self.core },
                             .xit => .{ .core = &self.core, .root_cursor = &cursor },
@@ -392,7 +390,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     try self.restore(cmd_data.restore.path);
                 },
                 cmd.CommandData.log => {
-                    var cursor = try self.core.readOnlyCursor();
+                    var cursor = try self.core.latestCursor();
                     const core_cursor = switch (repo_kind) {
                         .git => .{ .core = &self.core },
                         .xit => .{ .core = &self.core, .root_cursor = &cursor },
@@ -580,7 +578,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
         }
 
         pub fn status(self: *Repo(repo_kind)) !st.Status(repo_kind) {
-            var cursor = try self.core.readOnlyCursor();
+            var cursor = try self.core.latestCursor();
             const core_cursor = switch (repo_kind) {
                 .git => .{ .core = &self.core },
                 .xit => .{ .core = &self.core, .root_cursor = &cursor },

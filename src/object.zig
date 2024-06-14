@@ -836,7 +836,7 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind) type {
         }
 
         pub fn next(self: *ObjectIterator(repo_kind)) !?*Object(repo_kind) {
-            var cursor = try self.core.readOnlyCursor();
+            var cursor = try self.core.latestCursor();
             const core_cursor = switch (repo_kind) {
                 .git => .{ .core = self.core },
                 .xit => .{ .core = self.core, .root_cursor = &cursor },

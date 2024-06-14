@@ -64,7 +64,7 @@ fn testSimple(comptime repo_kind: rp.RepoKind) !void {
     try oid_set.put(&commit_d, {});
 
     // assert that all commits have been found in the log
-    var cursor = try repo.core.readOnlyCursor();
+    var cursor = try repo.core.latestCursor();
     const core_cursor = switch (repo_kind) {
         .git => .{ .core = &repo.core },
         .xit => .{ .core = &repo.core, .root_cursor = &cursor },
@@ -160,7 +160,7 @@ fn testMerge(comptime repo_kind: rp.RepoKind) !void {
     try addFile(repo_kind, &repo, "master.md", "k");
     const commit_k = try repo.commit(null, "k");
 
-    var cursor = try repo.core.readOnlyCursor();
+    var cursor = try repo.core.latestCursor();
     const core_cursor = switch (repo_kind) {
         .git => .{ .core = &repo.core },
         .xit => .{ .core = &repo.core, .root_cursor = &cursor },
