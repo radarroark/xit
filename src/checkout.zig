@@ -100,7 +100,7 @@ pub fn objectToFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_k
                     try compress.decompress(in_file, out_file, true);
                 },
                 .xit => {
-                    var reader_maybe = try core_cursor.root_cursor.reader(void, &[_]xitdb.PathPart(void){
+                    var reader_maybe = try core_cursor.cursor.reader(void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = hash.hashBuffer("objects") },
                         .{ .hash_map_get = try hash.hexToHash(&oid_hex) },
                     });
@@ -182,7 +182,7 @@ pub fn objectToBuffer(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo
             return buffer[0..size];
         },
         .xit => {
-            var reader_maybe = try core_cursor.root_cursor.reader(void, &[_]xitdb.PathPart(void){
+            var reader_maybe = try core_cursor.cursor.reader(void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = hash.hashBuffer("objects") },
                 .{ .hash_map_get = try hash.hexToHash(&oid_hex) },
             });

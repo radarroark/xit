@@ -67,7 +67,7 @@ fn testSimple(comptime repo_kind: rp.RepoKind) !void {
     var cursor = try repo.core.latestCursor();
     const core_cursor = switch (repo_kind) {
         .git => .{ .core = &repo.core },
-        .xit => .{ .core = &repo.core, .root_cursor = &cursor },
+        .xit => .{ .core = &repo.core, .cursor = &cursor },
     };
     const head_oid = try ref.readHead(repo_kind, core_cursor);
     var commit_iter = try repo.log(head_oid);
@@ -163,7 +163,7 @@ fn testMerge(comptime repo_kind: rp.RepoKind) !void {
     var cursor = try repo.core.latestCursor();
     const core_cursor = switch (repo_kind) {
         .git => .{ .core = &repo.core },
-        .xit => .{ .core = &repo.core, .root_cursor = &cursor },
+        .xit => .{ .core = &repo.core, .cursor = &cursor },
     };
 
     // there are multiple common ancestors, b and d,

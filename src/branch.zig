@@ -57,17 +57,17 @@ pub fn create(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).C
             // get HEAD contents
             const head_file_buffer = try ref.readHead(repo_kind, core_cursor);
             const name_hash = hash.hashBuffer(name);
-            _ = try core_cursor.root_cursor.writeBytes(name, .once, void, &[_]xitdb.PathPart(void){
+            _ = try core_cursor.cursor.writeBytes(name, .once, void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = hash.hashBuffer("names") },
                 .hash_map_create,
                 .{ .hash_map_get = name_hash },
             });
-            const buffer_ptr = try core_cursor.root_cursor.writeBytes(&head_file_buffer, .once, void, &[_]xitdb.PathPart(void){
+            const buffer_ptr = try core_cursor.cursor.writeBytes(&head_file_buffer, .once, void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = hash.hashBuffer("ref-values") },
                 .hash_map_create,
                 .{ .hash_map_get = hash.hashBuffer(&head_file_buffer) },
             });
-            _ = try core_cursor.root_cursor.execute(void, &[_]xitdb.PathPart(void){
+            _ = try core_cursor.cursor.execute(void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = hash.hashBuffer("refs") },
                 .hash_map_create,
                 .{ .hash_map_get = hash.hashBuffer("heads") },
@@ -136,7 +136,7 @@ pub fn delete(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).C
                     return error.CannotDeleteCurrentBranch;
                 }
             }
-            _ = try core_cursor.root_cursor.execute(void, &[_]xitdb.PathPart(void){
+            _ = try core_cursor.cursor.execute(void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = hash.hashBuffer("refs") },
                 .hash_map_create,
                 .{ .hash_map_get = hash.hashBuffer("heads") },

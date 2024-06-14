@@ -533,7 +533,7 @@ pub fn DiffIterator(comptime repo_kind: rp.RepoKind) type {
             var cursor = try self.core.latestCursor();
             const core_cursor = switch (repo_kind) {
                 .git => .{ .core = self.core },
-                .xit => .{ .core = self.core, .root_cursor = &cursor },
+                .xit => .{ .core = self.core, .cursor = &cursor },
             };
             var next_index = self.next_index;
             switch (self.diff_kind) {

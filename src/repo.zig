@@ -50,7 +50,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             },
             .xit => struct {
                 core: *Core,
-                root_cursor: *xitdb.Database(.file).Cursor,
+                cursor: *xitdb.Database(.file).Cursor,
             },
         };
 
@@ -203,7 +203,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         allocator: std.mem.Allocator,
 
                         pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
-                            try ref.writeHead(repo_kind, .{ .core = ctx_self.core, .root_cursor = cursor }, ctx_self.allocator, "master", null);
+                            try ref.writeHead(repo_kind, .{ .core = ctx_self.core, .cursor = cursor }, ctx_self.allocator, "master", null);
                         }
                     };
                     _ = try self.core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
@@ -364,7 +364,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         var cursor = try self.core.latestCursor();
                         const core_cursor = switch (repo_kind) {
                             .git => .{ .core = &self.core },
-                            .xit => .{ .core = &self.core, .root_cursor = &cursor },
+                            .xit => .{ .core = &self.core, .cursor = &cursor },
                         };
 
                         var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, core_cursor, self.allocator, "HEAD");
@@ -393,7 +393,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     var cursor = try self.core.latestCursor();
                     const core_cursor = switch (repo_kind) {
                         .git => .{ .core = &self.core },
-                        .xit => .{ .core = &self.core, .root_cursor = &cursor },
+                        .xit => .{ .core = &self.core, .cursor = &cursor },
                     };
                     if (try ref.readHeadMaybe(repo_kind, core_cursor)) |oid| {
                         var commit_iter = try self.log(oid);
@@ -483,7 +483,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         result: *[hash.SHA1_HEX_LEN]u8,
 
                         pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
-                            ctx_self.result.* = try obj.writeCommit(repo_kind, .{ .core = ctx_self.core, .root_cursor = cursor }, ctx_self.allocator, ctx_self.parent_oids_maybe, ctx_self.message_maybe);
+                            ctx_self.result.* = try obj.writeCommit(repo_kind, .{ .core = ctx_self.core, .cursor = cursor }, ctx_self.allocator, ctx_self.parent_oids_maybe, ctx_self.message_maybe);
                         }
                     };
                     _ = try self.core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
@@ -540,7 +540,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
                         pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
                             // read index
-                            var index = try idx.Index(.xit).init(ctx_self.allocator, .{ .core = ctx_self.core, .root_cursor = cursor });
+                            var index = try idx.Index(.xit).init(ctx_self.allocator, .{ .core = ctx_self.core, .cursor = cursor });
                             defer index.deinit();
 
                             // read all the new entries
@@ -561,11 +561,11 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                                         else => return err,
                                     }
                                 }
-                                try index.addPath(.{ .core = ctx_self.core, .root_cursor = cursor }, path);
+                                try index.addPath(.{ .core = ctx_self.core, .cursor = cursor }, path);
                             }
 
                             // write index
-                            try index.write(ctx_self.allocator, .{ .core = ctx_self.core, .root_cursor = cursor });
+                            try index.write(ctx_self.allocator, .{ .core = ctx_self.core, .cursor = cursor });
                         }
                     };
                     _ = try self.core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
@@ -581,7 +581,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             var cursor = try self.core.latestCursor();
             const core_cursor = switch (repo_kind) {
                 .git => .{ .core = &self.core },
-                .xit => .{ .core = &self.core, .root_cursor = &cursor },
+                .xit => .{ .core = &self.core, .cursor = &cursor },
             };
             return try st.Status(repo_kind).init(self.allocator, core_cursor);
         }
@@ -602,7 +602,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         name: []const u8,
 
                         pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
-                            try bch.create(repo_kind, .{ .core = ctx_self.core, .root_cursor = cursor }, ctx_self.allocator, ctx_self.name);
+                            try bch.create(repo_kind, .{ .core = ctx_self.core, .cursor = cursor }, ctx_self.allocator, ctx_self.name);
                         }
                     };
                     _ = try self.core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
@@ -624,7 +624,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         name: []const u8,
 
                         pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
-                            try bch.delete(repo_kind, .{ .core = ctx_self.core, .root_cursor = cursor }, ctx_self.allocator, ctx_self.name);
+                            try bch.delete(repo_kind, .{ .core = ctx_self.core, .cursor = cursor }, ctx_self.allocator, ctx_self.name);
                         }
                     };
                     _ = try self.core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
@@ -648,7 +648,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         result: *chk.SwitchResult,
 
                         pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
-                            ctx_self.result.* = try chk.switch_head(repo_kind, .{ .core = ctx_self.core, .root_cursor = cursor }, ctx_self.allocator, ctx_self.target);
+                            ctx_self.result.* = try chk.switch_head(repo_kind, .{ .core = ctx_self.core, .cursor = cursor }, ctx_self.allocator, ctx_self.target);
                         }
                     };
                     _ = try self.core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
@@ -671,7 +671,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         path: []const u8,
 
                         pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
-                            try chk.restore(repo_kind, .{ .core = ctx_self.core, .root_cursor = cursor }, ctx_self.allocator, ctx_self.path);
+                            try chk.restore(repo_kind, .{ .core = ctx_self.core, .cursor = cursor }, ctx_self.allocator, ctx_self.path);
                         }
                     };
                     _ = try self.core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
@@ -699,7 +699,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         result: *mrg.MergeResult,
 
                         pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
-                            ctx_self.result.* = try mrg.merge(repo_kind, .{ .core = ctx_self.core, .root_cursor = cursor }, ctx_self.allocator, ctx_self.source);
+                            ctx_self.result.* = try mrg.merge(repo_kind, .{ .core = ctx_self.core, .cursor = cursor }, ctx_self.allocator, ctx_self.source);
                             // no need to make a new transaction if nothing was done
                             if (.nothing == ctx_self.result.data) {
                                 return error.CancelTransaction;

@@ -229,7 +229,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
                 var cursor = try repo.core.latestCursor();
-                const head_file_buffer = try ref.readHead(repo_kind, .{ .core = &repo.core, .root_cursor = &cursor });
+                const head_file_buffer = try ref.readHead(repo_kind, .{ .core = &repo.core, .cursor = &cursor });
                 var db_buffer = [_]u8{0} ** 1024;
                 const bytes_maybe = try cursor.readBytes(&db_buffer, void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = hash.hashBuffer("objects") },
@@ -247,7 +247,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var cursor = try repo.core.latestCursor();
         const core_cursor = switch (repo_kind) {
             .git => .{ .core = &repo.core },
-            .xit => .{ .core = &repo.core, .root_cursor = &cursor },
+            .xit => .{ .core = &repo.core, .cursor = &cursor },
         };
         break :blk try ref.readHead(repo_kind, core_cursor);
     };
@@ -471,7 +471,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
                 var cursor = try repo.core.latestCursor();
-                const head_file_buffer = try ref.readHead(repo_kind, .{ .core = &repo.core, .root_cursor = &cursor });
+                const head_file_buffer = try ref.readHead(repo_kind, .{ .core = &repo.core, .cursor = &cursor });
                 var db_buffer = [_]u8{0} ** 1024;
                 const bytes_maybe = try cursor.readBytes(&db_buffer, void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = hash.hashBuffer("objects") },
@@ -489,7 +489,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var cursor = try repo.core.latestCursor();
         const core_cursor = switch (repo_kind) {
             .git => .{ .core = &repo.core },
-            .xit => .{ .core = &repo.core, .root_cursor = &cursor },
+            .xit => .{ .core = &repo.core, .cursor = &cursor },
         };
         break :blk try ref.readHead(repo_kind, core_cursor);
     };
@@ -665,7 +665,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             var cursor = try repo.core.latestCursor();
             const core_cursor = switch (repo_kind) {
                 .git => .{ .core = &repo.core },
-                .xit => .{ .core = &repo.core, .root_cursor = &cursor },
+                .xit => .{ .core = &repo.core, .cursor = &cursor },
             };
             var index = try idx.Index(repo_kind).init(allocator, core_cursor);
             defer index.deinit();
@@ -733,7 +733,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             var cursor = try repo.core.latestCursor();
             const core_cursor = switch (repo_kind) {
                 .git => .{ .core = &repo.core },
-                .xit => .{ .core = &repo.core, .root_cursor = &cursor },
+                .xit => .{ .core = &repo.core, .cursor = &cursor },
             };
             var index = try idx.Index(repo_kind).init(allocator, core_cursor);
             defer index.deinit();
@@ -1001,7 +1001,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var cursor = try repo.core.latestCursor();
         const core_cursor = switch (repo_kind) {
             .git => .{ .core = &repo.core },
-            .xit => .{ .core = &repo.core, .root_cursor = &cursor },
+            .xit => .{ .core = &repo.core, .cursor = &cursor },
         };
 
         // read commit
@@ -1034,7 +1034,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var cursor = try repo.core.latestCursor();
         const core_cursor = switch (repo_kind) {
             .git => .{ .core = &repo.core },
-            .xit => .{ .core = &repo.core, .root_cursor = &cursor },
+            .xit => .{ .core = &repo.core, .cursor = &cursor },
         };
         try expectEqual(commit2, try ref.readHead(repo_kind, core_cursor));
         try expectEqual(commit2, try ref.resolve(repo_kind, core_cursor, "stuff"));
@@ -1047,7 +1047,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var cursor = try repo.core.latestCursor();
         const core_cursor = switch (repo_kind) {
             .git => .{ .core = &repo.core },
-            .xit => .{ .core = &repo.core, .root_cursor = &cursor },
+            .xit => .{ .core = &repo.core, .cursor = &cursor },
         };
         var ref_list = try ref.RefList.init(repo_kind, core_cursor, allocator, "heads");
         defer ref_list.deinit();
@@ -1061,7 +1061,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var cursor = try repo.core.latestCursor();
         const core_cursor = switch (repo_kind) {
             .git => .{ .core = &repo.core },
-            .xit => .{ .core = &repo.core, .root_cursor = &cursor },
+            .xit => .{ .core = &repo.core, .cursor = &cursor },
         };
         var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, core_cursor, allocator, "HEAD");
         defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
@@ -1134,7 +1134,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var cursor = try repo.core.latestCursor();
         const core_cursor = switch (repo_kind) {
             .git => .{ .core = &repo.core },
-            .xit => .{ .core = &repo.core, .root_cursor = &cursor },
+            .xit => .{ .core = &repo.core, .cursor = &cursor },
         };
         break :blk try ref.readHead(repo_kind, core_cursor);
     };
@@ -1158,7 +1158,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var cursor = try repo.core.latestCursor();
         const core_cursor = switch (repo_kind) {
             .git => .{ .core = &repo.core },
-            .xit => .{ .core = &repo.core, .root_cursor = &cursor },
+            .xit => .{ .core = &repo.core, .cursor = &cursor },
         };
         var ref_list = try ref.RefList.init(repo_kind, core_cursor, allocator, "heads");
         defer ref_list.deinit();
@@ -1220,7 +1220,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var cursor = try repo.core.latestCursor();
         const core_cursor = switch (repo_kind) {
             .git => .{ .core = &repo.core },
-            .xit => .{ .core = &repo.core, .root_cursor = &cursor },
+            .xit => .{ .core = &repo.core, .cursor = &cursor },
         };
         break :blk try ref.readHead(repo_kind, core_cursor);
     };
@@ -1232,7 +1232,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var cursor = try repo.core.latestCursor();
         const core_cursor = switch (repo_kind) {
             .git => .{ .core = &repo.core },
-            .xit => .{ .core = &repo.core, .root_cursor = &cursor },
+            .xit => .{ .core = &repo.core, .cursor = &cursor },
         };
         try expectEqual(commit3, try ref.resolve(repo_kind, core_cursor, "master"));
     }
@@ -1266,7 +1266,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var cursor = try repo.core.latestCursor();
         const core_cursor = switch (repo_kind) {
             .git => .{ .core = &repo.core },
-            .xit => .{ .core = &repo.core, .root_cursor = &cursor },
+            .xit => .{ .core = &repo.core, .cursor = &cursor },
         };
         const ancestor_commit = try obj.commonAncestor(repo_kind, allocator, core_cursor, &commit3, &commit4_stuff);
         try std.testing.expectEqualStrings(&commit2, &ancestor_commit);
@@ -1305,7 +1305,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var cursor = try repo.core.latestCursor();
         const core_cursor = switch (repo_kind) {
             .git => .{ .core = &repo.core },
-            .xit => .{ .core = &repo.core, .root_cursor = &cursor },
+            .xit => .{ .core = &repo.core, .cursor = &cursor },
         };
         break :blk try ref.readHead(repo_kind, core_cursor);
     };

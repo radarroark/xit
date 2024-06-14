@@ -163,7 +163,7 @@ pub fn writeBlob(
                         }
                         try writer.finish();
 
-                        _ = try ctx_self.core_cursor.root_cursor.execute(void, &[_]xitdb.PathPart(void){
+                        _ = try ctx_self.core_cursor.cursor.execute(void, &[_]xitdb.PathPart(void){
                             .{ .hash_map_get = hash.hashBuffer("objects") },
                             .hash_map_create,
                             .{ .hash_map_get = try hash.hexToHash(&ctx_self.sha1_hex) },
@@ -172,7 +172,7 @@ pub fn writeBlob(
                     }
                 }
             };
-            _ = try core_cursor.root_cursor.execute(Ctx, &[_]xitdb.PathPart(Ctx){
+            _ = try core_cursor.cursor.execute(Ctx, &[_]xitdb.PathPart(Ctx){
                 .{ .hash_map_get = hash.hashBuffer("file-values") },
                 .hash_map_create,
                 .{ .hash_map_get = file_hash },
@@ -258,7 +258,7 @@ fn writeTree(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).Co
         },
         .xit => {
             const Ctx = struct {
-                root_cursor: *xitdb.Database(.file).Cursor,
+                cursor: *xitdb.Database(.file).Cursor,
                 tree_sha1_bytes: *const [hash.SHA1_BYTES_LEN]u8,
                 tree_bytes: []const u8,
 
@@ -267,7 +267,7 @@ fn writeTree(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).Co
                     if (cursor.pointer() != null) {
                         return;
                     }
-                    const tree_ptr = try ctx_self.root_cursor.writeBytes(ctx_self.tree_bytes, .once, void, &[_]xitdb.PathPart(void){
+                    const tree_ptr = try ctx_self.cursor.writeBytes(ctx_self.tree_bytes, .once, void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = hash.hashBuffer("object-values") },
                         .hash_map_create,
                         .{ .hash_map_get = hash.bytesToHash(ctx_self.tree_sha1_bytes) },
@@ -277,12 +277,12 @@ fn writeTree(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).Co
                     });
                 }
             };
-            _ = try core_cursor.root_cursor.execute(Ctx, &[_]xitdb.PathPart(Ctx){
+            _ = try core_cursor.cursor.execute(Ctx, &[_]xitdb.PathPart(Ctx){
                 .{ .hash_map_get = hash.hashBuffer("objects") },
                 .hash_map_create,
                 .{ .hash_map_get = hash.bytesToHash(sha1_bytes_buffer) },
                 .{ .ctx = Ctx{
-                    .root_cursor = core_cursor.root_cursor,
+                    .cursor = core_cursor.cursor,
                     .tree_sha1_bytes = sha1_bytes_buffer,
                     .tree_bytes = tree_bytes,
                 } },
@@ -466,14 +466,14 @@ pub fn writeCommit(
             const commit_sha1_hex = std.fmt.bytesToHex(commit_sha1_bytes_buffer, .lower);
 
             // write commit content
-            const content_ptr = try core_cursor.root_cursor.writeBytes(commit, .once, void, &[_]xitdb.PathPart(void){
+            const content_ptr = try core_cursor.cursor.writeBytes(commit, .once, void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = hash.hashBuffer("object-values") },
                 .hash_map_create,
                 .{ .hash_map_get = hash.bytesToHash(&commit_sha1_bytes_buffer) },
             });
 
             // write commit
-            _ = try core_cursor.root_cursor.execute(void, &[_]xitdb.PathPart(void){
+            _ = try core_cursor.cursor.execute(void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = hash.hashBuffer("objects") },
                 .hash_map_create,
                 .{ .hash_map_get = hash.bytesToHash(&commit_sha1_bytes_buffer) },
@@ -581,7 +581,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                                 self.allocator.free(self.buffer);
                             }
                         };
-                        if (try core_cursor.root_cursor.readBytesAlloc(allocator, MAX_READ_BYTES, void, &[_]xitdb.PathPart(void){
+                        if (try core_cursor.cursor.readBytesAlloc(allocator, MAX_READ_BYTES, void, &[_]xitdb.PathPart(void){
                             .{ .hash_map_get = hash.hashBuffer("objects") },
                             .{ .hash_map_get = try hash.hexToHash(&oid) },
                         })) |bytes| {
@@ -841,7 +841,7 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind) type {
             var cursor = try self.core.latestCursor();
             const core_cursor = switch (repo_kind) {
                 .git => .{ .core = self.core },
-                .xit => .{ .core = self.core, .root_cursor = &cursor },
+                .xit => .{ .core = self.core, .cursor = &cursor },
             };
             if (self.oid_queue.popFirst()) |node| {
                 const next_oid = node.data;
