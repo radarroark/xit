@@ -372,6 +372,12 @@ pub fn merge(
 
             // exit early if there were conflicts
             if (conflicts.count() > 0) {
+                _ = try core_cursor.cursor.writeBytes(&source_oid, .replace, void, &[_]xitdb.PathPart(void){
+                    .{ .hash_map_get = hash.hashBuffer("MERGE_HEAD") },
+                });
+                _ = try core_cursor.cursor.writeBytes("", .replace, void, &[_]xitdb.PathPart(void){
+                    .{ .hash_map_get = hash.hashBuffer("MERGE_MSG") },
+                });
                 return .{
                     .arena = arena,
                     .changes = clean_diff.changes,
