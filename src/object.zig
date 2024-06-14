@@ -367,10 +367,15 @@ pub fn writeCommit(
     comptime repo_kind: rp.RepoKind,
     core: *rp.Repo(repo_kind).Core,
     allocator: std.mem.Allocator,
-    parent_oids: []const [hash.SHA1_HEX_LEN]u8,
+    parent_oids_maybe: ?[]const [hash.SHA1_HEX_LEN]u8,
     message_maybe: ?[]const u8,
-    sha1_bytes_out_maybe: ?*[hash.SHA1_BYTES_LEN]u8,
-) !void {
+) ![hash.SHA1_HEX_LEN]u8 {
+    var commit_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+    const parent_oids = if (parent_oids_maybe) |oids| oids else blk: {
+        const head_oid_maybe = try ref.readHeadMaybe(repo_kind, core);
+        break :blk if (head_oid_maybe) |head_oid| &[_][hash.SHA1_HEX_LEN]u8{head_oid} else &[_][hash.SHA1_HEX_LEN]u8{};
+    };
+
     // read index
     var index = try idx.Index(repo_kind).init(allocator, core);
     defer index.deinit();
@@ -400,7 +405,6 @@ pub fn writeCommit(
             defer allocator.free(commit);
 
             // calc the sha1 of its contents
-            var commit_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
             try hash.sha1Buffer(commit, &commit_sha1_bytes_buffer);
             const commit_sha1_hex = std.fmt.bytesToHex(commit_sha1_bytes_buffer, .lower);
 
@@ -437,9 +441,6 @@ pub fn writeCommit(
 
             // write commit id to HEAD
             try ref.updateRecur(repo_kind, .{ .core = core }, allocator, &[_][]const u8{"HEAD"}, &commit_sha1_hex);
-
-            // update out param
-            if (sha1_bytes_out_maybe) |sha1_bytes_out| sha1_bytes_out.* = commit_sha1_bytes_buffer;
         },
         .xit => {
             const Ctx = struct {
@@ -447,7 +448,7 @@ pub fn writeCommit(
                 index: idx.Index(repo_kind),
                 parent_oids: []const [hash.SHA1_HEX_LEN]u8,
                 message_maybe: ?[]const u8,
-                commit_sha1_bytes: [hash.SHA1_BYTES_LEN]u8,
+                commit_sha1_bytes: *[hash.SHA1_BYTES_LEN]u8,
                 allocator: std.mem.Allocator,
 
                 pub fn run(ctx_self: *@This(), cursor: *xitdb.Database(.file).Cursor) !void {
@@ -470,24 +471,23 @@ pub fn writeCommit(
                     defer ctx_self.allocator.free(commit);
 
                     // calc the sha1 of its contents
-                    try hash.sha1Buffer(commit, &ctx_self.commit_sha1_bytes);
+                    try hash.sha1Buffer(commit, ctx_self.commit_sha1_bytes);
+                    const commit_sha1_hex = std.fmt.bytesToHex(ctx_self.commit_sha1_bytes, .lower);
 
                     // write commit content
                     const content_ptr = try cursor.writeBytes(commit, .once, void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = hash.hashBuffer("object-values") },
                         .hash_map_create,
-                        .{ .hash_map_get = hash.bytesToHash(&ctx_self.commit_sha1_bytes) },
+                        .{ .hash_map_get = hash.bytesToHash(ctx_self.commit_sha1_bytes) },
                     });
 
                     // write commit
                     _ = try cursor.execute(void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = hash.hashBuffer("objects") },
                         .hash_map_create,
-                        .{ .hash_map_get = hash.bytesToHash(&ctx_self.commit_sha1_bytes) },
+                        .{ .hash_map_get = hash.bytesToHash(ctx_self.commit_sha1_bytes) },
                         .{ .value = .{ .bytes_ptr = content_ptr } },
                     });
-
-                    const commit_sha1_hex = std.fmt.bytesToHex(ctx_self.commit_sha1_bytes, .lower);
 
                     // write commit id to HEAD
                     try ref.updateRecur(repo_kind, .{ .core = ctx_self.core, .root_cursor = cursor }, ctx_self.allocator, &[_][]const u8{"HEAD"}, &commit_sha1_hex);
@@ -498,7 +498,7 @@ pub fn writeCommit(
                 .index = index,
                 .parent_oids = parent_oids,
                 .message_maybe = message_maybe,
-                .commit_sha1_bytes = undefined,
+                .commit_sha1_bytes = &commit_sha1_bytes_buffer,
                 .allocator = allocator,
             };
             _ = try core.db.rootCursor().execute(*Ctx, &[_]xitdb.PathPart(*Ctx){
@@ -506,11 +506,10 @@ pub fn writeCommit(
                 .hash_map_create,
                 .{ .ctx = &ctx },
             });
-
-            // update out param
-            if (sha1_bytes_out_maybe) |sha1_bytes_out| sha1_bytes_out.* = ctx.commit_sha1_bytes;
         },
     }
+
+    return std.fmt.bytesToHex(commit_sha1_bytes_buffer, .lower);
 }
 
 pub const ObjectKind = enum {

@@ -419,8 +419,7 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
 
         // commit the change
         const parent_oids = &[_][hash.SHA1_HEX_LEN]u8{ current_oid, source_oid };
-        var sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-        try obj.writeCommit(repo_kind, core, allocator, parent_oids, commit_message, &sha1_bytes_buffer);
+        const commit_oid = try obj.writeCommit(repo_kind, core, allocator, parent_oids, commit_message);
 
         return .{
             .arena = arena,
@@ -429,7 +428,7 @@ pub fn merge(comptime repo_kind: rp.RepoKind, core: *rp.Repo(repo_kind).Core, al
             .current_name = current_name,
             .data = .{
                 .success = .{
-                    .oid = std.fmt.bytesToHex(sha1_bytes_buffer, .lower),
+                    .oid = commit_oid,
                 },
             },
         };
