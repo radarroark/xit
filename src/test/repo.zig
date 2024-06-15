@@ -223,6 +223,34 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
 
     const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
 
+    const checkMergeAbort = struct {
+        fn run(repo: *rp.Repo(repo_kind)) !void {
+            // can't merge again with an unresolved merge
+            {
+                var result_or_err = repo.merge(.{ .new = .{ .source_name = "foo" } });
+                if (result_or_err) |*result| {
+                    defer result.deinit();
+                    return error.ExpectedMergeToAbort;
+                } else |err| switch (err) {
+                    error.UnfinishedMergeAlreadyInProgress => {},
+                    else => return err,
+                }
+            }
+
+            // can't continue merge with unresolved conflicts
+            {
+                var result_or_err = repo.merge(.cont);
+                if (result_or_err) |*result| {
+                    defer result.deinit();
+                    return error.ExpectedMergeToAbort;
+                } else |err| switch (err) {
+                    error.CannotContinueMergeWithUnresolvedConflicts => {},
+                    else => return err,
+                }
+            }
+        }
+    }.run;
+
     // same file conflict
     {
         var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "same-file-conflict" } }, writers);
@@ -264,29 +292,8 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             return error.DiffResultExpected;
         }
 
-        // can't merge again with an unresolved merge
-        {
-            var result_or_err = repo.merge(.{ .new = .{ .source_name = "foo" } });
-            if (result_or_err) |*result| {
-                defer result.deinit();
-                return error.ExpectedMergeToAbort;
-            } else |err| switch (err) {
-                error.UnfinishedMergeAlreadyInProgress => {},
-                else => return err,
-            }
-        }
-
-        // can't continue merge with unresolved conflicts
-        {
-            var result_or_err = repo.merge(.cont);
-            if (result_or_err) |*result| {
-                defer result.deinit();
-                return error.ExpectedMergeToAbort;
-            } else |err| switch (err) {
-                error.CannotContinueMergeWithUnresolvedConflicts => {},
-                else => return err,
-            }
-        }
+        // ensure merge cannot be run again while there are unresolved conflicts
+        try checkMergeAbort(&repo);
 
         // resolve conflict
         try addFile(repo_kind, &repo, "f.txt", "3");
@@ -338,29 +345,8 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             return error.DiffResultExpected;
         }
 
-        // can't merge again with an unresolved merge
-        {
-            var result_or_err = repo.merge(.{ .new = .{ .source_name = "foo" } });
-            if (result_or_err) |*result| {
-                defer result.deinit();
-                return error.ExpectedMergeToAbort;
-            } else |err| switch (err) {
-                error.UnfinishedMergeAlreadyInProgress => {},
-                else => return err,
-            }
-        }
-
-        // can't continue merge with unresolved conflicts
-        {
-            var result_or_err = repo.merge(.cont);
-            if (result_or_err) |*result| {
-                defer result.deinit();
-                return error.ExpectedMergeToAbort;
-            } else |err| switch (err) {
-                error.CannotContinueMergeWithUnresolvedConflicts => {},
-                else => return err,
-            }
-        }
+        // ensure merge cannot be run again while there are unresolved conflicts
+        try checkMergeAbort(&repo);
 
         // resolve conflict
         try repo.add(&[_][]const u8{"f.txt"});
@@ -410,29 +396,8 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             return error.DiffResultNotExpected;
         }
 
-        // can't merge again with an unresolved merge
-        {
-            var result_or_err = repo.merge(.{ .new = .{ .source_name = "foo" } });
-            if (result_or_err) |*result| {
-                defer result.deinit();
-                return error.ExpectedMergeToAbort;
-            } else |err| switch (err) {
-                error.UnfinishedMergeAlreadyInProgress => {},
-                else => return err,
-            }
-        }
-
-        // can't continue merge with unresolved conflicts
-        {
-            var result_or_err = repo.merge(.cont);
-            if (result_or_err) |*result| {
-                defer result.deinit();
-                return error.ExpectedMergeToAbort;
-            } else |err| switch (err) {
-                error.CannotContinueMergeWithUnresolvedConflicts => {},
-                else => return err,
-            }
-        }
+        // ensure merge cannot be run again while there are unresolved conflicts
+        try checkMergeAbort(&repo);
 
         // resolve conflict
         try repo.add(&[_][]const u8{"f.txt"});
@@ -484,29 +449,8 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             return error.DiffResultExpected;
         }
 
-        // can't merge again with an unresolved merge
-        {
-            var result_or_err = repo.merge(.{ .new = .{ .source_name = "foo" } });
-            if (result_or_err) |*result| {
-                defer result.deinit();
-                return error.ExpectedMergeToAbort;
-            } else |err| switch (err) {
-                error.UnfinishedMergeAlreadyInProgress => {},
-                else => return err,
-            }
-        }
-
-        // can't continue merge with unresolved conflicts
-        {
-            var result_or_err = repo.merge(.cont);
-            if (result_or_err) |*result| {
-                defer result.deinit();
-                return error.ExpectedMergeToAbort;
-            } else |err| switch (err) {
-                error.CannotContinueMergeWithUnresolvedConflicts => {},
-                else => return err,
-            }
-        }
+        // ensure merge cannot be run again while there are unresolved conflicts
+        try checkMergeAbort(&repo);
 
         // make sure renamed file exists
         var renamed_file = try repo.core.repo_dir.openFile("f.txt~master", .{});
@@ -564,29 +508,8 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             return error.DiffResultNotExpected;
         }
 
-        // can't merge again with an unresolved merge
-        {
-            var result_or_err = repo.merge(.{ .new = .{ .source_name = "foo" } });
-            if (result_or_err) |*result| {
-                defer result.deinit();
-                return error.ExpectedMergeToAbort;
-            } else |err| switch (err) {
-                error.UnfinishedMergeAlreadyInProgress => {},
-                else => return err,
-            }
-        }
-
-        // can't continue merge with unresolved conflicts
-        {
-            var result_or_err = repo.merge(.cont);
-            if (result_or_err) |*result| {
-                defer result.deinit();
-                return error.ExpectedMergeToAbort;
-            } else |err| switch (err) {
-                error.CannotContinueMergeWithUnresolvedConflicts => {},
-                else => return err,
-            }
-        }
+        // ensure merge cannot be run again while there are unresolved conflicts
+        try checkMergeAbort(&repo);
 
         // resolve conflict
         try repo.add(&[_][]const u8{"f.txt"});
