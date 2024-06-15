@@ -12,7 +12,7 @@ pub const LockFile = struct {
     pub fn init(allocator: std.mem.Allocator, dir: std.fs.Dir, file_name: []const u8) !LockFile {
         const lock_name = try std.fmt.allocPrint(allocator, "{s}.lock", .{file_name});
         errdefer allocator.free(lock_name);
-        const lock_file = try dir.createFile(lock_name, .{ .exclusive = true, .lock = .exclusive });
+        const lock_file = try dir.createFile(lock_name, .{ .truncate = true, .lock = .exclusive });
         errdefer dir.deleteFile(lock_name) catch {};
         return .{
             .allocator = allocator,
@@ -158,7 +158,7 @@ pub fn joinPath(allocator: std.mem.Allocator, paths: []const []const u8) ![]u8 {
         if (i < paths.len - 1) {
             // even on windows we want the / separator
             buf_slice[path.len] = '/';
-            buf_slice = buf_slice[path.len+1..];
+            buf_slice = buf_slice[path.len + 1 ..];
         }
     }
 

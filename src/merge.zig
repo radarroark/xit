@@ -333,11 +333,11 @@ pub fn merge(
 
             // exit early if there were conflicts
             if (conflicts.count() > 0) {
-                const merge_head = try core_cursor.core.git_dir.createFile("MERGE_HEAD", .{ .exclusive = true, .lock = .exclusive });
+                const merge_head = try core_cursor.core.git_dir.createFile("MERGE_HEAD", .{ .truncate = true, .lock = .exclusive });
                 defer merge_head.close();
                 try merge_head.writeAll(&source_oid);
 
-                const merge_msg = try core_cursor.core.git_dir.createFile("MERGE_MSG", .{ .exclusive = true, .lock = .exclusive });
+                const merge_msg = try core_cursor.core.git_dir.createFile("MERGE_MSG", .{ .truncate = true, .lock = .exclusive });
                 defer merge_msg.close();
                 try merge_msg.writeAll(commit_message);
 
