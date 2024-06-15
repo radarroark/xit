@@ -461,6 +461,18 @@ pub fn merge(
             };
         },
         .cont => {
+            // ensure there are no conflict entries in the index
+            {
+                var index = try idx.Index(repo_kind).init(allocator, core_cursor);
+                defer index.deinit();
+
+                for (index.entries.values()) |*entries_for_path| {
+                    if (null == entries_for_path[0]) {
+                        return error.CannotContinueMergeWithUnresolvedConflicts;
+                    }
+                }
+            }
+
             var source_oid: [hash.SHA1_HEX_LEN]u8 = undefined;
             var commit_message: []const u8 = undefined;
 
