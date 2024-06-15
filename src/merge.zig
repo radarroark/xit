@@ -283,8 +283,12 @@ pub fn merge(
                 },
             }
 
+            // we need to return the source name so copy it into a new buffer
+            // so we an ensure it lives as long as the rest of the return struct
+            const source_name = try arena.allocator().alloc(u8, input.new.source_name.len);
+            @memcpy(source_name, input.new.source_name);
+
             // get the oids for the three-way merge
-            const source_name = input.new.source_name;
             const source_oid = try ref.resolve(repo_kind, core_cursor, source_name) orelse return error.InvalidTarget;
             const common_oid = try obj.commonAncestor(repo_kind, allocator, core_cursor, &current_oid, &source_oid);
 
