@@ -299,6 +299,10 @@ pub fn merge(
 
     // TODO: exit early if working tree is dirty
 
+    // create commit message
+    const commit_message = try std.fmt.allocPrint(allocator, "merge from {s}", .{source_name});
+    defer allocator.free(commit_message);
+
     switch (repo_kind) {
         .git => {
             // create lock file
@@ -335,6 +339,7 @@ pub fn merge(
 
                 const merge_msg = try core_cursor.core.git_dir.createFile("MERGE_MSG", .{ .exclusive = true, .lock = .exclusive });
                 defer merge_msg.close();
+                try merge_msg.writeAll(commit_message);
 
                 return .{
                     .arena = arena,
@@ -375,7 +380,7 @@ pub fn merge(
                 _ = try core_cursor.cursor.writeBytes(&source_oid, .replace, void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = hash.hashBuffer("MERGE_HEAD") },
                 });
-                _ = try core_cursor.cursor.writeBytes("", .replace, void, &[_]xitdb.PathPart(void){
+                _ = try core_cursor.cursor.writeBytes(commit_message, .replace, void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = hash.hashBuffer("MERGE_MSG") },
                 });
                 return .{
@@ -400,10 +405,6 @@ pub fn merge(
             .data = .fast_forward,
         };
     } else {
-        // create commit message
-        const commit_message = try std.fmt.allocPrint(allocator, "merge from {s}", .{source_name});
-        defer allocator.free(commit_message);
-
         // commit the change
         const parent_oids = &[_][hash.SHA1_HEX_LEN]u8{ current_oid, source_oid };
         const commit_oid = try obj.writeCommit(repo_kind, core_cursor, allocator, parent_oids, commit_message);
