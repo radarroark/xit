@@ -254,6 +254,18 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             try std.testing.expect(.conflict == result.data);
         }
 
+        // can't merge again with an unresolved merge
+        {
+            var result_or_err = repo.merge(.{ .new = .{ .source_name = "foo" } });
+            if (result_or_err) |*result| {
+                defer result.deinit();
+                return error.ExpectedMergeToAbort;
+            } else |err| switch (err) {
+                error.UnfinishedMergeAlreadyInProgress => {},
+                else => return err,
+            }
+        }
+
         // generate diff
         var diff_iter = try repo.diff(.workspace, .current);
         defer diff_iter.deinit();
@@ -302,6 +314,18 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             var result = try repo.merge(.{ .new = .{ .source_name = "foo" } });
             defer result.deinit();
             try std.testing.expect(.conflict == result.data);
+        }
+
+        // can't merge again with an unresolved merge
+        {
+            var result_or_err = repo.merge(.{ .new = .{ .source_name = "foo" } });
+            if (result_or_err) |*result| {
+                defer result.deinit();
+                return error.ExpectedMergeToAbort;
+            } else |err| switch (err) {
+                error.UnfinishedMergeAlreadyInProgress => {},
+                else => return err,
+            }
         }
 
         // generate diff
@@ -354,6 +378,18 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             try std.testing.expect(.conflict == result.data);
         }
 
+        // can't merge again with an unresolved merge
+        {
+            var result_or_err = repo.merge(.{ .new = .{ .source_name = "foo" } });
+            if (result_or_err) |*result| {
+                defer result.deinit();
+                return error.ExpectedMergeToAbort;
+            } else |err| switch (err) {
+                error.UnfinishedMergeAlreadyInProgress => {},
+                else => return err,
+            }
+        }
+
         // generate diff
         var diff_iter = try repo.diff(.workspace, .current);
         defer diff_iter.deinit();
@@ -402,6 +438,22 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             try std.testing.expect(.conflict == result.data);
         }
 
+        // can't merge again with an unresolved merge
+        {
+            var result_or_err = repo.merge(.{ .new = .{ .source_name = "foo" } });
+            if (result_or_err) |*result| {
+                defer result.deinit();
+                return error.ExpectedMergeToAbort;
+            } else |err| switch (err) {
+                error.UnfinishedMergeAlreadyInProgress => {},
+                else => return err,
+            }
+        }
+
+        // make sure renamed file exists
+        var renamed_file = try repo.core.repo_dir.openFile("f.txt~master", .{});
+        defer renamed_file.close();
+
         // generate diff
         var diff_iter = try repo.diff(.workspace, .current);
         defer diff_iter.deinit();
@@ -411,10 +463,6 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         } else {
             return error.DiffResultExpected;
         }
-
-        // make sure renamed file exists
-        var renamed_file = try repo.core.repo_dir.openFile("f.txt~master", .{});
-        defer renamed_file.close();
 
         // resolve conflict
         try repo.add(&[_][]const u8{"f.txt"});
@@ -456,6 +504,22 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             try std.testing.expect(.conflict == result.data);
         }
 
+        // make sure renamed file exists
+        var renamed_file = try repo.core.repo_dir.openFile("f.txt~foo", .{});
+        defer renamed_file.close();
+
+        // can't merge again with an unresolved merge
+        {
+            var result_or_err = repo.merge(.{ .new = .{ .source_name = "foo" } });
+            if (result_or_err) |*result| {
+                defer result.deinit();
+                return error.ExpectedMergeToAbort;
+            } else |err| switch (err) {
+                error.UnfinishedMergeAlreadyInProgress => {},
+                else => return err,
+            }
+        }
+
         // generate diff
         var diff_iter = try repo.diff(.workspace, .current);
         defer diff_iter.deinit();
@@ -463,10 +527,6 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             defer diff_item.deinit();
             return error.DiffResultNotExpected;
         }
-
-        // make sure renamed file exists
-        var renamed_file = try repo.core.repo_dir.openFile("f.txt~foo", .{});
-        defer renamed_file.close();
 
         // resolve conflict
         try repo.add(&[_][]const u8{"f.txt"});

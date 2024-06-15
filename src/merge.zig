@@ -263,9 +263,28 @@ pub fn merge(
 
     switch (input) {
         .new => {
-            const source_name = input.new.source_name;
+            // make sure there is no stored merge state
+            switch (repo_kind) {
+                .git => {
+                    if (core_cursor.core.git_dir.openFile("MERGE_HEAD", .{ .mode = .read_only })) |merge_head| {
+                        defer merge_head.close();
+                        return error.UnfinishedMergeAlreadyInProgress;
+                    } else |err| switch (err) {
+                        error.FileNotFound => {},
+                        else => return err,
+                    }
+                },
+                .xit => {
+                    if (try core_cursor.cursor.readCursor(void, &[_]xitdb.PathPart(void){
+                        .{ .hash_map_get = hash.hashBuffer("MERGE_HEAD") },
+                    })) |_| {
+                        return error.UnfinishedMergeAlreadyInProgress;
+                    }
+                },
+            }
 
             // get the oids for the three-way merge
+            const source_name = input.new.source_name;
             const source_oid = try ref.resolve(repo_kind, core_cursor, source_name) orelse return error.InvalidTarget;
             const common_oid = try obj.commonAncestor(repo_kind, allocator, core_cursor, &current_oid, &source_oid);
 
