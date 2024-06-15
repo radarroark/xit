@@ -414,7 +414,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     }
                 },
                 cmd.CommandData.merge => {
-                    var result = try self.merge(cmd_data.merge.source);
+                    var result = try self.merge(cmd_data.merge);
                     defer result.deinit();
                     for (result.auto_resolved_conflicts.keys()) |path| {
                         if (result.changes.contains(path)) {
@@ -437,7 +437,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                                     else
                                         "directory/file";
                                     const dir_branch_name = if (conflict.current != null)
-                                        cmd_data.merge.source
+                                        result.source_name
                                     else
                                         result.current_name;
                                     try writers.err.print("CONFLICT ({s}): There is a directory with name {s} in {s}. Adding {s} as {s}\n", .{ conflict_type, path, dir_branch_name, path, renamed.path });
@@ -457,9 +457,9 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                                         else
                                             "delete/modify";
                                         const deleted_branch_name, const modified_branch_name = if (conflict.current != null)
-                                            .{ cmd_data.merge.source, result.current_name }
+                                            .{ result.source_name, result.current_name }
                                         else
-                                            .{ result.current_name, cmd_data.merge.source };
+                                            .{ result.current_name, result.source_name };
                                         try writers.err.print("CONFLICT ({s}): {s} deleted in {s} and modified in {s}\n", .{ conflict_type, path, deleted_branch_name, modified_branch_name });
                                     }
                                 }
@@ -687,19 +687,19 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             return try obj.ObjectIterator(repo_kind).init(self.allocator, &self.core, oid);
         }
 
-        pub fn merge(self: *Repo(repo_kind), source: []const u8) !mrg.MergeResult {
+        pub fn merge(self: *Repo(repo_kind), input: mrg.MergeInput) !mrg.MergeResult {
             switch (repo_kind) {
-                .git => return try mrg.merge(repo_kind, .{ .core = &self.core }, self.allocator, source),
+                .git => return try mrg.merge(repo_kind, .{ .core = &self.core }, self.allocator, input),
                 .xit => {
                     var result: mrg.MergeResult = undefined;
                     const Ctx = struct {
                         core: *Repo(repo_kind).Core,
                         allocator: std.mem.Allocator,
-                        source: []const u8,
+                        input: mrg.MergeInput,
                         result: *mrg.MergeResult,
 
                         pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
-                            ctx_self.result.* = try mrg.merge(repo_kind, .{ .core = ctx_self.core, .cursor = cursor }, ctx_self.allocator, ctx_self.source);
+                            ctx_self.result.* = try mrg.merge(repo_kind, .{ .core = ctx_self.core, .cursor = cursor }, ctx_self.allocator, ctx_self.input);
                             // no need to make a new transaction if nothing was done
                             if (.nothing == ctx_self.result.data) {
                                 return error.CancelTransaction;
@@ -709,7 +709,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     _ = self.core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
                         .{ .array_list_get = .append_copy },
                         .hash_map_create,
-                        .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .source = source, .result = &result } },
+                        .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .input = input, .result = &result } },
                     }) catch |err| switch (err) {
                         error.CancelTransaction => {},
                         else => return err,

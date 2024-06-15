@@ -152,7 +152,7 @@ fn testMerge(comptime repo_kind: rp.RepoKind) !void {
     try addFile(repo_kind, &repo, "master.md", "c");
     _ = try repo.commit(null, "c");
     const commit_j = blk: {
-        var result = try repo.merge("foo");
+        var result = try repo.merge(.{ .new = .{ .source_name = "foo" } });
         defer result.deinit();
         try std.testing.expect(.success == result.data);
         break :blk result.data.success.oid;
@@ -177,7 +177,7 @@ fn testMerge(comptime repo_kind: rp.RepoKind) !void {
 
     // if we try merging foo again, it does nothing
     {
-        var merge_result = try repo.merge("foo");
+        var merge_result = try repo.merge(.{ .new = .{ .source_name = "foo" } });
         defer merge_result.deinit();
         try std.testing.expect(.nothing == merge_result.data);
     }
@@ -186,7 +186,7 @@ fn testMerge(comptime repo_kind: rp.RepoKind) !void {
     {
         var switch_result = try repo.switch_head("foo");
         defer switch_result.deinit();
-        var merge_result = try repo.merge("master");
+        var merge_result = try repo.merge(.{ .new = .{ .source_name = "master" } });
         defer merge_result.deinit();
         try std.testing.expect(.fast_forward == merge_result.data);
 
@@ -249,7 +249,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             defer result.deinit();
         }
         {
-            var result = try repo.merge("foo");
+            var result = try repo.merge(.{ .new = .{ .source_name = "foo" } });
             defer result.deinit();
             try std.testing.expect(.conflict == result.data);
         }
@@ -262,6 +262,14 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             try std.testing.expectEqualStrings("f.txt", diff_item.path);
         } else {
             return error.DiffResultExpected;
+        }
+
+        // resolve conflict
+        try addFile(repo_kind, &repo, "f.txt", "3");
+        {
+            var result = try repo.merge(.cont);
+            defer result.deinit();
+            try std.testing.expect(.success == result.data);
         }
     }
 
@@ -291,7 +299,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             defer result.deinit();
         }
         {
-            var result = try repo.merge("foo");
+            var result = try repo.merge(.{ .new = .{ .source_name = "foo" } });
             defer result.deinit();
             try std.testing.expect(.conflict == result.data);
         }
@@ -305,9 +313,17 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         } else {
             return error.DiffResultExpected;
         }
+
+        // resolve conflict
+        try repo.add(&[_][]const u8{"f.txt"});
+        {
+            var result = try repo.merge(.cont);
+            defer result.deinit();
+            try std.testing.expect(.success == result.data);
+        }
     }
 
-    // modify/delete conflict (current deletes, source modifies)
+    // delete/modify conflict (current deletes, source modifies)
     {
         var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "delete-modify-conflict" } }, writers);
         defer repo.deinit();
@@ -333,7 +349,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             defer result.deinit();
         }
         {
-            var result = try repo.merge("foo");
+            var result = try repo.merge(.{ .new = .{ .source_name = "foo" } });
             defer result.deinit();
             try std.testing.expect(.conflict == result.data);
         }
@@ -344,6 +360,14 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         if (try diff_iter.next()) |diff_item| {
             defer diff_item.deinit();
             return error.DiffResultNotExpected;
+        }
+
+        // resolve conflict
+        try repo.add(&[_][]const u8{"f.txt"});
+        {
+            var result = try repo.merge(.cont);
+            defer result.deinit();
+            try std.testing.expect(.success == result.data);
         }
     }
 
@@ -373,7 +397,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             defer result.deinit();
         }
         {
-            var result = try repo.merge("foo");
+            var result = try repo.merge(.{ .new = .{ .source_name = "foo" } });
             defer result.deinit();
             try std.testing.expect(.conflict == result.data);
         }
@@ -391,6 +415,14 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         // make sure renamed file exists
         var renamed_file = try repo.core.repo_dir.openFile("f.txt~master", .{});
         defer renamed_file.close();
+
+        // resolve conflict
+        try repo.add(&[_][]const u8{"f.txt"});
+        {
+            var result = try repo.merge(.cont);
+            defer result.deinit();
+            try std.testing.expect(.success == result.data);
+        }
     }
 
     // dir/file conflict (current has dir, source has file)
@@ -419,7 +451,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             defer result.deinit();
         }
         {
-            var result = try repo.merge("foo");
+            var result = try repo.merge(.{ .new = .{ .source_name = "foo" } });
             defer result.deinit();
             try std.testing.expect(.conflict == result.data);
         }
@@ -435,6 +467,14 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         // make sure renamed file exists
         var renamed_file = try repo.core.repo_dir.openFile("f.txt~foo", .{});
         defer renamed_file.close();
+
+        // resolve conflict
+        try repo.add(&[_][]const u8{"f.txt"});
+        {
+            var result = try repo.merge(.cont);
+            defer result.deinit();
+            try std.testing.expect(.success == result.data);
+        }
     }
 }
 

@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const df = @import("./diff.zig");
+const mrg = @import("./merge.zig");
 
 pub const CommandKind = enum {
     invalid,
@@ -47,9 +48,7 @@ pub const CommandData = union(CommandKind) {
         path: []const u8,
     },
     log,
-    merge: struct {
-        source: []const u8,
-    },
+    merge: mrg.MergeInput,
 };
 
 /// returns the data from the process args in a nicer format.
@@ -127,10 +126,21 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8))
         } else if (std.mem.eql(u8, args.items[0], "log")) {
             return CommandData{ .log = {} };
         } else if (std.mem.eql(u8, args.items[0], "merge")) {
-            if (pos_args.items.len == 0) {
-                return error.MergeSourceMissing;
+            var merge_input_maybe: ?mrg.MergeInput = null;
+            if (pos_args.items.len > 0) {
+                merge_input_maybe = .{ .new = .{ .source_name = pos_args.items[0] } };
             }
-            return CommandData{ .merge = .{ .source = pos_args.items[0] } };
+            if (map_args.contains("--continue")) {
+                if (merge_input_maybe != null) {
+                    return error.ConflictingMergeArgs;
+                }
+                merge_input_maybe = .cont;
+            }
+            if (merge_input_maybe) |merge_input| {
+                return CommandData{ .merge = merge_input };
+            } else {
+                return error.InsufficientMergeArgs;
+            }
         } else {
             return CommandData{ .invalid = .{ .name = args.items[0] } };
         }
