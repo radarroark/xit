@@ -32,7 +32,7 @@ pub const MyersDiff = struct {
         },
     };
 
-    pub fn init(allocator: std.mem.Allocator, a: []const []const u8, b: []const []const u8) !MyersDiff {
+    pub fn init(allocator: std.mem.Allocator, line_iter_a: *LineIterator, line_iter_b: *LineIterator) !MyersDiff {
         var trace = std.ArrayList(std.ArrayList(isize)).init(allocator);
         defer {
             for (trace.items) |*arr| {
@@ -41,8 +41,20 @@ pub const MyersDiff = struct {
             trace.deinit();
         }
 
+        var a = std.ArrayList([]const u8).init(allocator);
+        defer a.deinit();
+        while (line_iter_a.next()) |line| {
+            try a.append(line);
+        }
+
+        var b = std.ArrayList([]const u8).init(allocator);
+        defer b.deinit();
+        while (line_iter_b.next()) |line| {
+            try b.append(line);
+        }
+
         {
-            const max = a.len + b.len;
+            const max = a.items.len + b.items.len;
             var v = try std.ArrayList(isize).initCapacity(allocator, 2 * max + 1);
             defer v.deinit();
             v.expandToCapacity();
@@ -62,12 +74,12 @@ pub const MyersDiff = struct {
                         xx = v.items[absIndex(kk - 1, v.items.len)] + 1;
                     }
                     var yy = xx - kk;
-                    while (xx < a.len and yy < b.len and std.mem.eql(u8, a[absIndex(xx, a.len)], b[absIndex(yy, b.len)])) {
+                    while (xx < a.items.len and yy < b.items.len and std.mem.eql(u8, a.items[absIndex(xx, a.items.len)], b.items[absIndex(yy, b.items.len)])) {
                         xx += 1;
                         yy += 1;
                     }
                     v.items[absIndex(kk, v.items.len)] = xx;
-                    if (xx >= a.len and yy >= b.len) {
+                    if (xx >= a.items.len and yy >= b.items.len) {
                         break :blk;
                     }
                 }
@@ -77,8 +89,8 @@ pub const MyersDiff = struct {
         var backtrack = std.ArrayList([4]isize).init(allocator);
         defer backtrack.deinit();
         {
-            var xx: isize = @intCast(a.len);
-            var yy: isize = @intCast(b.len);
+            var xx: isize = @intCast(a.items.len);
+            var yy: isize = @intCast(b.items.len);
             for (0..trace.items.len) |i| {
                 const d = trace.items.len - i - 1;
                 const v = trace.items[d];
@@ -121,26 +133,26 @@ pub const MyersDiff = struct {
             const yy = edit[3];
 
             if (xx == prev_xx) {
-                const new_idx = absIndex(prev_yy, b.len);
+                const new_idx = absIndex(prev_yy, b.items.len);
                 edits.items[ii] = .{
                     .ins = .{
-                        .new_line = .{ .num = new_idx + 1, .text = b[new_idx] },
+                        .new_line = .{ .num = new_idx + 1, .text = b.items[new_idx] },
                     },
                 };
             } else if (yy == prev_yy) {
-                const old_idx = absIndex(prev_xx, a.len);
+                const old_idx = absIndex(prev_xx, a.items.len);
                 edits.items[ii] = .{
                     .del = .{
-                        .old_line = .{ .num = old_idx + 1, .text = a[old_idx] },
+                        .old_line = .{ .num = old_idx + 1, .text = a.items[old_idx] },
                     },
                 };
             } else {
-                const old_idx = absIndex(prev_xx, a.len);
-                const new_idx = absIndex(prev_yy, b.len);
+                const old_idx = absIndex(prev_xx, a.items.len);
+                const new_idx = absIndex(prev_yy, b.items.len);
                 edits.items[ii] = .{
                     .eql = .{
-                        .old_line = .{ .num = old_idx + 1, .text = a[old_idx] },
-                        .new_line = .{ .num = new_idx + 1, .text = b[new_idx] },
+                        .old_line = .{ .num = old_idx + 1, .text = a.items[old_idx] },
+                        .new_line = .{ .num = new_idx + 1, .text = b.items[new_idx] },
                     },
                 };
             }
@@ -159,8 +171,12 @@ pub const MyersDiff = struct {
 test "myers diff" {
     const allocator = std.testing.allocator;
     {
-        const lines1 = [_][]const u8{ "A", "B", "C", "A", "B", "B", "A" };
-        const lines2 = [_][]const u8{ "C", "B", "A", "B", "A", "C" };
+        const lines1 = "A\nB\nC\nA\nB\nB\nA";
+        const lines2 = "C\nB\nA\nB\nA\nC";
+        var line_iter1 = try LineIterator.initFromBuffer(allocator, lines1);
+        defer line_iter1.deinit();
+        var line_iter2 = try LineIterator.initFromBuffer(allocator, lines2);
+        defer line_iter2.deinit();
         const expected_diff = [_]MyersDiff.Edit{
             .{ .del = .{ .old_line = .{ .num = 1, .text = "A" } } },
             .{ .del = .{ .old_line = .{ .num = 2, .text = "B" } } },
@@ -172,7 +188,7 @@ test "myers diff" {
             .{ .eql = .{ .old_line = .{ .num = 7, .text = "A" }, .new_line = .{ .num = 5, .text = "A" } } },
             .{ .ins = .{ .new_line = .{ .num = 6, .text = "C" } } },
         };
-        var actual_diff = try MyersDiff.init(allocator, &lines1, &lines2);
+        var actual_diff = try MyersDiff.init(allocator, &line_iter1, &line_iter2);
         defer actual_diff.deinit();
         try std.testing.expectEqual(expected_diff.len, actual_diff.edits.items.len);
         for (expected_diff, actual_diff.edits.items) |expected, actual| {
@@ -180,13 +196,17 @@ test "myers diff" {
         }
     }
     {
-        const lines1 = [_][]const u8{"hello, world!"};
-        const lines2 = [_][]const u8{"goodbye, world!"};
+        const lines1 = "hello, world!";
+        const lines2 = "goodbye, world!";
+        var line_iter1 = try LineIterator.initFromBuffer(allocator, lines1);
+        defer line_iter1.deinit();
+        var line_iter2 = try LineIterator.initFromBuffer(allocator, lines2);
+        defer line_iter2.deinit();
         const expected_diff = [_]MyersDiff.Edit{
             .{ .del = .{ .old_line = .{ .num = 1, .text = "hello, world!" } } },
             .{ .ins = .{ .new_line = .{ .num = 1, .text = "goodbye, world!" } } },
         };
-        var actual_diff = try MyersDiff.init(allocator, &lines1, &lines2);
+        var actual_diff = try MyersDiff.init(allocator, &line_iter1, &line_iter2);
         defer actual_diff.deinit();
         try std.testing.expectEqual(expected_diff.len, actual_diff.edits.items.len);
         for (expected_diff, actual_diff.edits.items) |expected, actual| {
@@ -250,16 +270,16 @@ pub const LineIterator = struct {
     }
 
     pub fn initFromNothing(allocator: std.mem.Allocator, path: []const u8) !LineIterator {
-        const buffer = try allocator.alloc(u8, 0);
-        errdefer allocator.free(buffer);
+        const empty_buffer = try allocator.alloc(u8, 0);
+        errdefer allocator.free(empty_buffer);
         return .{
             .allocator = allocator,
             .path = path,
             .oid = [_]u8{0} ** hash.SHA1_BYTES_LEN,
             .oid_hex = [_]u8{0} ** hash.SHA1_HEX_LEN,
             .mode = null,
-            .buffer = buffer,
-            .split_iter = std.mem.splitScalar(u8, buffer, '\n'),
+            .buffer = empty_buffer,
+            .split_iter = std.mem.splitScalar(u8, empty_buffer, '\n'),
         };
     }
 
@@ -277,6 +297,20 @@ pub const LineIterator = struct {
             .mode = entry.mode,
             .buffer = buffer,
             .split_iter = std.mem.splitScalar(u8, buf, '\n'),
+        };
+    }
+
+    pub fn initFromBuffer(allocator: std.mem.Allocator, buffer: []const u8) !LineIterator {
+        const empty_buffer = try allocator.alloc(u8, 0);
+        errdefer allocator.free(empty_buffer);
+        return .{
+            .allocator = allocator,
+            .path = "",
+            .oid = [_]u8{0} ** hash.SHA1_BYTES_LEN,
+            .oid_hex = [_]u8{0} ** hash.SHA1_HEX_LEN,
+            .mode = null,
+            .buffer = empty_buffer,
+            .split_iter = std.mem.splitScalar(u8, buffer, '\n'),
         };
     }
 
@@ -393,17 +427,7 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind) type {
                     try header_lines.append("+++ /dev/null");
                 }
 
-                var lines_a = std.ArrayList([]const u8).init(arena.allocator());
-                while (a.next()) |line| {
-                    try lines_a.append(line);
-                }
-
-                var lines_b = std.ArrayList([]const u8).init(arena.allocator());
-                while (b.next()) |line| {
-                    try lines_b.append(line);
-                }
-
-                myers_diff_maybe = try MyersDiff.init(allocator, lines_a.items, lines_b.items);
+                myers_diff_maybe = try MyersDiff.init(allocator, a, b);
             }
 
             return HunkIterator(repo_kind){
