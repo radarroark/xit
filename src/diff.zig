@@ -508,7 +508,7 @@ pub const ConflictDiffKind = enum {
     source, // theirs
 };
 
-pub fn DiffIterator(comptime repo_kind: rp.RepoKind) type {
+pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
     return struct {
         allocator: std.mem.Allocator,
         core: *rp.Repo(repo_kind).Core,
@@ -524,7 +524,7 @@ pub fn DiffIterator(comptime repo_kind: rp.RepoKind) type {
             diff_kind: DiffKind,
             conflict_diff_kind_maybe: ?ConflictDiffKind,
             status: st.Status(repo_kind),
-        ) !DiffIterator(repo_kind) {
+        ) !FileIterator(repo_kind) {
             return .{
                 .allocator = allocator,
                 .core = core,
@@ -536,7 +536,7 @@ pub fn DiffIterator(comptime repo_kind: rp.RepoKind) type {
             };
         }
 
-        pub fn next(self: *DiffIterator(repo_kind)) !?*HunkIterator(repo_kind) {
+        pub fn next(self: *FileIterator(repo_kind)) !?*HunkIterator(repo_kind) {
             // TODO: instead of latest cursor, store the tx id so we always use the
             // same transaction even if the db is written to while calling next
             var cursor = try self.core.latestCursor();
@@ -652,7 +652,7 @@ pub fn DiffIterator(comptime repo_kind: rp.RepoKind) type {
             return null;
         }
 
-        pub fn deinit(self: *DiffIterator(repo_kind)) void {
+        pub fn deinit(self: *FileIterator(repo_kind)) void {
             self.status.deinit();
         }
     };
