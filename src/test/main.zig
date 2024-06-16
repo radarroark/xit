@@ -310,10 +310,10 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             var diff_iter = try repo.diff(.workspace, null);
             defer diff_iter.deinit();
 
-            while (try diff_iter.next()) |diff_item| {
-                defer diff_item.deinit();
-                if (std.mem.eql(u8, "hello.txt", diff_item.path)) {
-                    try std.testing.expectEqualStrings("diff --git a/hello.txt b/hello.txt", diff_item.header_lines.items[0]);
+            while (try diff_iter.next()) |hunk_iter| {
+                defer hunk_iter.deinit();
+                if (std.mem.eql(u8, "hello.txt", hunk_iter.path)) {
+                    try std.testing.expectEqualStrings("diff --git a/hello.txt b/hello.txt", hunk_iter.header_lines.items[0]);
                     const expected_hunks = [_][]const df.MyersDiff.Edit{
                         &[_]df.MyersDiff.Edit{
                             .{ .eql = .{ .old_line = .{ .num = 2, .text = "2" }, .new_line = .{ .num = 2, .text = "2" } } },
@@ -340,18 +340,23 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                             .{ .ins = .{ .new_line = .{ .num = 15, .text = "15.0" } } },
                         },
                     };
-                    for (expected_hunks, diff_item.hunks.items) |expected_hunk, actual_hunk| {
-                        for (expected_hunk, actual_hunk.edits) |expected_edit, actual_edit| {
-                            try std.testing.expectEqualDeep(expected_edit, actual_edit);
+                    for (expected_hunks) |expected_hunk| {
+                        const actual_hunk_maybe = hunk_iter.next();
+                        if (actual_hunk_maybe) |actual_hunk| {
+                            for (expected_hunk, actual_hunk.edits) |expected_edit, actual_edit| {
+                                try std.testing.expectEqualDeep(expected_edit, actual_edit);
+                            }
+                        } else {
+                            return error.NullHunk;
                         }
                     }
-                } else if (std.mem.eql(u8, "run.sh", diff_item.path)) {
-                    try std.testing.expectEqualStrings("diff --git a/run.sh b/run.sh", diff_item.header_lines.items[0]);
-                    try std.testing.expectEqualStrings("old mode 100644", diff_item.header_lines.items[1]);
-                    try std.testing.expectEqualStrings("new mode 100755", diff_item.header_lines.items[2]);
-                } else if (std.mem.eql(u8, "tests", diff_item.path)) {
-                    try std.testing.expectEqualStrings("diff --git a/tests b/tests", diff_item.header_lines.items[0]);
-                    try std.testing.expectEqualStrings("deleted file mode 100644", diff_item.header_lines.items[1]);
+                } else if (std.mem.eql(u8, "run.sh", hunk_iter.path)) {
+                    try std.testing.expectEqualStrings("diff --git a/run.sh b/run.sh", hunk_iter.header_lines.items[0]);
+                    try std.testing.expectEqualStrings("old mode 100644", hunk_iter.header_lines.items[1]);
+                    try std.testing.expectEqualStrings("new mode 100755", hunk_iter.header_lines.items[2]);
+                } else if (std.mem.eql(u8, "tests", hunk_iter.path)) {
+                    try std.testing.expectEqualStrings("diff --git a/tests b/tests", hunk_iter.header_lines.items[0]);
+                    try std.testing.expectEqualStrings("deleted file mode 100644", hunk_iter.header_lines.items[1]);
                 } else {
                     return error.EntryNotExpected;
                 }

@@ -314,56 +314,60 @@ pub fn Target(comptime repo_kind: rp.RepoKind) type {
     };
 }
 
-pub fn Diff(comptime repo_kind: rp.RepoKind) type {
+pub const Hunk = struct {
+    edits: []MyersDiff.Edit,
+
+    pub const Offsets = struct {
+        del_start: usize,
+        del_count: usize,
+        ins_start: usize,
+        ins_count: usize,
+    };
+
+    pub fn offsets(self: Hunk) Offsets {
+        var o = Offsets{
+            .del_start = 0,
+            .del_count = 0,
+            .ins_start = 0,
+            .ins_count = 0,
+        };
+        for (self.edits) |edit| {
+            switch (edit) {
+                .eql => {
+                    if (o.ins_start == 0) o.ins_start = edit.eql.new_line.num;
+                    o.ins_count += 1;
+                    if (o.del_start == 0) o.del_start = edit.eql.old_line.num;
+                    o.del_count += 1;
+                },
+                .ins => {
+                    if (o.ins_start == 0) o.ins_start = edit.ins.new_line.num;
+                    o.ins_count += 1;
+                },
+                .del => {
+                    if (o.del_start == 0) o.del_start = edit.del.old_line.num;
+                    o.del_count += 1;
+                },
+            }
+        }
+        return o;
+    }
+};
+
+pub fn HunkIterator(comptime repo_kind: rp.RepoKind) type {
     return struct {
         path: []const u8,
         header_lines: std.ArrayList([]const u8),
         myers_diff_maybe: ?MyersDiff,
-        hunks: std.ArrayList(Hunk), // TODO: turn into iterator
         arena: std.heap.ArenaAllocator,
         target_a: Target(repo_kind),
         target_b: Target(repo_kind),
+        next_edit_index: usize,
+        found_edit: bool,
+        margin: usize,
+        begin_index: usize,
+        end_index: usize,
 
-        pub const Hunk = struct {
-            edits: []MyersDiff.Edit,
-
-            pub const Offsets = struct {
-                del_start: usize,
-                del_count: usize,
-                ins_start: usize,
-                ins_count: usize,
-            };
-
-            pub fn offsets(self: Hunk) Offsets {
-                var o = Offsets{
-                    .del_start = 0,
-                    .del_count = 0,
-                    .ins_start = 0,
-                    .ins_count = 0,
-                };
-                for (self.edits) |edit| {
-                    switch (edit) {
-                        .eql => {
-                            if (o.ins_start == 0) o.ins_start = edit.eql.new_line.num;
-                            o.ins_count += 1;
-                            if (o.del_start == 0) o.del_start = edit.eql.old_line.num;
-                            o.del_count += 1;
-                        },
-                        .ins => {
-                            if (o.ins_start == 0) o.ins_start = edit.ins.new_line.num;
-                            o.ins_count += 1;
-                        },
-                        .del => {
-                            if (o.del_start == 0) o.del_start = edit.del.old_line.num;
-                            o.del_count += 1;
-                        },
-                    }
-                }
-                return o;
-            }
-        };
-
-        pub fn init(allocator: std.mem.Allocator, a: Target(repo_kind), b: Target(repo_kind)) !Diff(repo_kind) {
+        pub fn init(allocator: std.mem.Allocator, a: Target(repo_kind), b: Target(repo_kind)) !HunkIterator(repo_kind) {
             var arena = std.heap.ArenaAllocator.init(allocator);
             errdefer arena.deinit();
 
@@ -390,7 +394,6 @@ pub fn Diff(comptime repo_kind: rp.RepoKind) type {
                 }
             }
 
-            var hunks = std.ArrayList(Hunk).init(arena.allocator());
             var myers_diff_maybe: ?MyersDiff = null;
 
             if (!std.mem.eql(u8, &a.oid, &b.oid)) {
@@ -415,69 +418,88 @@ pub fn Diff(comptime repo_kind: rp.RepoKind) type {
                     try header_lines.append("+++ /dev/null");
                 }
 
-                var myers_diff = try MyersDiff.init(allocator, a.lines.items, b.lines.items);
-                errdefer myers_diff.deinit();
-                const max_margin: usize = 3;
-                var found_edit = false;
-                var margin: usize = 0;
-                var begin_idx: usize = 0;
-                var end_idx: usize = 0;
+                myers_diff_maybe = try MyersDiff.init(allocator, a.lines.items, b.lines.items);
+            }
 
-                for (myers_diff.edits.items, 0..) |edit, i| {
-                    end_idx = i;
+            return HunkIterator(repo_kind){
+                .path = a.path,
+                .header_lines = header_lines,
+                .myers_diff_maybe = myers_diff_maybe,
+                .arena = arena,
+                .target_a = a,
+                .target_b = b,
+                .next_edit_index = 0,
+                .found_edit = false,
+                .margin = 0,
+                .begin_index = 0,
+                .end_index = 0,
+            };
+        }
+
+        pub fn next(self: *HunkIterator(repo_kind)) ?Hunk {
+            const max_margin: usize = 3;
+            const edit_index = self.next_edit_index;
+
+            if (self.myers_diff_maybe) |myers_diff| {
+                if (edit_index < myers_diff.edits.items.len) {
+                    const edit = myers_diff.edits.items[edit_index];
+                    self.end_index = edit_index;
 
                     if (edit == .eql) {
-                        margin += 1;
-                        if (found_edit) {
+                        self.margin += 1;
+                        if (self.found_edit) {
                             // if the end margin isn't the max,
                             // keep adding to the hunk
-                            if (margin < max_margin) {
-                                if (i < myers_diff.edits.items.len - 1) continue;
+                            if (self.margin < max_margin) {
+                                self.next_edit_index += 1;
+                                if (edit_index < myers_diff.edits.items.len - 1) {
+                                    return self.next();
+                                }
                             }
                         }
                         // if the begin margin is over the max,
                         // remove the first line (which is
                         // guaranteed to be an eql edit)
-                        else if (margin > max_margin) {
-                            begin_idx += 1;
-                            margin -= 1;
-                            if (i < myers_diff.edits.items.len - 1) continue;
+                        else if (self.margin > max_margin) {
+                            self.begin_index += 1;
+                            self.margin -= 1;
+                            self.next_edit_index += 1;
+                            if (edit_index < myers_diff.edits.items.len - 1) {
+                                return self.next();
+                            }
                         }
                     } else {
-                        found_edit = true;
-                        margin = 0;
-                        if (i < myers_diff.edits.items.len - 1) continue;
+                        self.found_edit = true;
+                        self.margin = 0;
+                        self.next_edit_index += 1;
+                        if (edit_index < myers_diff.edits.items.len - 1) {
+                            return self.next();
+                        }
                     }
 
                     // if the diff state contains an actual edit
                     // (that is, non-eql line)
-                    if (found_edit) {
+                    if (self.found_edit) {
                         const hunk = Hunk{
-                            .edits = myers_diff.edits.items[begin_idx .. end_idx + 1],
+                            .edits = myers_diff.edits.items[self.begin_index .. self.end_index + 1],
                         };
-                        try hunks.append(hunk);
-                        found_edit = false;
-                        margin = 0;
-                        end_idx += 1;
-                        begin_idx = end_idx;
+                        self.found_edit = false;
+                        self.margin = 0;
+                        self.end_index += 1;
+                        self.begin_index = self.end_index;
+                        self.next_edit_index += 1;
+                        return hunk;
+                    } else {
+                        self.next_edit_index += 1;
+                        return self.next();
                     }
                 }
-
-                myers_diff_maybe = myers_diff;
             }
 
-            return Diff(repo_kind){
-                .path = a.path,
-                .header_lines = header_lines,
-                .myers_diff_maybe = myers_diff_maybe,
-                .hunks = hunks,
-                .arena = arena,
-                .target_a = a,
-                .target_b = b,
-            };
+            return null;
         }
 
-        pub fn deinit(self: *Diff(repo_kind)) void {
+        pub fn deinit(self: *HunkIterator(repo_kind)) void {
             self.arena.deinit();
             if (self.myers_diff_maybe) |*myers_diff| {
                 myers_diff.deinit();
@@ -506,7 +528,7 @@ pub fn DiffIterator(comptime repo_kind: rp.RepoKind) type {
         diff_kind: DiffKind,
         conflict_diff_kind_maybe: ?ConflictDiffKind,
         status: st.Status(repo_kind),
-        diff: Diff(repo_kind),
+        hunk_iter: HunkIterator(repo_kind),
         next_index: usize,
 
         pub fn init(
@@ -522,12 +544,12 @@ pub fn DiffIterator(comptime repo_kind: rp.RepoKind) type {
                 .diff_kind = diff_kind,
                 .conflict_diff_kind_maybe = conflict_diff_kind_maybe,
                 .status = status,
-                .diff = undefined,
+                .hunk_iter = undefined,
                 .next_index = 0,
             };
         }
 
-        pub fn next(self: *DiffIterator(repo_kind)) !?*Diff(repo_kind) {
+        pub fn next(self: *DiffIterator(repo_kind)) !?*HunkIterator(repo_kind) {
             // TODO: instead of latest cursor, store the tx id so we always use the
             // same transaction even if the db is written to while calling next
             var cursor = try self.core.latestCursor();
@@ -558,9 +580,9 @@ pub fn DiffIterator(comptime repo_kind: rp.RepoKind) type {
                                     else => try Target(repo_kind).initFromNothing(self.allocator, path),
                                 };
                                 errdefer b.deinit();
-                                self.diff = try Diff(repo_kind).init(self.allocator, a, b);
+                                self.hunk_iter = try HunkIterator(repo_kind).init(self.allocator, a, b);
                                 self.next_index += 1;
-                                return &self.diff;
+                                return &self.hunk_iter;
                             }
                             // there is no entry, so just skip it and call this method recursively
                             else {
@@ -579,9 +601,9 @@ pub fn DiffIterator(comptime repo_kind: rp.RepoKind) type {
                         errdefer a.deinit();
                         var b = try Target(repo_kind).initFromWorkspace(self.allocator, core_cursor, entry.path, io.getMode(entry.meta));
                         errdefer b.deinit();
-                        self.diff = try Diff(repo_kind).init(self.allocator, a, b);
+                        self.hunk_iter = try HunkIterator(repo_kind).init(self.allocator, a, b);
                         self.next_index += 1;
-                        return &self.diff;
+                        return &self.hunk_iter;
                     } else {
                         next_index -= self.status.workspace_modified.items.len;
                     }
@@ -593,9 +615,9 @@ pub fn DiffIterator(comptime repo_kind: rp.RepoKind) type {
                         errdefer a.deinit();
                         var b = try Target(repo_kind).initFromNothing(self.allocator, path);
                         errdefer b.deinit();
-                        self.diff = try Diff(repo_kind).init(self.allocator, a, b);
+                        self.hunk_iter = try HunkIterator(repo_kind).init(self.allocator, a, b);
                         self.next_index += 1;
-                        return &self.diff;
+                        return &self.hunk_iter;
                     }
                 },
                 .index => {
@@ -606,9 +628,9 @@ pub fn DiffIterator(comptime repo_kind: rp.RepoKind) type {
                         const index_entries_for_path = self.status.index.entries.get(path) orelse return error.EntryNotFound;
                         var b = try Target(repo_kind).initFromIndex(self.allocator, core_cursor, index_entries_for_path[0] orelse return error.NullEntry);
                         errdefer b.deinit();
-                        self.diff = try Diff(repo_kind).init(self.allocator, a, b);
+                        self.hunk_iter = try HunkIterator(repo_kind).init(self.allocator, a, b);
                         self.next_index += 1;
-                        return &self.diff;
+                        return &self.hunk_iter;
                     } else {
                         next_index -= self.status.index_added.items.len;
                     }
@@ -620,9 +642,9 @@ pub fn DiffIterator(comptime repo_kind: rp.RepoKind) type {
                         const index_entries_for_path = self.status.index.entries.get(path) orelse return error.EntryNotFound;
                         var b = try Target(repo_kind).initFromIndex(self.allocator, core_cursor, index_entries_for_path[0] orelse return error.NullEntry);
                         errdefer b.deinit();
-                        self.diff = try Diff(repo_kind).init(self.allocator, a, b);
+                        self.hunk_iter = try HunkIterator(repo_kind).init(self.allocator, a, b);
                         self.next_index += 1;
-                        return &self.diff;
+                        return &self.hunk_iter;
                     } else {
                         next_index -= self.status.index_modified.items.len;
                     }
@@ -633,9 +655,9 @@ pub fn DiffIterator(comptime repo_kind: rp.RepoKind) type {
                         errdefer a.deinit();
                         var b = try Target(repo_kind).initFromNothing(self.allocator, path);
                         errdefer b.deinit();
-                        self.diff = try Diff(repo_kind).init(self.allocator, a, b);
+                        self.hunk_iter = try HunkIterator(repo_kind).init(self.allocator, a, b);
                         self.next_index += 1;
-                        return &self.diff;
+                        return &self.hunk_iter;
                     }
                 },
             }

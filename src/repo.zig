@@ -327,12 +327,12 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     var diff_iter = try self.diff(cmd_data.diff.diff_kind, cmd_data.diff.conflict_diff_kind_maybe);
                     defer diff_iter.deinit();
 
-                    while (try diff_iter.next()) |diff_item| {
-                        defer diff_item.deinit();
-                        for (diff_item.header_lines.items) |header_line| {
+                    while (try diff_iter.next()) |hunk_iter| {
+                        defer hunk_iter.deinit();
+                        for (hunk_iter.header_lines.items) |header_line| {
                             try writers.out.print("{s}\n", .{header_line});
                         }
-                        for (diff_item.hunks.items) |hunk| {
+                        while (hunk_iter.next()) |hunk| {
                             const offsets = hunk.offsets();
                             try writers.out.print("@@ -{},{} +{},{} @@\n", .{
                                 offsets.del_start,
