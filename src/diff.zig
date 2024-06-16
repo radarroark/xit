@@ -362,162 +362,160 @@ pub const Hunk = struct {
     }
 };
 
-pub fn HunkIterator(comptime repo_kind: rp.RepoKind) type {
-    return struct {
-        path: []const u8,
-        header_lines: std.ArrayList([]const u8),
-        myers_diff_maybe: ?MyersDiff,
-        arena: std.heap.ArenaAllocator,
-        line_iter_a: LineIterator,
-        line_iter_b: LineIterator,
-        next_edit_index: usize,
-        found_edit: bool,
-        margin: usize,
-        begin_index: usize,
-        end_index: usize,
+pub const HunkIterator = struct {
+    path: []const u8,
+    header_lines: std.ArrayList([]const u8),
+    myers_diff_maybe: ?MyersDiff,
+    arena: std.heap.ArenaAllocator,
+    line_iter_a: LineIterator,
+    line_iter_b: LineIterator,
+    next_edit_index: usize,
+    found_edit: bool,
+    margin: usize,
+    begin_index: usize,
+    end_index: usize,
 
-        pub fn init(allocator: std.mem.Allocator, a: *LineIterator, b: *LineIterator) !HunkIterator(repo_kind) {
-            var arena = std.heap.ArenaAllocator.init(allocator);
-            errdefer arena.deinit();
+    pub fn init(allocator: std.mem.Allocator, a: *LineIterator, b: *LineIterator) !HunkIterator {
+        var arena = std.heap.ArenaAllocator.init(allocator);
+        errdefer arena.deinit();
 
-            var header_lines = std.ArrayList([]const u8).init(arena.allocator());
+        var header_lines = std.ArrayList([]const u8).init(arena.allocator());
 
-            try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "diff --git a/{s} b/{s}", .{ a.path, b.path }));
+        try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "diff --git a/{s} b/{s}", .{ a.path, b.path }));
 
-            var mode_maybe: ?io.Mode = null;
+        var mode_maybe: ?io.Mode = null;
 
-            if (a.mode) |a_mode| {
-                if (b.mode) |b_mode| {
-                    if (a_mode.unix_permission != b_mode.unix_permission) {
-                        try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "old mode {s}", .{a_mode.toStr()}));
-                        try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "new mode {s}", .{b_mode.toStr()}));
-                    } else {
-                        mode_maybe = a_mode;
-                    }
+        if (a.mode) |a_mode| {
+            if (b.mode) |b_mode| {
+                if (a_mode.unix_permission != b_mode.unix_permission) {
+                    try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "old mode {s}", .{a_mode.toStr()}));
+                    try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "new mode {s}", .{b_mode.toStr()}));
                 } else {
-                    try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "deleted file mode {s}", .{a_mode.toStr()}));
+                    mode_maybe = a_mode;
                 }
             } else {
-                if (b.mode) |b_mode| {
-                    try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "new file mode {s}", .{b_mode.toStr()}));
-                }
+                try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "deleted file mode {s}", .{a_mode.toStr()}));
             }
-
-            var myers_diff_maybe: ?MyersDiff = null;
-
-            if (!std.mem.eql(u8, &a.oid, &b.oid)) {
-                if (mode_maybe) |mode| {
-                    try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "index {s}..{s} {s}", .{
-                        a.oid_hex[0..7],
-                        b.oid_hex[0..7],
-                        mode.toStr(),
-                    }));
-                } else {
-                    try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "index {s}..{s}", .{
-                        a.oid_hex[0..7],
-                        b.oid_hex[0..7],
-                    }));
-                }
-
-                try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "--- a/{s}", .{a.path}));
-
-                if (b.mode != null) {
-                    try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "+++ b/{s}", .{b.path}));
-                } else {
-                    try header_lines.append("+++ /dev/null");
-                }
-
-                myers_diff_maybe = try MyersDiff.init(allocator, a, b);
+        } else {
+            if (b.mode) |b_mode| {
+                try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "new file mode {s}", .{b_mode.toStr()}));
             }
-
-            return HunkIterator(repo_kind){
-                .path = a.path,
-                .header_lines = header_lines,
-                .myers_diff_maybe = myers_diff_maybe,
-                .arena = arena,
-                .line_iter_a = a.*,
-                .line_iter_b = b.*,
-                .next_edit_index = 0,
-                .found_edit = false,
-                .margin = 0,
-                .begin_index = 0,
-                .end_index = 0,
-            };
         }
 
-        pub fn next(self: *HunkIterator(repo_kind)) ?Hunk {
-            const max_margin: usize = 3;
-            const edit_index = self.next_edit_index;
+        var myers_diff_maybe: ?MyersDiff = null;
 
-            if (self.myers_diff_maybe) |myers_diff| {
-                if (edit_index < myers_diff.edits.items.len) {
-                    const edit = myers_diff.edits.items[edit_index];
-                    self.end_index = edit_index;
+        if (!std.mem.eql(u8, &a.oid, &b.oid)) {
+            if (mode_maybe) |mode| {
+                try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "index {s}..{s} {s}", .{
+                    a.oid_hex[0..7],
+                    b.oid_hex[0..7],
+                    mode.toStr(),
+                }));
+            } else {
+                try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "index {s}..{s}", .{
+                    a.oid_hex[0..7],
+                    b.oid_hex[0..7],
+                }));
+            }
 
-                    if (edit == .eql) {
-                        self.margin += 1;
-                        if (self.found_edit) {
-                            // if the end margin isn't the max,
-                            // keep adding to the hunk
-                            if (self.margin < max_margin) {
-                                self.next_edit_index += 1;
-                                if (edit_index < myers_diff.edits.items.len - 1) {
-                                    return self.next();
-                                }
-                            }
-                        }
-                        // if the begin margin is over the max,
-                        // remove the first line (which is
-                        // guaranteed to be an eql edit)
-                        else if (self.margin > max_margin) {
-                            self.begin_index += 1;
-                            self.margin -= 1;
+            try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "--- a/{s}", .{a.path}));
+
+            if (b.mode != null) {
+                try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "+++ b/{s}", .{b.path}));
+            } else {
+                try header_lines.append("+++ /dev/null");
+            }
+
+            myers_diff_maybe = try MyersDiff.init(allocator, a, b);
+        }
+
+        return HunkIterator{
+            .path = a.path,
+            .header_lines = header_lines,
+            .myers_diff_maybe = myers_diff_maybe,
+            .arena = arena,
+            .line_iter_a = a.*,
+            .line_iter_b = b.*,
+            .next_edit_index = 0,
+            .found_edit = false,
+            .margin = 0,
+            .begin_index = 0,
+            .end_index = 0,
+        };
+    }
+
+    pub fn next(self: *HunkIterator) ?Hunk {
+        const max_margin: usize = 3;
+        const edit_index = self.next_edit_index;
+
+        if (self.myers_diff_maybe) |myers_diff| {
+            if (edit_index < myers_diff.edits.items.len) {
+                const edit = myers_diff.edits.items[edit_index];
+                self.end_index = edit_index;
+
+                if (edit == .eql) {
+                    self.margin += 1;
+                    if (self.found_edit) {
+                        // if the end margin isn't the max,
+                        // keep adding to the hunk
+                        if (self.margin < max_margin) {
                             self.next_edit_index += 1;
                             if (edit_index < myers_diff.edits.items.len - 1) {
                                 return self.next();
                             }
                         }
-                    } else {
-                        self.found_edit = true;
-                        self.margin = 0;
+                    }
+                    // if the begin margin is over the max,
+                    // remove the first line (which is
+                    // guaranteed to be an eql edit)
+                    else if (self.margin > max_margin) {
+                        self.begin_index += 1;
+                        self.margin -= 1;
                         self.next_edit_index += 1;
                         if (edit_index < myers_diff.edits.items.len - 1) {
                             return self.next();
                         }
                     }
-
-                    // if the diff state contains an actual edit
-                    // (that is, non-eql line)
-                    if (self.found_edit) {
-                        const hunk = Hunk{
-                            .edits = myers_diff.edits.items[self.begin_index .. self.end_index + 1],
-                        };
-                        self.found_edit = false;
-                        self.margin = 0;
-                        self.end_index += 1;
-                        self.begin_index = self.end_index;
-                        self.next_edit_index += 1;
-                        return hunk;
-                    } else {
-                        self.next_edit_index += 1;
+                } else {
+                    self.found_edit = true;
+                    self.margin = 0;
+                    self.next_edit_index += 1;
+                    if (edit_index < myers_diff.edits.items.len - 1) {
                         return self.next();
                     }
                 }
-            }
 
-            return null;
+                // if the diff state contains an actual edit
+                // (that is, non-eql line)
+                if (self.found_edit) {
+                    const hunk = Hunk{
+                        .edits = myers_diff.edits.items[self.begin_index .. self.end_index + 1],
+                    };
+                    self.found_edit = false;
+                    self.margin = 0;
+                    self.end_index += 1;
+                    self.begin_index = self.end_index;
+                    self.next_edit_index += 1;
+                    return hunk;
+                } else {
+                    self.next_edit_index += 1;
+                    return self.next();
+                }
+            }
         }
 
-        pub fn deinit(self: *HunkIterator(repo_kind)) void {
-            self.arena.deinit();
-            if (self.myers_diff_maybe) |*myers_diff| {
-                myers_diff.deinit();
-            }
-            self.line_iter_a.deinit();
-            self.line_iter_b.deinit();
+        return null;
+    }
+
+    pub fn deinit(self: *HunkIterator) void {
+        self.arena.deinit();
+        if (self.myers_diff_maybe) |*myers_diff| {
+            myers_diff.deinit();
         }
-    };
-}
+        self.line_iter_a.deinit();
+        self.line_iter_b.deinit();
+    }
+};
 
 pub const DiffKind = enum {
     workspace,
@@ -537,7 +535,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
         diff_kind: DiffKind,
         conflict_diff_kind_maybe: ?ConflictDiffKind,
         status: st.Status(repo_kind),
-        hunk_iter: HunkIterator(repo_kind),
+        hunk_iter: HunkIterator,
         next_index: usize,
 
         pub fn init(
@@ -558,7 +556,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
             };
         }
 
-        pub fn next(self: *FileIterator(repo_kind)) !?*HunkIterator(repo_kind) {
+        pub fn next(self: *FileIterator(repo_kind)) !?*HunkIterator {
             // TODO: instead of latest cursor, store the tx id so we always use the
             // same transaction even if the db is written to while calling next
             var cursor = try self.core.latestCursor();
@@ -589,7 +587,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
                                     else => try LineIterator.initFromNothing(self.allocator, path),
                                 };
                                 errdefer b.deinit();
-                                self.hunk_iter = try HunkIterator(repo_kind).init(self.allocator, &a, &b);
+                                self.hunk_iter = try HunkIterator.init(self.allocator, &a, &b);
                                 self.next_index += 1;
                                 return &self.hunk_iter;
                             }
@@ -610,7 +608,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
                         errdefer a.deinit();
                         var b = try LineIterator.initFromWorkspace(repo_kind, core_cursor, self.allocator, entry.path, io.getMode(entry.meta));
                         errdefer b.deinit();
-                        self.hunk_iter = try HunkIterator(repo_kind).init(self.allocator, &a, &b);
+                        self.hunk_iter = try HunkIterator.init(self.allocator, &a, &b);
                         self.next_index += 1;
                         return &self.hunk_iter;
                     } else {
@@ -624,7 +622,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
                         errdefer a.deinit();
                         var b = try LineIterator.initFromNothing(self.allocator, path);
                         errdefer b.deinit();
-                        self.hunk_iter = try HunkIterator(repo_kind).init(self.allocator, &a, &b);
+                        self.hunk_iter = try HunkIterator.init(self.allocator, &a, &b);
                         self.next_index += 1;
                         return &self.hunk_iter;
                     }
@@ -637,7 +635,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
                         const index_entries_for_path = self.status.index.entries.get(path) orelse return error.EntryNotFound;
                         var b = try LineIterator.initFromIndex(repo_kind, core_cursor, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
                         errdefer b.deinit();
-                        self.hunk_iter = try HunkIterator(repo_kind).init(self.allocator, &a, &b);
+                        self.hunk_iter = try HunkIterator.init(self.allocator, &a, &b);
                         self.next_index += 1;
                         return &self.hunk_iter;
                     } else {
@@ -651,7 +649,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
                         const index_entries_for_path = self.status.index.entries.get(path) orelse return error.EntryNotFound;
                         var b = try LineIterator.initFromIndex(repo_kind, core_cursor, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
                         errdefer b.deinit();
-                        self.hunk_iter = try HunkIterator(repo_kind).init(self.allocator, &a, &b);
+                        self.hunk_iter = try HunkIterator.init(self.allocator, &a, &b);
                         self.next_index += 1;
                         return &self.hunk_iter;
                     } else {
@@ -664,7 +662,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
                         errdefer a.deinit();
                         var b = try LineIterator.initFromNothing(self.allocator, path);
                         errdefer b.deinit();
-                        self.hunk_iter = try HunkIterator(repo_kind).init(self.allocator, &a, &b);
+                        self.hunk_iter = try HunkIterator.init(self.allocator, &a, &b);
                         self.next_index += 1;
                         return &self.hunk_iter;
                     }
