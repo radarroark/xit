@@ -7,9 +7,113 @@ const idx = @import("./index.zig");
 const obj = @import("./object.zig");
 const chk = @import("./checkout.zig");
 
-fn absIndex(i: isize, len: usize) usize {
-    return if (i < 0) len - @abs(i) else @intCast(i);
-}
+pub const LineIterator = struct {
+    allocator: std.mem.Allocator,
+    path: []const u8,
+    oid: [hash.SHA1_BYTES_LEN]u8,
+    oid_hex: [hash.SHA1_HEX_LEN]u8,
+    mode: ?io.Mode,
+    buffer: []u8, // TODO: don't read it all into memory
+    split_iter: std.mem.SplitIterator(u8, .scalar),
+
+    pub fn initFromIndex(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, entry: idx.Index(repo_kind).Entry) !LineIterator {
+        const oid_hex = std.fmt.bytesToHex(&entry.oid, .lower);
+        const buffer = try allocator.alloc(u8, 1024);
+        errdefer allocator.free(buffer);
+        const buf = try chk.objectToBuffer(repo_kind, core_cursor, oid_hex, buffer);
+
+        return LineIterator{
+            .allocator = allocator,
+            .path = entry.path,
+            .oid = entry.oid,
+            .oid_hex = oid_hex,
+            .mode = entry.mode,
+            .buffer = buffer,
+            .split_iter = std.mem.splitScalar(u8, buf, '\n'),
+        };
+    }
+
+    pub fn initFromWorkspace(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, path: []const u8, mode: io.Mode) !LineIterator {
+        const buffer = try allocator.alloc(u8, 1024);
+        errdefer allocator.free(buffer);
+
+        var file = try core_cursor.core.repo_dir.openFile(path, .{ .mode = .read_only });
+        defer file.close();
+        const size = try file.reader().read(buffer);
+        const buf = buffer[0..size];
+
+        var line_iter = LineIterator{
+            .allocator = allocator,
+            .path = path,
+            .oid = undefined,
+            .oid_hex = undefined,
+            .mode = mode,
+            .buffer = buffer,
+            .split_iter = std.mem.splitScalar(u8, buf, '\n'),
+        };
+
+        const file_size = (try file.metadata()).size();
+        const header = try std.fmt.allocPrint(allocator, "blob {}\x00", .{file_size});
+        defer allocator.free(header);
+        try hash.sha1Reader(file.reader(), header, &line_iter.oid);
+        line_iter.oid_hex = std.fmt.bytesToHex(&line_iter.oid, .lower);
+
+        return line_iter;
+    }
+
+    pub fn initFromNothing(allocator: std.mem.Allocator, path: []const u8) !LineIterator {
+        const empty_buffer = try allocator.alloc(u8, 0);
+        errdefer allocator.free(empty_buffer);
+        return .{
+            .allocator = allocator,
+            .path = path,
+            .oid = [_]u8{0} ** hash.SHA1_BYTES_LEN,
+            .oid_hex = [_]u8{0} ** hash.SHA1_HEX_LEN,
+            .mode = null,
+            .buffer = empty_buffer,
+            .split_iter = std.mem.splitScalar(u8, empty_buffer, '\n'),
+        };
+    }
+
+    pub fn initFromHead(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, path: []const u8, entry: obj.TreeEntry) !LineIterator {
+        const oid_hex = std.fmt.bytesToHex(&entry.oid, .lower);
+        const buffer = try allocator.alloc(u8, 1024);
+        errdefer allocator.free(buffer);
+        const buf = try chk.objectToBuffer(repo_kind, core_cursor, oid_hex, buffer);
+
+        return LineIterator{
+            .allocator = allocator,
+            .path = path,
+            .oid = entry.oid,
+            .oid_hex = oid_hex,
+            .mode = entry.mode,
+            .buffer = buffer,
+            .split_iter = std.mem.splitScalar(u8, buf, '\n'),
+        };
+    }
+
+    pub fn initFromBuffer(allocator: std.mem.Allocator, buffer: []const u8) !LineIterator {
+        const empty_buffer = try allocator.alloc(u8, 0);
+        errdefer allocator.free(empty_buffer);
+        return .{
+            .allocator = allocator,
+            .path = "",
+            .oid = [_]u8{0} ** hash.SHA1_BYTES_LEN,
+            .oid_hex = [_]u8{0} ** hash.SHA1_HEX_LEN,
+            .mode = null,
+            .buffer = empty_buffer,
+            .split_iter = std.mem.splitScalar(u8, buffer, '\n'),
+        };
+    }
+
+    pub fn next(self: *LineIterator) ?[]const u8 {
+        return self.split_iter.next();
+    }
+
+    pub fn deinit(self: *LineIterator) void {
+        self.allocator.free(self.buffer);
+    }
+};
 
 pub const MyersDiff = struct {
     edits: std.ArrayList(Edit), // TODO: turn into iterator
@@ -52,6 +156,12 @@ pub const MyersDiff = struct {
         while (line_iter_b.next()) |line| {
             try b.append(line);
         }
+
+        const absIndex = struct {
+            fn run(i: isize, len: usize) usize {
+                return if (i < 0) len - @abs(i) else @intCast(i);
+            }
+        }.run;
 
         {
             const max = a.items.len + b.items.len;
@@ -214,114 +324,6 @@ test "myers diff" {
         }
     }
 }
-
-pub const LineIterator = struct {
-    allocator: std.mem.Allocator,
-    path: []const u8,
-    oid: [hash.SHA1_BYTES_LEN]u8,
-    oid_hex: [hash.SHA1_HEX_LEN]u8,
-    mode: ?io.Mode,
-    buffer: []u8, // TODO: don't read it all into memory
-    split_iter: std.mem.SplitIterator(u8, .scalar),
-
-    pub fn initFromIndex(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, entry: idx.Index(repo_kind).Entry) !LineIterator {
-        const oid_hex = std.fmt.bytesToHex(&entry.oid, .lower);
-        const buffer = try allocator.alloc(u8, 1024);
-        errdefer allocator.free(buffer);
-        const buf = try chk.objectToBuffer(repo_kind, core_cursor, oid_hex, buffer);
-
-        return LineIterator{
-            .allocator = allocator,
-            .path = entry.path,
-            .oid = entry.oid,
-            .oid_hex = oid_hex,
-            .mode = entry.mode,
-            .buffer = buffer,
-            .split_iter = std.mem.splitScalar(u8, buf, '\n'),
-        };
-    }
-
-    pub fn initFromWorkspace(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, path: []const u8, mode: io.Mode) !LineIterator {
-        const buffer = try allocator.alloc(u8, 1024);
-        errdefer allocator.free(buffer);
-
-        var file = try core_cursor.core.repo_dir.openFile(path, .{ .mode = .read_only });
-        defer file.close();
-        const size = try file.reader().read(buffer);
-        const buf = buffer[0..size];
-
-        var line_iter = LineIterator{
-            .allocator = allocator,
-            .path = path,
-            .oid = undefined,
-            .oid_hex = undefined,
-            .mode = mode,
-            .buffer = buffer,
-            .split_iter = std.mem.splitScalar(u8, buf, '\n'),
-        };
-
-        const file_size = (try file.metadata()).size();
-        const header = try std.fmt.allocPrint(allocator, "blob {}\x00", .{file_size});
-        defer allocator.free(header);
-        try hash.sha1Reader(file.reader(), header, &line_iter.oid);
-        line_iter.oid_hex = std.fmt.bytesToHex(&line_iter.oid, .lower);
-
-        return line_iter;
-    }
-
-    pub fn initFromNothing(allocator: std.mem.Allocator, path: []const u8) !LineIterator {
-        const empty_buffer = try allocator.alloc(u8, 0);
-        errdefer allocator.free(empty_buffer);
-        return .{
-            .allocator = allocator,
-            .path = path,
-            .oid = [_]u8{0} ** hash.SHA1_BYTES_LEN,
-            .oid_hex = [_]u8{0} ** hash.SHA1_HEX_LEN,
-            .mode = null,
-            .buffer = empty_buffer,
-            .split_iter = std.mem.splitScalar(u8, empty_buffer, '\n'),
-        };
-    }
-
-    pub fn initFromHead(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, path: []const u8, entry: obj.TreeEntry) !LineIterator {
-        const oid_hex = std.fmt.bytesToHex(&entry.oid, .lower);
-        const buffer = try allocator.alloc(u8, 1024);
-        errdefer allocator.free(buffer);
-        const buf = try chk.objectToBuffer(repo_kind, core_cursor, oid_hex, buffer);
-
-        return LineIterator{
-            .allocator = allocator,
-            .path = path,
-            .oid = entry.oid,
-            .oid_hex = oid_hex,
-            .mode = entry.mode,
-            .buffer = buffer,
-            .split_iter = std.mem.splitScalar(u8, buf, '\n'),
-        };
-    }
-
-    pub fn initFromBuffer(allocator: std.mem.Allocator, buffer: []const u8) !LineIterator {
-        const empty_buffer = try allocator.alloc(u8, 0);
-        errdefer allocator.free(empty_buffer);
-        return .{
-            .allocator = allocator,
-            .path = "",
-            .oid = [_]u8{0} ** hash.SHA1_BYTES_LEN,
-            .oid_hex = [_]u8{0} ** hash.SHA1_HEX_LEN,
-            .mode = null,
-            .buffer = empty_buffer,
-            .split_iter = std.mem.splitScalar(u8, buffer, '\n'),
-        };
-    }
-
-    pub fn next(self: *LineIterator) ?[]const u8 {
-        return self.split_iter.next();
-    }
-
-    pub fn deinit(self: *LineIterator) void {
-        self.allocator.free(self.buffer);
-    }
-};
 
 pub const Hunk = struct {
     edits: []MyersDiff.Edit,
