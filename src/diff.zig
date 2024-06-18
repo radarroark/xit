@@ -170,7 +170,7 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
         line_cache_b: std.AutoArrayHashMap(usize, []const u8),
         next_index: usize,
 
-        const max_line_cache_size = 32;
+        const MAX_LINE_CACHE_SIZE = 32;
 
         pub const Line = struct {
             num: usize,
@@ -224,10 +224,10 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
 
             var line_cache_a = std.AutoArrayHashMap(usize, []const u8).init(allocator);
             errdefer line_cache_a.deinit();
-            try line_cache_a.ensureTotalCapacity(max_line_cache_size);
+            try line_cache_a.ensureTotalCapacity(MAX_LINE_CACHE_SIZE);
             var line_cache_b = std.AutoArrayHashMap(usize, []const u8).init(allocator);
             errdefer line_cache_b.deinit();
-            try line_cache_b.ensureTotalCapacity(max_line_cache_size);
+            try line_cache_b.ensureTotalCapacity(MAX_LINE_CACHE_SIZE);
 
             {
                 const max = line_count_a + line_count_b;
@@ -389,7 +389,7 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
             if (line_cache.get(index)) |line| {
                 return line;
             } else {
-                if (line_cache.count() == max_line_cache_size) {
+                if (line_cache.count() == MAX_LINE_CACHE_SIZE) {
                     _ = line_cache.orderedRemove(line_cache.keys()[0]);
                 }
                 line_iter.reset();
