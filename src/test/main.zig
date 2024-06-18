@@ -314,8 +314,8 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 defer hunk_iter.deinit();
                 if (std.mem.eql(u8, "hello.txt", hunk_iter.path)) {
                     try std.testing.expectEqualStrings("diff --git a/hello.txt b/hello.txt", hunk_iter.header_lines.items[0]);
-                    const expected_hunks = [_][]const df.MyersDiffIterator.Edit{
-                        &[_]df.MyersDiffIterator.Edit{
+                    const expected_hunks = [_][]const df.MyersDiffIterator(repo_kind).Edit{
+                        &[_]df.MyersDiffIterator(repo_kind).Edit{
                             .{ .eql = .{ .old_line = .{ .num = 2, .text = "2" }, .new_line = .{ .num = 2, .text = "2" } } },
                             .{ .eql = .{ .old_line = .{ .num = 3, .text = "3" }, .new_line = .{ .num = 3, .text = "3" } } },
                             .{ .eql = .{ .old_line = .{ .num = 4, .text = "4" }, .new_line = .{ .num = 4, .text = "4" } } },
@@ -325,7 +325,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                             .{ .eql = .{ .old_line = .{ .num = 7, .text = "7" }, .new_line = .{ .num = 7, .text = "7" } } },
                             .{ .eql = .{ .old_line = .{ .num = 8, .text = "8" }, .new_line = .{ .num = 8, .text = "8" } } },
                         },
-                        &[_]df.MyersDiffIterator.Edit{
+                        &[_]df.MyersDiffIterator(repo_kind).Edit{
                             .{ .del = .{ .old_line = .{ .num = 9, .text = "9" } } },
                             .{ .del = .{ .old_line = .{ .num = 10, .text = "10" } } },
                             .{ .ins = .{ .new_line = .{ .num = 9, .text = "9.0" } } },
@@ -334,7 +334,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                             .{ .eql = .{ .old_line = .{ .num = 12, .text = "12" }, .new_line = .{ .num = 12, .text = "12" } } },
                             .{ .eql = .{ .old_line = .{ .num = 13, .text = "13" }, .new_line = .{ .num = 13, .text = "13" } } },
                         },
-                        &[_]df.MyersDiffIterator.Edit{
+                        &[_]df.MyersDiffIterator(repo_kind).Edit{
                             .{ .eql = .{ .old_line = .{ .num = 14, .text = "14" }, .new_line = .{ .num = 14, .text = "14" } } },
                             .{ .del = .{ .old_line = .{ .num = 15, .text = "15" } } },
                             .{ .ins = .{ .new_line = .{ .num = 15, .text = "15.0" } } },
