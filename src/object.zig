@@ -544,15 +544,12 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                         errdefer commit_hash_suffix_file.close();
 
                         // decompress the object file
-                        var decompressed = try compress.Decompressed.init(commit_hash_suffix_file);
-                        const reader = decompressed.stream.reader();
-
+                        const reader = try compress.decompressReader(commit_hash_suffix_file, false);
                         const Reader = @TypeOf(reader);
                         const State = struct {
                             objects_dir: std.fs.Dir,
                             commit_hash_prefix_dir: std.fs.Dir,
                             commit_hash_suffix_file: std.fs.File,
-                            decompressed: compress.Decompressed,
                             reader: Reader,
 
                             fn deinit(self: *@This()) void {
@@ -566,7 +563,6 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                             .objects_dir = objects_dir,
                             .commit_hash_prefix_dir = commit_hash_prefix_dir,
                             .commit_hash_suffix_file = commit_hash_suffix_file,
-                            .decompressed = decompressed,
                             .reader = reader,
                         };
                     },

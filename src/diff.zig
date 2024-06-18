@@ -20,7 +20,8 @@ pub const LineIterator = struct {
         const oid_hex = std.fmt.bytesToHex(&entry.oid, .lower);
         const buffer = try allocator.alloc(u8, 1024);
         errdefer allocator.free(buffer);
-        const buf = try chk.objectToBuffer(repo_kind, core_cursor, oid_hex, buffer);
+        var reader = try chk.objectToReader(repo_kind, core_cursor, oid_hex);
+        const size = try reader.read(buffer);
 
         return LineIterator{
             .allocator = allocator,
@@ -29,7 +30,7 @@ pub const LineIterator = struct {
             .oid_hex = oid_hex,
             .mode = entry.mode,
             .buffer = buffer,
-            .split_iter = std.mem.splitScalar(u8, buf, '\n'),
+            .split_iter = std.mem.splitScalar(u8, buffer[0..size], '\n'),
         };
     }
 
@@ -79,7 +80,8 @@ pub const LineIterator = struct {
         const oid_hex = std.fmt.bytesToHex(&entry.oid, .lower);
         const buffer = try allocator.alloc(u8, 1024);
         errdefer allocator.free(buffer);
-        const buf = try chk.objectToBuffer(repo_kind, core_cursor, oid_hex, buffer);
+        var reader = try chk.objectToReader(repo_kind, core_cursor, oid_hex);
+        const size = try reader.read(buffer);
 
         return LineIterator{
             .allocator = allocator,
@@ -88,7 +90,7 @@ pub const LineIterator = struct {
             .oid_hex = oid_hex,
             .mode = entry.mode,
             .buffer = buffer,
-            .split_iter = std.mem.splitScalar(u8, buf, '\n'),
+            .split_iter = std.mem.splitScalar(u8, buffer[0..size], '\n'),
         };
     }
 

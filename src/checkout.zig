@@ -160,7 +160,14 @@ pub fn objectToFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_k
     }
 }
 
-pub fn objectToBuffer(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, oid_hex: [hash.SHA1_HEX_LEN]u8, buffer: []u8) ![]u8 {
+pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
+    return switch (repo_kind) {
+        .git => compress.ZlibReader,
+        .xit => xitdb.Database(.file).Cursor.Reader,
+    };
+}
+
+pub fn objectToReader(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, oid_hex: [hash.SHA1_HEX_LEN]u8) !ObjectReader(repo_kind) {
     switch (repo_kind) {
         .git => {
             // open the internal dirs
@@ -174,12 +181,7 @@ pub fn objectToBuffer(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo
             var in_file = try hash_prefix_dir.openFile(hash_suffix, .{});
             defer in_file.close();
 
-            // decompress into arraylist
-            var decompressed = try compress.Decompressed.init(in_file);
-            var reader = decompressed.stream.reader();
-            try reader.skipUntilDelimiterOrEof(0);
-            const size = try reader.read(buffer);
-            return buffer[0..size];
+            return try compress.decompressReader(in_file, true);
         },
         .xit => {
             var reader_maybe = try core_cursor.cursor.reader(void, &[_]xitdb.PathPart(void){
@@ -200,10 +202,8 @@ pub fn objectToBuffer(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo
                     }
                 }
                 if (header_skipped) {
-                    const out_size = try reader.read(buffer);
-                    return buffer[0..out_size];
+                    return reader.*;
                 }
-
                 return error.ObjectInvalid;
             } else {
                 return error.ObjectNotFound;

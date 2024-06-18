@@ -46,32 +46,16 @@ pub fn decompress(in: std.fs.File, out: std.fs.File, skip_header: bool) !void {
     }
 }
 
-// does the same thing as decompress, except it remains completely
-// in memory and can clean itself up via deinit.
-const MAX_FILE_SIZE_BYTES = 1024;
-pub const Decompressed = struct {
-    buffer: [MAX_FILE_SIZE_BYTES]u8,
-    stream: std.compress.zlib.Decompressor(std.io.Reader(*std.io.FixedBufferStream([]u8), std.io.FixedBufferStream([]u8).ReadError, std.io.FixedBufferStream([]u8).read)),
+pub const ZlibReader = std.compress.flate.inflate.Decompressor(.zlib, std.fs.File.Reader).Reader;
 
-    pub fn init(in: std.fs.File) !Decompressed {
-        var decompressed = Decompressed{
-            .buffer = [_]u8{0} ** MAX_FILE_SIZE_BYTES,
-            .stream = undefined,
-        };
-
-        // read the in file into memory
-        const in_size = try in.pread(&decompressed.buffer, 0);
-        if (in_size == MAX_FILE_SIZE_BYTES) {
-            return error.FileTooLarge;
-        }
-
-        // create the stream
-        var fixed_buffer = std.io.fixedBufferStream(decompressed.buffer[0..in_size]);
-        decompressed.stream = zlib.decompressor(fixed_buffer.reader());
-
-        return decompressed;
+pub fn decompressReader(in: std.fs.File, skip_header: bool) !ZlibReader {
+    var zlib_stream = zlib.decompressor(in.reader());
+    if (skip_header) {
+        // skip section in beginning of file which is not compressed
+        try zlib_stream.reader().skipUntilDelimiterOrEof(0);
     }
-};
+    return zlib_stream.reader();
+}
 
 test "compress and decompress" {
     const temp_dir_name = "temp-test-compress";
@@ -108,13 +92,7 @@ test "compress and decompress" {
     try decompress(out_compressed, out_decompressed, false);
 
     // read the decompressed file into memory and check that it's the same
-    var read_buffer = [_]u8{0} ** MAX_FILE_SIZE_BYTES;
+    var read_buffer = [_]u8{0} ** 1024;
     const size = try out_decompressed.pread(&read_buffer, 0);
     try std.testing.expect(std.mem.eql(u8, hello_txt_content, read_buffer[0..size]));
-
-    // decompress purely in memory
-    var decompressed = try Decompressed.init(out_compressed);
-    const buf = try decompressed.stream.reader().readAllAlloc(allocator, std.math.maxInt(usize));
-    defer allocator.free(buf);
-    try std.testing.expect(std.mem.eql(u8, hello_txt_content, buf));
 }
