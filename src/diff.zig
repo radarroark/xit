@@ -110,13 +110,27 @@ pub const LineIterator = struct {
         return self.split_iter.next();
     }
 
+    pub fn reset(self: *LineIterator) void {
+        self.split_iter.reset();
+    }
+
     pub fn deinit(self: *LineIterator) void {
         self.allocator.free(self.buffer);
     }
 };
 
-pub const MyersDiff = struct {
-    edits: std.ArrayList(Edit), // TODO: turn into iterator
+pub const MyersDiffIterator = struct {
+    allocator: std.mem.Allocator,
+    backtrack: std.ArrayList([4]isize),
+    line_iter_a: *LineIterator,
+    line_iter_b: *LineIterator,
+    line_count_a: usize,
+    line_count_b: usize,
+    line_cache_a: std.AutoArrayHashMap(usize, []const u8),
+    line_cache_b: std.AutoArrayHashMap(usize, []const u8),
+    next_index: usize,
+
+    const max_line_cache_size = 32;
 
     pub const Line = struct {
         num: usize,
@@ -134,9 +148,20 @@ pub const MyersDiff = struct {
         del: struct {
             old_line: Line,
         },
+
+        pub fn deinit(self: Edit, allocator: std.mem.Allocator) void {
+            switch (self) {
+                .eql => {
+                    allocator.free(self.eql.old_line.text);
+                    allocator.free(self.eql.new_line.text);
+                },
+                .ins => allocator.free(self.ins.new_line.text),
+                .del => allocator.free(self.del.old_line.text),
+            }
+        }
     };
 
-    pub fn init(allocator: std.mem.Allocator, line_iter_a: *LineIterator, line_iter_b: *LineIterator) !MyersDiff {
+    pub fn init(allocator: std.mem.Allocator, line_iter_a: *LineIterator, line_iter_b: *LineIterator) !MyersDiffIterator {
         var trace = std.ArrayList(std.ArrayList(isize)).init(allocator);
         defer {
             for (trace.items) |*arr| {
@@ -145,26 +170,27 @@ pub const MyersDiff = struct {
             trace.deinit();
         }
 
-        var a = std.ArrayList([]const u8).init(allocator);
-        defer a.deinit();
-        while (line_iter_a.next()) |line| {
-            try a.append(line);
+        var line_count_a: usize = 0;
+        while (line_iter_a.next()) |_| {
+            line_count_a += 1;
         }
+        line_iter_a.reset();
 
-        var b = std.ArrayList([]const u8).init(allocator);
-        defer b.deinit();
-        while (line_iter_b.next()) |line| {
-            try b.append(line);
+        var line_count_b: usize = 0;
+        while (line_iter_b.next()) |_| {
+            line_count_b += 1;
         }
+        line_iter_b.reset();
 
-        const absIndex = struct {
-            fn run(i: isize, len: usize) usize {
-                return if (i < 0) len - @abs(i) else @intCast(i);
-            }
-        }.run;
+        var line_cache_a = std.AutoArrayHashMap(usize, []const u8).init(allocator);
+        errdefer line_cache_a.deinit();
+        try line_cache_a.ensureTotalCapacity(max_line_cache_size);
+        var line_cache_b = std.AutoArrayHashMap(usize, []const u8).init(allocator);
+        errdefer line_cache_b.deinit();
+        try line_cache_b.ensureTotalCapacity(max_line_cache_size);
 
         {
-            const max = a.items.len + b.items.len;
+            const max = line_count_a + line_count_b;
             var v = try std.ArrayList(isize).initCapacity(allocator, 2 * max + 1);
             defer v.deinit();
             v.expandToCapacity();
@@ -184,12 +210,20 @@ pub const MyersDiff = struct {
                         xx = v.items[absIndex(kk - 1, v.items.len)] + 1;
                     }
                     var yy = xx - kk;
-                    while (xx < a.items.len and yy < b.items.len and std.mem.eql(u8, a.items[absIndex(xx, a.items.len)], b.items[absIndex(yy, b.items.len)])) {
-                        xx += 1;
-                        yy += 1;
+                    while (true) {
+                        if (xx < line_count_a and yy < line_count_b) {
+                            const line_a = get(line_iter_a, &line_cache_a, absIndex(xx, line_count_a)) orelse return error.EndOfLineIterator;
+                            const line_b = get(line_iter_b, &line_cache_b, absIndex(yy, line_count_b)) orelse return error.EndOfLineIterator;
+                            if (std.mem.eql(u8, line_a, line_b)) {
+                                xx += 1;
+                                yy += 1;
+                                continue;
+                            }
+                        }
+                        break;
                     }
                     v.items[absIndex(kk, v.items.len)] = xx;
-                    if (xx >= a.items.len and yy >= b.items.len) {
+                    if (xx >= line_count_a and yy >= line_count_b) {
                         break :blk;
                     }
                 }
@@ -197,10 +231,10 @@ pub const MyersDiff = struct {
         }
 
         var backtrack = std.ArrayList([4]isize).init(allocator);
-        defer backtrack.deinit();
+        errdefer backtrack.deinit();
         {
-            var xx: isize = @intCast(a.items.len);
-            var yy: isize = @intCast(b.items.len);
+            var xx: isize = @intCast(line_count_a);
+            var yy: isize = @intCast(line_count_b);
             for (0..trace.items.len) |i| {
                 const d = trace.items.len - i - 1;
                 const v = trace.items[d];
@@ -231,50 +265,108 @@ pub const MyersDiff = struct {
             }
         }
 
-        var edits = try std.ArrayList(Edit).initCapacity(allocator, backtrack.items.len);
-        errdefer edits.deinit();
-        edits.expandToCapacity();
-        for (backtrack.items, 0..) |edit, i| {
-            const ii = backtrack.items.len - i - 1;
-
-            const prev_xx = edit[0];
-            const prev_yy = edit[1];
-            const xx = edit[2];
-            const yy = edit[3];
-
-            if (xx == prev_xx) {
-                const new_idx = absIndex(prev_yy, b.items.len);
-                edits.items[ii] = .{
-                    .ins = .{
-                        .new_line = .{ .num = new_idx + 1, .text = b.items[new_idx] },
-                    },
-                };
-            } else if (yy == prev_yy) {
-                const old_idx = absIndex(prev_xx, a.items.len);
-                edits.items[ii] = .{
-                    .del = .{
-                        .old_line = .{ .num = old_idx + 1, .text = a.items[old_idx] },
-                    },
-                };
-            } else {
-                const old_idx = absIndex(prev_xx, a.items.len);
-                const new_idx = absIndex(prev_yy, b.items.len);
-                edits.items[ii] = .{
-                    .eql = .{
-                        .old_line = .{ .num = old_idx + 1, .text = a.items[old_idx] },
-                        .new_line = .{ .num = new_idx + 1, .text = b.items[new_idx] },
-                    },
-                };
-            }
-        }
-
-        return MyersDiff{
-            .edits = edits,
+        return MyersDiffIterator{
+            .allocator = allocator,
+            .backtrack = backtrack,
+            .line_iter_a = line_iter_a,
+            .line_iter_b = line_iter_b,
+            .line_count_a = line_count_a,
+            .line_count_b = line_count_b,
+            .line_cache_a = line_cache_a,
+            .line_cache_b = line_cache_b,
+            .next_index = 0,
         };
     }
 
-    pub fn deinit(self: *MyersDiff) void {
-        self.edits.deinit();
+    pub fn next(self: *MyersDiffIterator) !?Edit {
+        if (self.next_index == self.backtrack.items.len) {
+            return null;
+        }
+
+        const i = self.next_index;
+        const backtrack_index = self.backtrack.items.len - i - 1;
+        self.next_index += 1;
+
+        const edit = self.backtrack.items[backtrack_index];
+        const prev_xx = edit[0];
+        const prev_yy = edit[1];
+        const xx = edit[2];
+        const yy = edit[3];
+
+        if (xx == prev_xx) {
+            const new_idx = absIndex(prev_yy, self.line_count_b);
+            const line_b = get(self.line_iter_b, &self.line_cache_b, new_idx) orelse return error.EndOfLineIterator;
+            const line_b_copy = try self.allocator.alloc(u8, line_b.len);
+            errdefer self.allocator.free(line_b_copy);
+            @memcpy(line_b_copy, line_b);
+            return .{
+                .ins = .{
+                    .new_line = .{ .num = new_idx + 1, .text = line_b_copy },
+                },
+            };
+        } else if (yy == prev_yy) {
+            const old_idx = absIndex(prev_xx, self.line_count_a);
+            const line_a = get(self.line_iter_a, &self.line_cache_a, old_idx) orelse return error.EndOfLineIterator;
+            const line_a_copy = try self.allocator.alloc(u8, line_a.len);
+            errdefer self.allocator.free(line_a_copy);
+            @memcpy(line_a_copy, line_a);
+            return .{
+                .del = .{
+                    .old_line = .{ .num = old_idx + 1, .text = line_a_copy },
+                },
+            };
+        } else {
+            const old_idx = absIndex(prev_xx, self.line_count_a);
+            const new_idx = absIndex(prev_yy, self.line_count_b);
+            const line_a = get(self.line_iter_a, &self.line_cache_a, old_idx) orelse return null;
+            const line_a_copy = try self.allocator.alloc(u8, line_a.len);
+            errdefer self.allocator.free(line_a_copy);
+            @memcpy(line_a_copy, line_a);
+            const line_b = get(self.line_iter_b, &self.line_cache_b, new_idx) orelse return null;
+            const line_b_copy = try self.allocator.alloc(u8, line_b.len);
+            errdefer self.allocator.free(line_b_copy);
+            @memcpy(line_b_copy, line_b);
+            return .{
+                .eql = .{
+                    .old_line = .{ .num = old_idx + 1, .text = line_a_copy },
+                    .new_line = .{ .num = new_idx + 1, .text = line_b_copy },
+                },
+            };
+        }
+    }
+
+    pub fn deinit(self: *MyersDiffIterator) void {
+        self.backtrack.deinit();
+        self.line_cache_a.deinit();
+        self.line_cache_b.deinit();
+    }
+
+    fn absIndex(i: isize, len: usize) usize {
+        return if (i < 0) len - @abs(i) else @intCast(i);
+    }
+
+    fn get(line_iter: *LineIterator, line_cache: *std.AutoArrayHashMap(usize, []const u8), index: usize) ?[]const u8 {
+        if (line_cache.get(index)) |line| {
+            return line;
+        } else {
+            if (line_cache.count() == max_line_cache_size) {
+                _ = line_cache.orderedRemove(line_cache.keys()[0]);
+            }
+            line_iter.reset();
+            var count: usize = 0;
+            while (true) {
+                if (line_iter.next()) |line| {
+                    if (count == index) {
+                        line_cache.putAssumeCapacity(index, line);
+                        return line;
+                    } else {
+                        count += 1;
+                    }
+                } else {
+                    return null;
+                }
+            }
+        }
     }
 };
 
@@ -287,7 +379,7 @@ test "myers diff" {
         defer line_iter1.deinit();
         var line_iter2 = try LineIterator.initFromBuffer(allocator, lines2);
         defer line_iter2.deinit();
-        const expected_diff = [_]MyersDiff.Edit{
+        const expected_diff = [_]MyersDiffIterator.Edit{
             .{ .del = .{ .old_line = .{ .num = 1, .text = "A" } } },
             .{ .del = .{ .old_line = .{ .num = 2, .text = "B" } } },
             .{ .eql = .{ .old_line = .{ .num = 3, .text = "C" }, .new_line = .{ .num = 1, .text = "C" } } },
@@ -298,10 +390,20 @@ test "myers diff" {
             .{ .eql = .{ .old_line = .{ .num = 7, .text = "A" }, .new_line = .{ .num = 5, .text = "A" } } },
             .{ .ins = .{ .new_line = .{ .num = 6, .text = "C" } } },
         };
-        var actual_diff = try MyersDiff.init(allocator, &line_iter1, &line_iter2);
-        defer actual_diff.deinit();
-        try std.testing.expectEqual(expected_diff.len, actual_diff.edits.items.len);
-        for (expected_diff, actual_diff.edits.items) |expected, actual| {
+        var myers_diff_iter = try MyersDiffIterator.init(allocator, &line_iter1, &line_iter2);
+        defer myers_diff_iter.deinit();
+        var actual_diff = std.ArrayList(MyersDiffIterator.Edit).init(allocator);
+        defer {
+            for (actual_diff.items) |edit| {
+                edit.deinit(allocator);
+            }
+            actual_diff.deinit();
+        }
+        while (try myers_diff_iter.next()) |edit| {
+            try actual_diff.append(edit);
+        }
+        try std.testing.expectEqual(expected_diff.len, actual_diff.items.len);
+        for (expected_diff, actual_diff.items) |expected, actual| {
             try std.testing.expectEqualDeep(expected, actual);
         }
     }
@@ -312,21 +414,39 @@ test "myers diff" {
         defer line_iter1.deinit();
         var line_iter2 = try LineIterator.initFromBuffer(allocator, lines2);
         defer line_iter2.deinit();
-        const expected_diff = [_]MyersDiff.Edit{
+        const expected_diff = [_]MyersDiffIterator.Edit{
             .{ .del = .{ .old_line = .{ .num = 1, .text = "hello, world!" } } },
             .{ .ins = .{ .new_line = .{ .num = 1, .text = "goodbye, world!" } } },
         };
-        var actual_diff = try MyersDiff.init(allocator, &line_iter1, &line_iter2);
-        defer actual_diff.deinit();
-        try std.testing.expectEqual(expected_diff.len, actual_diff.edits.items.len);
-        for (expected_diff, actual_diff.edits.items) |expected, actual| {
+        var myers_diff_iter = try MyersDiffIterator.init(allocator, &line_iter1, &line_iter2);
+        defer myers_diff_iter.deinit();
+        var actual_diff = std.ArrayList(MyersDiffIterator.Edit).init(allocator);
+        defer {
+            for (actual_diff.items) |edit| {
+                edit.deinit(allocator);
+            }
+            actual_diff.deinit();
+        }
+        while (try myers_diff_iter.next()) |edit| {
+            try actual_diff.append(edit);
+        }
+        try std.testing.expectEqual(expected_diff.len, actual_diff.items.len);
+        for (expected_diff, actual_diff.items) |expected, actual| {
             try std.testing.expectEqualDeep(expected, actual);
         }
     }
 }
 
 pub const Hunk = struct {
-    edits: []MyersDiff.Edit,
+    edits: std.ArrayList(MyersDiffIterator.Edit),
+    allocator: std.mem.Allocator,
+
+    pub fn deinit(self: *Hunk) void {
+        for (self.edits.items) |edit| {
+            edit.deinit(self.allocator);
+        }
+        self.edits.deinit();
+    }
 
     pub const Offsets = struct {
         del_start: usize,
@@ -342,7 +462,7 @@ pub const Hunk = struct {
             .ins_start = 0,
             .ins_count = 0,
         };
-        for (self.edits) |edit| {
+        for (self.edits.items) |edit| {
             switch (edit) {
                 .eql => {
                     if (o.ins_start == 0) o.ins_start = edit.eql.new_line.num;
@@ -367,15 +487,14 @@ pub const Hunk = struct {
 pub const HunkIterator = struct {
     path: []const u8,
     header_lines: std.ArrayList([]const u8),
-    myers_diff_maybe: ?MyersDiff,
+    myers_diff_maybe: ?MyersDiffIterator,
+    allocator: std.mem.Allocator,
     arena: std.heap.ArenaAllocator,
     line_iter_a: LineIterator,
     line_iter_b: LineIterator,
-    next_edit_index: usize,
     found_edit: bool,
     margin: usize,
-    begin_index: usize,
-    end_index: usize,
+    next_hunk: Hunk,
 
     pub fn init(allocator: std.mem.Allocator, a: *LineIterator, b: *LineIterator) !HunkIterator {
         var arena = std.heap.ArenaAllocator.init(allocator);
@@ -404,7 +523,7 @@ pub const HunkIterator = struct {
             }
         }
 
-        var myers_diff_maybe: ?MyersDiff = null;
+        var myers_diff_maybe: ?MyersDiffIterator = null;
 
         if (!std.mem.eql(u8, &a.oid, &b.oid)) {
             if (mode_maybe) |mode| {
@@ -428,32 +547,32 @@ pub const HunkIterator = struct {
                 try header_lines.append("+++ /dev/null");
             }
 
-            myers_diff_maybe = try MyersDiff.init(allocator, a, b);
+            myers_diff_maybe = try MyersDiffIterator.init(allocator, a, b);
         }
 
         return HunkIterator{
             .path = a.path,
             .header_lines = header_lines,
             .myers_diff_maybe = myers_diff_maybe,
+            .allocator = allocator,
             .arena = arena,
             .line_iter_a = a.*,
             .line_iter_b = b.*,
-            .next_edit_index = 0,
             .found_edit = false,
             .margin = 0,
-            .begin_index = 0,
-            .end_index = 0,
+            .next_hunk = Hunk{
+                .edits = std.ArrayList(MyersDiffIterator.Edit).init(allocator),
+                .allocator = allocator,
+            },
         };
     }
 
-    pub fn next(self: *HunkIterator) ?Hunk {
+    pub fn next(self: *HunkIterator) !?Hunk {
         const max_margin: usize = 3;
-        const edit_index = self.next_edit_index;
 
-        if (self.myers_diff_maybe) |myers_diff| {
-            if (edit_index < myers_diff.edits.items.len) {
-                const edit = myers_diff.edits.items[edit_index];
-                self.end_index = edit_index;
+        if (self.myers_diff_maybe) |*myers_diff| {
+            if (try myers_diff.next()) |edit| {
+                try self.next_hunk.edits.append(edit);
 
                 if (edit == .eql) {
                     self.margin += 1;
@@ -461,48 +580,51 @@ pub const HunkIterator = struct {
                         // if the end margin isn't the max,
                         // keep adding to the hunk
                         if (self.margin < max_margin) {
-                            self.next_edit_index += 1;
-                            if (edit_index < myers_diff.edits.items.len - 1) {
-                                return self.next();
-                            }
+                            return self.next();
                         }
                     }
                     // if the begin margin is over the max,
                     // remove the first line (which is
                     // guaranteed to be an eql edit)
                     else if (self.margin > max_margin) {
-                        self.begin_index += 1;
+                        const removed_edit = self.next_hunk.edits.orderedRemove(0);
+                        removed_edit.deinit(self.allocator);
                         self.margin -= 1;
-                        self.next_edit_index += 1;
-                        if (edit_index < myers_diff.edits.items.len - 1) {
-                            return self.next();
-                        }
+                        return self.next();
                     }
                 } else {
                     self.found_edit = true;
                     self.margin = 0;
-                    self.next_edit_index += 1;
-                    if (edit_index < myers_diff.edits.items.len - 1) {
-                        return self.next();
-                    }
+                    return self.next();
                 }
 
                 // if the diff state contains an actual edit
                 // (that is, non-eql line)
                 if (self.found_edit) {
-                    const hunk = Hunk{
-                        .edits = myers_diff.edits.items[self.begin_index .. self.end_index + 1],
+                    const hunk = self.next_hunk;
+                    self.next_hunk = Hunk{
+                        .edits = std.ArrayList(MyersDiffIterator.Edit).init(self.allocator),
+                        .allocator = self.allocator,
                     };
                     self.found_edit = false;
                     self.margin = 0;
-                    self.end_index += 1;
-                    self.begin_index = self.end_index;
-                    self.next_edit_index += 1;
                     return hunk;
                 } else {
-                    self.next_edit_index += 1;
                     return self.next();
                 }
+            } else {
+                // nullify the myers diff iterator so next() returns null afterwards
+                myers_diff.deinit();
+                self.myers_diff_maybe = null;
+                // return last hunk
+                const hunk = self.next_hunk;
+                self.next_hunk = Hunk{
+                    .edits = std.ArrayList(MyersDiffIterator.Edit).init(self.allocator),
+                    .allocator = self.allocator,
+                };
+                self.found_edit = false;
+                self.margin = 0;
+                return hunk;
             }
         }
 
@@ -516,6 +638,7 @@ pub const HunkIterator = struct {
         }
         self.line_iter_a.deinit();
         self.line_iter_b.deinit();
+        self.next_hunk.deinit();
     }
 };
 

@@ -332,7 +332,9 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         for (hunk_iter.header_lines.items) |header_line| {
                             try writers.out.print("{s}\n", .{header_line});
                         }
-                        while (hunk_iter.next()) |hunk| {
+                        var hunk_maybe = try hunk_iter.next();
+                        while (hunk_maybe) |*hunk| {
+                            defer hunk.deinit();
                             const offsets = hunk.offsets();
                             try writers.out.print("@@ -{},{} +{},{} @@\n", .{
                                 offsets.del_start,
@@ -340,7 +342,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                                 offsets.ins_start,
                                 offsets.ins_count,
                             });
-                            for (hunk.edits) |edit| {
+                            for (hunk.edits.items) |edit| {
                                 try writers.out.print("{s} {s}\n", .{
                                     switch (edit) {
                                         .eql => " ",
