@@ -14,8 +14,18 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
         oid: [hash.SHA1_BYTES_LEN]u8,
         oid_hex: [hash.SHA1_HEX_LEN]u8,
         mode: ?io.Mode,
-        buffer: []u8, // TODO: don't read it all into memory
-        split_iter: std.mem.SplitIterator(u8, .scalar),
+        source: union(enum) {
+            object: struct {
+                buffer: []u8, // TODO: don't read it all into memory
+                split_iter: std.mem.SplitIterator(u8, .scalar),
+            },
+            file: struct {
+                buffer: []u8, // TODO: don't read it all into memory
+                split_iter: std.mem.SplitIterator(u8, .scalar),
+            },
+            buffer: std.mem.SplitIterator(u8, .scalar),
+            nothing,
+        },
 
         pub fn initFromIndex(core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, entry: idx.Index(repo_kind).Entry) !LineIterator(repo_kind) {
             const oid_hex = std.fmt.bytesToHex(&entry.oid, .lower);
@@ -30,8 +40,12 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                 .oid = entry.oid,
                 .oid_hex = oid_hex,
                 .mode = entry.mode,
-                .buffer = buffer,
-                .split_iter = std.mem.splitScalar(u8, buffer[0..size], '\n'),
+                .source = .{
+                    .object = .{
+                        .buffer = buffer,
+                        .split_iter = std.mem.splitScalar(u8, buffer[0..size], '\n'),
+                    },
+                },
             };
         }
 
@@ -50,8 +64,12 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                 .oid = undefined,
                 .oid_hex = undefined,
                 .mode = mode,
-                .buffer = buffer,
-                .split_iter = std.mem.splitScalar(u8, buf, '\n'),
+                .source = .{
+                    .file = .{
+                        .buffer = buffer,
+                        .split_iter = std.mem.splitScalar(u8, buf, '\n'),
+                    },
+                },
             };
 
             const file_size = (try file.metadata()).size();
@@ -64,16 +82,13 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
         }
 
         pub fn initFromNothing(allocator: std.mem.Allocator, path: []const u8) !LineIterator(repo_kind) {
-            const empty_buffer = try allocator.alloc(u8, 0);
-            errdefer allocator.free(empty_buffer);
             return .{
                 .allocator = allocator,
                 .path = path,
                 .oid = [_]u8{0} ** hash.SHA1_BYTES_LEN,
                 .oid_hex = [_]u8{0} ** hash.SHA1_HEX_LEN,
                 .mode = null,
-                .buffer = empty_buffer,
-                .split_iter = std.mem.splitScalar(u8, empty_buffer, '\n'),
+                .source = .nothing,
             };
         }
 
@@ -90,8 +105,12 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                 .oid = entry.oid,
                 .oid_hex = oid_hex,
                 .mode = entry.mode,
-                .buffer = buffer,
-                .split_iter = std.mem.splitScalar(u8, buffer[0..size], '\n'),
+                .source = .{
+                    .object = .{
+                        .buffer = buffer,
+                        .split_iter = std.mem.splitScalar(u8, buffer[0..size], '\n'),
+                    },
+                },
             };
         }
 
@@ -104,21 +123,37 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                 .oid = [_]u8{0} ** hash.SHA1_BYTES_LEN,
                 .oid_hex = [_]u8{0} ** hash.SHA1_HEX_LEN,
                 .mode = null,
-                .buffer = empty_buffer,
-                .split_iter = std.mem.splitScalar(u8, buffer, '\n'),
+                .source = .{
+                    .buffer = std.mem.splitScalar(u8, buffer, '\n'),
+                },
             };
         }
 
         pub fn next(self: *LineIterator(repo_kind)) ?[]const u8 {
-            return self.split_iter.next();
+            return switch (self.source) {
+                .object => self.source.object.split_iter.next(),
+                .file => self.source.file.split_iter.next(),
+                .nothing => null,
+                .buffer => self.source.buffer.next(),
+            };
         }
 
         pub fn reset(self: *LineIterator(repo_kind)) void {
-            self.split_iter.reset();
+            switch (self.source) {
+                .object => self.source.object.split_iter.reset(),
+                .file => self.source.file.split_iter.reset(),
+                .nothing => {},
+                .buffer => self.source.buffer.reset(),
+            }
         }
 
         pub fn deinit(self: *LineIterator(repo_kind)) void {
-            self.allocator.free(self.buffer);
+            switch (self.source) {
+                .object => self.allocator.free(self.source.object.buffer),
+                .file => self.allocator.free(self.source.file.buffer),
+                .nothing => {},
+                .buffer => {},
+            }
         }
     };
 }
