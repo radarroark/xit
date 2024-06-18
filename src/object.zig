@@ -568,25 +568,16 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                     },
                     .xit => {
                         const State = struct {
-                            allocator: std.mem.Allocator,
-                            buffer: []u8,
-                            stream: std.io.FixedBufferStream([]u8),
-                            reader: std.io.FixedBufferStream([]u8).Reader,
+                            reader: xitdb.Database(.file).Cursor.Reader,
 
-                            fn deinit(self: *@This()) void {
-                                self.allocator.free(self.buffer);
-                            }
+                            fn deinit(_: *@This()) void {}
                         };
-                        if (try core_cursor.cursor.readBytesAlloc(allocator, MAX_READ_BYTES, void, &[_]xitdb.PathPart(void){
+                        if (try core_cursor.cursor.reader(void, &[_]xitdb.PathPart(void){
                             .{ .hash_map_get = hash.hashBuffer("objects") },
                             .{ .hash_map_get = try hash.hexToHash(&oid) },
-                        })) |bytes| {
-                            var stream = std.io.fixedBufferStream(bytes);
+                        })) |reader| {
                             break :blk State{
-                                .allocator = allocator,
-                                .buffer = bytes,
-                                .stream = stream,
-                                .reader = stream.reader(),
+                                .reader = reader,
                             };
                         } else {
                             return error.ObjectNotFound;
@@ -628,7 +619,8 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                     };
                     const entry_mode: io.Mode = @bitCast(try std.fmt.parseInt(u32, entry_mode_str, 8));
                     const entry_name = try state.reader.readUntilDelimiterAlloc(arena.allocator(), 0, MAX_READ_BYTES);
-                    const entry_oid = try state.reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
+                    var entry_oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+                    try state.reader.readNoEof(&entry_oid);
                     try entries.put(entry_name, TreeEntry{ .oid = entry_oid, .mode = entry_mode });
                 }
 
