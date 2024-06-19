@@ -280,7 +280,9 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
                         while (true) {
                             if (xx < line_count_a and yy < line_count_b) {
                                 const line_a = try line_iter_a.get(absIndex(xx, line_count_a));
+                                defer line_iter_a.free(line_a);
                                 const line_b = try line_iter_b.get(absIndex(yy, line_count_b));
+                                defer line_iter_b.free(line_b);
                                 if (std.mem.eql(u8, line_a, line_b)) {
                                     xx += 1;
                                     yy += 1;
@@ -361,40 +363,32 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
             if (xx == prev_xx) {
                 const new_idx = absIndex(prev_yy, self.line_count_b);
                 const line_b = try self.line_iter_b.get(new_idx);
-                const line_b_copy = try self.allocator.alloc(u8, line_b.len);
-                errdefer self.allocator.free(line_b_copy);
-                @memcpy(line_b_copy, line_b);
+                errdefer self.line_iter_b.free(line_b);
                 return .{
                     .ins = .{
-                        .new_line = .{ .num = new_idx + 1, .text = line_b_copy },
+                        .new_line = .{ .num = new_idx + 1, .text = line_b },
                     },
                 };
             } else if (yy == prev_yy) {
                 const old_idx = absIndex(prev_xx, self.line_count_a);
                 const line_a = try self.line_iter_a.get(old_idx);
-                const line_a_copy = try self.allocator.alloc(u8, line_a.len);
-                errdefer self.allocator.free(line_a_copy);
-                @memcpy(line_a_copy, line_a);
+                errdefer self.line_iter_a.free(line_a);
                 return .{
                     .del = .{
-                        .old_line = .{ .num = old_idx + 1, .text = line_a_copy },
+                        .old_line = .{ .num = old_idx + 1, .text = line_a },
                     },
                 };
             } else {
                 const old_idx = absIndex(prev_xx, self.line_count_a);
                 const new_idx = absIndex(prev_yy, self.line_count_b);
                 const line_a = try self.line_iter_a.get(old_idx);
-                const line_a_copy = try self.allocator.alloc(u8, line_a.len);
-                errdefer self.allocator.free(line_a_copy);
-                @memcpy(line_a_copy, line_a);
+                errdefer self.line_iter_a.free(line_a);
                 const line_b = try self.line_iter_b.get(new_idx);
-                const line_b_copy = try self.allocator.alloc(u8, line_b.len);
-                errdefer self.allocator.free(line_b_copy);
-                @memcpy(line_b_copy, line_b);
+                errdefer self.line_iter_b.free(line_b);
                 return .{
                     .eql = .{
-                        .old_line = .{ .num = old_idx + 1, .text = line_a_copy },
-                        .new_line = .{ .num = new_idx + 1, .text = line_b_copy },
+                        .old_line = .{ .num = old_idx + 1, .text = line_a },
+                        .new_line = .{ .num = new_idx + 1, .text = line_b },
                     },
                 };
             }
