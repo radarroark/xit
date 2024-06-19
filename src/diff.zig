@@ -31,8 +31,9 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
             const oid_hex = std.fmt.bytesToHex(&entry.oid, .lower);
             const buffer = try allocator.alloc(u8, 1024);
             errdefer allocator.free(buffer);
-            var reader = try chk.objectToReader(repo_kind, core_cursor, oid_hex);
-            const size = try reader.read(buffer);
+            var object_reader = try obj.ObjectReader(repo_kind).init(core_cursor, oid_hex, true);
+            defer object_reader.deinit();
+            const size = try object_reader.reader.read(buffer);
 
             return LineIterator(repo_kind){
                 .allocator = allocator,
@@ -96,8 +97,9 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
             const oid_hex = std.fmt.bytesToHex(&entry.oid, .lower);
             const buffer = try allocator.alloc(u8, 1024);
             errdefer allocator.free(buffer);
-            var reader = try chk.objectToReader(repo_kind, core_cursor, oid_hex);
-            const size = try reader.read(buffer);
+            var object_reader = try obj.ObjectReader(repo_kind).init(core_cursor, oid_hex, true);
+            defer object_reader.deinit();
+            const size = try object_reader.reader.read(buffer);
 
             return LineIterator(repo_kind){
                 .allocator = allocator,

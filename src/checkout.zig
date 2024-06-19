@@ -70,77 +70,32 @@ pub fn objectToFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_k
 
     switch (tree_entry.mode.object_type) {
         .regular_file => {
-            switch (repo_kind) {
-                .git => {
-                    // open the internal dirs
-                    var objects_dir = try core_cursor.core.git_dir.openDir("objects", .{});
-                    defer objects_dir.close();
+            // open the reader
+            var object_reader = try obj.ObjectReader(repo_kind).init(core_cursor, oid_hex, true);
+            defer object_reader.deinit();
 
-                    // open the in file
-                    var hash_prefix_dir = try objects_dir.openDir(oid_hex[0..2], .{});
-                    defer hash_prefix_dir.close();
-                    const hash_suffix = oid_hex[2..];
-                    var in_file = try hash_prefix_dir.openFile(hash_suffix, .{});
-                    defer in_file.close();
+            // create parent dir(s)
+            if (std.fs.path.dirname(path)) |dir| {
+                try core_cursor.core.repo_dir.makePath(dir);
+            }
 
-                    // create parent dir(s)
-                    if (std.fs.path.dirname(path)) |dir| {
-                        try core_cursor.core.repo_dir.makePath(dir);
-                    }
+            // open the out file
+            const out_flags: std.fs.File.CreateFlags = switch (builtin.os.tag) {
+                .windows => .{},
+                else => .{ .mode = @as(u32, @bitCast(tree_entry.mode)) },
+            };
+            const out_file = try core_cursor.core.repo_dir.createFile(path, out_flags);
+            defer out_file.close();
 
-                    // open the out file
-                    const out_flags: std.fs.File.CreateFlags = switch (builtin.os.tag) {
-                        .windows => .{},
-                        else => .{ .mode = @as(u32, @bitCast(tree_entry.mode)) },
-                    };
-                    const out_file = try core_cursor.core.repo_dir.createFile(path, out_flags);
-                    defer out_file.close();
-
-                    // create the file
-                    try compress.decompress(in_file, out_file, true);
-                },
-                .xit => {
-                    var reader_maybe = try core_cursor.cursor.reader(void, &[_]xitdb.PathPart(void){
-                        .{ .hash_map_get = hash.hashBuffer("objects") },
-                        .{ .hash_map_get = try hash.hexToHash(&oid_hex) },
-                    });
-                    if (reader_maybe) |*reader| {
-                        // create parent dir(s)
-                        if (std.fs.path.dirname(path)) |dir| {
-                            try core_cursor.core.repo_dir.makePath(dir);
-                        }
-
-                        // open the out file
-                        const out_flags: std.fs.File.CreateFlags = switch (builtin.os.tag) {
-                            .windows => .{},
-                            else => .{ .mode = @as(u32, @bitCast(tree_entry.mode)) },
-                        };
-                        const out_file = try core_cursor.core.repo_dir.createFile(path, out_flags);
-                        defer out_file.close();
-
-                        var read_buffer = [_]u8{0} ** MAX_FILE_READ_BYTES;
-                        var header_skipped = false;
-                        while (true) {
-                            const size = try reader.read(&read_buffer);
-                            if (size == 0) break;
-                            if (!header_skipped) {
-                                if (std.mem.indexOf(u8, read_buffer[0..size], &[_]u8{0})) |index| {
-                                    if (index + 1 < size) {
-                                        try out_file.writeAll(read_buffer[index + 1 .. size]);
-                                    }
-                                    header_skipped = true;
-                                }
-                            } else {
-                                try out_file.writeAll(read_buffer[0..size]);
-                            }
-                        }
-                        if (header_skipped) return;
-
-                        return error.ObjectInvalid;
-                    } else {
-                        return error.ObjectNotFound;
-                    }
-                },
+            // write the decompressed data to the output file
+            const writer = out_file.writer();
+            var buf = [_]u8{0} ** MAX_FILE_READ_BYTES;
+            while (true) {
+                // read from file
+                const size = try object_reader.reader.read(&buf);
+                if (size == 0) break;
+                // decompress
+                _ = try writer.write(buf[0..size]);
             }
         },
         .tree => {
@@ -157,58 +112,6 @@ pub fn objectToFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_k
         },
         // TODO: handle symlinks
         else => return error.ObjectInvalid,
-    }
-}
-
-pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
-    return switch (repo_kind) {
-        .git => compress.ZlibReader,
-        .xit => xitdb.Database(.file).Cursor.Reader,
-    };
-}
-
-pub fn objectToReader(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, oid_hex: [hash.SHA1_HEX_LEN]u8) !ObjectReader(repo_kind) {
-    switch (repo_kind) {
-        .git => {
-            // open the internal dirs
-            var objects_dir = try core_cursor.core.git_dir.openDir("objects", .{});
-            defer objects_dir.close();
-
-            // open the in file
-            var hash_prefix_dir = try objects_dir.openDir(oid_hex[0..2], .{});
-            defer hash_prefix_dir.close();
-            const hash_suffix = oid_hex[2..];
-            var in_file = try hash_prefix_dir.openFile(hash_suffix, .{});
-            defer in_file.close();
-
-            return try compress.decompressReader(in_file, true);
-        },
-        .xit => {
-            var reader_maybe = try core_cursor.cursor.reader(void, &[_]xitdb.PathPart(void){
-                .{ .hash_map_get = hash.hashBuffer("objects") },
-                .{ .hash_map_get = try hash.hexToHash(&oid_hex) },
-            });
-            if (reader_maybe) |*reader| {
-                var read_buffer = [_]u8{0} ** 1;
-                var header_skipped = false;
-                while (true) {
-                    const size = try reader.read(&read_buffer);
-                    if (size == 0) break;
-                    if (!header_skipped) {
-                        if (read_buffer[0] == 0) {
-                            header_skipped = true;
-                            break;
-                        }
-                    }
-                }
-                if (header_skipped) {
-                    return reader.*;
-                }
-                return error.ObjectInvalid;
-            } else {
-                return error.ObjectNotFound;
-            }
-        },
     }
 }
 
