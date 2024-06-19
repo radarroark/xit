@@ -285,9 +285,10 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         // generate diff
         var diff_iter = try repo.diff(.workspace, .current);
         defer diff_iter.deinit();
-        if (try diff_iter.next()) |diff_item| {
-            defer diff_item.deinit();
-            try std.testing.expectEqualStrings("f.txt", diff_item.path);
+        if (try diff_iter.next()) |*hunk_iter_ptr| {
+            var hunk_iter = hunk_iter_ptr.*;
+            defer hunk_iter.deinit();
+            try std.testing.expectEqualStrings("f.txt", hunk_iter.path);
         } else {
             return error.DiffResultExpected;
         }
@@ -338,9 +339,10 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         // generate diff
         var diff_iter = try repo.diff(.workspace, .current);
         defer diff_iter.deinit();
-        if (try diff_iter.next()) |diff_item| {
-            defer diff_item.deinit();
-            try std.testing.expectEqualStrings("f.txt", diff_item.path);
+        if (try diff_iter.next()) |*hunk_iter_ptr| {
+            var hunk_iter = hunk_iter_ptr.*;
+            defer hunk_iter.deinit();
+            try std.testing.expectEqualStrings("f.txt", hunk_iter.path);
         } else {
             return error.DiffResultExpected;
         }
@@ -391,8 +393,9 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         // generate diff
         var diff_iter = try repo.diff(.workspace, .current);
         defer diff_iter.deinit();
-        if (try diff_iter.next()) |diff_item| {
-            defer diff_item.deinit();
+        if (try diff_iter.next()) |*hunk_iter_ptr| {
+            var hunk_iter = hunk_iter_ptr.*;
+            defer hunk_iter.deinit();
             return error.DiffResultNotExpected;
         }
 
@@ -442,9 +445,10 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         // generate diff
         var diff_iter = try repo.diff(.workspace, .current);
         defer diff_iter.deinit();
-        if (try diff_iter.next()) |diff_item| {
-            defer diff_item.deinit();
-            try std.testing.expectEqualStrings("f.txt", diff_item.path);
+        if (try diff_iter.next()) |*hunk_iter_ptr| {
+            var hunk_iter = hunk_iter_ptr.*;
+            defer hunk_iter.deinit();
+            try std.testing.expectEqualStrings("f.txt", hunk_iter.path);
         } else {
             return error.DiffResultExpected;
         }
@@ -503,8 +507,9 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         // generate diff
         var diff_iter = try repo.diff(.workspace, .current);
         defer diff_iter.deinit();
-        if (try diff_iter.next()) |diff_item| {
-            defer diff_item.deinit();
+        if (try diff_iter.next()) |*hunk_iter_ptr| {
+            var hunk_iter = hunk_iter_ptr.*;
+            defer hunk_iter.deinit();
             return error.DiffResultNotExpected;
         }
 

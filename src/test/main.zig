@@ -310,7 +310,8 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             var diff_iter = try repo.diff(.workspace, null);
             defer diff_iter.deinit();
 
-            while (try diff_iter.next()) |hunk_iter| {
+            while (try diff_iter.next()) |*hunk_iter_ptr| {
+                var hunk_iter = hunk_iter_ptr.*;
                 defer hunk_iter.deinit();
                 if (std.mem.eql(u8, "hello.txt", hunk_iter.path)) {
                     try std.testing.expectEqualStrings("diff --git a/hello.txt b/hello.txt", hunk_iter.header_lines.items[0]);
@@ -399,23 +400,24 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             var diff_iter = try repo.diff(.index, null);
             defer diff_iter.deinit();
 
-            while (try diff_iter.next()) |diff_item| {
-                defer diff_item.deinit();
-                if (std.mem.eql(u8, "LICENSE", diff_item.path)) {
-                    try std.testing.expectEqualStrings("diff --git a/LICENSE b/LICENSE", diff_item.header_lines.items[0]);
-                    try std.testing.expectEqualStrings("deleted file mode 100644", diff_item.header_lines.items[1]);
-                } else if (std.mem.eql(u8, "docs/design.md", diff_item.path)) {
-                    try std.testing.expectEqualStrings("diff --git a/docs/design.md b/docs/design.md", diff_item.header_lines.items[0]);
-                    try std.testing.expectEqualStrings("deleted file mode 100644", diff_item.header_lines.items[1]);
-                } else if (std.mem.eql(u8, "hello.txt", diff_item.path)) {
-                    try std.testing.expectEqualStrings("diff --git a/hello.txt b/hello.txt", diff_item.header_lines.items[0]);
-                } else if (std.mem.eql(u8, "run.sh", diff_item.path)) {
-                    try std.testing.expectEqualStrings("diff --git a/run.sh b/run.sh", diff_item.header_lines.items[0]);
-                    try std.testing.expectEqualStrings("old mode 100644", diff_item.header_lines.items[1]);
-                    try std.testing.expectEqualStrings("new mode 100755", diff_item.header_lines.items[2]);
-                } else if (std.mem.eql(u8, "src/zig/main.zig", diff_item.path)) {
-                    try std.testing.expectEqualStrings("diff --git a/src/zig/main.zig b/src/zig/main.zig", diff_item.header_lines.items[0]);
-                    try std.testing.expectEqualStrings("new file mode 100644", diff_item.header_lines.items[1]);
+            while (try diff_iter.next()) |*hunk_iter_ptr| {
+                var hunk_iter = hunk_iter_ptr.*;
+                defer hunk_iter.deinit();
+                if (std.mem.eql(u8, "LICENSE", hunk_iter.path)) {
+                    try std.testing.expectEqualStrings("diff --git a/LICENSE b/LICENSE", hunk_iter.header_lines.items[0]);
+                    try std.testing.expectEqualStrings("deleted file mode 100644", hunk_iter.header_lines.items[1]);
+                } else if (std.mem.eql(u8, "docs/design.md", hunk_iter.path)) {
+                    try std.testing.expectEqualStrings("diff --git a/docs/design.md b/docs/design.md", hunk_iter.header_lines.items[0]);
+                    try std.testing.expectEqualStrings("deleted file mode 100644", hunk_iter.header_lines.items[1]);
+                } else if (std.mem.eql(u8, "hello.txt", hunk_iter.path)) {
+                    try std.testing.expectEqualStrings("diff --git a/hello.txt b/hello.txt", hunk_iter.header_lines.items[0]);
+                } else if (std.mem.eql(u8, "run.sh", hunk_iter.path)) {
+                    try std.testing.expectEqualStrings("diff --git a/run.sh b/run.sh", hunk_iter.header_lines.items[0]);
+                    try std.testing.expectEqualStrings("old mode 100644", hunk_iter.header_lines.items[1]);
+                    try std.testing.expectEqualStrings("new mode 100755", hunk_iter.header_lines.items[2]);
+                } else if (std.mem.eql(u8, "src/zig/main.zig", hunk_iter.path)) {
+                    try std.testing.expectEqualStrings("diff --git a/src/zig/main.zig b/src/zig/main.zig", hunk_iter.header_lines.items[0]);
+                    try std.testing.expectEqualStrings("new file mode 100644", hunk_iter.header_lines.items[1]);
                 } else {
                     return error.EntryNotExpected;
                 }

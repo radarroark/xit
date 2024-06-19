@@ -327,7 +327,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     var diff_iter = try self.diff(cmd_data.diff.diff_kind, cmd_data.diff.conflict_diff_kind_maybe);
                     defer diff_iter.deinit();
 
-                    while (try diff_iter.next()) |hunk_iter| {
+                    while (try diff_iter.next()) |*hunk_iter_ptr| {
+                        var hunk_iter = hunk_iter_ptr.*;
                         defer hunk_iter.deinit();
                         for (hunk_iter.header_lines.items) |header_line| {
                             try writers.out.print("{s}\n", .{header_line});
