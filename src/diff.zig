@@ -611,37 +611,54 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind) type {
             const max_margin: usize = 3;
 
             if (self.myers_diff_maybe) |*myers_diff| {
-                if (try myers_diff.next()) |edit| {
-                    errdefer edit.deinit(self.allocator);
-                    try self.next_hunk.edits.append(edit);
+                while (true) {
+                    if (try myers_diff.next()) |edit| {
+                        errdefer edit.deinit(self.allocator);
+                        try self.next_hunk.edits.append(edit);
 
-                    if (edit == .eql) {
-                        self.margin += 1;
-                        if (self.found_edit) {
-                            // if the end margin isn't the max,
-                            // keep adding to the hunk
-                            if (self.margin < max_margin) {
-                                return self.next();
+                        if (edit == .eql) {
+                            self.margin += 1;
+                            if (self.found_edit) {
+                                // if the end margin isn't the max,
+                                // keep adding to the hunk
+                                if (self.margin < max_margin) {
+                                    continue;
+                                }
                             }
+                            // if the begin margin is over the max,
+                            // remove the first line (which is
+                            // guaranteed to be an eql edit)
+                            else if (self.margin > max_margin) {
+                                const removed_edit = self.next_hunk.edits.orderedRemove(0);
+                                removed_edit.deinit(self.allocator);
+                                self.margin -= 1;
+                                continue;
+                            }
+                        } else {
+                            self.found_edit = true;
+                            self.margin = 0;
+                            continue;
                         }
-                        // if the begin margin is over the max,
-                        // remove the first line (which is
-                        // guaranteed to be an eql edit)
-                        else if (self.margin > max_margin) {
-                            const removed_edit = self.next_hunk.edits.orderedRemove(0);
-                            removed_edit.deinit(self.allocator);
-                            self.margin -= 1;
-                            return self.next();
+
+                        // if the diff state contains an actual edit
+                        // (that is, non-eql line)
+                        if (self.found_edit) {
+                            const hunk = self.next_hunk;
+                            self.next_hunk = Hunk(repo_kind){
+                                .edits = std.ArrayList(MyersDiffIterator(repo_kind).Edit).init(self.allocator),
+                                .allocator = self.allocator,
+                            };
+                            self.found_edit = false;
+                            self.margin = 0;
+                            return hunk;
+                        } else {
+                            continue;
                         }
                     } else {
-                        self.found_edit = true;
-                        self.margin = 0;
-                        return self.next();
-                    }
-
-                    // if the diff state contains an actual edit
-                    // (that is, non-eql line)
-                    if (self.found_edit) {
+                        // nullify the myers diff iterator so next() returns null afterwards
+                        myers_diff.deinit();
+                        self.myers_diff_maybe = null;
+                        // return last hunk
                         const hunk = self.next_hunk;
                         self.next_hunk = Hunk(repo_kind){
                             .edits = std.ArrayList(MyersDiffIterator(repo_kind).Edit).init(self.allocator),
@@ -650,26 +667,11 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind) type {
                         self.found_edit = false;
                         self.margin = 0;
                         return hunk;
-                    } else {
-                        return self.next();
                     }
-                } else {
-                    // nullify the myers diff iterator so next() returns null afterwards
-                    myers_diff.deinit();
-                    self.myers_diff_maybe = null;
-                    // return last hunk
-                    const hunk = self.next_hunk;
-                    self.next_hunk = Hunk(repo_kind){
-                        .edits = std.ArrayList(MyersDiffIterator(repo_kind).Edit).init(self.allocator),
-                        .allocator = self.allocator,
-                    };
-                    self.found_edit = false;
-                    self.margin = 0;
-                    return hunk;
                 }
+            } else {
+                return null;
             }
-
-            return null;
         }
 
         pub fn deinit(self: *HunkIterator(repo_kind)) void {
