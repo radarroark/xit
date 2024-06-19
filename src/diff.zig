@@ -126,7 +126,16 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
 
         pub fn next(self: *LineIterator(repo_kind)) !?[]const u8 {
             switch (self.source) {
-                .object => return self.source.object.iter.next(),
+                .object => {
+                    if (self.source.object.iter.next()) |line| {
+                        const line_copy = try self.allocator.alloc(u8, line.len);
+                        errdefer self.allocator.free(line_copy);
+                        @memcpy(line_copy, line);
+                        return line_copy;
+                    } else {
+                        return null;
+                    }
+                },
                 .workspace => {
                     if (self.source.workspace.eof) {
                         return null;
@@ -140,7 +149,16 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                     return try line_arr.toOwnedSlice();
                 },
                 .nothing => return null,
-                .buffer => return self.source.buffer.iter.next(),
+                .buffer => {
+                    if (self.source.buffer.iter.next()) |line| {
+                        const line_copy = try self.allocator.alloc(u8, line.len);
+                        errdefer self.allocator.free(line_copy);
+                        @memcpy(line_copy, line);
+                        return line_copy;
+                    } else {
+                        return null;
+                    }
+                },
             }
         }
 
@@ -165,10 +183,10 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
 
         pub fn free(self: LineIterator(repo_kind), line: []const u8) void {
             switch (self.source) {
-                .object => {},
+                .object => self.allocator.free(line),
                 .workspace => self.allocator.free(line),
                 .nothing => {},
-                .buffer => {},
+                .buffer => self.allocator.free(line),
             }
         }
 
