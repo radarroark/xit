@@ -16,6 +16,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
         oid: [hash.SHA1_BYTES_LEN]u8,
         oid_hex: [hash.SHA1_HEX_LEN]u8,
         mode: ?io.Mode,
+        cache: std.AutoArrayHashMap(usize, []const u8),
         source: union(enum) {
             object: struct {
                 buffer: []u8, // TODO: don't read it all into memory
@@ -29,6 +30,8 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
             nothing,
         },
 
+        const MAX_LINE_CACHE_SIZE = 32;
+
         pub fn initFromIndex(core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, entry: idx.Index(repo_kind).Entry) !LineIterator(repo_kind) {
             const oid_hex = std.fmt.bytesToHex(&entry.oid, .lower);
             const buffer = try allocator.alloc(u8, 1024);
@@ -37,12 +40,17 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
             defer object_reader.deinit();
             const size = try object_reader.reader.read(buffer);
 
+            var cache = std.AutoArrayHashMap(usize, []const u8).init(allocator);
+            errdefer cache.deinit();
+            try cache.ensureTotalCapacity(MAX_LINE_CACHE_SIZE);
+
             return LineIterator(repo_kind){
                 .allocator = allocator,
                 .path = entry.path,
                 .oid = entry.oid,
                 .oid_hex = oid_hex,
                 .mode = entry.mode,
+                .cache = cache,
                 .source = .{
                     .object = .{
                         .buffer = buffer,
@@ -63,12 +71,17 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
             try hash.sha1Reader(file.reader(), header, &oid);
             try file.seekTo(0);
 
+            var cache = std.AutoArrayHashMap(usize, []const u8).init(allocator);
+            errdefer cache.deinit();
+            try cache.ensureTotalCapacity(MAX_LINE_CACHE_SIZE);
+
             return LineIterator(repo_kind){
                 .allocator = allocator,
                 .path = path,
                 .oid = oid,
                 .oid_hex = std.fmt.bytesToHex(&oid, .lower),
                 .mode = mode,
+                .cache = cache,
                 .source = .{ .workspace = .{ .file = file, .eof = false } },
             };
         }
@@ -80,6 +93,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                 .oid = [_]u8{0} ** hash.SHA1_BYTES_LEN,
                 .oid_hex = [_]u8{0} ** hash.SHA1_HEX_LEN,
                 .mode = null,
+                .cache = std.AutoArrayHashMap(usize, []const u8).init(allocator),
                 .source = .nothing,
             };
         }
@@ -92,12 +106,17 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
             defer object_reader.deinit();
             const size = try object_reader.reader.read(buffer);
 
+            var cache = std.AutoArrayHashMap(usize, []const u8).init(allocator);
+            errdefer cache.deinit();
+            try cache.ensureTotalCapacity(MAX_LINE_CACHE_SIZE);
+
             return LineIterator(repo_kind){
                 .allocator = allocator,
                 .path = path,
                 .oid = entry.oid,
                 .oid_hex = oid_hex,
                 .mode = entry.mode,
+                .cache = cache,
                 .source = .{
                     .object = .{
                         .buffer = buffer,
@@ -110,12 +129,18 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
         pub fn initFromBuffer(allocator: std.mem.Allocator, buffer: []const u8) !LineIterator(repo_kind) {
             const empty_buffer = try allocator.alloc(u8, 0);
             errdefer allocator.free(empty_buffer);
+
+            var cache = std.AutoArrayHashMap(usize, []const u8).init(allocator);
+            errdefer cache.deinit();
+            try cache.ensureTotalCapacity(MAX_LINE_CACHE_SIZE);
+
             return .{
                 .allocator = allocator,
                 .path = "",
                 .oid = [_]u8{0} ** hash.SHA1_BYTES_LEN,
                 .oid_hex = [_]u8{0} ** hash.SHA1_HEX_LEN,
                 .mode = null,
+                .cache = cache,
                 .source = .{
                     .buffer = std.mem.splitScalar(u8, buffer, '\n'),
                 },
@@ -142,6 +167,33 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
             }
         }
 
+        fn get(self: *LineIterator(repo_kind), index: usize) ![]const u8 {
+            if (self.cache.get(index)) |line| {
+                return line;
+            } else {
+                if (self.cache.count() == MAX_LINE_CACHE_SIZE) {
+                    const kv = self.cache.fetchOrderedRemove(self.cache.keys()[0]) orelse return error.CacheKeyNotFound;
+                    defer self.free(kv.value);
+                }
+                try self.reset();
+                var count: usize = 0;
+                while (true) {
+                    if (try self.next()) |line| {
+                        if (count == index) {
+                            errdefer self.free(line);
+                            self.cache.putAssumeCapacity(index, line);
+                            return line;
+                        } else {
+                            defer self.free(line);
+                            count += 1;
+                        }
+                    } else {
+                        return error.IndexOutOfBounds;
+                    }
+                }
+            }
+        }
+
         pub fn free(self: LineIterator(repo_kind), line: []const u8) void {
             switch (self.source) {
                 .object => {},
@@ -164,6 +216,10 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
         }
 
         pub fn deinit(self: *LineIterator(repo_kind)) void {
+            for (self.cache.values()) |line| {
+                self.free(line);
+            }
+            self.cache.deinit();
             switch (self.source) {
                 .object => self.allocator.free(self.source.object.buffer),
                 .workspace => self.source.workspace.file.close(),
@@ -182,11 +238,7 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
         line_iter_b: *LineIterator(repo_kind),
         line_count_a: usize,
         line_count_b: usize,
-        line_cache_a: std.AutoArrayHashMap(usize, []const u8),
-        line_cache_b: std.AutoArrayHashMap(usize, []const u8),
         next_index: usize,
-
-        const MAX_LINE_CACHE_SIZE = 32;
 
         pub const Line = struct {
             num: usize,
@@ -240,13 +292,6 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
             }
             try line_iter_b.reset();
 
-            var line_cache_a = std.AutoArrayHashMap(usize, []const u8).init(allocator);
-            errdefer line_cache_a.deinit();
-            try line_cache_a.ensureTotalCapacity(MAX_LINE_CACHE_SIZE);
-            var line_cache_b = std.AutoArrayHashMap(usize, []const u8).init(allocator);
-            errdefer line_cache_b.deinit();
-            try line_cache_b.ensureTotalCapacity(MAX_LINE_CACHE_SIZE);
-
             {
                 const max = line_count_a + line_count_b;
                 var v = try std.ArrayList(isize).initCapacity(allocator, 2 * max + 1);
@@ -270,8 +315,8 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
                         var yy = xx - kk;
                         while (true) {
                             if (xx < line_count_a and yy < line_count_b) {
-                                const line_a = try get(line_iter_a, &line_cache_a, absIndex(xx, line_count_a));
-                                const line_b = try get(line_iter_b, &line_cache_b, absIndex(yy, line_count_b));
+                                const line_a = try line_iter_a.get(absIndex(xx, line_count_a));
+                                const line_b = try line_iter_b.get(absIndex(yy, line_count_b));
                                 if (std.mem.eql(u8, line_a, line_b)) {
                                     xx += 1;
                                     yy += 1;
@@ -330,8 +375,6 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
                 .line_iter_b = line_iter_b,
                 .line_count_a = line_count_a,
                 .line_count_b = line_count_b,
-                .line_cache_a = line_cache_a,
-                .line_cache_b = line_cache_b,
                 .next_index = 0,
             };
         }
@@ -353,7 +396,7 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
 
             if (xx == prev_xx) {
                 const new_idx = absIndex(prev_yy, self.line_count_b);
-                const line_b = try get(self.line_iter_b, &self.line_cache_b, new_idx);
+                const line_b = try self.line_iter_b.get(new_idx);
                 const line_b_copy = try self.allocator.alloc(u8, line_b.len);
                 errdefer self.allocator.free(line_b_copy);
                 @memcpy(line_b_copy, line_b);
@@ -364,7 +407,7 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
                 };
             } else if (yy == prev_yy) {
                 const old_idx = absIndex(prev_xx, self.line_count_a);
-                const line_a = try get(self.line_iter_a, &self.line_cache_a, old_idx);
+                const line_a = try self.line_iter_a.get(old_idx);
                 const line_a_copy = try self.allocator.alloc(u8, line_a.len);
                 errdefer self.allocator.free(line_a_copy);
                 @memcpy(line_a_copy, line_a);
@@ -376,11 +419,11 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
             } else {
                 const old_idx = absIndex(prev_xx, self.line_count_a);
                 const new_idx = absIndex(prev_yy, self.line_count_b);
-                const line_a = try get(self.line_iter_a, &self.line_cache_a, old_idx);
+                const line_a = try self.line_iter_a.get(old_idx);
                 const line_a_copy = try self.allocator.alloc(u8, line_a.len);
                 errdefer self.allocator.free(line_a_copy);
                 @memcpy(line_a_copy, line_a);
-                const line_b = try get(self.line_iter_b, &self.line_cache_b, new_idx);
+                const line_b = try self.line_iter_b.get(new_idx);
                 const line_b_copy = try self.allocator.alloc(u8, line_b.len);
                 errdefer self.allocator.free(line_b_copy);
                 @memcpy(line_b_copy, line_b);
@@ -395,45 +438,10 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
 
         pub fn deinit(self: *MyersDiffIterator(repo_kind)) void {
             self.backtrack.deinit();
-            for (self.line_cache_a.values()) |line| {
-                self.line_iter_a.free(line);
-            }
-            self.line_cache_a.deinit();
-            for (self.line_cache_b.values()) |line| {
-                self.line_iter_b.free(line);
-            }
-            self.line_cache_b.deinit();
         }
 
         fn absIndex(i: isize, len: usize) usize {
             return if (i < 0) len - @abs(i) else @intCast(i);
-        }
-
-        fn get(line_iter: *LineIterator(repo_kind), line_cache: *std.AutoArrayHashMap(usize, []const u8), index: usize) ![]const u8 {
-            if (line_cache.get(index)) |line| {
-                return line;
-            } else {
-                if (line_cache.count() == MAX_LINE_CACHE_SIZE) {
-                    const kv = line_cache.fetchOrderedRemove(line_cache.keys()[0]) orelse return error.CacheKeyNotFound;
-                    defer line_iter.free(kv.value);
-                }
-                try line_iter.reset();
-                var count: usize = 0;
-                while (true) {
-                    if (try line_iter.next()) |line| {
-                        if (count == index) {
-                            errdefer line_iter.free(line);
-                            line_cache.putAssumeCapacity(index, line);
-                            return line;
-                        } else {
-                            defer line_iter.free(line);
-                            count += 1;
-                        }
-                    } else {
-                        return error.IndexOutOfBounds;
-                    }
-                }
-            }
         }
     };
 }
