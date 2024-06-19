@@ -49,6 +49,7 @@ pub fn decompress(in: std.fs.File, out: std.fs.File, skip_header: bool) !void {
 pub const ZlibReader = std.compress.flate.inflate.Decompressor(.zlib, std.fs.File.Reader).Reader;
 
 pub fn decompressReader(in: std.fs.File, skip_header: bool) !ZlibReader {
+    try in.seekTo(0);
     var zlib_stream = zlib.decompressor(in.reader());
     if (skip_header) {
         // skip section in beginning of file which is not compressed
