@@ -88,11 +88,12 @@ pub fn objectToFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_k
             defer out_file.close();
 
             // write the decompressed data to the output file
+            var reader = object_reader.reader();
             const writer = out_file.writer();
             var buf = [_]u8{0} ** MAX_FILE_READ_BYTES;
             while (true) {
                 // read from file
-                const size = try object_reader.reader.read(&buf);
+                const size = try reader.read(&buf);
                 if (size == 0) break;
                 // decompress
                 _ = try writer.write(buf[0..size]);

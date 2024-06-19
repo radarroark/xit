@@ -131,7 +131,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                     errdefer line_arr.deinit();
                     var buffer = [_]u8{0} ** 1;
                     while (true) {
-                        const size = try self.source.object.object_reader.reader.read(&buffer);
+                        const size = try self.source.object.object_reader.reader().read(&buffer);
                         if (size == 0) {
                             self.source.object.eof = true;
                             break;

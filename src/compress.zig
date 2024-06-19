@@ -46,16 +46,16 @@ pub fn decompress(in: std.fs.File, out: std.fs.File, skip_header: bool) !void {
     }
 }
 
-pub const ZlibReader = std.compress.flate.inflate.Decompressor(.zlib, std.fs.File.Reader).Reader;
+pub const ZlibStream = std.compress.flate.inflate.Decompressor(.zlib, std.fs.File.Reader);
 
-pub fn decompressReader(in: std.fs.File, skip_header: bool) !ZlibReader {
+pub fn decompressStream(in: std.fs.File, skip_header: bool) !ZlibStream {
     try in.seekTo(0);
     var zlib_stream = zlib.decompressor(in.reader());
     if (skip_header) {
         // skip section in beginning of file which is not compressed
         try zlib_stream.reader().skipUntilDelimiterOrEof(0);
     }
-    return zlib_stream.reader();
+    return zlib_stream;
 }
 
 test "compress and decompress" {

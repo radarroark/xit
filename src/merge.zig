@@ -35,13 +35,13 @@ fn writeBlobWithConflict(
     var current_buf = [_]u8{0} ** 1024;
     var current_reader = try obj.ObjectReader(repo_kind).init(core_cursor, std.fmt.bytesToHex(current_oid, .lower), true);
     defer current_reader.deinit();
-    const current_size = try current_reader.reader.read(&current_buf);
+    const current_size = try current_reader.reader().read(&current_buf);
     const current_content = current_buf[0..current_size];
 
     var source_buf = [_]u8{0} ** 1024;
     var source_reader = try obj.ObjectReader(repo_kind).init(core_cursor, std.fmt.bytesToHex(source_oid, .lower), true);
     defer source_reader.deinit();
-    const source_size = try source_reader.reader.read(&source_buf);
+    const source_size = try source_reader.reader().read(&source_buf);
     const source_content = source_buf[0..source_size];
 
     const content = try std.fmt.allocPrint(allocator, "<<<<<<< {s}\n{s}\n=======\n{s}\n>>>>>>> {s}", .{ current_name, current_content, source_content, source_name });
