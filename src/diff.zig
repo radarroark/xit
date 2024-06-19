@@ -176,16 +176,16 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                     defer self.free(kv.value);
                 }
                 try self.reset();
-                var count: usize = 0;
+                var n: usize = 0;
                 while (true) {
                     if (try self.next()) |line| {
-                        if (count == index) {
+                        if (n == index) {
                             errdefer self.free(line);
                             self.cache.putAssumeCapacity(index, line);
                             return line;
                         } else {
                             defer self.free(line);
-                            count += 1;
+                            n += 1;
                         }
                     } else {
                         return error.IndexOutOfBounds;
@@ -213,6 +213,16 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                 .nothing => {},
                 .buffer => self.source.buffer.reset(),
             }
+        }
+
+        pub fn count(self: *LineIterator(repo_kind)) !usize {
+            var n: usize = 0;
+            while (try self.next()) |line| {
+                defer self.free(line);
+                n += 1;
+            }
+            try self.reset();
+            return n;
         }
 
         pub fn deinit(self: *LineIterator(repo_kind)) void {
@@ -278,19 +288,8 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
                 trace.deinit();
             }
 
-            var line_count_a: usize = 0;
-            while (try line_iter_a.next()) |line| {
-                defer line_iter_a.free(line);
-                line_count_a += 1;
-            }
-            try line_iter_a.reset();
-
-            var line_count_b: usize = 0;
-            while (try line_iter_b.next()) |line| {
-                defer line_iter_b.free(line);
-                line_count_b += 1;
-            }
-            try line_iter_b.reset();
+            const line_count_a = try line_iter_a.count();
+            const line_count_b = try line_iter_b.count();
 
             {
                 const max = line_count_a + line_count_b;
