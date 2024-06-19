@@ -19,13 +19,15 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
         source: union(enum) {
             object: struct {
                 buffer: []u8, // TODO: don't read it all into memory
-                split_iter: std.mem.SplitIterator(u8, .scalar),
+                iter: std.mem.SplitIterator(u8, .scalar),
             },
             workspace: struct {
                 file: std.fs.File,
                 eof: bool,
             },
-            buffer: std.mem.SplitIterator(u8, .scalar),
+            buffer: struct {
+                iter: std.mem.SplitIterator(u8, .scalar),
+            },
             nothing,
         },
 
@@ -46,7 +48,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                 .source = .{
                     .object = .{
                         .buffer = buffer,
-                        .split_iter = std.mem.splitScalar(u8, buffer[0..size], '\n'),
+                        .iter = std.mem.splitScalar(u8, buffer[0..size], '\n'),
                     },
                 },
             };
@@ -101,7 +103,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                 .source = .{
                     .object = .{
                         .buffer = buffer,
-                        .split_iter = std.mem.splitScalar(u8, buffer[0..size], '\n'),
+                        .iter = std.mem.splitScalar(u8, buffer[0..size], '\n'),
                     },
                 },
             };
@@ -115,14 +117,16 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                 .oid_hex = [_]u8{0} ** hash.SHA1_HEX_LEN,
                 .mode = null,
                 .source = .{
-                    .buffer = std.mem.splitScalar(u8, buffer, '\n'),
+                    .buffer = .{
+                        .iter = std.mem.splitScalar(u8, buffer, '\n'),
+                    },
                 },
             };
         }
 
         pub fn next(self: *LineIterator(repo_kind)) !?[]const u8 {
             switch (self.source) {
-                .object => return self.source.object.split_iter.next(),
+                .object => return self.source.object.iter.next(),
                 .workspace => {
                     if (self.source.workspace.eof) {
                         return null;
@@ -136,7 +140,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                     return try line_arr.toOwnedSlice();
                 },
                 .nothing => return null,
-                .buffer => return self.source.buffer.next(),
+                .buffer => return self.source.buffer.iter.next(),
             }
         }
 
@@ -170,13 +174,13 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
 
         pub fn reset(self: *LineIterator(repo_kind)) !void {
             switch (self.source) {
-                .object => self.source.object.split_iter.reset(),
+                .object => self.source.object.iter.reset(),
                 .workspace => {
                     self.source.workspace.eof = false;
                     try self.source.workspace.file.seekTo(0);
                 },
                 .nothing => {},
-                .buffer => self.source.buffer.reset(),
+                .buffer => self.source.buffer.iter.reset(),
             }
         }
 
