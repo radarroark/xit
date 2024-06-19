@@ -179,24 +179,15 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
             while (true) {
                 if (try self.next()) |line| {
                     if (n == index) {
-                        errdefer self.free(line);
+                        errdefer self.allocator.free(line);
                         return line;
                     } else {
-                        defer self.free(line);
+                        defer self.allocator.free(line);
                         n += 1;
                     }
                 } else {
                     return error.IndexOutOfBounds;
                 }
-            }
-        }
-
-        pub fn free(self: LineIterator(repo_kind), line: []const u8) void {
-            switch (self.source) {
-                .object => self.allocator.free(line),
-                .workspace => self.allocator.free(line),
-                .nothing => {},
-                .buffer => self.allocator.free(line),
             }
         }
 
@@ -218,7 +209,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
         pub fn count(self: *LineIterator(repo_kind)) !usize {
             var n: usize = 0;
             while (try self.next()) |line| {
-                defer self.free(line);
+                defer self.allocator.free(line);
                 n += 1;
             }
             try self.reset();
@@ -311,9 +302,9 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
                         while (true) {
                             if (xx < line_count_a and yy < line_count_b) {
                                 const line_a = try line_iter_a.get(absIndex(xx, line_count_a));
-                                defer line_iter_a.free(line_a);
+                                defer allocator.free(line_a);
                                 const line_b = try line_iter_b.get(absIndex(yy, line_count_b));
-                                defer line_iter_b.free(line_b);
+                                defer allocator.free(line_b);
                                 if (std.mem.eql(u8, line_a, line_b)) {
                                     xx += 1;
                                     yy += 1;
@@ -394,7 +385,7 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
             if (xx == prev_xx) {
                 const new_idx = absIndex(prev_yy, self.line_count_b);
                 const line_b = try self.line_iter_b.get(new_idx);
-                errdefer self.line_iter_b.free(line_b);
+                errdefer self.allocator.free(line_b);
                 return .{
                     .ins = .{
                         .new_line = .{ .num = new_idx + 1, .text = line_b },
@@ -403,7 +394,7 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
             } else if (yy == prev_yy) {
                 const old_idx = absIndex(prev_xx, self.line_count_a);
                 const line_a = try self.line_iter_a.get(old_idx);
-                errdefer self.line_iter_a.free(line_a);
+                errdefer self.allocator.free(line_a);
                 return .{
                     .del = .{
                         .old_line = .{ .num = old_idx + 1, .text = line_a },
@@ -413,9 +404,9 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
                 const old_idx = absIndex(prev_xx, self.line_count_a);
                 const new_idx = absIndex(prev_yy, self.line_count_b);
                 const line_a = try self.line_iter_a.get(old_idx);
-                errdefer self.line_iter_a.free(line_a);
+                errdefer self.allocator.free(line_a);
                 const line_b = try self.line_iter_b.get(new_idx);
-                errdefer self.line_iter_b.free(line_b);
+                errdefer self.allocator.free(line_b);
                 return .{
                     .eql = .{
                         .old_line = .{ .num = old_idx + 1, .text = line_a },
