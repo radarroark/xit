@@ -510,8 +510,13 @@ pub fn isTree(entry: TreeEntry) bool {
 pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
     return struct {
         internal: switch (repo_kind) {
-            .git => std.fs.File,
-            .xit => void,
+            .git => struct {
+                file: std.fs.File,
+                skip_header: bool,
+            },
+            .xit => struct {
+                header_offset: u60,
+            },
         },
         reader: switch (repo_kind) {
             .git => compress.ZlibReader,
@@ -532,7 +537,10 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
                     errdefer commit_hash_suffix_file.close();
 
                     return .{
-                        .internal = commit_hash_suffix_file,
+                        .internal = .{
+                            .file = commit_hash_suffix_file,
+                            .skip_header = skip_header,
+                        },
                         .reader = try compress.decompressReader(commit_hash_suffix_file, skip_header),
                     };
                 },
@@ -542,10 +550,12 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
                         .{ .hash_map_get = try hash.hexToHash(&oid) },
                     });
                     if (reader_maybe) |*reader| {
+                        var header_offset: u60 = 0;
                         if (skip_header) {
                             var read_buffer = [_]u8{0} ** 1;
                             while (true) {
                                 const size = try reader.read(&read_buffer);
+                                header_offset += 1;
                                 if (size == 0) {
                                     return error.ObjectInvalid;
                                 } else if (read_buffer[0] == 0) {
@@ -554,7 +564,9 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
                             }
                         }
                         return .{
-                            .internal = {},
+                            .internal = .{
+                                .header_offset = header_offset,
+                            },
                             .reader = reader.*,
                         };
                     } else {
@@ -566,8 +578,15 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
 
         pub fn deinit(self: *ObjectReader(repo_kind)) void {
             switch (repo_kind) {
-                .git => self.internal.close(),
+                .git => self.internal.file.close(),
                 .xit => {},
+            }
+        }
+
+        pub fn reset(self: *ObjectReader(repo_kind)) !void {
+            switch (repo_kind) {
+                .git => self.reader = try compress.decompressReader(self.internal.file, self.internal.skip_header),
+                .xit => try self.reader.seekTo(self.internal.header_offset),
             }
         }
     };

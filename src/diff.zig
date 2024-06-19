@@ -18,8 +18,8 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
         mode: ?io.Mode,
         source: union(enum) {
             object: struct {
-                buffer: []u8, // TODO: don't read it all into memory
-                iter: std.mem.SplitIterator(u8, .scalar),
+                object_reader: obj.ObjectReader(repo_kind),
+                eof: bool,
             },
             workspace: struct {
                 file: std.fs.File,
@@ -33,12 +33,8 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
 
         pub fn initFromIndex(core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, entry: idx.Index(repo_kind).Entry) !LineIterator(repo_kind) {
             const oid_hex = std.fmt.bytesToHex(&entry.oid, .lower);
-            const buffer = try allocator.alloc(u8, 1024);
-            errdefer allocator.free(buffer);
             var object_reader = try obj.ObjectReader(repo_kind).init(core_cursor, oid_hex, true);
-            defer object_reader.deinit();
-            const size = try object_reader.reader.read(buffer);
-
+            errdefer object_reader.deinit();
             return LineIterator(repo_kind){
                 .allocator = allocator,
                 .path = entry.path,
@@ -47,8 +43,8 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                 .mode = entry.mode,
                 .source = .{
                     .object = .{
-                        .buffer = buffer,
-                        .iter = std.mem.splitScalar(u8, buffer[0..size], '\n'),
+                        .object_reader = object_reader,
+                        .eof = false,
                     },
                 },
             };
@@ -71,7 +67,12 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                 .oid = oid,
                 .oid_hex = std.fmt.bytesToHex(&oid, .lower),
                 .mode = mode,
-                .source = .{ .workspace = .{ .file = file, .eof = false } },
+                .source = .{
+                    .workspace = .{
+                        .file = file,
+                        .eof = false,
+                    },
+                },
             };
         }
 
@@ -88,12 +89,8 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
 
         pub fn initFromHead(core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, path: []const u8, entry: obj.TreeEntry) !LineIterator(repo_kind) {
             const oid_hex = std.fmt.bytesToHex(&entry.oid, .lower);
-            const buffer = try allocator.alloc(u8, 1024);
-            errdefer allocator.free(buffer);
             var object_reader = try obj.ObjectReader(repo_kind).init(core_cursor, oid_hex, true);
-            defer object_reader.deinit();
-            const size = try object_reader.reader.read(buffer);
-
+            errdefer object_reader.deinit();
             return LineIterator(repo_kind){
                 .allocator = allocator,
                 .path = path,
@@ -102,8 +99,8 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                 .mode = entry.mode,
                 .source = .{
                     .object = .{
-                        .buffer = buffer,
-                        .iter = std.mem.splitScalar(u8, buffer[0..size], '\n'),
+                        .object_reader = object_reader,
+                        .eof = false,
                     },
                 },
             };
@@ -127,14 +124,27 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
         pub fn next(self: *LineIterator(repo_kind)) !?[]const u8 {
             switch (self.source) {
                 .object => {
-                    if (self.source.object.iter.next()) |line| {
-                        const line_copy = try self.allocator.alloc(u8, line.len);
-                        errdefer self.allocator.free(line_copy);
-                        @memcpy(line_copy, line);
-                        return line_copy;
-                    } else {
+                    if (self.source.object.eof) {
                         return null;
                     }
+                    var line_arr = std.ArrayList(u8).init(self.allocator);
+                    errdefer line_arr.deinit();
+                    var buffer = [_]u8{0} ** 1;
+                    while (true) {
+                        const size = try self.source.object.object_reader.reader.read(&buffer);
+                        if (size == 0) {
+                            self.source.object.eof = true;
+                            break;
+                        } else if (buffer[0] == '\n') {
+                            break;
+                        } else {
+                            if (line_arr.items.len == MAX_READ_BYTES) {
+                                return error.StreamTooLong;
+                            }
+                            try line_arr.append(buffer[0]);
+                        }
+                    }
+                    return try line_arr.toOwnedSlice();
                 },
                 .workspace => {
                     if (self.source.workspace.eof) {
@@ -192,7 +202,10 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
 
         pub fn reset(self: *LineIterator(repo_kind)) !void {
             switch (self.source) {
-                .object => self.source.object.iter.reset(),
+                .object => {
+                    self.source.object.eof = false;
+                    try self.source.object.object_reader.reset();
+                },
                 .workspace => {
                     self.source.workspace.eof = false;
                     try self.source.workspace.file.seekTo(0);
@@ -214,7 +227,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
 
         pub fn deinit(self: *LineIterator(repo_kind)) void {
             switch (self.source) {
-                .object => self.allocator.free(self.source.object.buffer),
+                .object => {},
                 .workspace => self.source.workspace.file.close(),
                 .nothing => {},
                 .buffer => {},
