@@ -604,6 +604,21 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
                 .xit => return &self.internal.rdr,
             }
         }
+
+        pub fn count(self: *ObjectReader(repo_kind)) !usize {
+            var n: usize = 0;
+            var read_buffer = [_]u8{0} ** MAX_READ_BYTES;
+            try self.reset();
+            while (true) {
+                const size = try self.reader().read(&read_buffer);
+                n += size;
+                if (size == 0) {
+                    break;
+                }
+            }
+            try self.reset();
+            return n;
+        }
     };
 }
 

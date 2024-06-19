@@ -288,7 +288,22 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         if (try diff_iter.next()) |*hunk_iter_ptr| {
             var hunk_iter = hunk_iter_ptr.*;
             defer hunk_iter.deinit();
+
+            // verify f.txt has conflict markers
             try std.testing.expectEqualStrings("f.txt", hunk_iter.path);
+            const f_txt = try repo.core.repo_dir.openFile("f.txt", .{ .mode = .read_only });
+            defer f_txt.close();
+            const f_txt_content = try f_txt.readToEndAlloc(allocator, 1024);
+            defer allocator.free(f_txt_content);
+            try std.testing.expectEqualStrings(
+                \\<<<<<<< master
+                \\2
+                \\=======
+                \\3
+                \\>>>>>>> foo
+            ,
+                f_txt_content,
+            );
         } else {
             return error.DiffResultExpected;
         }

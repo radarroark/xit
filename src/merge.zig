@@ -30,26 +30,124 @@ fn writeBlobWithConflict(
     current_name: []const u8,
     source_name: []const u8,
 ) ![hash.SHA1_BYTES_LEN]u8 {
-    // TODO: don't read it all into memory
-
-    var current_buf = [_]u8{0} ** 1024;
     var current_reader = try obj.ObjectReader(repo_kind).init(core_cursor, std.fmt.bytesToHex(current_oid, .lower), true);
     defer current_reader.deinit();
-    const current_size = try current_reader.reader().read(&current_buf);
-    const current_content = current_buf[0..current_size];
-
-    var source_buf = [_]u8{0} ** 1024;
     var source_reader = try obj.ObjectReader(repo_kind).init(core_cursor, std.fmt.bytesToHex(source_oid, .lower), true);
     defer source_reader.deinit();
-    const source_size = try source_reader.reader().read(&source_buf);
-    const source_content = source_buf[0..source_size];
 
-    const content = try std.fmt.allocPrint(allocator, "<<<<<<< {s}\n{s}\n=======\n{s}\n>>>>>>> {s}", .{ current_name, current_content, source_content, source_name });
-    defer allocator.free(content);
-    var stream = std.io.fixedBufferStream(content);
+    const Stream = struct {
+        current_marker: std.io.FixedBufferStream([]u8),
+        current_reader: *obj.ObjectReader(repo_kind),
+        separator: std.io.FixedBufferStream([]const u8),
+        source_reader: *obj.ObjectReader(repo_kind),
+        source_marker: std.io.FixedBufferStream([]u8),
+
+        section: enum {
+            current_marker,
+            current_reader,
+            separator,
+            source_reader,
+            source_marker,
+            finished,
+        },
+
+        const Parent = @This();
+
+        pub const Reader = struct {
+            parent: *Parent,
+
+            pub fn read(self: @This(), buf: []u8) !usize {
+                switch (self.parent.section) {
+                    .current_marker => {
+                        const size = try self.parent.current_marker.reader().read(buf);
+                        if (size == 0) {
+                            self.parent.section = .current_reader;
+                            return try self.read(buf);
+                        } else {
+                            return size;
+                        }
+                    },
+                    .current_reader => {
+                        const size = try self.parent.current_reader.reader().read(buf);
+                        if (size == 0) {
+                            self.parent.section = .separator;
+                            return try self.read(buf);
+                        } else {
+                            return size;
+                        }
+                    },
+                    .separator => {
+                        const size = try self.parent.separator.reader().read(buf);
+                        if (size == 0) {
+                            self.parent.section = .source_reader;
+                            return try self.read(buf);
+                        } else {
+                            return size;
+                        }
+                    },
+                    .source_reader => {
+                        const size = try self.parent.source_reader.reader().read(buf);
+                        if (size == 0) {
+                            self.parent.section = .source_marker;
+                            return try self.read(buf);
+                        } else {
+                            return size;
+                        }
+                    },
+                    .source_marker => {
+                        const size = try self.parent.source_marker.reader().read(buf);
+                        if (size == 0) {
+                            self.parent.section = .finished;
+                            return try self.read(buf);
+                        } else {
+                            return size;
+                        }
+                    },
+                    .finished => {
+                        return 0;
+                    },
+                }
+            }
+        };
+
+        pub fn seekTo(self: *@This(), offset: usize) !void {
+            if (offset == 0) {
+                self.section = .current_marker;
+                try self.current_marker.seekTo(0);
+                try self.current_reader.reset();
+                try self.separator.seekTo(0);
+                try self.source_reader.reset();
+                try self.source_marker.seekTo(0);
+            } else {
+                return error.InvalidOffset;
+            }
+        }
+
+        pub fn reader(self: *@This()) Reader {
+            return Reader{
+                .parent = self,
+            };
+        }
+    };
+
+    const current_marker = try std.fmt.allocPrint(allocator, "<<<<<<< {s}\n", .{current_name});
+    defer allocator.free(current_marker);
+    const separator = "\n=======\n";
+    const source_marker = try std.fmt.allocPrint(allocator, "\n>>>>>>> {s}", .{source_name});
+    defer allocator.free(source_marker);
+    var stream = Stream{
+        .current_marker = std.io.fixedBufferStream(current_marker),
+        .current_reader = &current_reader,
+        .separator = std.io.fixedBufferStream(separator),
+        .source_reader = &source_reader,
+        .source_marker = std.io.fixedBufferStream(source_marker),
+        .section = .current_marker,
+    };
+
+    const file_size = current_marker.len + try current_reader.count() + separator.len + try source_reader.count() + source_marker.len;
 
     var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-    try obj.writeBlob(repo_kind, core_cursor, allocator, &stream, content.len, std.io.FixedBufferStream([]u8).Reader, &oid);
+    try obj.writeBlob(repo_kind, core_cursor, allocator, &stream, file_size, Stream.Reader, &oid);
     return oid;
 }
 
