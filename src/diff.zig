@@ -16,7 +16,6 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
         oid: [hash.SHA1_BYTES_LEN]u8,
         oid_hex: [hash.SHA1_HEX_LEN]u8,
         mode: ?io.Mode,
-        cache: std.AutoArrayHashMap(usize, []const u8),
         source: union(enum) {
             object: struct {
                 buffer: []u8, // TODO: don't read it all into memory
@@ -30,8 +29,6 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
             nothing,
         },
 
-        const MAX_LINE_CACHE_SIZE = 32;
-
         pub fn initFromIndex(core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, entry: idx.Index(repo_kind).Entry) !LineIterator(repo_kind) {
             const oid_hex = std.fmt.bytesToHex(&entry.oid, .lower);
             const buffer = try allocator.alloc(u8, 1024);
@@ -40,17 +37,12 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
             defer object_reader.deinit();
             const size = try object_reader.reader.read(buffer);
 
-            var cache = std.AutoArrayHashMap(usize, []const u8).init(allocator);
-            errdefer cache.deinit();
-            try cache.ensureTotalCapacity(MAX_LINE_CACHE_SIZE);
-
             return LineIterator(repo_kind){
                 .allocator = allocator,
                 .path = entry.path,
                 .oid = entry.oid,
                 .oid_hex = oid_hex,
                 .mode = entry.mode,
-                .cache = cache,
                 .source = .{
                     .object = .{
                         .buffer = buffer,
@@ -71,17 +63,12 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
             try hash.sha1Reader(file.reader(), header, &oid);
             try file.seekTo(0);
 
-            var cache = std.AutoArrayHashMap(usize, []const u8).init(allocator);
-            errdefer cache.deinit();
-            try cache.ensureTotalCapacity(MAX_LINE_CACHE_SIZE);
-
             return LineIterator(repo_kind){
                 .allocator = allocator,
                 .path = path,
                 .oid = oid,
                 .oid_hex = std.fmt.bytesToHex(&oid, .lower),
                 .mode = mode,
-                .cache = cache,
                 .source = .{ .workspace = .{ .file = file, .eof = false } },
             };
         }
@@ -93,7 +80,6 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                 .oid = [_]u8{0} ** hash.SHA1_BYTES_LEN,
                 .oid_hex = [_]u8{0} ** hash.SHA1_HEX_LEN,
                 .mode = null,
-                .cache = std.AutoArrayHashMap(usize, []const u8).init(allocator),
                 .source = .nothing,
             };
         }
@@ -106,17 +92,12 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
             defer object_reader.deinit();
             const size = try object_reader.reader.read(buffer);
 
-            var cache = std.AutoArrayHashMap(usize, []const u8).init(allocator);
-            errdefer cache.deinit();
-            try cache.ensureTotalCapacity(MAX_LINE_CACHE_SIZE);
-
             return LineIterator(repo_kind){
                 .allocator = allocator,
                 .path = path,
                 .oid = entry.oid,
                 .oid_hex = oid_hex,
                 .mode = entry.mode,
-                .cache = cache,
                 .source = .{
                     .object = .{
                         .buffer = buffer,
@@ -127,20 +108,12 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
         }
 
         pub fn initFromBuffer(allocator: std.mem.Allocator, buffer: []const u8) !LineIterator(repo_kind) {
-            const empty_buffer = try allocator.alloc(u8, 0);
-            errdefer allocator.free(empty_buffer);
-
-            var cache = std.AutoArrayHashMap(usize, []const u8).init(allocator);
-            errdefer cache.deinit();
-            try cache.ensureTotalCapacity(MAX_LINE_CACHE_SIZE);
-
             return .{
                 .allocator = allocator,
                 .path = "",
                 .oid = [_]u8{0} ** hash.SHA1_BYTES_LEN,
                 .oid_hex = [_]u8{0} ** hash.SHA1_HEX_LEN,
                 .mode = null,
-                .cache = cache,
                 .source = .{
                     .buffer = std.mem.splitScalar(u8, buffer, '\n'),
                 },
@@ -168,28 +141,20 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
         }
 
         fn get(self: *LineIterator(repo_kind), index: usize) ![]const u8 {
-            if (self.cache.get(index)) |line| {
-                return line;
-            } else {
-                if (self.cache.count() == MAX_LINE_CACHE_SIZE) {
-                    const kv = self.cache.fetchOrderedRemove(self.cache.keys()[0]) orelse return error.CacheKeyNotFound;
-                    defer self.free(kv.value);
-                }
-                try self.reset();
-                var n: usize = 0;
-                while (true) {
-                    if (try self.next()) |line| {
-                        if (n == index) {
-                            errdefer self.free(line);
-                            self.cache.putAssumeCapacity(index, line);
-                            return line;
-                        } else {
-                            defer self.free(line);
-                            n += 1;
-                        }
+            // TODO: cache result so we don't have to scan the file every time
+            try self.reset();
+            var n: usize = 0;
+            while (true) {
+                if (try self.next()) |line| {
+                    if (n == index) {
+                        errdefer self.free(line);
+                        return line;
                     } else {
-                        return error.IndexOutOfBounds;
+                        defer self.free(line);
+                        n += 1;
                     }
+                } else {
+                    return error.IndexOutOfBounds;
                 }
             }
         }
@@ -226,10 +191,6 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
         }
 
         pub fn deinit(self: *LineIterator(repo_kind)) void {
-            for (self.cache.values()) |line| {
-                self.free(line);
-            }
-            self.cache.deinit();
             switch (self.source) {
                 .object => self.allocator.free(self.source.object.buffer),
                 .workspace => self.source.workspace.file.close(),
