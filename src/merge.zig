@@ -128,6 +128,21 @@ fn writeBlobWithConflict(
                 .parent = self,
             };
         }
+
+        pub fn count(self: *@This()) !usize {
+            var n: usize = 0;
+            var read_buffer = [_]u8{0} ** MAX_READ_BYTES;
+            try self.seekTo(0);
+            while (true) {
+                const size = try self.reader().read(&read_buffer);
+                if (size == 0) {
+                    break;
+                }
+                n += size;
+            }
+            try self.seekTo(0);
+            return n;
+        }
     };
 
     const current_marker = try std.fmt.allocPrint(allocator, "<<<<<<< {s}\n", .{current_name});
@@ -144,10 +159,8 @@ fn writeBlobWithConflict(
         .section = .current_marker,
     };
 
-    const file_size = current_marker.len + try current_reader.count() + separator.len + try source_reader.count() + source_marker.len;
-
     var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-    try obj.writeBlob(repo_kind, core_cursor, allocator, &stream, file_size, Stream.Reader, &oid);
+    try obj.writeBlob(repo_kind, core_cursor, allocator, &stream, try stream.count(), Stream.Reader, &oid);
     return oid;
 }
 
