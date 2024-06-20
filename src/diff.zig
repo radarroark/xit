@@ -494,6 +494,96 @@ test "myers diff" {
     }
 }
 
+pub fn Diff3Iterator(comptime repo_kind: rp.RepoKind) type {
+    return struct {
+        line_iter_o: *LineIterator(repo_kind),
+        line_iter_a: *LineIterator(repo_kind),
+        line_iter_b: *LineIterator(repo_kind),
+        match_a: std.AutoHashMap(usize, usize),
+        match_b: std.AutoHashMap(usize, usize),
+
+        pub fn init(
+            allocator: std.mem.Allocator,
+            line_iter_o: *LineIterator(repo_kind),
+            line_iter_a: *LineIterator(repo_kind),
+            line_iter_b: *LineIterator(repo_kind),
+        ) !Diff3Iterator(repo_kind) {
+            var match_a = std.AutoHashMap(usize, usize).init(allocator);
+            errdefer match_a.deinit();
+            var match_b = std.AutoHashMap(usize, usize).init(allocator);
+            errdefer match_b.deinit();
+
+            var myers_diff_iter_a = try MyersDiffIterator(repo_kind).init(allocator, line_iter_o, line_iter_a);
+            defer myers_diff_iter_a.deinit();
+            while (try myers_diff_iter_a.next()) |edit| {
+                defer edit.deinit(allocator);
+                if (.eql == edit) {
+                    try match_a.put(edit.eql.old_line.num, edit.eql.new_line.num);
+                }
+            }
+
+            var myers_diff_iter_b = try MyersDiffIterator(repo_kind).init(allocator, line_iter_o, line_iter_b);
+            defer myers_diff_iter_b.deinit();
+            while (try myers_diff_iter_b.next()) |edit| {
+                defer edit.deinit(allocator);
+                if (.eql == edit) {
+                    try match_b.put(edit.eql.old_line.num, edit.eql.new_line.num);
+                }
+            }
+
+            return .{
+                .line_iter_o = line_iter_o,
+                .line_iter_a = line_iter_a,
+                .line_iter_b = line_iter_b,
+                .match_a = match_a,
+                .match_b = match_b,
+            };
+        }
+
+        pub fn deinit(self: *Diff3Iterator(repo_kind)) void {
+            self.match_a.deinit();
+            self.match_b.deinit();
+        }
+    };
+}
+
+test "diff3" {
+    const repo_kind = rp.RepoKind.xit;
+    const allocator = std.testing.allocator;
+    const orig_lines =
+        \\celery
+        \\garlic
+        \\onions
+        \\salmon
+        \\tomatoes
+        \\wine
+    ;
+    const alice_lines =
+        \\celery
+        \\salmon
+        \\tomatoes
+        \\garlic
+        \\onions
+        \\wine
+    ;
+    const bob_lines =
+        \\celery
+        \\salmon
+        \\garlic
+        \\onions
+        \\tomatoes
+        \\wine
+    ;
+    var orig_iter = try LineIterator(repo_kind).initFromBuffer(allocator, orig_lines);
+    defer orig_iter.deinit();
+    var alice_iter = try LineIterator(repo_kind).initFromBuffer(allocator, alice_lines);
+    defer alice_iter.deinit();
+    var bob_iter = try LineIterator(repo_kind).initFromBuffer(allocator, bob_lines);
+    defer bob_iter.deinit();
+    var diff3_iter = try Diff3Iterator(repo_kind).init(allocator, &orig_iter, &alice_iter, &bob_iter);
+    defer diff3_iter.deinit();
+}
+
 pub fn Hunk(comptime repo_kind: rp.RepoKind) type {
     return struct {
         edits: std.ArrayList(MyersDiffIterator(repo_kind).Edit),
