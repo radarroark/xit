@@ -160,7 +160,7 @@ fn writeBlobWithConflict(
     };
 
     var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-    try obj.writeBlob(repo_kind, core_cursor, allocator, &stream, try stream.count(), Stream.Reader, &oid);
+    try obj.writeBlob(repo_kind, core_cursor, allocator, &stream, try stream.count(), &oid);
     return oid;
 }
 

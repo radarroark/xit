@@ -75,7 +75,6 @@ pub fn writeBlob(
     allocator: std.mem.Allocator,
     file: anytype,
     file_size: u64,
-    comptime FileReaderType: type,
     sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8,
 ) !void {
     // create blob header
@@ -142,6 +141,7 @@ pub fn writeBlob(
         },
         .xit => {
             const file_hash = hash.bytesToHash(sha1_bytes_buffer);
+            const FileReaderType = @TypeOf(reader);
 
             const Ctx = struct {
                 core_cursor: rp.Repo(repo_kind).CoreCursor,

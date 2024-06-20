@@ -226,7 +226,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
 
                     // write the object
                     var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-                    try obj.writeBlob(repo_kind, core_cursor, self.allocator, file, meta.size(), std.fs.File.Reader, &oid);
+                    try obj.writeBlob(repo_kind, core_cursor, self.allocator, file, meta.size(), &oid);
                     // add the entry
                     const times = io.getTimes(meta);
                     const stat = try io.getStat(file);
