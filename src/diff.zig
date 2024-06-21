@@ -524,20 +524,6 @@ test "myers diff" {
     }
 }
 
-pub const LineRange = struct {
-    begin: usize,
-    end: usize,
-};
-
-pub const Chunk = union(enum) {
-    clean: LineRange,
-    conflict: struct {
-        o_range: ?LineRange,
-        a_range: ?LineRange,
-        b_range: ?LineRange,
-    },
-};
-
 pub fn Diff3Iterator(comptime repo_kind: rp.RepoKind) type {
     return struct {
         line_iter_o: *LineIterator(repo_kind),
@@ -552,6 +538,20 @@ pub fn Diff3Iterator(comptime repo_kind: rp.RepoKind) type {
         match_a: std.AutoHashMap(usize, usize),
         match_b: std.AutoHashMap(usize, usize),
         finished: bool,
+
+        pub const Range = struct {
+            begin: usize,
+            end: usize,
+        };
+
+        pub const Chunk = union(enum) {
+            clean: Range,
+            conflict: struct {
+                o_range: ?Range,
+                a_range: ?Range,
+                b_range: ?Range,
+            },
+        };
 
         pub fn init(
             allocator: std.mem.Allocator,
@@ -701,7 +701,7 @@ pub fn Diff3Iterator(comptime repo_kind: rp.RepoKind) type {
             }
         }
 
-        fn lineRange(begin: usize, end: usize) ?LineRange {
+        fn lineRange(begin: usize, end: usize) ?Range {
             if (end > begin) {
                 return .{ .begin = begin, .end = end };
             } else {
@@ -709,7 +709,7 @@ pub fn Diff3Iterator(comptime repo_kind: rp.RepoKind) type {
             }
         }
 
-        fn chunk(o_range_maybe: ?LineRange, a_range_maybe: ?LineRange, b_range_maybe: ?LineRange, match: bool) ?Chunk {
+        fn chunk(o_range_maybe: ?Range, a_range_maybe: ?Range, b_range_maybe: ?Range, match: bool) ?Chunk {
             if (match) {
                 return .{
                     .clean = o_range_maybe orelse return null,

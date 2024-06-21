@@ -22,55 +22,6 @@ pub const MergeConflict = struct {
     renamed: ?RenamedEntry,
 };
 
-const LineSubset = struct {
-    allocator: std.mem.Allocator,
-    lines: std.ArrayList([]const u8),
-
-    fn init(allocator: std.mem.Allocator, comptime repo_kind: rp.RepoKind, iter: *df.LineIterator(repo_kind), range_maybe: ?df.LineRange) !@This() {
-        var lines = std.ArrayList([]const u8).init(allocator);
-        errdefer {
-            for (lines.items) |line| {
-                allocator.free(line);
-            }
-            lines.deinit();
-        }
-        if (range_maybe) |range| {
-            if (iter.current_line != range.begin) {
-                return error.UnexpectedLineNumber;
-            }
-            while (iter.current_line < range.end) {
-                if (try iter.next()) |line| {
-                    errdefer allocator.free(line);
-                    try lines.append(line);
-                }
-            }
-        }
-        return .{
-            .allocator = allocator,
-            .lines = lines,
-        };
-    }
-
-    fn deinit(self: *@This()) void {
-        for (self.lines.items) |line| {
-            self.allocator.free(line);
-        }
-        self.lines.deinit();
-    }
-
-    fn eql(self: @This(), other: LineSubset) bool {
-        if (self.lines.items.len != other.lines.items.len) {
-            return false;
-        }
-        for (self.lines.items, other.lines.items) |our_line, their_line| {
-            if (!std.mem.eql(u8, our_line, their_line)) {
-                return false;
-            }
-        }
-        return true;
-    }
-};
-
 fn writeBlobWithConflict(
     comptime repo_kind: rp.RepoKind,
     core_cursor: rp.Repo(repo_kind).CoreCursor,
@@ -101,6 +52,55 @@ fn writeBlobWithConflict(
         }
         line_buffer.deinit();
     }
+
+    const LineRange = struct {
+        allocator: std.mem.Allocator,
+        lines: std.ArrayList([]const u8),
+
+        fn init(alctr: std.mem.Allocator, iter: *df.LineIterator(repo_kind), range_maybe: ?df.Diff3Iterator(repo_kind).Range) !@This() {
+            var lines = std.ArrayList([]const u8).init(alctr);
+            errdefer {
+                for (lines.items) |line| {
+                    alctr.free(line);
+                }
+                lines.deinit();
+            }
+            if (range_maybe) |range| {
+                if (iter.current_line != range.begin) {
+                    return error.UnexpectedLineNumber;
+                }
+                while (iter.current_line < range.end) {
+                    if (try iter.next()) |line| {
+                        errdefer alctr.free(line);
+                        try lines.append(line);
+                    }
+                }
+            }
+            return .{
+                .allocator = alctr,
+                .lines = lines,
+            };
+        }
+
+        fn deinit(self: *@This()) void {
+            for (self.lines.items) |line| {
+                self.allocator.free(line);
+            }
+            self.lines.deinit();
+        }
+
+        fn eql(self: @This(), other: @This()) bool {
+            if (self.lines.items.len != other.lines.items.len) {
+                return false;
+            }
+            for (self.lines.items, other.lines.items) |our_line, their_line| {
+                if (!std.mem.eql(u8, our_line, their_line)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+    };
 
     const Stream = struct {
         allocator: std.mem.Allocator,
@@ -176,11 +176,11 @@ fn writeBlobWithConflict(
                             }
                         },
                         .conflict => {
-                            var o_lines = try LineSubset.init(self.parent.allocator, repo_kind, self.parent.common_iter, chunk.conflict.o_range);
+                            var o_lines = try LineRange.init(self.parent.allocator, self.parent.common_iter, chunk.conflict.o_range);
                             defer o_lines.deinit();
-                            var a_lines = try LineSubset.init(self.parent.allocator, repo_kind, self.parent.current_iter, chunk.conflict.a_range);
+                            var a_lines = try LineRange.init(self.parent.allocator, self.parent.current_iter, chunk.conflict.a_range);
                             defer a_lines.deinit();
-                            var b_lines = try LineSubset.init(self.parent.allocator, repo_kind, self.parent.source_iter, chunk.conflict.b_range);
+                            var b_lines = try LineRange.init(self.parent.allocator, self.parent.source_iter, chunk.conflict.b_range);
                             defer b_lines.deinit();
 
                             // if o == a or a == b, return b to autoresolve conflict
