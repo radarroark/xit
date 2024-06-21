@@ -635,28 +635,25 @@ pub fn Diff3Iterator(comptime repo_kind: rp.RepoKind) type {
                             self.line_a = a - 1;
                             self.line_b = b - 1;
                             return chunk(
-                                lineRange(line_o, o - 1),
-                                lineRange(line_a, a - 1),
-                                lineRange(line_b, b - 1),
+                                lineRange(line_o, self.line_o),
+                                lineRange(line_a, self.line_a),
+                                lineRange(line_b, self.line_b),
                                 false,
                             );
                         }
                     }
                 } else {
                     // return matching chunk
-                    const o = self.line_o + i;
-                    const a = self.line_a + i;
-                    const b = self.line_b + i;
                     const line_o = self.line_o;
                     const line_a = self.line_a;
                     const line_b = self.line_b;
-                    self.line_o = o - 1;
-                    self.line_a = a - 1;
-                    self.line_b = b - 1;
+                    self.line_o += i - 1;
+                    self.line_a += i - 1;
+                    self.line_b += i - 1;
                     return chunk(
-                        lineRange(line_o, o - 1),
-                        lineRange(line_a, a - 1),
-                        lineRange(line_b, b - 1),
+                        lineRange(line_o, self.line_o),
+                        lineRange(line_a, self.line_a),
+                        lineRange(line_b, self.line_b),
                         true,
                     );
                 }
