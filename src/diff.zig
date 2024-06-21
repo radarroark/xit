@@ -499,8 +499,29 @@ pub fn Diff3Iterator(comptime repo_kind: rp.RepoKind) type {
         line_iter_o: *LineIterator(repo_kind),
         line_iter_a: *LineIterator(repo_kind),
         line_iter_b: *LineIterator(repo_kind),
+        line_count_o: usize,
+        line_count_a: usize,
+        line_count_b: usize,
+        line_o: usize,
+        line_a: usize,
+        line_b: usize,
         match_a: std.AutoHashMap(usize, usize),
         match_b: std.AutoHashMap(usize, usize),
+        finished: bool,
+
+        pub const LineRange = struct {
+            begin: usize,
+            end: usize,
+        };
+
+        pub const Chunk = union(enum) {
+            clean: LineRange,
+            conflict: struct {
+                o_range: ?LineRange,
+                a_range: ?LineRange,
+                b_range: ?LineRange,
+            },
+        };
 
         pub fn init(
             allocator: std.mem.Allocator,
@@ -521,6 +542,8 @@ pub fn Diff3Iterator(comptime repo_kind: rp.RepoKind) type {
                     try match_a.put(edit.eql.old_line.num, edit.eql.new_line.num);
                 }
             }
+            try line_iter_o.reset();
+            try line_iter_a.reset();
 
             var myers_diff_iter_b = try MyersDiffIterator(repo_kind).init(allocator, line_iter_o, line_iter_b);
             defer myers_diff_iter_b.deinit();
@@ -530,19 +553,136 @@ pub fn Diff3Iterator(comptime repo_kind: rp.RepoKind) type {
                     try match_b.put(edit.eql.old_line.num, edit.eql.new_line.num);
                 }
             }
+            try line_iter_o.reset();
+            try line_iter_b.reset();
 
             return .{
                 .line_iter_o = line_iter_o,
                 .line_iter_a = line_iter_a,
                 .line_iter_b = line_iter_b,
+                .line_count_o = try line_iter_o.count(),
+                .line_count_a = try line_iter_a.count(),
+                .line_count_b = try line_iter_b.count(),
+                .line_o = 0,
+                .line_a = 0,
+                .line_b = 0,
                 .match_a = match_a,
                 .match_b = match_b,
+                .finished = false,
             };
+        }
+
+        pub fn next(self: *Diff3Iterator(repo_kind)) ?Chunk {
+            if (self.finished) {
+                return null;
+            }
+
+            // find next mismatch
+            var i: usize = 1;
+            while (self.inBounds(i) and
+                self.isMatch(&self.match_a, self.line_a, i) and
+                self.isMatch(&self.match_b, self.line_b, i))
+            {
+                i += 1;
+            }
+
+            if (self.inBounds(i)) {
+                if (i == 1) {
+                    // find next match
+                    var o = self.line_o + 1;
+                    while (o <= self.line_count_o and (!self.match_a.contains(o) or !self.match_b.contains(o))) {
+                        o += 1;
+                    }
+                    const a_maybe = self.match_a.get(o);
+                    const b_maybe = self.match_b.get(o);
+                    if (a_maybe) |a| {
+                        if (b_maybe) |b| {
+                            // return mismatching chunk
+                            const line_o = self.line_o;
+                            const line_a = self.line_a;
+                            const line_b = self.line_b;
+                            self.line_o = o - 1;
+                            self.line_a = a - 1;
+                            self.line_b = b - 1;
+                            return chunk(
+                                lineRange(line_o, o - 1),
+                                lineRange(line_a, a - 1),
+                                lineRange(line_b, b - 1),
+                                false,
+                            );
+                        }
+                    }
+                } else {
+                    // return matching chunk
+                    const o = self.line_o + i;
+                    const a = self.line_a + i;
+                    const b = self.line_b + i;
+                    const line_o = self.line_o;
+                    const line_a = self.line_a;
+                    const line_b = self.line_b;
+                    self.line_o = o - 1;
+                    self.line_a = a - 1;
+                    self.line_b = b - 1;
+                    return chunk(
+                        lineRange(line_o, o - 1),
+                        lineRange(line_a, a - 1),
+                        lineRange(line_b, b - 1),
+                        true,
+                    );
+                }
+            }
+
+            // return final chunk
+            self.finished = true;
+            return chunk(
+                lineRange(self.line_o, self.line_count_o),
+                lineRange(self.line_a, self.line_count_a),
+                lineRange(self.line_b, self.line_count_b),
+                i > 1,
+            );
         }
 
         pub fn deinit(self: *Diff3Iterator(repo_kind)) void {
             self.match_a.deinit();
             self.match_b.deinit();
+        }
+
+        fn inBounds(self: Diff3Iterator(repo_kind), i: usize) bool {
+            return self.line_o + i <= self.line_count_o or
+                self.line_a + i <= self.line_count_a or
+                self.line_b + i <= self.line_count_b;
+        }
+
+        fn isMatch(self: Diff3Iterator(repo_kind), matches: *std.AutoHashMap(usize, usize), offset: usize, i: usize) bool {
+            if (matches.get(self.line_o + i)) |match| {
+                return match == offset + i;
+            } else {
+                return false;
+            }
+        }
+
+        fn lineRange(begin: usize, end: usize) ?LineRange {
+            if (end > begin) {
+                return .{ .begin = begin, .end = end };
+            } else {
+                return null;
+            }
+        }
+
+        fn chunk(o_range_maybe: ?LineRange, a_range_maybe: ?LineRange, b_range_maybe: ?LineRange, match: bool) ?Chunk {
+            if (match) {
+                return .{
+                    .clean = o_range_maybe orelse return null,
+                };
+            } else {
+                return .{
+                    .conflict = .{
+                        .o_range = o_range_maybe,
+                        .a_range = a_range_maybe,
+                        .b_range = b_range_maybe,
+                    },
+                };
+            }
         }
     };
 }
@@ -550,6 +690,7 @@ pub fn Diff3Iterator(comptime repo_kind: rp.RepoKind) type {
 test "diff3" {
     const repo_kind = rp.RepoKind.xit;
     const allocator = std.testing.allocator;
+
     const orig_lines =
         \\celery
         \\garlic
@@ -565,6 +706,7 @@ test "diff3" {
         \\garlic
         \\onions
         \\wine
+        \\beer
     ;
     const bob_lines =
         \\celery
@@ -573,7 +715,9 @@ test "diff3" {
         \\onions
         \\tomatoes
         \\wine
+        \\beer
     ;
+
     var orig_iter = try LineIterator(repo_kind).initFromBuffer(allocator, orig_lines);
     defer orig_iter.deinit();
     var alice_iter = try LineIterator(repo_kind).initFromBuffer(allocator, alice_lines);
@@ -582,6 +726,31 @@ test "diff3" {
     defer bob_iter.deinit();
     var diff3_iter = try Diff3Iterator(repo_kind).init(allocator, &orig_iter, &alice_iter, &bob_iter);
     defer diff3_iter.deinit();
+
+    var chunk = diff3_iter.next() orelse return error.ExpectedChunk;
+    try std.testing.expect(.clean == chunk);
+
+    chunk = diff3_iter.next() orelse return error.ExpectedChunk;
+    try std.testing.expect(.conflict == chunk);
+
+    chunk = diff3_iter.next() orelse return error.ExpectedChunk;
+    try std.testing.expect(.clean == chunk);
+
+    chunk = diff3_iter.next() orelse return error.ExpectedChunk;
+    try std.testing.expect(.conflict == chunk);
+
+    chunk = diff3_iter.next() orelse return error.ExpectedChunk;
+    try std.testing.expect(.clean == chunk);
+
+    // this is a conflict even though a and b are both "beer",
+    // because the original does not contain it.
+    // it is only marked as clean if all three are matches.
+    // when outputting the conflict lines this should be
+    // auto-resolved since we can compare a and b at that point.
+    chunk = diff3_iter.next() orelse return error.ExpectedChunk;
+    try std.testing.expect(.conflict == chunk);
+
+    try std.testing.expect(null == diff3_iter.next());
 }
 
 pub fn Hunk(comptime repo_kind: rp.RepoKind) type {
