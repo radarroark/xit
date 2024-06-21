@@ -261,16 +261,28 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         //   \       /
         //    `---- C [foo]
 
-        try addFile(repo_kind, &repo, "f.txt", "1");
+        try addFile(repo_kind, &repo, "f.txt",
+            \\a
+            \\b
+            \\c
+        );
         _ = try repo.commit(null, "a");
         try repo.create_branch("foo");
-        try addFile(repo_kind, &repo, "f.txt", "2");
+        try addFile(repo_kind, &repo, "f.txt",
+            \\a
+            \\x
+            \\c
+        );
         _ = try repo.commit(null, "b");
         {
             var result = try repo.switch_head("foo");
             defer result.deinit();
         }
-        try addFile(repo_kind, &repo, "f.txt", "3");
+        try addFile(repo_kind, &repo, "f.txt",
+            \\a
+            \\y
+            \\c
+        );
         _ = try repo.commit(null, "d");
         {
             var result = try repo.switch_head("master");
@@ -296,11 +308,15 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             const f_txt_content = try f_txt.readToEndAlloc(allocator, 1024);
             defer allocator.free(f_txt_content);
             try std.testing.expectEqualStrings(
+                \\a
                 \\<<<<<<< master
-                \\2
+                \\x
+                \\||||||| original (1c943a98887754f364fafaa1da3ac56e0e0875a9)
+                \\b
                 \\=======
-                \\3
+                \\y
                 \\>>>>>>> foo
+                \\c
             ,
                 f_txt_content,
             );
@@ -312,7 +328,11 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         try checkMergeAbort(&repo);
 
         // resolve conflict
-        try addFile(repo_kind, &repo, "f.txt", "3");
+        try addFile(repo_kind, &repo, "f.txt",
+            \\a
+            \\y
+            \\c
+        );
         {
             var result = try repo.merge(.cont);
             defer result.deinit();

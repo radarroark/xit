@@ -16,6 +16,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
         oid: [hash.SHA1_BYTES_LEN]u8,
         oid_hex: [hash.SHA1_HEX_LEN]u8,
         mode: ?io.Mode,
+        current_line: usize,
         source: union(enum) {
             object: struct {
                 object_reader: obj.ObjectReader(repo_kind),
@@ -41,6 +42,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                 .oid = entry.oid,
                 .oid_hex = oid_hex,
                 .mode = entry.mode,
+                .current_line = 0,
                 .source = .{
                     .object = .{
                         .object_reader = object_reader,
@@ -67,6 +69,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                 .oid = oid,
                 .oid_hex = std.fmt.bytesToHex(&oid, .lower),
                 .mode = mode,
+                .current_line = 0,
                 .source = .{
                     .workspace = .{
                         .file = file,
@@ -83,6 +86,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                 .oid = [_]u8{0} ** hash.SHA1_BYTES_LEN,
                 .oid_hex = [_]u8{0} ** hash.SHA1_HEX_LEN,
                 .mode = null,
+                .current_line = 0,
                 .source = .nothing,
             };
         }
@@ -97,6 +101,27 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                 .oid = entry.oid,
                 .oid_hex = oid_hex,
                 .mode = entry.mode,
+                .current_line = 0,
+                .source = .{
+                    .object = .{
+                        .object_reader = object_reader,
+                        .eof = false,
+                    },
+                },
+            };
+        }
+
+        pub fn initFromOid(core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, oid: [hash.SHA1_BYTES_LEN]u8) !LineIterator(repo_kind) {
+            const oid_hex = std.fmt.bytesToHex(&oid, .lower);
+            var object_reader = try obj.ObjectReader(repo_kind).init(core_cursor, oid_hex, true);
+            errdefer object_reader.deinit();
+            return LineIterator(repo_kind){
+                .allocator = allocator,
+                .path = "",
+                .oid = oid,
+                .oid_hex = oid_hex,
+                .mode = null,
+                .current_line = 0,
                 .source = .{
                     .object = .{
                         .object_reader = object_reader,
@@ -113,6 +138,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                 .oid = [_]u8{0} ** hash.SHA1_BYTES_LEN,
                 .oid_hex = [_]u8{0} ** hash.SHA1_HEX_LEN,
                 .mode = null,
+                .current_line = 0,
                 .source = .{
                     .buffer = .{
                         .iter = std.mem.splitScalar(u8, buffer, '\n'),
@@ -144,6 +170,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                             try line_arr.append(buffer[0]);
                         }
                     }
+                    self.current_line += 1;
                     return try line_arr.toOwnedSlice();
                 },
                 .workspace => {
@@ -156,6 +183,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                         error.EndOfStream => self.source.workspace.eof = true,
                         else => return err,
                     };
+                    self.current_line += 1;
                     return try line_arr.toOwnedSlice();
                 },
                 .nothing => return null,
@@ -164,6 +192,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                         const line_copy = try self.allocator.alloc(u8, line.len);
                         errdefer self.allocator.free(line_copy);
                         @memcpy(line_copy, line);
+                        self.current_line += 1;
                         return line_copy;
                     } else {
                         return null;
@@ -192,6 +221,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
         }
 
         pub fn reset(self: *LineIterator(repo_kind)) !void {
+            self.current_line = 0;
             switch (self.source) {
                 .object => {
                     self.source.object.eof = false;
@@ -494,6 +524,20 @@ test "myers diff" {
     }
 }
 
+pub const LineRange = struct {
+    begin: usize,
+    end: usize,
+};
+
+pub const Chunk = union(enum) {
+    clean: LineRange,
+    conflict: struct {
+        o_range: ?LineRange,
+        a_range: ?LineRange,
+        b_range: ?LineRange,
+    },
+};
+
 pub fn Diff3Iterator(comptime repo_kind: rp.RepoKind) type {
     return struct {
         line_iter_o: *LineIterator(repo_kind),
@@ -508,20 +552,6 @@ pub fn Diff3Iterator(comptime repo_kind: rp.RepoKind) type {
         match_a: std.AutoHashMap(usize, usize),
         match_b: std.AutoHashMap(usize, usize),
         finished: bool,
-
-        pub const LineRange = struct {
-            begin: usize,
-            end: usize,
-        };
-
-        pub const Chunk = union(enum) {
-            clean: LineRange,
-            conflict: struct {
-                o_range: ?LineRange,
-                a_range: ?LineRange,
-                b_range: ?LineRange,
-            },
-        };
 
         pub fn init(
             allocator: std.mem.Allocator,
@@ -640,6 +670,16 @@ pub fn Diff3Iterator(comptime repo_kind: rp.RepoKind) type {
                 lineRange(self.line_b, self.line_count_b),
                 i > 1,
             );
+        }
+
+        pub fn reset(self: *Diff3Iterator(repo_kind)) !void {
+            try self.line_iter_o.reset();
+            try self.line_iter_a.reset();
+            try self.line_iter_b.reset();
+            self.line_o = 0;
+            self.line_a = 0;
+            self.line_b = 0;
+            self.finished = false;
         }
 
         pub fn deinit(self: *Diff3Iterator(repo_kind)) void {

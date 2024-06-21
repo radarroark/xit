@@ -113,7 +113,7 @@ pub fn writeBlob(
             var rand_chars = [_]u8{0} ** 6;
             try fillWithRandChars(&rand_chars);
             const tmp_file_name = "tmp_obj_" ++ rand_chars;
-            const tmp_file = try hash_prefix_dir.createFile(tmp_file_name, .{ .read = true });
+            const tmp_file = try hash_prefix_dir.createFile(tmp_file_name, .{ .read = true, .truncate = true });
             defer tmp_file.close();
             try tmp_file.writeAll(header);
 
