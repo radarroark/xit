@@ -294,32 +294,31 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             try std.testing.expect(.conflict == result.data);
         }
 
+        // verify f.txt has conflict markers
+        const f_txt = try repo.core.repo_dir.openFile("f.txt", .{ .mode = .read_only });
+        defer f_txt.close();
+        const f_txt_content = try f_txt.readToEndAlloc(allocator, 1024);
+        defer allocator.free(f_txt_content);
+        try std.testing.expectEqualStrings(
+            \\a
+            \\<<<<<<< master
+            \\x
+            \\||||||| original (1c943a98887754f364fafaa1da3ac56e0e0875a9)
+            \\b
+            \\=======
+            \\y
+            \\>>>>>>> foo
+            \\c
+        ,
+            f_txt_content,
+        );
+
         // generate diff
         var diff_iter = try repo.diff(.workspace, .current);
         defer diff_iter.deinit();
         if (try diff_iter.next()) |*hunk_iter_ptr| {
             var hunk_iter = hunk_iter_ptr.*;
             defer hunk_iter.deinit();
-
-            // verify f.txt has conflict markers
-            try std.testing.expectEqualStrings("f.txt", hunk_iter.path);
-            const f_txt = try repo.core.repo_dir.openFile("f.txt", .{ .mode = .read_only });
-            defer f_txt.close();
-            const f_txt_content = try f_txt.readToEndAlloc(allocator, 1024);
-            defer allocator.free(f_txt_content);
-            try std.testing.expectEqualStrings(
-                \\a
-                \\<<<<<<< master
-                \\x
-                \\||||||| original (1c943a98887754f364fafaa1da3ac56e0e0875a9)
-                \\b
-                \\=======
-                \\y
-                \\>>>>>>> foo
-                \\c
-            ,
-                f_txt_content,
-            );
         } else {
             return error.DiffResultExpected;
         }
@@ -337,6 +336,72 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             var result = try repo.merge(.cont);
             defer result.deinit();
             try std.testing.expect(.success == result.data);
+        }
+    }
+
+    // same file conflict (autoresolved)
+    {
+        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "same-file-conflict-autoresolved" } }, writers);
+        defer repo.deinit();
+
+        // A --- B --- D [master]
+        //  \         /
+        //   \       /
+        //    `---- C [foo]
+
+        try addFile(repo_kind, &repo, "f.txt",
+            \\a
+            \\b
+            \\c
+        );
+        _ = try repo.commit(null, "a");
+        try repo.create_branch("foo");
+        try addFile(repo_kind, &repo, "f.txt",
+            \\x
+            \\b
+            \\c
+        );
+        _ = try repo.commit(null, "b");
+        {
+            var result = try repo.switch_head("foo");
+            defer result.deinit();
+        }
+        try addFile(repo_kind, &repo, "f.txt",
+            \\a
+            \\b
+            \\y
+        );
+        _ = try repo.commit(null, "d");
+        {
+            var result = try repo.switch_head("master");
+            defer result.deinit();
+        }
+        {
+            var result = try repo.merge(.{ .new = .{ .source_name = "foo" } });
+            defer result.deinit();
+            try std.testing.expect(.success == result.data);
+        }
+
+        // verify f.txt has been autoresolved
+        const f_txt = try repo.core.repo_dir.openFile("f.txt", .{ .mode = .read_only });
+        defer f_txt.close();
+        const f_txt_content = try f_txt.readToEndAlloc(allocator, 1024);
+        defer allocator.free(f_txt_content);
+        try std.testing.expectEqualStrings(
+            \\x
+            \\b
+            \\y
+        ,
+            f_txt_content,
+        );
+
+        // generate diff
+        var diff_iter = try repo.diff(.workspace, .current);
+        defer diff_iter.deinit();
+        if (try diff_iter.next()) |*hunk_iter_ptr| {
+            var hunk_iter = hunk_iter_ptr.*;
+            defer hunk_iter.deinit();
+            return error.DiffResultNotExpected;
         }
     }
 

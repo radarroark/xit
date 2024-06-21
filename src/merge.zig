@@ -80,6 +80,7 @@ fn writeBlobWithConflict(
     source_oid: [hash.SHA1_BYTES_LEN]u8,
     current_name: []const u8,
     source_name: []const u8,
+    has_conflict: *bool,
 ) ![hash.SHA1_BYTES_LEN]u8 {
     var common_iter = if (common_oid_maybe) |common_oid|
         try df.LineIterator(repo_kind).initFromOid(core_cursor, allocator, common_oid)
@@ -113,6 +114,7 @@ fn writeBlobWithConflict(
         diff3_iter: *df.Diff3Iterator(repo_kind),
         line_buffer: *std.ArrayList([]const u8),
         current_line: ?[]const u8,
+        has_conflict: bool,
 
         const Parent = @This();
 
@@ -181,7 +183,7 @@ fn writeBlobWithConflict(
                             var b_lines = try LineSubset.init(self.parent.allocator, repo_kind, self.parent.source_iter, chunk.conflict.b_range);
                             defer b_lines.deinit();
 
-                            // if o == a or a == b, return b
+                            // if o == a or a == b, return b to autoresolve conflict
                             if (o_lines.eql(a_lines) or a_lines.eql(b_lines)) {
                                 if (b_lines.lines.items.len > 0) {
                                     try self.parent.line_buffer.appendSlice(b_lines.lines.items);
@@ -190,7 +192,7 @@ fn writeBlobWithConflict(
                                 }
                                 return self.read(buf);
                             }
-                            // if o == b, return a
+                            // if o == b, return a to autoresolve conflict
                             else if (o_lines.eql(b_lines)) {
                                 if (a_lines.lines.items.len > 0) {
                                     try self.parent.line_buffer.appendSlice(a_lines.lines.items);
@@ -233,6 +235,7 @@ fn writeBlobWithConflict(
                             }
 
                             self.parent.current_line = self.parent.line_buffer.items[0];
+                            self.parent.has_conflict = true;
                         },
                     }
                     return self.read(buf);
@@ -294,10 +297,12 @@ fn writeBlobWithConflict(
         .diff3_iter = &diff3_iter,
         .line_buffer = &line_buffer,
         .current_line = null,
+        .has_conflict = false,
     };
 
     var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
     try obj.writeBlob(repo_kind, core_cursor, allocator, &stream, try stream.count(), &oid);
+    has_conflict.* = stream.has_conflict;
     return oid;
 }
 
@@ -354,8 +359,10 @@ fn samePathConflict(
                     break :blk null;
                 };
 
-                const common_oid_maybe = if (source_change.old) |common_entry| common_entry.oid else null;
-                const oid = oid_maybe orelse try writeBlobWithConflict(repo_kind, core_cursor, allocator, common_oid_maybe, current_entry.oid, source_entry.oid, current_name, source_name);
+                var has_conflict = oid_maybe == null or mode_maybe == null;
+
+                const common_oid_maybe = if (common_entry_maybe) |common_entry| common_entry.oid else null;
+                const oid = oid_maybe orelse try writeBlobWithConflict(repo_kind, core_cursor, allocator, common_oid_maybe, current_entry.oid, source_entry.oid, current_name, source_name, &has_conflict);
                 const mode = mode_maybe orelse current_entry.mode;
 
                 return .{
@@ -363,7 +370,7 @@ fn samePathConflict(
                         .old = current_change.new,
                         .new = .{ .oid = oid, .mode = mode },
                     },
-                    .conflict = if (oid_maybe == null or mode_maybe == null)
+                    .conflict = if (has_conflict)
                         .{
                             .common = common_entry_maybe,
                             .current = current_entry,
