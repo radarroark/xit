@@ -641,7 +641,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
         pub fn switch_head(self: *Repo(repo_kind), target: []const u8) !chk.SwitchResult {
             switch (repo_kind) {
-                .git => return try chk.switch_head(repo_kind, .{ .core = &self.core }, self.allocator, target),
+                .git => return try chk.SwitchResult.init(repo_kind, .{ .core = &self.core }, self.allocator, target),
                 .xit => {
                     var result: chk.SwitchResult = undefined;
                     const Ctx = struct {
@@ -651,7 +651,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         result: *chk.SwitchResult,
 
                         pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
-                            ctx_self.result.* = try chk.switch_head(repo_kind, .{ .core = ctx_self.core, .cursor = cursor }, ctx_self.allocator, ctx_self.target);
+                            ctx_self.result.* = try chk.SwitchResult.init(repo_kind, .{ .core = ctx_self.core, .cursor = cursor }, ctx_self.allocator, ctx_self.target);
                         }
                     };
                     _ = try self.core.db.rootCursor().execute(Ctx, &[_]xitdb.PathPart(Ctx){
@@ -692,7 +692,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
         pub fn merge(self: *Repo(repo_kind), input: mrg.MergeInput) !mrg.MergeResult {
             switch (repo_kind) {
-                .git => return try mrg.merge(repo_kind, .{ .core = &self.core }, self.allocator, input),
+                .git => return try mrg.MergeResult.init(repo_kind, .{ .core = &self.core }, self.allocator, input),
                 .xit => {
                     var result: mrg.MergeResult = undefined;
                     const Ctx = struct {
@@ -702,7 +702,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         result: *mrg.MergeResult,
 
                         pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
-                            ctx_self.result.* = try mrg.merge(repo_kind, .{ .core = ctx_self.core, .cursor = cursor }, ctx_self.allocator, ctx_self.input);
+                            ctx_self.result.* = try mrg.MergeResult.init(repo_kind, .{ .core = ctx_self.core, .cursor = cursor }, ctx_self.allocator, ctx_self.input);
                             // no need to make a new transaction if nothing was done
                             if (.nothing == ctx_self.result.data) {
                                 return error.CancelTransaction;

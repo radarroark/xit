@@ -22,49 +22,6 @@ const rp = @import("./repo.zig");
 
 const MAX_FILE_READ_BYTES = 1024; // FIXME: this is arbitrary...
 
-pub const SwitchResultData = union(enum) {
-    success,
-    conflict: struct {
-        stale_files: std.StringHashMap(void),
-        stale_dirs: std.StringHashMap(void),
-        untracked_overwritten: std.StringHashMap(void),
-        untracked_removed: std.StringHashMap(void),
-    },
-};
-
-pub const SwitchResult = struct {
-    data: SwitchResultData,
-
-    pub fn init() SwitchResult {
-        return SwitchResult{ .data = SwitchResultData{ .success = {} } };
-    }
-
-    pub fn deinit(self: *SwitchResult) void {
-        switch (self.data) {
-            .success => {},
-            .conflict => {
-                self.data.conflict.stale_files.deinit();
-                self.data.conflict.stale_dirs.deinit();
-                self.data.conflict.untracked_overwritten.deinit();
-                self.data.conflict.untracked_removed.deinit();
-            },
-        }
-    }
-
-    pub fn conflict(self: *SwitchResult, allocator: std.mem.Allocator) void {
-        if (self.data != .conflict) {
-            self.data = SwitchResultData{
-                .conflict = .{
-                    .stale_files = std.StringHashMap(void).init(allocator),
-                    .stale_dirs = std.StringHashMap(void).init(allocator),
-                    .untracked_overwritten = std.StringHashMap(void).init(allocator),
-                    .untracked_removed = std.StringHashMap(void).init(allocator),
-                },
-            };
-        }
-    }
-};
-
 pub fn objectToFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, path: []const u8, tree_entry: obj.TreeEntry) !void {
     const oid_hex = std.fmt.bytesToHex(tree_entry.oid, .lower);
 
@@ -382,70 +339,6 @@ pub fn migrate(
     }
 }
 
-pub fn switch_head(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, target: []const u8) !SwitchResult {
-    // get the current commit and target oid
-    const current_oid = try ref.readHead(repo_kind, core_cursor);
-    const target_oid = try ref.resolve(repo_kind, core_cursor, target) orelse return error.InvalidTarget;
-
-    // compare the commits
-    var tree_diff = obj.TreeDiff(repo_kind).init(allocator);
-    defer tree_diff.deinit();
-    try tree_diff.compare(core_cursor, current_oid, target_oid, null);
-
-    var result = SwitchResult.init();
-    errdefer result.deinit();
-
-    switch (repo_kind) {
-        .git => {
-            // create lock file
-            var lock = try io.LockFile.init(allocator, core_cursor.core.git_dir, "index");
-            defer lock.deinit();
-
-            // read index
-            var index = try idx.Index(repo_kind).init(allocator, core_cursor);
-            defer index.deinit();
-
-            // update the working tree
-            try migrate(repo_kind, core_cursor, allocator, tree_diff, &index, &result);
-
-            // return early if conflict
-            if (result.data == .conflict) {
-                return result;
-            }
-
-            // update the index
-            try index.write(allocator, .{ .core = core_cursor.core, .lock_file_maybe = lock.lock_file });
-
-            // update HEAD
-            try ref.writeHead(repo_kind, core_cursor, allocator, target, target_oid);
-
-            // finish lock
-            lock.success = true;
-        },
-        .xit => {
-            // read index
-            var index = try idx.Index(repo_kind).init(allocator, core_cursor);
-            defer index.deinit();
-
-            // update the working tree
-            try migrate(repo_kind, core_cursor, allocator, tree_diff, &index, &result);
-
-            // return early if conflict
-            if (result.data == .conflict) {
-                return result;
-            }
-
-            // update the index
-            try index.write(allocator, core_cursor);
-
-            // update HEAD
-            try ref.writeHead(repo_kind, core_cursor, allocator, target, target_oid);
-        },
-    }
-
-    return result;
-}
-
 pub fn restore(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, path: []const u8) !void {
     // get the current commit
     const current_oid = try ref.readHead(repo_kind, core_cursor);
@@ -472,3 +365,106 @@ pub fn restore(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).
     // restore file in the working tree
     try objectToFile(repo_kind, core_cursor, allocator, path, tree_entry);
 }
+
+pub const SwitchResultData = union(enum) {
+    success,
+    conflict: struct {
+        stale_files: std.StringHashMap(void),
+        stale_dirs: std.StringHashMap(void),
+        untracked_overwritten: std.StringHashMap(void),
+        untracked_removed: std.StringHashMap(void),
+    },
+};
+
+pub const SwitchResult = struct {
+    data: SwitchResultData,
+
+    pub fn init(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, target: []const u8) !SwitchResult {
+        // get the current commit and target oid
+        const current_oid = try ref.readHead(repo_kind, core_cursor);
+        const target_oid = try ref.resolve(repo_kind, core_cursor, target) orelse return error.InvalidTarget;
+
+        // compare the commits
+        var tree_diff = obj.TreeDiff(repo_kind).init(allocator);
+        defer tree_diff.deinit();
+        try tree_diff.compare(core_cursor, current_oid, target_oid, null);
+
+        var result = SwitchResult{ .data = SwitchResultData{ .success = {} } };
+        errdefer result.deinit();
+
+        switch (repo_kind) {
+            .git => {
+                // create lock file
+                var lock = try io.LockFile.init(allocator, core_cursor.core.git_dir, "index");
+                defer lock.deinit();
+
+                // read index
+                var index = try idx.Index(repo_kind).init(allocator, core_cursor);
+                defer index.deinit();
+
+                // update the working tree
+                try migrate(repo_kind, core_cursor, allocator, tree_diff, &index, &result);
+
+                // return early if conflict
+                if (result.data == .conflict) {
+                    return result;
+                }
+
+                // update the index
+                try index.write(allocator, .{ .core = core_cursor.core, .lock_file_maybe = lock.lock_file });
+
+                // update HEAD
+                try ref.writeHead(repo_kind, core_cursor, allocator, target, target_oid);
+
+                // finish lock
+                lock.success = true;
+            },
+            .xit => {
+                // read index
+                var index = try idx.Index(repo_kind).init(allocator, core_cursor);
+                defer index.deinit();
+
+                // update the working tree
+                try migrate(repo_kind, core_cursor, allocator, tree_diff, &index, &result);
+
+                // return early if conflict
+                if (result.data == .conflict) {
+                    return result;
+                }
+
+                // update the index
+                try index.write(allocator, core_cursor);
+
+                // update HEAD
+                try ref.writeHead(repo_kind, core_cursor, allocator, target, target_oid);
+            },
+        }
+
+        return result;
+    }
+
+    pub fn deinit(self: *SwitchResult) void {
+        switch (self.data) {
+            .success => {},
+            .conflict => {
+                self.data.conflict.stale_files.deinit();
+                self.data.conflict.stale_dirs.deinit();
+                self.data.conflict.untracked_overwritten.deinit();
+                self.data.conflict.untracked_removed.deinit();
+            },
+        }
+    }
+
+    pub fn conflict(self: *SwitchResult, allocator: std.mem.Allocator) void {
+        if (self.data != .conflict) {
+            self.data = SwitchResultData{
+                .conflict = .{
+                    .stale_files = std.StringHashMap(void).init(allocator),
+                    .stale_dirs = std.StringHashMap(void).init(allocator),
+                    .untracked_overwritten = std.StringHashMap(void).init(allocator),
+                    .untracked_removed = std.StringHashMap(void).init(allocator),
+                },
+            };
+        }
+    }
+};
