@@ -66,14 +66,10 @@ fn writeBlobWithConflict(
                 lines.deinit();
             }
             if (range_maybe) |range| {
-                if (iter.current_line != range.begin) {
-                    return error.UnexpectedLineNumber;
-                }
-                while (iter.current_line < range.end) {
-                    if (try iter.next()) |line| {
-                        errdefer alctr.free(line);
-                        try lines.append(line);
-                    }
+                for (range.begin..range.end) |line_num| {
+                    const line = try iter.get(line_num) orelse return error.ExpectedLine;
+                    errdefer alctr.free(line);
+                    try lines.append(line);
                 }
             }
             return .{
@@ -154,25 +150,16 @@ fn writeBlobWithConflict(
                     return size;
                 }
 
-                if (self.parent.diff3_iter.next()) |chunk| {
+                if (try self.parent.diff3_iter.next()) |chunk| {
                     switch (chunk) {
                         .clean => {
-                            if (self.parent.common_iter.current_line != chunk.clean.begin) {
-                                return error.UnexpectedLineNumber;
-                            }
-                            for (chunk.clean.begin..chunk.clean.end) |_| {
-                                const common_line = (try self.parent.common_iter.next()) orelse return error.ExpectedLine;
+                            for (chunk.clean.begin..chunk.clean.end) |line_num| {
+                                const common_line = (try self.parent.common_iter.get(line_num)) orelse return error.ExpectedLine;
                                 {
                                     errdefer self.parent.allocator.free(common_line);
                                     try self.parent.line_buffer.append(common_line);
                                 }
                                 self.parent.current_line = self.parent.line_buffer.items[0];
-
-                                // move the other iterators forward
-                                const current_line = (try self.parent.current_iter.next()) orelse return error.ExpectedLine;
-                                defer self.parent.allocator.free(current_line);
-                                const source_line = (try self.parent.source_iter.next()) orelse return error.ExpectedLine;
-                                defer self.parent.allocator.free(source_line);
                             }
                         },
                         .conflict => {
@@ -247,6 +234,9 @@ fn writeBlobWithConflict(
 
         pub fn seekTo(self: *@This(), offset: usize) !void {
             if (offset == 0) {
+                try self.common_iter.reset();
+                try self.current_iter.reset();
+                try self.source_iter.reset();
                 try self.diff3_iter.reset();
             } else {
                 return error.InvalidOffset;

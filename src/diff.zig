@@ -16,7 +16,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
         oid: [hash.SHA1_BYTES_LEN]u8,
         oid_hex: [hash.SHA1_HEX_LEN]u8,
         mode: ?io.Mode,
-        current_line: usize,
+        next_line: usize,
         source: union(enum) {
             object: struct {
                 object_reader: obj.ObjectReader(repo_kind),
@@ -42,7 +42,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                 .oid = entry.oid,
                 .oid_hex = oid_hex,
                 .mode = entry.mode,
-                .current_line = 0,
+                .next_line = 0,
                 .source = .{
                     .object = .{
                         .object_reader = object_reader,
@@ -69,7 +69,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                 .oid = oid,
                 .oid_hex = std.fmt.bytesToHex(&oid, .lower),
                 .mode = mode,
-                .current_line = 0,
+                .next_line = 0,
                 .source = .{
                     .workspace = .{
                         .file = file,
@@ -86,7 +86,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                 .oid = [_]u8{0} ** hash.SHA1_BYTES_LEN,
                 .oid_hex = [_]u8{0} ** hash.SHA1_HEX_LEN,
                 .mode = null,
-                .current_line = 0,
+                .next_line = 0,
                 .source = .nothing,
             };
         }
@@ -101,7 +101,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                 .oid = entry.oid,
                 .oid_hex = oid_hex,
                 .mode = entry.mode,
-                .current_line = 0,
+                .next_line = 0,
                 .source = .{
                     .object = .{
                         .object_reader = object_reader,
@@ -121,7 +121,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                 .oid = oid,
                 .oid_hex = oid_hex,
                 .mode = null,
-                .current_line = 0,
+                .next_line = 0,
                 .source = .{
                     .object = .{
                         .object_reader = object_reader,
@@ -138,7 +138,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                 .oid = [_]u8{0} ** hash.SHA1_BYTES_LEN,
                 .oid_hex = [_]u8{0} ** hash.SHA1_HEX_LEN,
                 .mode = null,
-                .current_line = 0,
+                .next_line = 0,
                 .source = .{
                     .buffer = .{
                         .iter = std.mem.splitScalar(u8, buffer, '\n'),
@@ -170,7 +170,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                             try line_arr.append(buffer[0]);
                         }
                     }
-                    self.current_line += 1;
+                    self.next_line += 1;
                     return try line_arr.toOwnedSlice();
                 },
                 .workspace => {
@@ -183,7 +183,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                         error.EndOfStream => self.source.workspace.eof = true,
                         else => return err,
                     };
-                    self.current_line += 1;
+                    self.next_line += 1;
                     return try line_arr.toOwnedSlice();
                 },
                 .nothing => return null,
@@ -192,7 +192,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                         const line_copy = try self.allocator.alloc(u8, line.len);
                         errdefer self.allocator.free(line_copy);
                         @memcpy(line_copy, line);
-                        self.current_line += 1;
+                        self.next_line += 1;
                         return line_copy;
                     } else {
                         return null;
@@ -201,27 +201,27 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
             }
         }
 
-        fn get(self: *LineIterator(repo_kind), index: usize) ![]const u8 {
+        pub fn get(self: *LineIterator(repo_kind), index: usize) !?[]const u8 {
             // TODO: cache result so we don't have to scan the file every time
-            try self.reset();
-            var n: usize = 0;
-            while (true) {
-                if (try self.next()) |line| {
-                    if (n == index) {
-                        errdefer self.allocator.free(line);
-                        return line;
-                    } else {
-                        defer self.allocator.free(line);
-                        n += 1;
-                    }
+
+            // if we don't happen to be on the correct line, restart from the beginning
+            if (self.next_line != index) {
+                try self.reset();
+            }
+
+            while (try self.next()) |line| {
+                if (self.next_line == index + 1) {
+                    errdefer self.allocator.free(line);
+                    return line;
                 } else {
-                    return error.IndexOutOfBounds;
+                    defer self.allocator.free(line);
                 }
             }
+            return null;
         }
 
         pub fn reset(self: *LineIterator(repo_kind)) !void {
-            self.current_line = 0;
+            self.next_line = 0;
             switch (self.source) {
                 .object => {
                     self.source.object.eof = false;
@@ -237,12 +237,12 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
         }
 
         pub fn count(self: *LineIterator(repo_kind)) !usize {
+            try self.reset();
             var n: usize = 0;
             while (try self.next()) |line| {
                 defer self.allocator.free(line);
                 n += 1;
             }
-            try self.reset();
             return n;
         }
 
@@ -331,9 +331,9 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
                         var yy = xx - kk;
                         while (true) {
                             if (xx < line_count_a and yy < line_count_b) {
-                                const line_a = try line_iter_a.get(absIndex(xx, line_count_a));
+                                const line_a = (try line_iter_a.get(absIndex(xx, line_count_a))) orelse return error.ExpectedLine;
                                 defer allocator.free(line_a);
-                                const line_b = try line_iter_b.get(absIndex(yy, line_count_b));
+                                const line_b = (try line_iter_b.get(absIndex(yy, line_count_b))) orelse return error.ExpectedLine;
                                 defer allocator.free(line_b);
                                 if (std.mem.eql(u8, line_a, line_b)) {
                                     xx += 1;
@@ -414,7 +414,7 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
 
             if (xx == prev_xx) {
                 const new_idx = absIndex(prev_yy, self.line_count_b);
-                const line_b = try self.line_iter_b.get(new_idx);
+                const line_b = (try self.line_iter_b.get(new_idx)) orelse return error.ExpectedLine;
                 errdefer self.allocator.free(line_b);
                 return .{
                     .ins = .{
@@ -423,7 +423,7 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
                 };
             } else if (yy == prev_yy) {
                 const old_idx = absIndex(prev_xx, self.line_count_a);
-                const line_a = try self.line_iter_a.get(old_idx);
+                const line_a = (try self.line_iter_a.get(old_idx)) orelse return error.ExpectedLine;
                 errdefer self.allocator.free(line_a);
                 return .{
                     .del = .{
@@ -433,9 +433,9 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
             } else {
                 const old_idx = absIndex(prev_xx, self.line_count_a);
                 const new_idx = absIndex(prev_yy, self.line_count_b);
-                const line_a = try self.line_iter_a.get(old_idx);
+                const line_a = (try self.line_iter_a.get(old_idx)) orelse return error.ExpectedLine;
                 errdefer self.allocator.free(line_a);
-                const line_b = try self.line_iter_b.get(new_idx);
+                const line_b = (try self.line_iter_b.get(new_idx)) orelse return error.ExpectedLine;
                 errdefer self.allocator.free(line_b);
                 return .{
                     .eql = .{
@@ -444,6 +444,38 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
                     },
                 };
             }
+        }
+
+        pub fn get(self: *MyersDiffIterator(repo_kind), old_line: usize) !?usize {
+            // TODO: cache result so we don't have to scan the file every time
+            try self.reset();
+            while (try self.next()) |edit| {
+                defer edit.deinit(self.allocator);
+                if (.eql == edit) {
+                    if (edit.eql.old_line.num < old_line) {
+                        continue;
+                    } else if (edit.eql.old_line.num == old_line) {
+                        return edit.eql.new_line.num;
+                    } else {
+                        break;
+                    }
+                }
+            }
+            return null;
+        }
+
+        pub fn contains(self: *MyersDiffIterator(repo_kind), old_line: usize) !bool {
+            if (try self.get(old_line)) |_| {
+                return true;
+            } else {
+                return false;
+            }
+        }
+
+        pub fn reset(self: *MyersDiffIterator(repo_kind)) !void {
+            try self.line_iter_a.reset();
+            try self.line_iter_b.reset();
+            self.next_index = 0;
         }
 
         pub fn deinit(self: *MyersDiffIterator(repo_kind)) void {
@@ -526,17 +558,14 @@ test "myers diff" {
 
 pub fn Diff3Iterator(comptime repo_kind: rp.RepoKind) type {
     return struct {
-        line_iter_o: *LineIterator(repo_kind),
-        line_iter_a: *LineIterator(repo_kind),
-        line_iter_b: *LineIterator(repo_kind),
         line_count_o: usize,
         line_count_a: usize,
         line_count_b: usize,
         line_o: usize,
         line_a: usize,
         line_b: usize,
-        match_a: std.AutoHashMap(usize, usize),
-        match_b: std.AutoHashMap(usize, usize),
+        myers_diff_iter_a: MyersDiffIterator(repo_kind),
+        myers_diff_iter_b: MyersDiffIterator(repo_kind),
         finished: bool,
 
         pub const Range = struct {
@@ -559,50 +588,24 @@ pub fn Diff3Iterator(comptime repo_kind: rp.RepoKind) type {
             line_iter_a: *LineIterator(repo_kind),
             line_iter_b: *LineIterator(repo_kind),
         ) !Diff3Iterator(repo_kind) {
-            var match_a = std.AutoHashMap(usize, usize).init(allocator);
-            errdefer match_a.deinit();
-            var match_b = std.AutoHashMap(usize, usize).init(allocator);
-            errdefer match_b.deinit();
-
             var myers_diff_iter_a = try MyersDiffIterator(repo_kind).init(allocator, line_iter_o, line_iter_a);
-            defer myers_diff_iter_a.deinit();
-            while (try myers_diff_iter_a.next()) |edit| {
-                defer edit.deinit(allocator);
-                if (.eql == edit) {
-                    try match_a.put(edit.eql.old_line.num, edit.eql.new_line.num);
-                }
-            }
-            try line_iter_o.reset();
-            try line_iter_a.reset();
-
+            errdefer myers_diff_iter_a.deinit();
             var myers_diff_iter_b = try MyersDiffIterator(repo_kind).init(allocator, line_iter_o, line_iter_b);
-            defer myers_diff_iter_b.deinit();
-            while (try myers_diff_iter_b.next()) |edit| {
-                defer edit.deinit(allocator);
-                if (.eql == edit) {
-                    try match_b.put(edit.eql.old_line.num, edit.eql.new_line.num);
-                }
-            }
-            try line_iter_o.reset();
-            try line_iter_b.reset();
-
+            errdefer myers_diff_iter_b.deinit();
             return .{
-                .line_iter_o = line_iter_o,
-                .line_iter_a = line_iter_a,
-                .line_iter_b = line_iter_b,
                 .line_count_o = try line_iter_o.count(),
                 .line_count_a = try line_iter_a.count(),
                 .line_count_b = try line_iter_b.count(),
                 .line_o = 0,
                 .line_a = 0,
                 .line_b = 0,
-                .match_a = match_a,
-                .match_b = match_b,
+                .myers_diff_iter_a = myers_diff_iter_a,
+                .myers_diff_iter_b = myers_diff_iter_b,
                 .finished = false,
             };
         }
 
-        pub fn next(self: *Diff3Iterator(repo_kind)) ?Chunk {
+        pub fn next(self: *Diff3Iterator(repo_kind)) !?Chunk {
             if (self.finished) {
                 return null;
             }
@@ -610,8 +613,8 @@ pub fn Diff3Iterator(comptime repo_kind: rp.RepoKind) type {
             // find next mismatch
             var i: usize = 1;
             while (self.inBounds(i) and
-                self.isMatch(&self.match_a, self.line_a, i) and
-                self.isMatch(&self.match_b, self.line_b, i))
+                try self.isMatch(&self.myers_diff_iter_a, self.line_a, i) and
+                try self.isMatch(&self.myers_diff_iter_b, self.line_b, i))
             {
                 i += 1;
             }
@@ -620,13 +623,11 @@ pub fn Diff3Iterator(comptime repo_kind: rp.RepoKind) type {
                 if (i == 1) {
                     // find next match
                     var o = self.line_o + 1;
-                    while (o <= self.line_count_o and (!self.match_a.contains(o) or !self.match_b.contains(o))) {
+                    while (o <= self.line_count_o and (!(try self.myers_diff_iter_a.contains(o)) or !(try self.myers_diff_iter_b.contains(o)))) {
                         o += 1;
                     }
-                    const a_maybe = self.match_a.get(o);
-                    const b_maybe = self.match_b.get(o);
-                    if (a_maybe) |a| {
-                        if (b_maybe) |b| {
+                    if (try self.myers_diff_iter_a.get(o)) |a| {
+                        if (try self.myers_diff_iter_b.get(o)) |b| {
                             // return mismatching chunk
                             const line_o = self.line_o;
                             const line_a = self.line_a;
@@ -670,18 +671,17 @@ pub fn Diff3Iterator(comptime repo_kind: rp.RepoKind) type {
         }
 
         pub fn reset(self: *Diff3Iterator(repo_kind)) !void {
-            try self.line_iter_o.reset();
-            try self.line_iter_a.reset();
-            try self.line_iter_b.reset();
             self.line_o = 0;
             self.line_a = 0;
             self.line_b = 0;
+            try self.myers_diff_iter_a.reset();
+            try self.myers_diff_iter_b.reset();
             self.finished = false;
         }
 
         pub fn deinit(self: *Diff3Iterator(repo_kind)) void {
-            self.match_a.deinit();
-            self.match_b.deinit();
+            self.myers_diff_iter_a.deinit();
+            self.myers_diff_iter_b.deinit();
         }
 
         fn inBounds(self: Diff3Iterator(repo_kind), i: usize) bool {
@@ -690,9 +690,9 @@ pub fn Diff3Iterator(comptime repo_kind: rp.RepoKind) type {
                 self.line_b + i <= self.line_count_b;
         }
 
-        fn isMatch(self: Diff3Iterator(repo_kind), matches: *std.AutoHashMap(usize, usize), offset: usize, i: usize) bool {
-            if (matches.get(self.line_o + i)) |match| {
-                return match == offset + i;
+        fn isMatch(self: Diff3Iterator(repo_kind), myers_diff_iter: *MyersDiffIterator(repo_kind), offset: usize, i: usize) !bool {
+            if (try myers_diff_iter.get(self.line_o + i)) |line_num| {
+                return line_num == offset + i;
             } else {
                 return false;
             }
@@ -764,19 +764,19 @@ test "diff3" {
     var diff3_iter = try Diff3Iterator(repo_kind).init(allocator, &orig_iter, &alice_iter, &bob_iter);
     defer diff3_iter.deinit();
 
-    var chunk = diff3_iter.next() orelse return error.ExpectedChunk;
+    var chunk = (try diff3_iter.next()) orelse return error.ExpectedChunk;
     try std.testing.expect(.clean == chunk);
 
-    chunk = diff3_iter.next() orelse return error.ExpectedChunk;
+    chunk = (try diff3_iter.next()) orelse return error.ExpectedChunk;
     try std.testing.expect(.conflict == chunk);
 
-    chunk = diff3_iter.next() orelse return error.ExpectedChunk;
+    chunk = (try diff3_iter.next()) orelse return error.ExpectedChunk;
     try std.testing.expect(.clean == chunk);
 
-    chunk = diff3_iter.next() orelse return error.ExpectedChunk;
+    chunk = (try diff3_iter.next()) orelse return error.ExpectedChunk;
     try std.testing.expect(.conflict == chunk);
 
-    chunk = diff3_iter.next() orelse return error.ExpectedChunk;
+    chunk = (try diff3_iter.next()) orelse return error.ExpectedChunk;
     try std.testing.expect(.clean == chunk);
 
     // this is a conflict even though a and b are both "beer",
@@ -784,10 +784,10 @@ test "diff3" {
     // it is only marked as clean if all three are matches.
     // when outputting the conflict lines this should be
     // auto-resolved since we can compare a and b at that point.
-    chunk = diff3_iter.next() orelse return error.ExpectedChunk;
+    chunk = (try diff3_iter.next()) orelse return error.ExpectedChunk;
     try std.testing.expect(.conflict == chunk);
 
-    try std.testing.expect(null == diff3_iter.next());
+    try std.testing.expect(null == try diff3_iter.next());
 }
 
 pub fn Hunk(comptime repo_kind: rp.RepoKind) type {
