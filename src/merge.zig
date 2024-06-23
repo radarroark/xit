@@ -480,31 +480,29 @@ pub const MergeInput = union(enum) {
     cont,
 };
 
-pub const MergeResultData = union(enum) {
-    success: struct {
-        oid: [hash.SHA1_HEX_LEN]u8,
-    },
-    nothing,
-    fast_forward,
-    conflict: struct {
-        conflicts: std.StringArrayHashMap(MergeConflict),
-    },
-};
-
-pub const MergeResult = struct {
+pub const Merge = struct {
     arena: std.heap.ArenaAllocator,
     changes: std.StringArrayHashMap(obj.Change),
     auto_resolved_conflicts: std.StringArrayHashMap(void),
     current_name: []const u8,
     source_name: []const u8,
-    data: MergeResultData,
+    data: union(enum) {
+        success: struct {
+            oid: [hash.SHA1_HEX_LEN]u8,
+        },
+        nothing,
+        fast_forward,
+        conflict: struct {
+            conflicts: std.StringArrayHashMap(MergeConflict),
+        },
+    },
 
     pub fn init(
         comptime repo_kind: rp.RepoKind,
         core_cursor: rp.Repo(repo_kind).CoreCursor,
         allocator: std.mem.Allocator,
         input: MergeInput,
-    ) !MergeResult {
+    ) !Merge {
         // TODO: exit early if working tree is dirty
 
         var arena = std.heap.ArenaAllocator.init(allocator);
@@ -806,7 +804,7 @@ pub const MergeResult = struct {
         }
     }
 
-    pub fn deinit(self: *MergeResult) void {
+    pub fn deinit(self: *Merge) void {
         self.arena.deinit();
     }
 };

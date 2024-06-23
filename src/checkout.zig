@@ -188,7 +188,7 @@ pub fn migrate(
     allocator: std.mem.Allocator,
     tree_diff: obj.TreeDiff(repo_kind),
     index: *idx.Index(repo_kind),
-    result_maybe: ?*SwitchResult,
+    result_maybe: ?*Switch,
 ) !void {
     var add_files = std.StringHashMap(obj.TreeEntry).init(allocator);
     defer add_files.deinit();
@@ -366,20 +366,18 @@ pub fn restore(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).
     try objectToFile(repo_kind, core_cursor, allocator, path, tree_entry);
 }
 
-pub const SwitchResultData = union(enum) {
-    success,
-    conflict: struct {
-        stale_files: std.StringHashMap(void),
-        stale_dirs: std.StringHashMap(void),
-        untracked_overwritten: std.StringHashMap(void),
-        untracked_removed: std.StringHashMap(void),
+pub const Switch = struct {
+    data: union(enum) {
+        success,
+        conflict: struct {
+            stale_files: std.StringHashMap(void),
+            stale_dirs: std.StringHashMap(void),
+            untracked_overwritten: std.StringHashMap(void),
+            untracked_removed: std.StringHashMap(void),
+        },
     },
-};
 
-pub const SwitchResult = struct {
-    data: SwitchResultData,
-
-    pub fn init(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, target: []const u8) !SwitchResult {
+    pub fn init(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, target: []const u8) !Switch {
         // get the current commit and target oid
         const current_oid = try ref.readHead(repo_kind, core_cursor);
         const target_oid = try ref.resolve(repo_kind, core_cursor, target) orelse return error.InvalidTarget;
@@ -389,7 +387,7 @@ pub const SwitchResult = struct {
         defer tree_diff.deinit();
         try tree_diff.compare(core_cursor, current_oid, target_oid, null);
 
-        var result = SwitchResult{ .data = SwitchResultData{ .success = {} } };
+        var result = Switch{ .data = .{ .success = {} } };
         errdefer result.deinit();
 
         switch (repo_kind) {
@@ -443,7 +441,7 @@ pub const SwitchResult = struct {
         return result;
     }
 
-    pub fn deinit(self: *SwitchResult) void {
+    pub fn deinit(self: *Switch) void {
         switch (self.data) {
             .success => {},
             .conflict => {
@@ -455,9 +453,9 @@ pub const SwitchResult = struct {
         }
     }
 
-    pub fn conflict(self: *SwitchResult, allocator: std.mem.Allocator) void {
+    pub fn conflict(self: *Switch, allocator: std.mem.Allocator) void {
         if (self.data != .conflict) {
-            self.data = SwitchResultData{
+            self.data = .{
                 .conflict = .{
                     .stale_files = std.StringHashMap(void).init(allocator),
                     .stale_dirs = std.StringHashMap(void).init(allocator),
