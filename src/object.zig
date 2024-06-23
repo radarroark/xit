@@ -118,6 +118,7 @@ pub fn writeBlob(
             try tmp_file.writeAll(header);
 
             // copy file into temp file
+            // TODO: use buffered io
             var read_buffer = [_]u8{0} ** MAX_READ_BYTES;
             while (true) {
                 const size = try reader.read(&read_buffer);
@@ -153,6 +154,7 @@ pub fn writeBlob(
                     if (cursor.pointer() == null) {
                         var writer = try cursor.writer(void, &[_]xitdb.PathPart(void){});
                         try writer.writeAll(ctx_self.header);
+                        // TODO: use buffered io
                         var read_buffer = [_]u8{0} ** MAX_READ_BYTES;
                         while (true) {
                             const size = try ctx_self.reader.read(&read_buffer);

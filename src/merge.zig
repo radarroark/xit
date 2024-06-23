@@ -251,6 +251,7 @@ fn writeBlobWithConflict(
 
         pub fn count(self: *@This()) !usize {
             var n: usize = 0;
+            // TODO: use buffered io
             var read_buffer = [_]u8{0} ** MAX_READ_BYTES;
             try self.seekTo(0);
             while (true) {
