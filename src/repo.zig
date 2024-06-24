@@ -333,8 +333,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         for (hunk_iter.header_lines.items) |header_line| {
                             try writers.out.print("{s}\n", .{header_line});
                         }
-                        var hunk_maybe = try hunk_iter.next();
-                        while (hunk_maybe) |*hunk| {
+                        while (try hunk_iter.next()) |*hunk_ptr| {
+                            var hunk = hunk_ptr.*;
                             defer hunk.deinit();
                             const offsets = hunk.offsets();
                             try writers.out.print("@@ -{},{} +{},{} @@\n", .{

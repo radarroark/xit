@@ -342,8 +342,8 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                         },
                     };
                     for (expected_hunks) |expected_hunk| {
-                        var actual_hunk_maybe = try hunk_iter.next();
-                        if (actual_hunk_maybe) |*actual_hunk| {
+                        if (try hunk_iter.next()) |*actual_hunk_ptr| {
+                            var actual_hunk = actual_hunk_ptr.*;
                             defer actual_hunk.deinit();
                             for (expected_hunk, actual_hunk.edits.items) |expected_edit, actual_edit| {
                                 try std.testing.expectEqualDeep(expected_edit, actual_edit);
