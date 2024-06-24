@@ -1018,7 +1018,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
         allocator: std.mem.Allocator,
         core: *rp.Repo(repo_kind).Core,
         diff_kind: DiffKind,
-        conflict_diff_kind_maybe: ?ConflictDiffKind,
+        conflict_diff_kind: ConflictDiffKind,
         status: st.Status(repo_kind),
         next_index: usize,
 
@@ -1026,14 +1026,14 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
             allocator: std.mem.Allocator,
             core: *rp.Repo(repo_kind).Core,
             diff_kind: DiffKind,
-            conflict_diff_kind_maybe: ?ConflictDiffKind,
+            conflict_diff_kind: ConflictDiffKind,
             status: st.Status(repo_kind),
         ) !FileIterator(repo_kind) {
             return .{
                 .allocator = allocator,
                 .core = core,
                 .diff_kind = diff_kind,
-                .conflict_diff_kind_maybe = conflict_diff_kind_maybe,
+                .conflict_diff_kind = conflict_diff_kind,
                 .status = status,
                 .next_index = 0,
             };
@@ -1050,37 +1050,35 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
             var next_index = self.next_index;
             switch (self.diff_kind) {
                 .workspace => {
-                    if (self.conflict_diff_kind_maybe) |conflict_diff_kind| {
-                        if (next_index < self.status.conflicts.count()) {
-                            const path = self.status.conflicts.keys()[next_index];
-                            const meta = try io.getMetadata(self.core.repo_dir, path);
-                            const stage: usize = switch (conflict_diff_kind) {
-                                .common => 1,
-                                .current => 2,
-                                .source => 3,
+                    if (next_index < self.status.conflicts.count()) {
+                        const path = self.status.conflicts.keys()[next_index];
+                        const meta = try io.getMetadata(self.core.repo_dir, path);
+                        const stage: usize = switch (self.conflict_diff_kind) {
+                            .common => 1,
+                            .current => 2,
+                            .source => 3,
+                        };
+                        const index_entries_for_path = self.status.index.entries.get(path) orelse return error.EntryNotFound;
+                        // if there is an entry for the stage we are diffing
+                        if (index_entries_for_path[stage]) |index_entry| {
+                            var a = try LineIterator(repo_kind).initFromIndex(core_cursor, self.allocator, index_entry);
+                            errdefer a.deinit();
+                            var b = switch (meta.kind()) {
+                                .file => try LineIterator(repo_kind).initFromWorkspace(core_cursor, self.allocator, path, io.getMode(meta)),
+                                // in file/dir conflicts, `path` may be a directory which can't be diffed, so just make it nothing
+                                else => try LineIterator(repo_kind).initFromNothing(self.allocator, path),
                             };
-                            const index_entries_for_path = self.status.index.entries.get(path) orelse return error.EntryNotFound;
-                            // if there is an entry for the stage we are diffing
-                            if (index_entries_for_path[stage]) |index_entry| {
-                                var a = try LineIterator(repo_kind).initFromIndex(core_cursor, self.allocator, index_entry);
-                                errdefer a.deinit();
-                                var b = switch (meta.kind()) {
-                                    .file => try LineIterator(repo_kind).initFromWorkspace(core_cursor, self.allocator, path, io.getMode(meta)),
-                                    // in file/dir conflicts, `path` may be a directory which can't be diffed, so just make it nothing
-                                    else => try LineIterator(repo_kind).initFromNothing(self.allocator, path),
-                                };
-                                errdefer b.deinit();
-                                self.next_index += 1;
-                                return try HunkIterator(repo_kind).init(self.allocator, &a, &b);
-                            }
-                            // there is no entry, so just skip it and call this method recursively
-                            else {
-                                self.next_index += 1;
-                                return try self.next();
-                            }
-                        } else {
-                            next_index -= self.status.conflicts.count();
+                            errdefer b.deinit();
+                            self.next_index += 1;
+                            return try HunkIterator(repo_kind).init(self.allocator, &a, &b);
                         }
+                        // there is no entry, so just skip it and call this method recursively
+                        else {
+                            self.next_index += 1;
+                            return try self.next();
+                        }
+                    } else {
+                        next_index -= self.status.conflicts.count();
                     }
 
                     if (next_index < self.status.workspace_modified.items.len) {
