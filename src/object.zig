@@ -519,7 +519,7 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
                 rdr: Reader,
             },
             .xit => struct {
-                header_offset: u60,
+                header_offset: u64,
                 rdr: Reader,
             },
         },
@@ -557,7 +557,7 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
                         .{ .hash_map_get = try hash.hexToHash(&oid) },
                     });
                     if (reader_maybe) |*rdr| {
-                        var header_offset: u60 = 0;
+                        var header_offset: u64 = 0;
                         if (skip_header) {
                             var read_buffer = [_]u8{0} ** 1;
                             while (true) {
