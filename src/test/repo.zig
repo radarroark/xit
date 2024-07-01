@@ -630,3 +630,100 @@ test "merge conflict" {
     try testMergeConflict(.git);
     try testMergeConflict(.xit);
 }
+
+/// demonstrates an example of git shuffling lines unexpectedly
+/// when auto-resolving a merge conflict
+fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind) !void {
+    const allocator = std.testing.allocator;
+    const temp_dir_name = "temp-test-repo-merge-conflict-shuffle";
+    const cwd = std.fs.cwd();
+
+    // create the temp dir
+    if (cwd.openFile(temp_dir_name, .{})) |file| {
+        file.close();
+        try cwd.deleteTree(temp_dir_name);
+    } else |_| {}
+    var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
+    defer cwd.deleteTree(temp_dir_name) catch {};
+    defer temp_dir.close();
+
+    const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
+
+    var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, writers);
+    defer repo.deinit();
+
+    // A --- B --- C --- E [master]
+    //  \               /
+    //   \             /
+    //    `---------- D [foo]
+
+    try addFile(repo_kind, &repo, "f.txt",
+        \\a
+        \\b
+    );
+    _ = try repo.commit(null, "a");
+    try repo.create_branch("foo");
+    try addFile(repo_kind, &repo, "f.txt",
+        \\g
+        \\a
+        \\b
+    );
+    _ = try repo.commit(null, "b");
+    try addFile(repo_kind, &repo, "f.txt",
+        \\a
+        \\b
+        \\g
+        \\a
+        \\b
+    );
+    _ = try repo.commit(null, "c");
+    {
+        var result = try repo.switch_head("foo");
+        defer result.deinit();
+    }
+    try addFile(repo_kind, &repo, "f.txt",
+        \\a
+        \\x
+        \\b
+    );
+    _ = try repo.commit(null, "d");
+    {
+        var result = try repo.switch_head("master");
+        defer result.deinit();
+    }
+    {
+        var result = try repo.merge(.{ .new = .{ .source_name = "foo" } });
+        defer result.deinit();
+        try std.testing.expect(.success == result.data);
+    }
+
+    // verify f.txt has been autoresolved
+    const f_txt = try repo.core.repo_dir.openFile("f.txt", .{ .mode = .read_only });
+    defer f_txt.close();
+    const f_txt_content = try f_txt.readToEndAlloc(allocator, 1024);
+    defer allocator.free(f_txt_content);
+    try std.testing.expectEqualStrings(
+        \\a
+        \\x
+        \\b
+        \\g
+        \\a
+        \\b
+    ,
+        f_txt_content,
+    );
+
+    // generate diff
+    var diff_iter = try repo.diff(.workspace, .current);
+    defer diff_iter.deinit();
+    if (try diff_iter.next()) |*hunk_iter_ptr| {
+        var hunk_iter = hunk_iter_ptr.*;
+        defer hunk_iter.deinit();
+        return error.DiffResultNotExpected;
+    }
+}
+
+test "merge conflict shuffle" {
+    try testMergeConflictShuffle(.git);
+    try testMergeConflictShuffle(.xit);
+}
