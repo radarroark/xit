@@ -283,7 +283,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             \\y
             \\c
         );
-        _ = try repo.commit(null, "d");
+        _ = try repo.commit(null, "c");
         {
             var result = try repo.switch_head("master");
             defer result.deinit();
@@ -371,7 +371,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             \\b
             \\y
         );
-        _ = try repo.commit(null, "d");
+        _ = try repo.commit(null, "c");
         {
             var result = try repo.switch_head("master");
             defer result.deinit();
@@ -425,7 +425,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             defer result.deinit();
         }
         try removeFile(repo_kind, &repo, "f.txt");
-        _ = try repo.commit(null, "d");
+        _ = try repo.commit(null, "c");
         {
             var result = try repo.switch_head("master");
             defer result.deinit();
@@ -479,7 +479,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             defer result.deinit();
         }
         try addFile(repo_kind, &repo, "f.txt", "2");
-        _ = try repo.commit(null, "d");
+        _ = try repo.commit(null, "c");
         {
             var result = try repo.switch_head("master");
             defer result.deinit();
