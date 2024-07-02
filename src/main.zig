@@ -2,8 +2,7 @@
 //! the successor to git. behold the three rules of xit:
 //!
 //! 1. keep the codebase small and stupid.
-//! 2. prefer features that solve multiple problems imperfectly
-//! over those that solve a single problem perfectly.
+//! 2. prefer simple 80% solutions over complex 100% solutions.
 //! 3. never take yourself too seriously. be a dork, and you'll
 //! attract dorks. together, we'll make a glorious pack of strays.
 //!
