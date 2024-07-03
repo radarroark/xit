@@ -846,24 +846,30 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind) type {
         myers_diff_maybe: ?MyersDiffIterator(repo_kind),
         allocator: std.mem.Allocator,
         arena: std.heap.ArenaAllocator,
-        line_iter_a: LineIterator(repo_kind),
-        line_iter_b: LineIterator(repo_kind),
+        line_iter_a: *LineIterator(repo_kind),
+        line_iter_b: *LineIterator(repo_kind),
         found_edit: bool,
         margin: usize,
         next_hunk: Hunk(repo_kind),
 
-        pub fn init(allocator: std.mem.Allocator, a: *LineIterator(repo_kind), b: *LineIterator(repo_kind)) !HunkIterator(repo_kind) {
+        pub fn init(allocator: std.mem.Allocator, temp_line_iter_a: LineIterator(repo_kind), temp_line_iter_b: LineIterator(repo_kind)) !HunkIterator(repo_kind) {
+            // put line iters on the heap
+            var line_iter_a = try allocator.create(LineIterator(repo_kind));
+            line_iter_a.* = temp_line_iter_a;
+            var line_iter_b = try allocator.create(LineIterator(repo_kind));
+            line_iter_b.* = temp_line_iter_b;
+
             var arena = std.heap.ArenaAllocator.init(allocator);
             errdefer arena.deinit();
 
             var header_lines = std.ArrayList([]const u8).init(arena.allocator());
 
-            try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "diff --git a/{s} b/{s}", .{ a.path, b.path }));
+            try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "diff --git a/{s} b/{s}", .{ line_iter_a.path, line_iter_b.path }));
 
             var mode_maybe: ?io.Mode = null;
 
-            if (a.mode) |a_mode| {
-                if (b.mode) |b_mode| {
+            if (line_iter_a.mode) |a_mode| {
+                if (line_iter_b.mode) |b_mode| {
                     if (a_mode.unix_permission != b_mode.unix_permission) {
                         try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "old mode {s}", .{a_mode.toStr()}));
                         try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "new mode {s}", .{b_mode.toStr()}));
@@ -874,46 +880,46 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind) type {
                     try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "deleted file mode {s}", .{a_mode.toStr()}));
                 }
             } else {
-                if (b.mode) |b_mode| {
+                if (line_iter_b.mode) |b_mode| {
                     try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "new file mode {s}", .{b_mode.toStr()}));
                 }
             }
 
             var myers_diff_maybe: ?MyersDiffIterator(repo_kind) = null;
 
-            if (!std.mem.eql(u8, &a.oid, &b.oid)) {
+            if (!std.mem.eql(u8, &line_iter_a.oid, &line_iter_b.oid)) {
                 if (mode_maybe) |mode| {
                     try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "index {s}..{s} {s}", .{
-                        a.oid_hex[0..7],
-                        b.oid_hex[0..7],
+                        line_iter_a.oid_hex[0..7],
+                        line_iter_b.oid_hex[0..7],
                         mode.toStr(),
                     }));
                 } else {
                     try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "index {s}..{s}", .{
-                        a.oid_hex[0..7],
-                        b.oid_hex[0..7],
+                        line_iter_a.oid_hex[0..7],
+                        line_iter_b.oid_hex[0..7],
                     }));
                 }
 
-                try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "--- a/{s}", .{a.path}));
+                try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "--- a/{s}", .{line_iter_a.path}));
 
-                if (b.mode != null) {
-                    try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "+++ b/{s}", .{b.path}));
+                if (line_iter_b.mode != null) {
+                    try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "+++ b/{s}", .{line_iter_b.path}));
                 } else {
                     try header_lines.append("+++ /dev/null");
                 }
 
-                myers_diff_maybe = try MyersDiffIterator(repo_kind).init(allocator, a, b);
+                myers_diff_maybe = try MyersDiffIterator(repo_kind).init(allocator, line_iter_a, line_iter_b);
             }
 
             return HunkIterator(repo_kind){
-                .path = a.path,
+                .path = line_iter_a.path,
                 .header_lines = header_lines,
                 .myers_diff_maybe = myers_diff_maybe,
                 .allocator = allocator,
                 .arena = arena,
-                .line_iter_a = a.*,
-                .line_iter_b = b.*,
+                .line_iter_a = line_iter_a,
+                .line_iter_b = line_iter_b,
                 .found_edit = false,
                 .margin = 0,
                 .next_hunk = Hunk(repo_kind){
@@ -996,7 +1002,9 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind) type {
                 myers_diff.deinit();
             }
             self.line_iter_a.deinit();
+            self.allocator.destroy(self.line_iter_a);
             self.line_iter_b.deinit();
+            self.allocator.destroy(self.line_iter_b);
             self.next_hunk.deinit();
         }
     };
@@ -1069,7 +1077,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
                             };
                             errdefer b.deinit();
                             self.next_index += 1;
-                            return try HunkIterator(repo_kind).init(self.allocator, &a, &b);
+                            return try HunkIterator(repo_kind).init(self.allocator, a, b);
                         }
                         // there is no entry, so just skip it and call this method recursively
                         else {
@@ -1088,7 +1096,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
                         var b = try LineIterator(repo_kind).initFromWorkspace(core_cursor, self.allocator, entry.path, io.getMode(entry.meta));
                         errdefer b.deinit();
                         self.next_index += 1;
-                        return try HunkIterator(repo_kind).init(self.allocator, &a, &b);
+                        return try HunkIterator(repo_kind).init(self.allocator, a, b);
                     } else {
                         next_index -= self.status.workspace_modified.items.len;
                     }
@@ -1101,7 +1109,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
                         var b = try LineIterator(repo_kind).initFromNothing(self.allocator, path);
                         errdefer b.deinit();
                         self.next_index += 1;
-                        return try HunkIterator(repo_kind).init(self.allocator, &a, &b);
+                        return try HunkIterator(repo_kind).init(self.allocator, a, b);
                     }
                 },
                 .index => {
@@ -1113,7 +1121,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
                         var b = try LineIterator(repo_kind).initFromIndex(core_cursor, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
                         errdefer b.deinit();
                         self.next_index += 1;
-                        return try HunkIterator(repo_kind).init(self.allocator, &a, &b);
+                        return try HunkIterator(repo_kind).init(self.allocator, a, b);
                     } else {
                         next_index -= self.status.index_added.items.len;
                     }
@@ -1126,7 +1134,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
                         var b = try LineIterator(repo_kind).initFromIndex(core_cursor, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
                         errdefer b.deinit();
                         self.next_index += 1;
-                        return try HunkIterator(repo_kind).init(self.allocator, &a, &b);
+                        return try HunkIterator(repo_kind).init(self.allocator, a, b);
                     } else {
                         next_index -= self.status.index_modified.items.len;
                     }
@@ -1138,7 +1146,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
                         var b = try LineIterator(repo_kind).initFromNothing(self.allocator, path);
                         errdefer b.deinit();
                         self.next_index += 1;
-                        return try HunkIterator(repo_kind).init(self.allocator, &a, &b);
+                        return try HunkIterator(repo_kind).init(self.allocator, a, b);
                     }
                 },
             }
