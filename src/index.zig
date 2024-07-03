@@ -496,10 +496,10 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                             for (ctx_self.index.entries.keys(), ctx_self.index.entries.values()) |path, *entries_for_path| {
                                 var entry_buffer = std.ArrayList(u8).init(ctx_self.allocator);
                                 defer entry_buffer.deinit();
+                                const writer = entry_buffer.writer();
 
                                 for (entries_for_path) |entry_maybe| {
                                     if (entry_maybe) |entry| {
-                                        const writer = entry_buffer.writer();
                                         try writer.writeInt(u32, entry.ctime_secs, .big);
                                         try writer.writeInt(u32, entry.ctime_nsecs, .big);
                                         try writer.writeInt(u32, entry.mtime_secs, .big);
