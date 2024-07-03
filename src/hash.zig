@@ -58,3 +58,9 @@ pub fn bytesToHash(bytes_buffer: *const [SHA1_BYTES_LEN]u8) xitdb.Hash {
     @memcpy(hash[0..xitdb.HASH_SIZE], bytes_buffer);
     return std.mem.bytesToValue(xitdb.Hash, &hash);
 }
+
+pub fn hexToBytes(hex_buffer: [SHA1_HEX_LEN]u8) ![SHA1_BYTES_LEN]u8 {
+    var bytes = [_]u8{0} ** SHA1_BYTES_LEN;
+    _ = try std.fmt.hexToBytes(&bytes, &hex_buffer);
+    return bytes;
+}

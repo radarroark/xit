@@ -1007,6 +1007,21 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind) type {
             self.allocator.destroy(self.line_iter_b);
             self.next_hunk.deinit();
         }
+
+        pub fn reset(self: *HunkIterator(repo_kind)) !void {
+            try self.line_iter_a.reset();
+            try self.line_iter_b.reset();
+            self.found_edit = false;
+            self.margin = 0;
+            self.next_hunk.deinit();
+            self.next_hunk = Hunk(repo_kind){
+                .edits = std.ArrayList(MyersDiffIterator(repo_kind).Edit).init(self.allocator),
+                .allocator = self.allocator,
+            };
+            if (self.myers_diff_maybe) |*myers_diff| {
+                try myers_diff.reset();
+            }
+        }
     };
 }
 
