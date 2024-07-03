@@ -314,7 +314,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         );
 
         // generate diff
-        var diff_iter = try repo.diff(.workspace, .current);
+        var diff_iter = try repo.diff(.{ .workspace = .{ .conflict_diff_kind = .current } });
         defer diff_iter.deinit();
         if (try diff_iter.next()) |*hunk_iter_ptr| {
             var hunk_iter = hunk_iter_ptr.*;
@@ -396,7 +396,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         );
 
         // generate diff
-        var diff_iter = try repo.diff(.workspace, .current);
+        var diff_iter = try repo.diff(.{ .workspace = .{ .conflict_diff_kind = .current } });
         defer diff_iter.deinit();
         if (try diff_iter.next()) |*hunk_iter_ptr| {
             var hunk_iter = hunk_iter_ptr.*;
@@ -437,7 +437,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         }
 
         // generate diff
-        var diff_iter = try repo.diff(.workspace, .current);
+        var diff_iter = try repo.diff(.{ .workspace = .{ .conflict_diff_kind = .current } });
         defer diff_iter.deinit();
         if (try diff_iter.next()) |*hunk_iter_ptr| {
             var hunk_iter = hunk_iter_ptr.*;
@@ -491,7 +491,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         }
 
         // generate diff
-        var diff_iter = try repo.diff(.workspace, .current);
+        var diff_iter = try repo.diff(.{ .workspace = .{ .conflict_diff_kind = .current } });
         defer diff_iter.deinit();
         if (try diff_iter.next()) |*hunk_iter_ptr| {
             var hunk_iter = hunk_iter_ptr.*;
@@ -543,7 +543,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         }
 
         // generate diff
-        var diff_iter = try repo.diff(.workspace, .current);
+        var diff_iter = try repo.diff(.{ .workspace = .{ .conflict_diff_kind = .current } });
         defer diff_iter.deinit();
         if (try diff_iter.next()) |*hunk_iter_ptr| {
             var hunk_iter = hunk_iter_ptr.*;
@@ -605,7 +605,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         defer renamed_file.close();
 
         // generate diff
-        var diff_iter = try repo.diff(.workspace, .current);
+        var diff_iter = try repo.diff(.{ .workspace = .{ .conflict_diff_kind = .current } });
         defer diff_iter.deinit();
         if (try diff_iter.next()) |*hunk_iter_ptr| {
             var hunk_iter = hunk_iter_ptr.*;
@@ -714,7 +714,7 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind) !void {
     );
 
     // generate diff
-    var diff_iter = try repo.diff(.workspace, .current);
+    var diff_iter = try repo.diff(.{ .workspace = .{ .conflict_diff_kind = .current } });
     defer diff_iter.deinit();
     if (try diff_iter.next()) |*hunk_iter_ptr| {
         var hunk_iter = hunk_iter_ptr.*;

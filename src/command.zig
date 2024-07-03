@@ -36,7 +36,6 @@ pub const CommandData = union(CommandKind) {
     status,
     diff: struct {
         diff_kind: df.DiffKind,
-        conflict_diff_kind: df.ConflictDiffKind,
     },
     branch: struct {
         name: ?[]const u8,
@@ -107,10 +106,18 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8))
         } else if (std.mem.eql(u8, args.items[0], "status")) {
             return CommandData{ .status = {} };
         } else if (std.mem.eql(u8, args.items[0], "diff")) {
-            return CommandData{ .diff = .{
-                .diff_kind = if (map_args.contains("--staged")) .index else .workspace,
-                .conflict_diff_kind = if (map_args.contains("--base")) .common else if (map_args.contains("--ours")) .current else if (map_args.contains("--theirs")) .source else .current,
-            } };
+            const diff_kind: df.DiffKind = if (map_args.contains("--staged"))
+                .index
+            else
+                (if (map_args.contains("--base"))
+                    .{ .workspace = .{ .conflict_diff_kind = .common } }
+                else if (map_args.contains("--ours"))
+                    .{ .workspace = .{ .conflict_diff_kind = .current } }
+                else if (map_args.contains("--theirs"))
+                    .{ .workspace = .{ .conflict_diff_kind = .source } }
+                else
+                    .{ .workspace = .{ .conflict_diff_kind = .current } });
+            return CommandData{ .diff = .{ .diff_kind = diff_kind } };
         } else if (std.mem.eql(u8, args.items[0], "branch")) {
             return CommandData{ .branch = .{ .name = if (pos_args.items.len == 0) null else pos_args.items[0] } };
         } else if (std.mem.eql(u8, args.items[0], "switch")) {

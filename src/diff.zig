@@ -1002,15 +1002,17 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind) type {
     };
 }
 
-pub const DiffKind = enum {
-    workspace,
-    index,
-};
-
 pub const ConflictDiffKind = enum {
     common, // base
     current, // ours
     source, // theirs
+};
+
+pub const DiffKind = union(enum) {
+    workspace: struct {
+        conflict_diff_kind: ConflictDiffKind,
+    },
+    index,
 };
 
 pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
@@ -1018,7 +1020,6 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
         allocator: std.mem.Allocator,
         core: *rp.Repo(repo_kind).Core,
         diff_kind: DiffKind,
-        conflict_diff_kind: ConflictDiffKind,
         status: st.Status(repo_kind),
         next_index: usize,
 
@@ -1026,14 +1027,12 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
             allocator: std.mem.Allocator,
             core: *rp.Repo(repo_kind).Core,
             diff_kind: DiffKind,
-            conflict_diff_kind: ConflictDiffKind,
             status: st.Status(repo_kind),
         ) !FileIterator(repo_kind) {
             return .{
                 .allocator = allocator,
                 .core = core,
                 .diff_kind = diff_kind,
-                .conflict_diff_kind = conflict_diff_kind,
                 .status = status,
                 .next_index = 0,
             };
@@ -1053,7 +1052,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
                     if (next_index < self.status.conflicts.count()) {
                         const path = self.status.conflicts.keys()[next_index];
                         const meta = try io.getMetadata(self.core.repo_dir, path);
-                        const stage: usize = switch (self.conflict_diff_kind) {
+                        const stage: usize = switch (self.diff_kind.workspace.conflict_diff_kind) {
                             .common => 1,
                             .current => 2,
                             .source => 3,
