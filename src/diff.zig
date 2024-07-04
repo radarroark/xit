@@ -842,7 +842,8 @@ pub fn Hunk(comptime repo_kind: rp.RepoKind) type {
 pub fn HunkIterator(comptime repo_kind: rp.RepoKind) type {
     return struct {
         header_lines: std.ArrayList([]const u8),
-        myers_diff_maybe: ?MyersDiffIterator(repo_kind),
+        myers_diff: MyersDiffIterator(repo_kind),
+        eof: bool,
         allocator: std.mem.Allocator,
         arena: std.heap.ArenaAllocator,
         line_iter_a: *LineIterator(repo_kind),
@@ -878,8 +879,6 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind) type {
                 }
             }
 
-            var myers_diff_maybe: ?MyersDiffIterator(repo_kind) = null;
-
             if (!std.mem.eql(u8, &line_iter_a.oid, &line_iter_b.oid)) {
                 if (mode_maybe) |mode| {
                     try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "index {s}..{s} {s}", .{
@@ -901,13 +900,12 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind) type {
                 } else {
                     try header_lines.append("+++ /dev/null");
                 }
-
-                myers_diff_maybe = try MyersDiffIterator(repo_kind).init(allocator, line_iter_a, line_iter_b);
             }
 
             return HunkIterator(repo_kind){
                 .header_lines = header_lines,
-                .myers_diff_maybe = myers_diff_maybe,
+                .myers_diff = try MyersDiffIterator(repo_kind).init(allocator, line_iter_a, line_iter_b),
+                .eof = false,
                 .allocator = allocator,
                 .arena = arena,
                 .line_iter_a = line_iter_a,
@@ -924,9 +922,9 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind) type {
         pub fn next(self: *HunkIterator(repo_kind)) !?Hunk(repo_kind) {
             const max_margin: usize = 3;
 
-            if (self.myers_diff_maybe) |*myers_diff| {
+            if (!self.eof) {
                 while (true) {
-                    if (try myers_diff.next()) |edit| {
+                    if (try self.myers_diff.next()) |edit| {
                         errdefer edit.deinit(self.allocator);
                         try self.next_hunk.edits.append(edit);
 
@@ -969,9 +967,8 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind) type {
                             continue;
                         }
                     } else {
-                        // nullify the myers diff iterator so next() returns null afterwards
-                        myers_diff.deinit();
-                        self.myers_diff_maybe = null;
+                        // set eof so next() returns null afterwards
+                        self.eof = true;
                         // return last hunk
                         const hunk = self.next_hunk;
                         self.next_hunk = Hunk(repo_kind){
@@ -989,14 +986,14 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind) type {
         }
 
         pub fn deinit(self: *HunkIterator(repo_kind)) void {
+            self.myers_diff.deinit();
             self.arena.deinit();
-            if (self.myers_diff_maybe) |*myers_diff| {
-                myers_diff.deinit();
-            }
             self.next_hunk.deinit();
         }
 
         pub fn reset(self: *HunkIterator(repo_kind)) !void {
+            try self.myers_diff.reset();
+            self.eof = false;
             try self.line_iter_a.reset();
             try self.line_iter_b.reset();
             self.found_edit = false;
@@ -1006,9 +1003,6 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind) type {
                 .edits = std.ArrayList(MyersDiffIterator(repo_kind).Edit).init(self.allocator),
                 .allocator = self.allocator,
             };
-            if (self.myers_diff_maybe) |*myers_diff| {
-                try myers_diff.reset();
-            }
         }
     };
 }
