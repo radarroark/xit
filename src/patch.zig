@@ -56,8 +56,10 @@ pub fn writePatches(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_k
     };
     defer file_iter.deinit();
 
-    while (try file_iter.next()) |*hunk_iter_ptr| {
-        var hunk_iter = hunk_iter_ptr.*;
+    while (try file_iter.next()) |*line_iter_pair_ptr| {
+        var line_iter_pair = line_iter_pair_ptr.*;
+        defer line_iter_pair.deinit();
+        var hunk_iter = try df.HunkIterator(repo_kind).init(allocator, &line_iter_pair.a, &line_iter_pair.b);
         defer hunk_iter.deinit();
 
         // generate hash of the patch
@@ -83,8 +85,8 @@ pub fn writePatches(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_k
 
         // write header
         try writer.writeAll(&patch_hash);
-        try writer.writeInt(u64, hunk_iter.path.len, .big);
-        try writer.writeAll(hunk_iter.path);
+        try writer.writeInt(u64, line_iter_pair.a.path.len, .big);
+        try writer.writeAll(line_iter_pair.a.path);
 
         // write the edits
         try hunk_iter.reset();

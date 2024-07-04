@@ -8,6 +8,7 @@ const ref = @import("../ref.zig");
 const chk = @import("../checkout.zig");
 const obj = @import("../object.zig");
 const mrg = @import("../merge.zig");
+const df = @import("../diff.zig");
 
 fn expectEqual(expected: anytype, actual: anytype) !void {
     try std.testing.expectEqual(@as(@TypeOf(actual), expected), actual);
@@ -316,9 +317,9 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         // generate diff
         var diff_iter = try repo.diff(.{ .workspace = .{ .conflict_diff_kind = .current } });
         defer diff_iter.deinit();
-        if (try diff_iter.next()) |*hunk_iter_ptr| {
-            var hunk_iter = hunk_iter_ptr.*;
-            defer hunk_iter.deinit();
+        if (try diff_iter.next()) |*line_iter_pair_ptr| {
+            var line_iter_pair = line_iter_pair_ptr.*;
+            defer line_iter_pair.deinit();
         } else {
             return error.DiffResultExpected;
         }
@@ -398,9 +399,9 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         // generate diff
         var diff_iter = try repo.diff(.{ .workspace = .{ .conflict_diff_kind = .current } });
         defer diff_iter.deinit();
-        if (try diff_iter.next()) |*hunk_iter_ptr| {
-            var hunk_iter = hunk_iter_ptr.*;
-            defer hunk_iter.deinit();
+        if (try diff_iter.next()) |*line_iter_pair_ptr| {
+            var line_iter_pair = line_iter_pair_ptr.*;
+            defer line_iter_pair.deinit();
             return error.DiffResultNotExpected;
         }
     }
@@ -439,10 +440,10 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         // generate diff
         var diff_iter = try repo.diff(.{ .workspace = .{ .conflict_diff_kind = .current } });
         defer diff_iter.deinit();
-        if (try diff_iter.next()) |*hunk_iter_ptr| {
-            var hunk_iter = hunk_iter_ptr.*;
-            defer hunk_iter.deinit();
-            try std.testing.expectEqualStrings("f.txt", hunk_iter.path);
+        if (try diff_iter.next()) |*line_iter_pair_ptr| {
+            var line_iter_pair = line_iter_pair_ptr.*;
+            defer line_iter_pair.deinit();
+            try std.testing.expectEqualStrings("f.txt", line_iter_pair.a.path);
         } else {
             return error.DiffResultExpected;
         }
@@ -493,9 +494,9 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         // generate diff
         var diff_iter = try repo.diff(.{ .workspace = .{ .conflict_diff_kind = .current } });
         defer diff_iter.deinit();
-        if (try diff_iter.next()) |*hunk_iter_ptr| {
-            var hunk_iter = hunk_iter_ptr.*;
-            defer hunk_iter.deinit();
+        if (try diff_iter.next()) |*line_iter_pair_ptr| {
+            var line_iter_pair = line_iter_pair_ptr.*;
+            defer line_iter_pair.deinit();
             return error.DiffResultNotExpected;
         }
 
@@ -545,10 +546,10 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         // generate diff
         var diff_iter = try repo.diff(.{ .workspace = .{ .conflict_diff_kind = .current } });
         defer diff_iter.deinit();
-        if (try diff_iter.next()) |*hunk_iter_ptr| {
-            var hunk_iter = hunk_iter_ptr.*;
-            defer hunk_iter.deinit();
-            try std.testing.expectEqualStrings("f.txt", hunk_iter.path);
+        if (try diff_iter.next()) |*line_iter_pair_ptr| {
+            var line_iter_pair = line_iter_pair_ptr.*;
+            defer line_iter_pair.deinit();
+            try std.testing.expectEqualStrings("f.txt", line_iter_pair.a.path);
         } else {
             return error.DiffResultExpected;
         }
@@ -607,9 +608,9 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         // generate diff
         var diff_iter = try repo.diff(.{ .workspace = .{ .conflict_diff_kind = .current } });
         defer diff_iter.deinit();
-        if (try diff_iter.next()) |*hunk_iter_ptr| {
-            var hunk_iter = hunk_iter_ptr.*;
-            defer hunk_iter.deinit();
+        if (try diff_iter.next()) |*line_iter_pair_ptr| {
+            var line_iter_pair = line_iter_pair_ptr.*;
+            defer line_iter_pair.deinit();
             return error.DiffResultNotExpected;
         }
 
@@ -716,9 +717,9 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind) !void {
     // generate diff
     var diff_iter = try repo.diff(.{ .workspace = .{ .conflict_diff_kind = .current } });
     defer diff_iter.deinit();
-    if (try diff_iter.next()) |*hunk_iter_ptr| {
-        var hunk_iter = hunk_iter_ptr.*;
-        defer hunk_iter.deinit();
+    if (try diff_iter.next()) |*line_iter_pair_ptr| {
+        var line_iter_pair = line_iter_pair_ptr.*;
+        defer line_iter_pair.deinit();
         return error.DiffResultNotExpected;
     }
 }
