@@ -248,7 +248,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
 
         pub fn deinit(self: *LineIterator(repo_kind)) void {
             switch (self.source) {
-                .object => {},
+                .object => self.source.object.object_reader.deinit(),
                 .workspace => self.source.workspace.file.close(),
                 .nothing => {},
                 .buffer => {},
