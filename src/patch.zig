@@ -59,20 +59,17 @@ pub fn writePatches(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_k
     while (try file_iter.next()) |*line_iter_pair_ptr| {
         var line_iter_pair = line_iter_pair_ptr.*;
         defer line_iter_pair.deinit();
-        var hunk_iter = try df.HunkIterator(repo_kind).init(allocator, &line_iter_pair.a, &line_iter_pair.b);
-        defer hunk_iter.deinit();
+        var myers_diff_iter = try df.MyersDiffIterator(repo_kind).init(allocator, &line_iter_pair.a, &line_iter_pair.b);
+        defer myers_diff_iter.deinit();
 
         // generate hash of the patch
         var h = std.crypto.hash.Sha1.init(.{});
-        while (try hunk_iter.next()) |*hunk_ptr| {
-            var hunk = hunk_ptr.*;
-            defer hunk.deinit();
-            for (hunk.edits.items) |edit| {
-                var entry_buffer = std.ArrayList(u8).init(allocator);
-                defer entry_buffer.deinit();
-                try writePatchChange(repo_kind, edit, entry_buffer.writer());
-                h.update(entry_buffer.items);
-            }
+        while (try myers_diff_iter.next()) |edit| {
+            defer edit.deinit(allocator);
+            var entry_buffer = std.ArrayList(u8).init(allocator);
+            defer entry_buffer.deinit();
+            try writePatchChange(repo_kind, edit, entry_buffer.writer());
+            h.update(entry_buffer.items);
         }
         var patch_hash = [_]u8{0} ** hash.SHA1_BYTES_LEN;
         h.final(&patch_hash);
@@ -89,13 +86,10 @@ pub fn writePatches(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_k
         try writer.writeAll(line_iter_pair.a.path);
 
         // write the edits
-        try hunk_iter.reset();
-        while (try hunk_iter.next()) |*hunk_ptr| {
-            var hunk = hunk_ptr.*;
-            defer hunk.deinit();
-            for (hunk.edits.items) |edit| {
-                try writePatchChange(repo_kind, edit, &writer);
-            }
+        try myers_diff_iter.reset();
+        while (try myers_diff_iter.next()) |edit| {
+            defer edit.deinit(allocator);
+            try writePatchChange(repo_kind, edit, &writer);
         }
 
         try writer.finish();
