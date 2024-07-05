@@ -34,14 +34,14 @@ fn writePatchChange(comptime repo_kind: rp.RepoKind, edit: df.MyersDiffIterator(
     switch (edit) {
         .eql => {},
         .ins => {
-            try writer.writeInt(u8, @intFromEnum(ChangeKind.new_node), .big);
-            try writer.writeInt(u64, edit.ins.new_line.num, .big);
-            try writer.writeInt(u64, edit.ins.new_line.text.len, .big);
+            try writer.writeInt(u8, @intFromEnum(ChangeKind.new_node), .little);
+            try writer.writeInt(u64, edit.ins.new_line.num, .little);
+            try writer.writeInt(u64, edit.ins.new_line.text.len, .little);
             try writer.writeAll(edit.ins.new_line.text);
         },
         .del => {
-            try writer.writeInt(u8, @intFromEnum(ChangeKind.delete_node), .big);
-            try writer.writeInt(u64, edit.del.old_line.num, .big);
+            try writer.writeInt(u8, @intFromEnum(ChangeKind.delete_node), .little);
+            try writer.writeInt(u64, edit.del.old_line.num, .little);
         },
     }
 }
@@ -82,7 +82,7 @@ pub fn writePatches(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_k
 
         // write header
         try writer.writeAll(&patch_hash);
-        try writer.writeInt(u64, line_iter_pair.a.path.len, .big);
+        try writer.writeInt(u64, line_iter_pair.a.path.len, .little);
         try writer.writeAll(line_iter_pair.a.path);
 
         // write the edits
