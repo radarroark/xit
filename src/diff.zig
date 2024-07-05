@@ -1022,6 +1022,7 @@ pub const DiffKind = union(enum) {
 
 pub fn LineIteratorPair(comptime repo_kind: rp.RepoKind) type {
     return struct {
+        path: []const u8,
         a: LineIterator(repo_kind),
         b: LineIterator(repo_kind),
 
@@ -1086,7 +1087,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
                             };
                             errdefer b.deinit();
                             self.next_index += 1;
-                            return LineIteratorPair(repo_kind){ .a = a, .b = b };
+                            return LineIteratorPair(repo_kind){ .path = path, .a = a, .b = b };
                         }
                         // there is no entry, so just skip it and call this method recursively
                         else {
@@ -1105,7 +1106,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
                         var b = try LineIterator(repo_kind).initFromWorkspace(core_cursor, self.allocator, entry.path, io.getMode(entry.meta));
                         errdefer b.deinit();
                         self.next_index += 1;
-                        return LineIteratorPair(repo_kind){ .a = a, .b = b };
+                        return LineIteratorPair(repo_kind){ .path = entry.path, .a = a, .b = b };
                     } else {
                         next_index -= self.status.workspace_modified.items.len;
                     }
@@ -1118,7 +1119,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
                         var b = try LineIterator(repo_kind).initFromNothing(self.allocator, path);
                         errdefer b.deinit();
                         self.next_index += 1;
-                        return LineIteratorPair(repo_kind){ .a = a, .b = b };
+                        return LineIteratorPair(repo_kind){ .path = path, .a = a, .b = b };
                     }
                 },
                 .index => {
@@ -1130,7 +1131,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
                         var b = try LineIterator(repo_kind).initFromIndex(core_cursor, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
                         errdefer b.deinit();
                         self.next_index += 1;
-                        return LineIteratorPair(repo_kind){ .a = a, .b = b };
+                        return LineIteratorPair(repo_kind){ .path = path, .a = a, .b = b };
                     } else {
                         next_index -= self.status.index_added.items.len;
                     }
@@ -1143,7 +1144,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
                         var b = try LineIterator(repo_kind).initFromIndex(core_cursor, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
                         errdefer b.deinit();
                         self.next_index += 1;
-                        return LineIteratorPair(repo_kind){ .a = a, .b = b };
+                        return LineIteratorPair(repo_kind){ .path = path, .a = a, .b = b };
                     } else {
                         next_index -= self.status.index_modified.items.len;
                     }
@@ -1155,7 +1156,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
                         var b = try LineIterator(repo_kind).initFromNothing(self.allocator, path);
                         errdefer b.deinit();
                         self.next_index += 1;
-                        return LineIteratorPair(repo_kind){ .a = a, .b = b };
+                        return LineIteratorPair(repo_kind){ .path = path, .a = a, .b = b };
                     }
                 },
             }

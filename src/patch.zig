@@ -82,8 +82,8 @@ pub fn writePatches(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_k
 
         // write header
         try writer.writeAll(&patch_hash);
-        try writer.writeInt(u64, line_iter_pair.a.path.len, .little);
-        try writer.writeAll(line_iter_pair.a.path);
+        try writer.writeInt(u64, line_iter_pair.path.len, .little);
+        try writer.writeAll(line_iter_pair.path);
 
         // write the edits
         try myers_diff_iter.reset();

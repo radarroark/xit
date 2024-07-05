@@ -443,7 +443,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         if (try diff_iter.next()) |*line_iter_pair_ptr| {
             var line_iter_pair = line_iter_pair_ptr.*;
             defer line_iter_pair.deinit();
-            try std.testing.expectEqualStrings("f.txt", line_iter_pair.a.path);
+            try std.testing.expectEqualStrings("f.txt", line_iter_pair.path);
         } else {
             return error.DiffResultExpected;
         }
@@ -549,7 +549,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         if (try diff_iter.next()) |*line_iter_pair_ptr| {
             var line_iter_pair = line_iter_pair_ptr.*;
             defer line_iter_pair.deinit();
-            try std.testing.expectEqualStrings("f.txt", line_iter_pair.a.path);
+            try std.testing.expectEqualStrings("f.txt", line_iter_pair.path);
         } else {
             return error.DiffResultExpected;
         }
