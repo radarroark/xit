@@ -532,14 +532,14 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                     .hash_map_create,
                                     .{ .hash_map_get = path_hash },
                                 });
-                                const buffer_ptr = try ctx_self.core_cursor.cursor.writeBytes(entry_buffer.items, .once, void, &[_]xitdb.PathPart(void){
+                                const buffer_slot = try ctx_self.core_cursor.cursor.writeBytes(entry_buffer.items, .once, void, &[_]xitdb.PathPart(void){
                                     .{ .hash_map_get = hash.hashBuffer("index-values") },
                                     .hash_map_create,
                                     .{ .hash_map_get = hash.hashBuffer(entry_buffer.items) },
                                 });
                                 _ = try cursor.execute(void, &[_]xitdb.PathPart(void){
                                     .{ .hash_map_get = path_hash },
-                                    .{ .value = .{ .bytes_ptr = buffer_ptr } },
+                                    .{ .value = .{ .slot = buffer_slot } },
                                 });
                             }
                         }

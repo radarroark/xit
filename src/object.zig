@@ -169,7 +169,7 @@ pub fn writeBlob(
                             .{ .hash_map_get = hash.hashBuffer("objects") },
                             .hash_map_create,
                             .{ .hash_map_get = try hash.hexToHash(&ctx_self.sha1_hex) },
-                            .{ .value = .{ .bytes_ptr = writer.ptr_position } },
+                            .{ .value = .{ .slot = writer.slot } },
                         });
                     }
                 }
@@ -269,13 +269,13 @@ fn writeTree(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).Co
                     if (cursor.pointer() != null) {
                         return;
                     }
-                    const tree_ptr = try ctx_self.cursor.writeBytes(ctx_self.tree_bytes, .once, void, &[_]xitdb.PathPart(void){
+                    const tree_slot = try ctx_self.cursor.writeBytes(ctx_self.tree_bytes, .once, void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = hash.hashBuffer("object-values") },
                         .hash_map_create,
                         .{ .hash_map_get = hash.bytesToHash(ctx_self.tree_sha1_bytes) },
                     });
                     _ = try cursor.execute(void, &[_]xitdb.PathPart(void){
-                        .{ .value = .{ .bytes_ptr = tree_ptr } },
+                        .{ .value = .{ .slot = tree_slot } },
                     });
                 }
             };
@@ -468,7 +468,7 @@ pub fn writeCommit(
             const commit_sha1_hex = std.fmt.bytesToHex(commit_sha1_bytes_buffer, .lower);
 
             // write commit content
-            const content_ptr = try core_cursor.cursor.writeBytes(commit, .once, void, &[_]xitdb.PathPart(void){
+            const content_slot = try core_cursor.cursor.writeBytes(commit, .once, void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = hash.hashBuffer("object-values") },
                 .hash_map_create,
                 .{ .hash_map_get = hash.bytesToHash(&commit_sha1_bytes_buffer) },
@@ -479,7 +479,7 @@ pub fn writeCommit(
                 .{ .hash_map_get = hash.hashBuffer("objects") },
                 .hash_map_create,
                 .{ .hash_map_get = hash.bytesToHash(&commit_sha1_bytes_buffer) },
-                .{ .value = .{ .bytes_ptr = content_ptr } },
+                .{ .value = .{ .slot = content_slot } },
             });
 
             // write commit id to HEAD
