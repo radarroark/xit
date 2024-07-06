@@ -46,11 +46,7 @@ fn writePatchChange(comptime repo_kind: rp.RepoKind, edit: df.MyersDiffIterator(
     }
 }
 
-pub fn writePatchesForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, line_iter_pair: *df.LineIteratorPair(repo_kind)) !void {
-    var myers_diff_iter = try df.MyersDiffIterator(repo_kind).init(allocator, &line_iter_pair.a, &line_iter_pair.b);
-    defer myers_diff_iter.deinit();
-
-    // generate hash of the patch
+pub fn patchHash(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, myers_diff_iter: *df.MyersDiffIterator(repo_kind)) ![hash.SHA1_BYTES_LEN]u8 {
     var h = std.crypto.hash.Sha1.init(.{});
     while (try myers_diff_iter.next()) |edit| {
         defer edit.deinit(allocator);
@@ -59,8 +55,18 @@ pub fn writePatchesForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo
         try writePatchChange(repo_kind, edit, entry_buffer.writer());
         h.update(entry_buffer.items);
     }
+    try myers_diff_iter.reset();
+
     var patch_hash = [_]u8{0} ** hash.SHA1_BYTES_LEN;
     h.final(&patch_hash);
+    return patch_hash;
+}
+
+pub fn writePatchesForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, line_iter_pair: *df.LineIteratorPair(repo_kind)) !void {
+    var myers_diff_iter = try df.MyersDiffIterator(repo_kind).init(allocator, &line_iter_pair.a, &line_iter_pair.b);
+    defer myers_diff_iter.deinit();
+
+    const patch_hash = try patchHash(repo_kind, allocator, &myers_diff_iter);
 
     // exit early if patch already exists
     if (try core_cursor.cursor.readCursor(void, &[_]xitdb.PathPart(void){
@@ -82,7 +88,6 @@ pub fn writePatchesForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo
     try writer.writeAll(line_iter_pair.path);
 
     // write the edits
-    try myers_diff_iter.reset();
     while (try myers_diff_iter.next()) |edit| {
         defer edit.deinit(allocator);
         try writePatchChange(repo_kind, edit, &writer);
