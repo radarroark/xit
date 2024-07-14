@@ -1,4 +1,5 @@
 const std = @import("std");
+const xitdb = @import("xitdb");
 const rp = @import("./repo.zig");
 const st = @import("./status.zig");
 const hash = @import("./hash.zig");
@@ -1037,6 +1038,10 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
     return struct {
         allocator: std.mem.Allocator,
         core: *rp.Repo(repo_kind).Core,
+        cursor: switch (repo_kind) {
+            .git => void,
+            .xit => xitdb.Database(.file).Cursor,
+        },
         diff_kind: DiffKind,
         status: st.Status(repo_kind),
         next_index: usize,
@@ -1050,6 +1055,10 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
             return .{
                 .allocator = allocator,
                 .core = core,
+                .cursor = switch (repo_kind) {
+                    .git => {},
+                    .xit => try core.latestCursor(),
+                },
                 .diff_kind = diff_kind,
                 .status = status,
                 .next_index = 0,
@@ -1057,12 +1066,9 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
         }
 
         pub fn next(self: *FileIterator(repo_kind)) !?LineIteratorPair(repo_kind) {
-            // TODO: instead of latest cursor, store the tx id so we always use the
-            // same transaction even if the db is written to while calling next
-            var cursor = try self.core.latestCursor();
             const core_cursor = switch (repo_kind) {
                 .git => .{ .core = self.core },
-                .xit => .{ .core = self.core, .cursor = &cursor },
+                .xit => .{ .core = self.core, .cursor = &self.cursor },
             };
             var next_index = self.next_index;
             switch (self.diff_kind) {
