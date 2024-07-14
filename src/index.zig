@@ -140,45 +140,39 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                         var iter = try index_cursor.iter(.hash_map);
                         defer iter.deinit();
                         while (try iter.next()) |*next_cursor| {
+                            const key_cursor = try next_cursor.keyCursor();
+                            const path = (try key_cursor.readBytesAlloc(index.arena.allocator(), MAX_READ_BYTES, void, &[_]xitdb.PathPart(void){})) orelse return error.ExpectedIndexKey;
+
                             const value_cursor = try next_cursor.valueCursor();
-                            if (try value_cursor.readBytesAlloc(index.allocator, MAX_READ_BYTES, void, &[_]xitdb.PathPart(void){})) |buffer| {
-                                defer index.allocator.free(buffer);
-                                if (try next_cursor.readHash(void, &[_]xitdb.PathPart(void){})) |path_hash| {
-                                    if (try core_cursor.cursor.readBytesAlloc(index.arena.allocator(), MAX_READ_BYTES, void, &[_]xitdb.PathPart(void){
-                                        .{ .hash_map_get_value = hash.hashBuffer("paths") },
-                                        .{ .hash_map_get_value = path_hash },
-                                    })) |path| {
-                                        var stream = std.io.fixedBufferStream(buffer);
-                                        var reader = stream.reader();
-                                        while (try stream.getPos() < buffer.len) {
-                                            var entry = Entry{
-                                                .ctime_secs = try reader.readInt(u32, .big),
-                                                .ctime_nsecs = try reader.readInt(u32, .big),
-                                                .mtime_secs = try reader.readInt(u32, .big),
-                                                .mtime_nsecs = try reader.readInt(u32, .big),
-                                                .dev = try reader.readInt(u32, .big),
-                                                .ino = try reader.readInt(u32, .big),
-                                                .mode = @bitCast(try reader.readInt(u32, .big)),
-                                                .uid = try reader.readInt(u32, .big),
-                                                .gid = try reader.readInt(u32, .big),
-                                                .file_size = try reader.readInt(u32, .big),
-                                                .oid = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN),
-                                                .flags = @bitCast(try reader.readInt(u16, .big)),
-                                                .extended_flags = null, // TODO: read this if necessary
-                                                .path = path,
-                                            };
-                                            if (entry.mode.unix_permission != 0o755) { // ensure mode is valid
-                                                entry.mode.unix_permission = 0o644;
-                                            }
-                                            if (entry.path.len != entry.flags.name_length) {
-                                                return error.InvalidPathSize;
-                                            }
-                                            try index.addEntry(entry);
-                                        }
-                                    } else {
-                                        return error.ValueNotFound;
-                                    }
+                            const buffer = (try value_cursor.readBytesAlloc(index.allocator, MAX_READ_BYTES, void, &[_]xitdb.PathPart(void){})) orelse return error.ExpectedIndexValue;
+                            defer index.allocator.free(buffer);
+
+                            var stream = std.io.fixedBufferStream(buffer);
+                            var reader = stream.reader();
+                            while (try stream.getPos() < buffer.len) {
+                                var entry = Entry{
+                                    .ctime_secs = try reader.readInt(u32, .big),
+                                    .ctime_nsecs = try reader.readInt(u32, .big),
+                                    .mtime_secs = try reader.readInt(u32, .big),
+                                    .mtime_nsecs = try reader.readInt(u32, .big),
+                                    .dev = try reader.readInt(u32, .big),
+                                    .ino = try reader.readInt(u32, .big),
+                                    .mode = @bitCast(try reader.readInt(u32, .big)),
+                                    .uid = try reader.readInt(u32, .big),
+                                    .gid = try reader.readInt(u32, .big),
+                                    .file_size = try reader.readInt(u32, .big),
+                                    .oid = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN),
+                                    .flags = @bitCast(try reader.readInt(u16, .big)),
+                                    .extended_flags = null, // TODO: read this if necessary
+                                    .path = path,
+                                };
+                                if (entry.mode.unix_permission != 0o755) { // ensure mode is valid
+                                    entry.mode.unix_permission = 0o644;
                                 }
+                                if (entry.path.len != entry.flags.name_length) {
+                                    return error.InvalidPathSize;
+                                }
+                                try index.addEntry(entry);
                             }
                         }
                     }
@@ -477,20 +471,14 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                             var iter = try cursor.iter(.hash_map);
                             defer iter.deinit();
                             while (try iter.next()) |*next_cursor| {
-                                if (try next_cursor.readHash(void, &[_]xitdb.PathPart(void){})) |path_hash| {
-                                    if (try ctx_self.core_cursor.cursor.readBytesAlloc(ctx_self.allocator, MAX_READ_BYTES, void, &[_]xitdb.PathPart(void){
-                                        .{ .hash_map_get_value = hash.hashBuffer("paths") },
-                                        .{ .hash_map_get_value = path_hash },
-                                    })) |path| {
-                                        defer ctx_self.allocator.free(path);
-                                        if (!ctx_self.index.entries.contains(path)) {
-                                            _ = try cursor.execute(void, &[_]xitdb.PathPart(void){
-                                                .{ .hash_map_remove = hash.hashBuffer(path) },
-                                            });
-                                        }
-                                    } else {
-                                        return error.ValueNotFound;
-                                    }
+                                const key_cursor = try next_cursor.keyCursor();
+                                const path = (try key_cursor.readBytesAlloc(ctx_self.allocator, MAX_READ_BYTES, void, &[_]xitdb.PathPart(void){})) orelse return error.ExpectedIndexKey;
+                                defer ctx_self.allocator.free(path);
+
+                                if (!ctx_self.index.entries.contains(path)) {
+                                    _ = try cursor.execute(void, &[_]xitdb.PathPart(void){
+                                        .{ .hash_map_remove = hash.hashBuffer(path) },
+                                    });
                                 }
                             }
 
@@ -518,8 +506,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
 
                                 const path_hash = hash.hashBuffer(path);
 
-                                if (try ctx_self.core_cursor.cursor.readBytesAlloc(ctx_self.allocator, MAX_READ_BYTES, void, &[_]xitdb.PathPart(void){
-                                    .{ .hash_map_get_value = hash.hashBuffer("index") },
+                                if (try cursor.readBytesAlloc(ctx_self.allocator, MAX_READ_BYTES, void, &[_]xitdb.PathPart(void){
                                     .{ .hash_map_get_value = path_hash },
                                 })) |existing_entry| {
                                     defer ctx_self.allocator.free(existing_entry);
@@ -528,19 +515,13 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                     }
                                 }
 
-                                _ = try ctx_self.core_cursor.cursor.writeBytes(path, .once, void, &[_]xitdb.PathPart(void){
-                                    .{ .hash_map_get_value = hash.hashBuffer("paths") },
-                                    .hash_map_create,
-                                    .{ .hash_map_get_value = path_hash },
-                                });
-                                const buffer_slot = try ctx_self.core_cursor.cursor.writeBytes(entry_buffer.items, .once, void, &[_]xitdb.PathPart(void){
-                                    .{ .hash_map_get_value = hash.hashBuffer("index-values") },
-                                    .hash_map_create,
-                                    .{ .hash_map_get_value = hash.hashBuffer(entry_buffer.items) },
+                                _ = try cursor.execute(void, &[_]xitdb.PathPart(void){
+                                    .{ .hash_map_get_key = path_hash },
+                                    .{ .write = .{ .bytes = path } },
                                 });
                                 _ = try cursor.execute(void, &[_]xitdb.PathPart(void){
                                     .{ .hash_map_get_value = path_hash },
-                                    .{ .write = .{ .slot = buffer_slot } },
+                                    .{ .write = .{ .bytes = entry_buffer.items } },
                                 });
                             }
                         }
