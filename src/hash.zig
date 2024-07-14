@@ -40,7 +40,7 @@ pub fn sha1Buffer(buffer: []const u8, out: *[SHA1_BYTES_LEN]u8) !void {
 }
 
 pub fn hashBuffer(buffer: []const u8) xitdb.Hash {
-    var hash = [_]u8{0} ** xitdb.HASH_INT_SIZE;
+    var hash = [_]u8{0} ** (@bitSizeOf(xitdb.Hash) / 8);
     var h = std.crypto.hash.Sha1.init(.{});
     h.update(buffer);
     h.final(hash[0..xitdb.HASH_SIZE]);
@@ -48,13 +48,13 @@ pub fn hashBuffer(buffer: []const u8) xitdb.Hash {
 }
 
 pub fn hexToHash(hex_buffer: *const [SHA1_HEX_LEN]u8) !xitdb.Hash {
-    var hash = [_]u8{0} ** xitdb.HASH_INT_SIZE;
+    var hash = [_]u8{0} ** (@bitSizeOf(xitdb.Hash) / 8);
     _ = try std.fmt.hexToBytes(hash[0..xitdb.HASH_SIZE], hex_buffer);
     return std.mem.bytesToValue(xitdb.Hash, &hash);
 }
 
 pub fn bytesToHash(bytes_buffer: *const [SHA1_BYTES_LEN]u8) xitdb.Hash {
-    var hash = [_]u8{0} ** xitdb.HASH_INT_SIZE;
+    var hash = [_]u8{0} ** (@bitSizeOf(xitdb.Hash) / 8);
     @memcpy(hash[0..xitdb.HASH_SIZE], bytes_buffer);
     return std.mem.bytesToValue(xitdb.Hash, &hash);
 }

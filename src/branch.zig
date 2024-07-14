@@ -58,22 +58,22 @@ pub fn create(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).C
             const head_file_buffer = try ref.readHead(repo_kind, core_cursor);
             const name_hash = hash.hashBuffer(name);
             _ = try core_cursor.cursor.writeBytes(name, .once, void, &[_]xitdb.PathPart(void){
-                .{ .hash_map_get = hash.hashBuffer("names") },
+                .{ .hash_map_get_value = hash.hashBuffer("names") },
                 .hash_map_create,
-                .{ .hash_map_get = name_hash },
+                .{ .hash_map_get_value = name_hash },
             });
             const buffer_slot = try core_cursor.cursor.writeBytes(&head_file_buffer, .once, void, &[_]xitdb.PathPart(void){
-                .{ .hash_map_get = hash.hashBuffer("ref-values") },
+                .{ .hash_map_get_value = hash.hashBuffer("ref-values") },
                 .hash_map_create,
-                .{ .hash_map_get = hash.hashBuffer(&head_file_buffer) },
+                .{ .hash_map_get_value = hash.hashBuffer(&head_file_buffer) },
             });
             _ = try core_cursor.cursor.execute(void, &[_]xitdb.PathPart(void){
-                .{ .hash_map_get = hash.hashBuffer("refs") },
+                .{ .hash_map_get_value = hash.hashBuffer("refs") },
                 .hash_map_create,
-                .{ .hash_map_get = hash.hashBuffer("heads") },
+                .{ .hash_map_get_value = hash.hashBuffer("heads") },
                 .hash_map_create,
-                .{ .hash_map_get = name_hash },
-                .{ .value = .{ .slot = buffer_slot } },
+                .{ .hash_map_get_value = name_hash },
+                .{ .write = .{ .slot = buffer_slot } },
             });
         },
     }
@@ -137,9 +137,9 @@ pub fn delete(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).C
                 }
             }
             _ = try core_cursor.cursor.execute(void, &[_]xitdb.PathPart(void){
-                .{ .hash_map_get = hash.hashBuffer("refs") },
+                .{ .hash_map_get_value = hash.hashBuffer("refs") },
                 .hash_map_create,
-                .{ .hash_map_get = hash.hashBuffer("heads") },
+                .{ .hash_map_get_value = hash.hashBuffer("heads") },
                 .hash_map_create,
                 .{ .hash_map_remove = hash.hashBuffer(name) },
             });

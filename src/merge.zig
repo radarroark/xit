@@ -524,7 +524,7 @@ pub const Merge = struct {
                     },
                     .xit => {
                         if (try core_cursor.cursor.readCursor(void, &[_]xitdb.PathPart(void){
-                            .{ .hash_map_get = hash.hashBuffer("MERGE_HEAD") },
+                            .{ .hash_map_get_value = hash.hashBuffer("MERGE_HEAD") },
                         })) |_| {
                             return error.UnfinishedMergeAlreadyInProgress;
                         }
@@ -665,10 +665,10 @@ pub const Merge = struct {
                         // exit early if there were conflicts
                         if (conflicts.count() > 0) {
                             _ = try core_cursor.cursor.writeBytes(&source_oid, .replace, void, &[_]xitdb.PathPart(void){
-                                .{ .hash_map_get = hash.hashBuffer("MERGE_HEAD") },
+                                .{ .hash_map_get_value = hash.hashBuffer("MERGE_HEAD") },
                             });
                             _ = try core_cursor.cursor.writeBytes(commit_message, .replace, void, &[_]xitdb.PathPart(void){
-                                .{ .hash_map_get = hash.hashBuffer("MERGE_MSG") },
+                                .{ .hash_map_get_value = hash.hashBuffer("MERGE_MSG") },
                             });
                             return .{
                                 .arena = arena,
@@ -746,14 +746,14 @@ pub const Merge = struct {
                     },
                     .xit => {
                         const source_oid_slice = (try core_cursor.cursor.readBytes(&source_oid, void, &[_]xitdb.PathPart(void){
-                            .{ .hash_map_get = hash.hashBuffer("MERGE_HEAD") },
+                            .{ .hash_map_get_value = hash.hashBuffer("MERGE_HEAD") },
                         })) orelse return error.MergeHeadNotFound;
                         if (source_oid_slice.len != source_oid.len) {
                             return error.InvalidMergeHead;
                         }
 
                         commit_message = (try core_cursor.cursor.readBytesAlloc(arena.allocator(), MAX_READ_BYTES, void, &[_]xitdb.PathPart(void){
-                            .{ .hash_map_get = hash.hashBuffer("MERGE_MSG") },
+                            .{ .hash_map_get_value = hash.hashBuffer("MERGE_MSG") },
                         })) orelse return error.MergeMessageNotFound;
                     },
                 }
