@@ -57,15 +57,13 @@ pub fn create(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).C
             // get HEAD contents
             const head_file_buffer = try ref.readHead(repo_kind, core_cursor);
             const name_hash = hash.hashBuffer(name);
-            _ = try core_cursor.cursor.writeBytes(name, .once, void, &[_]xitdb.PathPart(void){
-                .{ .hash_map_get_value = hash.hashBuffer("names") },
+            _ = try core_cursor.cursor.execute(void, &[_]xitdb.PathPart(void){
+                .{ .hash_map_get_value = hash.hashBuffer("refs") },
                 .hash_map_create,
-                .{ .hash_map_get_value = name_hash },
-            });
-            const buffer_slot = try core_cursor.cursor.writeBytes(&head_file_buffer, .once, void, &[_]xitdb.PathPart(void){
-                .{ .hash_map_get_value = hash.hashBuffer("ref-values") },
+                .{ .hash_map_get_value = hash.hashBuffer("heads") },
                 .hash_map_create,
-                .{ .hash_map_get_value = hash.hashBuffer(&head_file_buffer) },
+                .{ .hash_map_get_key = name_hash },
+                .{ .write = .{ .bytes = name } },
             });
             _ = try core_cursor.cursor.execute(void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get_value = hash.hashBuffer("refs") },
@@ -73,7 +71,7 @@ pub fn create(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).C
                 .{ .hash_map_get_value = hash.hashBuffer("heads") },
                 .hash_map_create,
                 .{ .hash_map_get_value = name_hash },
-                .{ .write = .{ .slot = buffer_slot } },
+                .{ .write = .{ .bytes = &head_file_buffer } },
             });
         },
     }
