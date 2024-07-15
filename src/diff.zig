@@ -1055,10 +1055,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
             return .{
                 .allocator = allocator,
                 .core = core,
-                .cursor = switch (repo_kind) {
-                    .git => {},
-                    .xit => try core.latestCursor(),
-                },
+                .cursor = try core.latestCursor(),
                 .diff_kind = diff_kind,
                 .status = status,
                 .next_index = 0,
