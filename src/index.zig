@@ -505,7 +505,6 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                 }
 
                                 const path_hash = hash.hashBuffer(path);
-
                                 if (try cursor.readBytesAlloc(ctx_self.allocator, MAX_READ_BYTES, void, &[_]xitdb.PathPart(void){
                                     .{ .hash_map_get_value = path_hash },
                                 })) |existing_entry| {
@@ -515,13 +514,24 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                     }
                                 }
 
+                                const path_slot = try ctx_self.core_cursor.cursor.writeBytes(path, .once, void, &[_]xitdb.PathPart(void){
+                                    .{ .hash_map_get_value = hash.hashBuffer("path-set") },
+                                    .hash_map_create,
+                                    .{ .hash_map_get_key = path_hash },
+                                });
                                 _ = try cursor.execute(void, &[_]xitdb.PathPart(void){
                                     .{ .hash_map_get_key = path_hash },
-                                    .{ .write = .{ .bytes = path } },
+                                    .{ .write = .{ .slot = path_slot } },
+                                });
+
+                                const entry_buffer_slot = try ctx_self.core_cursor.cursor.writeBytes(entry_buffer.items, .once, void, &[_]xitdb.PathPart(void){
+                                    .{ .hash_map_get_value = hash.hashBuffer("entry-buffer-set") },
+                                    .hash_map_create,
+                                    .{ .hash_map_get_key = hash.hashBuffer(entry_buffer.items) },
                                 });
                                 _ = try cursor.execute(void, &[_]xitdb.PathPart(void){
                                     .{ .hash_map_get_value = path_hash },
-                                    .{ .write = .{ .bytes = entry_buffer.items } },
+                                    .{ .write = .{ .slot = entry_buffer_slot } },
                                 });
                             }
                         }

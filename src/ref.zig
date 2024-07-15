@@ -269,24 +269,39 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind
                 // point HEAD at the ref
                 var write_buffer = [_]u8{0} ** MAX_READ_BYTES;
                 const content = try std.fmt.bufPrint(&write_buffer, "ref: refs/heads/{s}", .{target});
+                const ref_content_slot = try core_cursor.cursor.writeBytes(content, .once, void, &[_]xitdb.PathPart(void){
+                    .{ .hash_map_get_value = hash.hashBuffer("ref-content-set") },
+                    .hash_map_create,
+                    .{ .hash_map_get_key = hash.hashBuffer(content) },
+                });
                 _ = try core_cursor.cursor.execute(void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get_value = hash.hashBuffer("HEAD") },
-                    .{ .write = .{ .bytes = content } },
+                    .{ .write = .{ .slot = ref_content_slot } },
                 });
             } else {
                 if (oid_hex_maybe) |oid_hex| {
                     // the HEAD is detached, so just update it with the oid
+                    const ref_content_slot = try core_cursor.cursor.writeBytes(&oid_hex, .once, void, &[_]xitdb.PathPart(void){
+                        .{ .hash_map_get_value = hash.hashBuffer("ref-content-set") },
+                        .hash_map_create,
+                        .{ .hash_map_get_key = try hash.hexToHash(&oid_hex) },
+                    });
                     _ = try core_cursor.cursor.execute(void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get_value = hash.hashBuffer("HEAD") },
-                        .{ .write = .{ .bytes = &oid_hex } },
+                        .{ .write = .{ .slot = ref_content_slot } },
                     });
                 } else {
                     // point HEAD at the ref, even though the ref doesn't exist
                     var write_buffer = [_]u8{0} ** MAX_READ_BYTES;
                     const content = try std.fmt.bufPrint(&write_buffer, "ref: refs/heads/{s}", .{target});
+                    const ref_content_slot = try core_cursor.cursor.writeBytes(content, .once, void, &[_]xitdb.PathPart(void){
+                        .{ .hash_map_get_value = hash.hashBuffer("ref-content-set") },
+                        .hash_map_create,
+                        .{ .hash_map_get_key = hash.hashBuffer(content) },
+                    });
                     _ = try core_cursor.cursor.execute(void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get_value = hash.hashBuffer("HEAD") },
-                        .{ .write = .{ .bytes = content } },
+                        .{ .write = .{ .slot = ref_content_slot } },
                     });
                 }
             }
@@ -362,13 +377,23 @@ pub fn updateRecur(
                     }
 
                     // otherwise, update with the oid
+                    const ref_name_slot = try ctx_self.core_cursor.cursor.writeBytes(ctx_self.file_name, .once, void, &[_]xitdb.PathPart(void){
+                        .{ .hash_map_get_value = hash.hashBuffer("ref-name-set") },
+                        .hash_map_create,
+                        .{ .hash_map_get_key = file_name_hash },
+                    });
                     _ = try cursor.execute(void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get_key = file_name_hash },
-                        .{ .write = .{ .bytes = ctx_self.file_name } },
+                        .{ .write = .{ .slot = ref_name_slot } },
+                    });
+                    const ref_content_slot = try ctx_self.core_cursor.cursor.writeBytes(ctx_self.oid_hex, .once, void, &[_]xitdb.PathPart(void){
+                        .{ .hash_map_get_value = hash.hashBuffer("ref-content-set") },
+                        .hash_map_create,
+                        .{ .hash_map_get_key = try hash.hexToHash(ctx_self.oid_hex) },
                     });
                     _ = try cursor.execute(void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get_value = file_name_hash },
-                        .{ .write = .{ .bytes = ctx_self.oid_hex } },
+                        .{ .write = .{ .slot = ref_content_slot } },
                     });
                 }
             };
