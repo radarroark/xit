@@ -70,16 +70,16 @@ pub fn writePatchesForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo
 
     // exit early if patch already exists
     if (try core_cursor.cursor.readCursor(void, &[_]xitdb.PathPart(void){
-        .{ .hash_map_get_value = hash.hashBuffer("patches") },
-        .{ .hash_map_get_value = hash.bytesToHash(&patch_hash) },
+        .{ .hash_map_get_value = hash.hashBuffer("patch-set") },
+        .{ .hash_map_get_key = hash.bytesToHash(&patch_hash) },
     })) |_| {
         return;
     }
 
     var writer = try core_cursor.cursor.writer(void, &[_]xitdb.PathPart(void){
-        .{ .hash_map_get_value = hash.hashBuffer("patches") },
+        .{ .hash_map_get_value = hash.hashBuffer("patch-set") },
         .hash_map_create,
-        .{ .hash_map_get_value = hash.bytesToHash(&patch_hash) },
+        .{ .hash_map_get_key = hash.bytesToHash(&patch_hash) },
     });
 
     // write header
