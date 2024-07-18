@@ -30,29 +30,28 @@ pub const Change = union(ChangeKind) {
     },
 };
 
-fn writePatchChange(comptime repo_kind: rp.RepoKind, edit: df.MyersDiffIterator(repo_kind).Edit, writer: anytype) !void {
-    switch (edit) {
-        .eql => {},
-        .ins => {
-            try writer.writeInt(u8, @intFromEnum(ChangeKind.new_node), .big);
-            try writer.writeInt(u64, edit.ins.new_line.num, .big);
-            try writer.writeInt(u64, edit.ins.new_line.text.len, .big);
-            try writer.writeAll(edit.ins.new_line.text);
-        },
-        .del => {
-            try writer.writeInt(u8, @intFromEnum(ChangeKind.delete_node), .big);
-            try writer.writeInt(u64, edit.del.old_line.num, .big);
-        },
-    }
-}
-
 pub fn patchHash(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, myers_diff_iter: *df.MyersDiffIterator(repo_kind)) ![hash.SHA1_BYTES_LEN]u8 {
     var h = std.crypto.hash.Sha1.init(.{});
     while (try myers_diff_iter.next()) |edit| {
         defer edit.deinit(allocator);
         var entry_buffer = std.ArrayList(u8).init(allocator);
         defer entry_buffer.deinit();
-        try writePatchChange(repo_kind, edit, entry_buffer.writer());
+        var writer = entry_buffer.writer();
+
+        switch (edit) {
+            .eql => {},
+            .ins => {
+                try writer.writeInt(u8, @intFromEnum(ChangeKind.new_node), .big);
+                try writer.writeInt(u64, edit.ins.new_line.num, .big);
+                try writer.writeInt(u64, edit.ins.new_line.text.len, .big);
+                try writer.writeAll(edit.ins.new_line.text);
+            },
+            .del => {
+                try writer.writeInt(u8, @intFromEnum(ChangeKind.delete_node), .big);
+                try writer.writeInt(u64, edit.del.old_line.num, .big);
+            },
+        }
+
         h.update(entry_buffer.items);
     }
     try myers_diff_iter.reset();
@@ -70,30 +69,56 @@ pub fn writePatchesForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo
 
     // exit early if patch already exists
     if (try core_cursor.cursor.readCursor(void, &[_]xitdb.PathPart(void){
-        .{ .hash_map_get_value = hash.hashBuffer("patch-set") },
+        .{ .hash_map_get_value = hash.hashBuffer("patches") },
         .{ .hash_map_get_key = hash.bytesToHash(&patch_hash) },
     })) |_| {
         return;
     }
 
-    var writer = try core_cursor.cursor.writer(void, &[_]xitdb.PathPart(void){
-        .{ .hash_map_get_value = hash.hashBuffer("patch-set") },
-        .hash_map_create,
-        .{ .hash_map_get_key = hash.bytesToHash(&patch_hash) },
-    });
+    var new_node_count: u64 = 0;
 
-    // write header
-    try writer.writeAll(&patch_hash);
-    try writer.writeInt(u64, line_iter_pair.path.len, .big);
-    try writer.writeAll(line_iter_pair.path);
-
-    // write the edits
     while (try myers_diff_iter.next()) |edit| {
         defer edit.deinit(allocator);
-        try writePatchChange(repo_kind, edit, &writer);
-    }
+        var entry_buffer = std.ArrayList(u8).init(allocator);
+        defer entry_buffer.deinit();
+        var writer = entry_buffer.writer();
 
-    try writer.finish();
+        switch (edit) {
+            .eql => {},
+            .ins => {
+                try writer.writeInt(u8, @intFromEnum(ChangeKind.new_node), .big);
+                try writer.writeInt(u64, new_node_count, .big);
+            },
+            .del => {
+                try writer.writeInt(u8, @intFromEnum(ChangeKind.delete_node), .big);
+                try writer.writeInt(u64, edit.del.old_line.num, .big);
+            },
+        }
+
+        // put change list in the key
+        _ = try core_cursor.cursor.execute(void, &[_]xitdb.PathPart(void){
+            .{ .hash_map_get_value = hash.hashBuffer("patches") },
+            .hash_map_create,
+            .{ .hash_map_get_key = hash.bytesToHash(&patch_hash) },
+            .array_list_create,
+            .{ .array_list_get = .append },
+            .{ .write = .{ .bytes = entry_buffer.items } },
+        });
+
+        // put content list in the value
+        if (edit == .ins) {
+            _ = try core_cursor.cursor.execute(void, &[_]xitdb.PathPart(void){
+                .{ .hash_map_get_value = hash.hashBuffer("patches") },
+                .hash_map_create,
+                .{ .hash_map_get_value = hash.bytesToHash(&patch_hash) },
+                .array_list_create,
+                .{ .array_list_get = .append },
+                .{ .write = .{ .bytes = edit.ins.new_line.text } },
+            });
+
+            new_node_count += 1;
+        }
+    }
 }
 
 pub fn writePatches(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator) !void {
