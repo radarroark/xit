@@ -166,18 +166,18 @@ pub fn writeBlob(
                         try writer.finish();
 
                         _ = try ctx_self.core_cursor.cursor.execute(void, &[_]xitdb.PathPart(void){
-                            .{ .hash_map_get_value = hash.hashBuffer("objects") },
+                            .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
                             .hash_map_create,
-                            .{ .hash_map_get_value = try hash.hexToHash(&ctx_self.sha1_hex) },
+                            .{ .hash_map_get = .{ .value = try hash.hexToHash(&ctx_self.sha1_hex) } },
                             .{ .write = .{ .slot = writer.slot } },
                         });
                     }
                 }
             };
             _ = try core_cursor.cursor.execute(Ctx, &[_]xitdb.PathPart(Ctx){
-                .{ .hash_map_get_value = hash.hashBuffer("file-values") },
+                .{ .hash_map_get = .{ .value = hash.hashBuffer("file-values") } },
                 .hash_map_create,
-                .{ .hash_map_get_value = file_hash },
+                .{ .hash_map_get = .{ .value = file_hash } },
                 .{ .ctx = Ctx{ .core_cursor = core_cursor, .reader = &reader, .sha1_hex = sha1_hex, .header = header } },
             });
         },
@@ -270,9 +270,9 @@ fn writeTree(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).Co
                         return;
                     }
                     const tree_slot = try ctx_self.cursor.writeBytes(ctx_self.tree_bytes, .once, void, &[_]xitdb.PathPart(void){
-                        .{ .hash_map_get_value = hash.hashBuffer("object-values") },
+                        .{ .hash_map_get = .{ .value = hash.hashBuffer("object-values") } },
                         .hash_map_create,
-                        .{ .hash_map_get_value = hash.bytesToHash(ctx_self.tree_sha1_bytes) },
+                        .{ .hash_map_get = .{ .value = hash.bytesToHash(ctx_self.tree_sha1_bytes) } },
                     });
                     _ = try cursor.execute(void, &[_]xitdb.PathPart(void){
                         .{ .write = .{ .slot = tree_slot } },
@@ -280,9 +280,9 @@ fn writeTree(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).Co
                 }
             };
             _ = try core_cursor.cursor.execute(Ctx, &[_]xitdb.PathPart(Ctx){
-                .{ .hash_map_get_value = hash.hashBuffer("objects") },
+                .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
                 .hash_map_create,
-                .{ .hash_map_get_value = hash.bytesToHash(sha1_bytes_buffer) },
+                .{ .hash_map_get = .{ .value = hash.bytesToHash(sha1_bytes_buffer) } },
                 .{ .ctx = Ctx{
                     .cursor = core_cursor.cursor,
                     .tree_sha1_bytes = sha1_bytes_buffer,
@@ -469,16 +469,16 @@ pub fn writeCommit(
 
             // write commit content
             const content_slot = try core_cursor.cursor.writeBytes(commit, .once, void, &[_]xitdb.PathPart(void){
-                .{ .hash_map_get_value = hash.hashBuffer("object-values") },
+                .{ .hash_map_get = .{ .value = hash.hashBuffer("object-values") } },
                 .hash_map_create,
-                .{ .hash_map_get_value = hash.bytesToHash(&commit_sha1_bytes_buffer) },
+                .{ .hash_map_get = .{ .value = hash.bytesToHash(&commit_sha1_bytes_buffer) } },
             });
 
             // write commit
             _ = try core_cursor.cursor.execute(void, &[_]xitdb.PathPart(void){
-                .{ .hash_map_get_value = hash.hashBuffer("objects") },
+                .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
                 .hash_map_create,
-                .{ .hash_map_get_value = hash.bytesToHash(&commit_sha1_bytes_buffer) },
+                .{ .hash_map_get = .{ .value = hash.bytesToHash(&commit_sha1_bytes_buffer) } },
                 .{ .write = .{ .slot = content_slot } },
             });
 
@@ -553,8 +553,8 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
                 },
                 .xit => {
                     var reader_maybe = try core_cursor.cursor.reader(void, &[_]xitdb.PathPart(void){
-                        .{ .hash_map_get_value = hash.hashBuffer("objects") },
-                        .{ .hash_map_get_value = try hash.hexToHash(&oid) },
+                        .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
+                        .{ .hash_map_get = .{ .value = try hash.hexToHash(&oid) } },
                     });
                     if (reader_maybe) |*rdr| {
                         var header_offset: u64 = 0;

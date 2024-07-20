@@ -135,7 +135,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                 },
                 .xit => {
                     if (try core_cursor.cursor.readCursor(void, &[_]xitdb.PathPart(void){
-                        .{ .hash_map_get_value = hash.hashBuffer("index") },
+                        .{ .hash_map_get = .{ .value = hash.hashBuffer("index") } },
                     })) |index_cursor| {
                         var iter = try index_cursor.iter(.hash_map);
                         defer iter.deinit();
@@ -506,7 +506,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
 
                                 const path_hash = hash.hashBuffer(path);
                                 if (try cursor.readBytesAlloc(ctx_self.allocator, MAX_READ_BYTES, void, &[_]xitdb.PathPart(void){
-                                    .{ .hash_map_get_value = path_hash },
+                                    .{ .hash_map_get = .{ .value = path_hash } },
                                 })) |existing_entry| {
                                     defer ctx_self.allocator.free(existing_entry);
                                     if (std.mem.eql(u8, entry_buffer.items, existing_entry)) {
@@ -515,29 +515,29 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                 }
 
                                 const path_slot = try ctx_self.core_cursor.cursor.writeBytes(path, .once, void, &[_]xitdb.PathPart(void){
-                                    .{ .hash_map_get_value = hash.hashBuffer("path-set") },
+                                    .{ .hash_map_get = .{ .value = hash.hashBuffer("path-set") } },
                                     .hash_map_create,
-                                    .{ .hash_map_get_key = path_hash },
+                                    .{ .hash_map_get = .{ .key = path_hash } },
                                 });
                                 _ = try cursor.execute(void, &[_]xitdb.PathPart(void){
-                                    .{ .hash_map_get_key = path_hash },
+                                    .{ .hash_map_get = .{ .key = path_hash } },
                                     .{ .write = .{ .slot = path_slot } },
                                 });
 
                                 const entry_buffer_slot = try ctx_self.core_cursor.cursor.writeBytes(entry_buffer.items, .once, void, &[_]xitdb.PathPart(void){
-                                    .{ .hash_map_get_value = hash.hashBuffer("entry-buffer-set") },
+                                    .{ .hash_map_get = .{ .value = hash.hashBuffer("entry-buffer-set") } },
                                     .hash_map_create,
-                                    .{ .hash_map_get_key = hash.hashBuffer(entry_buffer.items) },
+                                    .{ .hash_map_get = .{ .key = hash.hashBuffer(entry_buffer.items) } },
                                 });
                                 _ = try cursor.execute(void, &[_]xitdb.PathPart(void){
-                                    .{ .hash_map_get_value = path_hash },
+                                    .{ .hash_map_get = .{ .value = path_hash } },
                                     .{ .write = .{ .slot = entry_buffer_slot } },
                                 });
                             }
                         }
                     };
                     _ = try core_cursor.cursor.execute(Ctx, &[_]xitdb.PathPart(Ctx){
-                        .{ .hash_map_get_value = hash.hashBuffer("index") },
+                        .{ .hash_map_get = .{ .value = hash.hashBuffer("index") } },
                         .hash_map_create,
                         .{ .ctx = Ctx{ .core_cursor = core_cursor, .allocator = allocator, .index = self } },
                     });

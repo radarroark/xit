@@ -69,8 +69,8 @@ pub fn writePatchesForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo
 
     // exit early if patch already exists
     if (try core_cursor.cursor.readCursor(void, &[_]xitdb.PathPart(void){
-        .{ .hash_map_get_value = hash.hashBuffer("patches") },
-        .{ .hash_map_get_key = hash.bytesToHash(&patch_hash) },
+        .{ .hash_map_get = .{ .value = hash.hashBuffer("patches") } },
+        .{ .hash_map_get = .{ .key = hash.bytesToHash(&patch_hash) } },
     })) |_| {
         return;
     }
@@ -97,9 +97,9 @@ pub fn writePatchesForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo
 
         // put change list in the key
         _ = try core_cursor.cursor.execute(void, &[_]xitdb.PathPart(void){
-            .{ .hash_map_get_value = hash.hashBuffer("patches") },
+            .{ .hash_map_get = .{ .value = hash.hashBuffer("patches") } },
             .hash_map_create,
-            .{ .hash_map_get_key = hash.bytesToHash(&patch_hash) },
+            .{ .hash_map_get = .{ .key = hash.bytesToHash(&patch_hash) } },
             .array_list_create,
             .{ .array_list_get = .append },
             .{ .write = .{ .bytes = entry_buffer.items } },
@@ -108,9 +108,9 @@ pub fn writePatchesForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo
         // put content list in the value
         if (edit == .ins) {
             _ = try core_cursor.cursor.execute(void, &[_]xitdb.PathPart(void){
-                .{ .hash_map_get_value = hash.hashBuffer("patches") },
+                .{ .hash_map_get = .{ .value = hash.hashBuffer("patches") } },
                 .hash_map_create,
-                .{ .hash_map_get_value = hash.bytesToHash(&patch_hash) },
+                .{ .hash_map_get = .{ .value = hash.bytesToHash(&patch_hash) } },
                 .array_list_create,
                 .{ .array_list_get = .append },
                 .{ .write = .{ .bytes = edit.ins.new_line.text } },

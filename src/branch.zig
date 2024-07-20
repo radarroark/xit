@@ -58,32 +58,32 @@ pub fn create(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).C
 
             // add key to refs/heads/{refname}
             const ref_name_slot = try core_cursor.cursor.writeBytes(name, .once, void, &[_]xitdb.PathPart(void){
-                .{ .hash_map_get_value = hash.hashBuffer("ref-name-set") },
+                .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-name-set") } },
                 .hash_map_create,
-                .{ .hash_map_get_key = name_hash },
+                .{ .hash_map_get = .{ .key = name_hash } },
             });
             _ = try core_cursor.cursor.execute(void, &[_]xitdb.PathPart(void){
-                .{ .hash_map_get_value = hash.hashBuffer("refs") },
+                .{ .hash_map_get = .{ .value = hash.hashBuffer("refs") } },
                 .hash_map_create,
-                .{ .hash_map_get_value = hash.hashBuffer("heads") },
+                .{ .hash_map_get = .{ .value = hash.hashBuffer("heads") } },
                 .hash_map_create,
-                .{ .hash_map_get_key = name_hash },
+                .{ .hash_map_get = .{ .key = name_hash } },
                 .{ .write = .{ .slot = ref_name_slot } },
             });
 
             // add value to refs/heads/{refname}
             const head_file_buffer = try ref.readHead(repo_kind, core_cursor);
             const ref_content_slot = try core_cursor.cursor.writeBytes(&head_file_buffer, .once, void, &[_]xitdb.PathPart(void){
-                .{ .hash_map_get_value = hash.hashBuffer("ref-content-set") },
+                .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-content-set") } },
                 .hash_map_create,
-                .{ .hash_map_get_key = hash.hashBuffer(&head_file_buffer) },
+                .{ .hash_map_get = .{ .key = hash.hashBuffer(&head_file_buffer) } },
             });
             _ = try core_cursor.cursor.execute(void, &[_]xitdb.PathPart(void){
-                .{ .hash_map_get_value = hash.hashBuffer("refs") },
+                .{ .hash_map_get = .{ .value = hash.hashBuffer("refs") } },
                 .hash_map_create,
-                .{ .hash_map_get_value = hash.hashBuffer("heads") },
+                .{ .hash_map_get = .{ .value = hash.hashBuffer("heads") } },
                 .hash_map_create,
-                .{ .hash_map_get_value = name_hash },
+                .{ .hash_map_get = .{ .value = name_hash } },
                 .{ .write = .{ .slot = ref_content_slot } },
             });
         },
@@ -148,9 +148,9 @@ pub fn delete(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).C
                 }
             }
             _ = try core_cursor.cursor.execute(void, &[_]xitdb.PathPart(void){
-                .{ .hash_map_get_value = hash.hashBuffer("refs") },
+                .{ .hash_map_get = .{ .value = hash.hashBuffer("refs") } },
                 .hash_map_create,
-                .{ .hash_map_get_value = hash.hashBuffer("heads") },
+                .{ .hash_map_get = .{ .value = hash.hashBuffer("heads") } },
                 .hash_map_create,
                 .{ .hash_map_remove = hash.hashBuffer(name) },
             });
