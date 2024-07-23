@@ -711,7 +711,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 if (try cursor.readCursor(void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = .{ .value = hash.hashBuffer("index") } },
                 })) |index_cursor| {
-                    var iter = try index_cursor.iter(.hash_map);
+                    var iter = try index_cursor.iter();
                     defer iter.deinit();
                     while (try iter.next()) |_| {
                         count += 1;
@@ -778,7 +778,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 if (try cursor.readCursor(void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = .{ .value = hash.hashBuffer("index") } },
                 })) |index_cursor| {
-                    var iter = try index_cursor.iter(.hash_map);
+                    var iter = try index_cursor.iter();
                     defer iter.deinit();
                     while (try iter.next()) |_| {
                         count += 1;

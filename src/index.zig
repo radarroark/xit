@@ -137,7 +137,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     if (try core_cursor.cursor.readCursor(void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("index") } },
                     })) |index_cursor| {
-                        var iter = try index_cursor.iter(.hash_map);
+                        var iter = try index_cursor.iter();
                         defer iter.deinit();
                         while (try iter.next()) |*next_cursor| {
                             const key_cursor = try next_cursor.keyCursor();
@@ -468,7 +468,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
 
                         pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
                             // remove items no longer in the index
-                            var iter = try cursor.iter(.hash_map);
+                            var iter = try cursor.iter();
                             defer iter.deinit();
                             while (try iter.next()) |*next_cursor| {
                                 const key_cursor = try next_cursor.keyCursor();
