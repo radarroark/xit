@@ -38,7 +38,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
                 pub fn latestCursor(self: *@This()) !xitdb.Database(.file).Cursor {
                     return (try self.db.rootCursor().readCursor(void, &[_]xitdb.PathPart(void){
-                        .{ .array_list_get = .{ .index = .{ .index = 0, .reverse = true } } },
+                        .{ .array_list_get = .{ .index = -1 } },
                     })) orelse return error.DatabaseEmpty;
                 }
             },
