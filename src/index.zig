@@ -476,7 +476,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                 defer ctx_self.allocator.free(path);
 
                                 if (!ctx_self.index.entries.contains(path)) {
-                                    _ = try cursor.execute(void, &[_]xitdb.PathPart(void){
+                                    _ = try cursor.readSlot(.read_write, void, &[_]xitdb.PathPart(void){
                                         .{ .hash_map_remove = hash.hashBuffer(path) },
                                     });
                                 }
@@ -519,7 +519,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                     .hash_map_create,
                                     .{ .hash_map_get = .{ .key = path_hash } },
                                 });
-                                _ = try cursor.execute(void, &[_]xitdb.PathPart(void){
+                                _ = try cursor.readSlot(.read_write, void, &[_]xitdb.PathPart(void){
                                     .{ .hash_map_get = .{ .key = path_hash } },
                                     .{ .write = .{ .slot = path_slot } },
                                 });
@@ -529,14 +529,14 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                     .hash_map_create,
                                     .{ .hash_map_get = .{ .key = hash.hashBuffer(entry_buffer.items) } },
                                 });
-                                _ = try cursor.execute(void, &[_]xitdb.PathPart(void){
+                                _ = try cursor.readSlot(.read_write, void, &[_]xitdb.PathPart(void){
                                     .{ .hash_map_get = .{ .value = path_hash } },
                                     .{ .write = .{ .slot = entry_buffer_slot } },
                                 });
                             }
                         }
                     };
-                    _ = try core_cursor.cursor.execute(Ctx, &[_]xitdb.PathPart(Ctx){
+                    _ = try core_cursor.cursor.readSlot(.read_write, Ctx, &[_]xitdb.PathPart(Ctx){
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("index") } },
                         .hash_map_create,
                         .{ .ctx = Ctx{ .core_cursor = core_cursor, .allocator = allocator, .index = self } },

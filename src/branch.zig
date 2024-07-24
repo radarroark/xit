@@ -62,7 +62,7 @@ pub fn create(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).C
                 .hash_map_create,
                 .{ .hash_map_get = .{ .key = name_hash } },
             });
-            _ = try core_cursor.cursor.execute(void, &[_]xitdb.PathPart(void){
+            _ = try core_cursor.cursor.readSlot(.read_write, void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("refs") } },
                 .hash_map_create,
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("heads") } },
@@ -78,7 +78,7 @@ pub fn create(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).C
                 .hash_map_create,
                 .{ .hash_map_get = .{ .key = hash.hashBuffer(&head_file_buffer) } },
             });
-            _ = try core_cursor.cursor.execute(void, &[_]xitdb.PathPart(void){
+            _ = try core_cursor.cursor.readSlot(.read_write, void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("refs") } },
                 .hash_map_create,
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("heads") } },
@@ -147,7 +147,7 @@ pub fn delete(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).C
                     return error.CannotDeleteCurrentBranch;
                 }
             }
-            _ = try core_cursor.cursor.execute(void, &[_]xitdb.PathPart(void){
+            _ = try core_cursor.cursor.readSlot(.read_write, void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("refs") } },
                 .hash_map_create,
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("heads") } },

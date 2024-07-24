@@ -274,7 +274,7 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind
                     .hash_map_create,
                     .{ .hash_map_get = .{ .key = hash.hashBuffer(content) } },
                 });
-                _ = try core_cursor.cursor.execute(void, &[_]xitdb.PathPart(void){
+                _ = try core_cursor.cursor.readSlot(.read_write, void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = .{ .value = hash.hashBuffer("HEAD") } },
                     .{ .write = .{ .slot = ref_content_slot } },
                 });
@@ -286,7 +286,7 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind
                         .hash_map_create,
                         .{ .hash_map_get = .{ .key = try hash.hexToHash(&oid_hex) } },
                     });
-                    _ = try core_cursor.cursor.execute(void, &[_]xitdb.PathPart(void){
+                    _ = try core_cursor.cursor.readSlot(.read_write, void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("HEAD") } },
                         .{ .write = .{ .slot = ref_content_slot } },
                     });
@@ -299,7 +299,7 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind
                         .hash_map_create,
                         .{ .hash_map_get = .{ .key = hash.hashBuffer(content) } },
                     });
-                    _ = try core_cursor.cursor.execute(void, &[_]xitdb.PathPart(void){
+                    _ = try core_cursor.cursor.readSlot(.read_write, void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("HEAD") } },
                         .{ .write = .{ .slot = ref_content_slot } },
                     });
@@ -382,7 +382,7 @@ pub fn updateRecur(
                         .hash_map_create,
                         .{ .hash_map_get = .{ .key = file_name_hash } },
                     });
-                    _ = try cursor.execute(void, &[_]xitdb.PathPart(void){
+                    _ = try cursor.readSlot(.read_write, void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = .{ .key = file_name_hash } },
                         .{ .write = .{ .slot = ref_name_slot } },
                     });
@@ -391,7 +391,7 @@ pub fn updateRecur(
                         .hash_map_create,
                         .{ .hash_map_get = .{ .key = try hash.hexToHash(ctx_self.oid_hex) } },
                     });
-                    _ = try cursor.execute(void, &[_]xitdb.PathPart(void){
+                    _ = try cursor.readSlot(.read_write, void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = .{ .value = file_name_hash } },
                         .{ .write = .{ .slot = ref_content_slot } },
                     });
@@ -409,7 +409,7 @@ pub fn updateRecur(
                 .oid_hex = oid_hex,
                 .file_name = path_parts[path_parts.len - 1],
             } });
-            _ = try core_cursor.cursor.execute(Ctx, db_path_parts.items);
+            _ = try core_cursor.cursor.readSlot(.read_write, Ctx, db_path_parts.items);
         },
     }
 }

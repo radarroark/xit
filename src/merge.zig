@@ -774,10 +774,10 @@ pub const Merge = struct {
                         try core_cursor.core.git_dir.deleteFile("MERGE_MSG");
                     },
                     .xit => {
-                        _ = try core_cursor.cursor.execute(void, &[_]xitdb.PathPart(void){
+                        _ = try core_cursor.cursor.readSlot(.read_write, void, &[_]xitdb.PathPart(void){
                             .{ .hash_map_remove = hash.hashBuffer("MERGE_HEAD") },
                         });
-                        _ = try core_cursor.cursor.execute(void, &[_]xitdb.PathPart(void){
+                        _ = try core_cursor.cursor.readSlot(.read_write, void, &[_]xitdb.PathPart(void){
                             .{ .hash_map_remove = hash.hashBuffer("MERGE_MSG") },
                         });
                     },

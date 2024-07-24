@@ -165,7 +165,7 @@ pub fn writeBlob(
                         }
                         try writer.finish();
 
-                        _ = try ctx_self.core_cursor.cursor.execute(void, &[_]xitdb.PathPart(void){
+                        _ = try ctx_self.core_cursor.cursor.readSlot(.read_write, void, &[_]xitdb.PathPart(void){
                             .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
                             .hash_map_create,
                             .{ .hash_map_get = .{ .value = try hash.hexToHash(&ctx_self.sha1_hex) } },
@@ -174,7 +174,7 @@ pub fn writeBlob(
                     }
                 }
             };
-            _ = try core_cursor.cursor.execute(Ctx, &[_]xitdb.PathPart(Ctx){
+            _ = try core_cursor.cursor.readSlot(.read_write, Ctx, &[_]xitdb.PathPart(Ctx){
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("file-values") } },
                 .hash_map_create,
                 .{ .hash_map_get = .{ .value = file_hash } },
@@ -274,12 +274,12 @@ fn writeTree(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).Co
                         .hash_map_create,
                         .{ .hash_map_get = .{ .value = hash.bytesToHash(ctx_self.tree_sha1_bytes) } },
                     });
-                    _ = try cursor.execute(void, &[_]xitdb.PathPart(void){
+                    _ = try cursor.readSlot(.read_write, void, &[_]xitdb.PathPart(void){
                         .{ .write = .{ .slot = tree_slot } },
                     });
                 }
             };
-            _ = try core_cursor.cursor.execute(Ctx, &[_]xitdb.PathPart(Ctx){
+            _ = try core_cursor.cursor.readSlot(.read_write, Ctx, &[_]xitdb.PathPart(Ctx){
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
                 .hash_map_create,
                 .{ .hash_map_get = .{ .value = hash.bytesToHash(sha1_bytes_buffer) } },
@@ -475,7 +475,7 @@ pub fn writeCommit(
             });
 
             // write commit
-            _ = try core_cursor.cursor.execute(void, &[_]xitdb.PathPart(void){
+            _ = try core_cursor.cursor.readSlot(.read_write, void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
                 .hash_map_create,
                 .{ .hash_map_get = .{ .value = hash.bytesToHash(&commit_sha1_bytes_buffer) } },
