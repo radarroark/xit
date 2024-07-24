@@ -80,8 +80,9 @@ pub const RefList = struct {
                     var iter = try heads_cursor.iter();
                     defer iter.deinit();
                     while (try iter.next()) |*next_cursor| {
-                        const key_cursor = try next_cursor.keyCursor();
-                        const name = (try key_cursor.readBytesAlloc(ref_list.arena.allocator(), MAX_READ_BYTES, void, &[_]xitdb.PathPart(void){})) orelse return error.ExpectedName;
+                        const kv_slot = (try next_cursor.readSlot(.read_only, void, &[_]xitdb.PathPart(void){})) orelse return error.ExpectedRefSlot;
+                        const kv_pair = try heads_cursor.db.readKeyValuePair(kv_slot);
+                        const name = try heads_cursor.db.readBytesAlloc(ref_list.arena.allocator(), MAX_READ_BYTES, kv_pair.key_slot);
                         const ref = try Ref.initWithName(repo_kind, core_cursor, ref_list.arena.allocator(), dir_name, name);
                         try ref_list.refs.append(ref);
                     }
@@ -152,11 +153,12 @@ pub fn resolve(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).
         },
         .xit => {
             var db_buffer = [_]u8{0} ** MAX_READ_BYTES;
-            if (try core_cursor.cursor.readBytes(&db_buffer, void, &[_]xitdb.PathPart(void){
+            if (try core_cursor.cursor.readSlot(.read_only, void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("refs") } },
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("heads") } },
                 .{ .hash_map_get = .{ .value = hash.hashBuffer(content) } },
-            })) |bytes| {
+            })) |bytes_slot| {
+                const bytes = try core_cursor.cursor.db.readBytes(&db_buffer, bytes_slot);
                 return try resolve(repo_kind, core_cursor, bytes);
             } else {
                 if (content.len >= hash.SHA1_HEX_LEN) {
@@ -180,10 +182,10 @@ pub fn read(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).Cor
             return buffer[0..size];
         },
         .xit => {
-            if (try core_cursor.cursor.readBytes(buffer, void, &[_]xitdb.PathPart(void){
+            if (try core_cursor.cursor.readSlot(.read_only, void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = .{ .value = hash.hashBuffer(path) } },
-            })) |target_bytes| {
-                return target_bytes;
+            })) |target_bytes_slot| {
+                return try core_cursor.cursor.db.readBytes(buffer, target_bytes_slot);
             } else {
                 return error.KeyNotFound;
             }
@@ -258,14 +260,11 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind
             lock.success = true;
         },
         .xit => {
-            if (try core_cursor.cursor.readBytesAlloc(allocator, MAX_READ_BYTES, void, &[_]xitdb.PathPart(void){
+            if (try core_cursor.cursor.readSlot(.read_only, void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("refs") } },
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("heads") } },
                 .{ .hash_map_get = .{ .value = hash.hashBuffer(target) } },
-            })) |target_bytes| {
-                // TODO: this allocation was pointless, we should just check that the value exists
-                allocator.free(target_bytes);
-
+            })) |_| {
                 // point HEAD at the ref
                 var write_buffer = [_]u8{0} ** MAX_READ_BYTES;
                 const content = try std.fmt.bufPrint(&write_buffer, "ref: refs/heads/{s}", .{target});
@@ -365,9 +364,10 @@ pub fn updateRecur(
                     const file_name_hash = hash.hashBuffer(ctx_self.file_name);
 
                     var buffer = [_]u8{0} ** MAX_READ_BYTES;
-                    if (try cursor.readBytes(&buffer, void, &[_]xitdb.PathPart(void){
+                    if (try cursor.readSlot(.read_only, void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = .{ .value = file_name_hash } },
-                    })) |old_content| {
+                    })) |old_content_slot| {
+                        const old_content = try cursor.db.readBytes(&buffer, old_content_slot);
                         // if it's a ref, update it recursively
                         if (std.mem.startsWith(u8, old_content, REF_START_STR) and old_content.len > REF_START_STR.len) {
                             const ref_name = old_content[REF_START_STR.len..];

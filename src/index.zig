@@ -140,11 +140,11 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                         var iter = try index_cursor.iter();
                         defer iter.deinit();
                         while (try iter.next()) |*next_cursor| {
-                            const key_cursor = try next_cursor.keyCursor();
-                            const path = (try key_cursor.readBytesAlloc(index.arena.allocator(), MAX_READ_BYTES, void, &[_]xitdb.PathPart(void){})) orelse return error.ExpectedIndexKey;
+                            const kv_slot = (try next_cursor.readSlot(.read_only, void, &[_]xitdb.PathPart(void){})) orelse return error.ExpectedIndexSlot;
+                            const kv_pair = try index_cursor.db.readKeyValuePair(kv_slot);
+                            const path = try index_cursor.db.readBytesAlloc(index.arena.allocator(), MAX_READ_BYTES, kv_pair.key_slot);
 
-                            const value_cursor = try next_cursor.valueCursor();
-                            const buffer = (try value_cursor.readBytesAlloc(index.allocator, MAX_READ_BYTES, void, &[_]xitdb.PathPart(void){})) orelse return error.ExpectedIndexValue;
+                            const buffer = try index_cursor.db.readBytesAlloc(index.allocator, MAX_READ_BYTES, kv_pair.value_slot);
                             defer index.allocator.free(buffer);
 
                             var stream = std.io.fixedBufferStream(buffer);
@@ -471,8 +471,9 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                             var iter = try cursor.iter();
                             defer iter.deinit();
                             while (try iter.next()) |*next_cursor| {
-                                const key_cursor = try next_cursor.keyCursor();
-                                const path = (try key_cursor.readBytesAlloc(ctx_self.allocator, MAX_READ_BYTES, void, &[_]xitdb.PathPart(void){})) orelse return error.ExpectedIndexKey;
+                                const kv_slot = (try next_cursor.readSlot(.read_only, void, &[_]xitdb.PathPart(void){})) orelse return error.ExpectedIndexSlot;
+                                const kv_pair = try cursor.db.readKeyValuePair(kv_slot);
+                                const path = try cursor.db.readBytesAlloc(ctx_self.allocator, MAX_READ_BYTES, kv_pair.key_slot);
                                 defer ctx_self.allocator.free(path);
 
                                 if (!ctx_self.index.entries.contains(path)) {
@@ -505,9 +506,10 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                 }
 
                                 const path_hash = hash.hashBuffer(path);
-                                if (try cursor.readBytesAlloc(ctx_self.allocator, MAX_READ_BYTES, void, &[_]xitdb.PathPart(void){
+                                if (try cursor.readSlot(.read_only, void, &[_]xitdb.PathPart(void){
                                     .{ .hash_map_get = .{ .value = path_hash } },
-                                })) |existing_entry| {
+                                })) |existing_entry_slot| {
+                                    const existing_entry = try cursor.db.readBytesAlloc(ctx_self.allocator, MAX_READ_BYTES, existing_entry_slot);
                                     defer ctx_self.allocator.free(existing_entry);
                                     if (std.mem.eql(u8, entry_buffer.items, existing_entry)) {
                                         continue;

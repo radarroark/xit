@@ -230,12 +230,11 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 defer repo.deinit();
                 var cursor = try repo.core.latestCursor();
                 const head_file_buffer = try ref.readHead(repo_kind, .{ .core = &repo.core, .cursor = &cursor });
-                var db_buffer = [_]u8{0} ** 1024;
-                const bytes_maybe = try cursor.readBytes(&db_buffer, void, &[_]xitdb.PathPart(void){
+                const bytes_slot_maybe = try cursor.readSlot(.read_only, void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
                     .{ .hash_map_get = .{ .value = try hash.hexToHash(&head_file_buffer) } },
                 });
-                try std.testing.expect(bytes_maybe != null);
+                try std.testing.expect(bytes_slot_maybe != null);
             },
         }
     }
@@ -484,12 +483,11 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 defer repo.deinit();
                 var cursor = try repo.core.latestCursor();
                 const head_file_buffer = try ref.readHead(repo_kind, .{ .core = &repo.core, .cursor = &cursor });
-                var db_buffer = [_]u8{0} ** 1024;
-                const bytes_maybe = try cursor.readBytes(&db_buffer, void, &[_]xitdb.PathPart(void){
+                const bytes_slot_maybe = try cursor.readSlot(.read_only, void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
                     .{ .hash_map_get = .{ .value = try hash.hexToHash(&head_file_buffer) } },
                 });
-                try std.testing.expect(bytes_maybe != null);
+                try std.testing.expect(bytes_slot_maybe != null);
             },
         }
     }
