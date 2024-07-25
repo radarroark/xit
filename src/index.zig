@@ -134,13 +134,13 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     _ = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
                 },
                 .xit => {
-                    if (try core_cursor.cursor.readCursor(void, &[_]xitdb.PathPart(void){
+                    if (try core_cursor.cursor.readPath(void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("index") } },
                     })) |index_cursor| {
                         var iter = try index_cursor.iter();
                         defer iter.deinit();
                         while (try iter.next()) |*next_cursor| {
-                            const kv_slot = (try next_cursor.readSlot(void, &[_]xitdb.PathPart(void){})) orelse return error.ExpectedIndexSlot;
+                            const kv_slot = next_cursor.slot_ptr.slot;
                             const kv_pair = try index_cursor.db.readKeyValuePair(kv_slot);
                             const path = try index_cursor.db.readBytesAlloc(index.arena.allocator(), MAX_READ_BYTES, kv_pair.key_slot);
 
@@ -471,13 +471,13 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                             var iter = try cursor.iter();
                             defer iter.deinit();
                             while (try iter.next()) |*next_cursor| {
-                                const kv_slot = (try next_cursor.readSlot(void, &[_]xitdb.PathPart(void){})) orelse return error.ExpectedIndexSlot;
+                                const kv_slot = next_cursor.slot_ptr.slot;
                                 const kv_pair = try cursor.db.readKeyValuePair(kv_slot);
                                 const path = try cursor.db.readBytesAlloc(ctx_self.allocator, MAX_READ_BYTES, kv_pair.key_slot);
                                 defer ctx_self.allocator.free(path);
 
                                 if (!ctx_self.index.entries.contains(path)) {
-                                    _ = try cursor.writeSlot(void, &[_]xitdb.PathPart(void){
+                                    _ = try cursor.writePath(void, &[_]xitdb.PathPart(void){
                                         .{ .hash_map_remove = hash.hashBuffer(path) },
                                     });
                                 }
@@ -506,41 +506,41 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                 }
 
                                 const path_hash = hash.hashBuffer(path);
-                                if (try cursor.readSlot(void, &[_]xitdb.PathPart(void){
+                                if (try cursor.readPath(void, &[_]xitdb.PathPart(void){
                                     .{ .hash_map_get = .{ .value = path_hash } },
-                                })) |existing_entry_slot| {
-                                    const existing_entry = try cursor.db.readBytesAlloc(ctx_self.allocator, MAX_READ_BYTES, existing_entry_slot);
+                                })) |existing_entry_cursor| {
+                                    const existing_entry = try cursor.db.readBytesAlloc(ctx_self.allocator, MAX_READ_BYTES, existing_entry_cursor.slot_ptr.slot);
                                     defer ctx_self.allocator.free(existing_entry);
                                     if (std.mem.eql(u8, entry_buffer.items, existing_entry)) {
                                         continue;
                                     }
                                 }
 
-                                var path_cursor = try ctx_self.core_cursor.cursor.writeCursor(void, &[_]xitdb.PathPart(void){
+                                var path_cursor = try ctx_self.core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
                                     .{ .hash_map_get = .{ .value = hash.hashBuffer("path-set") } },
                                     .hash_map_init,
                                     .{ .hash_map_get = .{ .key = path_hash } },
                                 });
                                 const path_slot = try path_cursor.writeBytes(path, .once);
-                                _ = try cursor.writeSlot(void, &[_]xitdb.PathPart(void){
+                                _ = try cursor.writePath(void, &[_]xitdb.PathPart(void){
                                     .{ .hash_map_get = .{ .key = path_hash } },
                                     .{ .write = .{ .slot = path_slot } },
                                 });
 
-                                var entry_buffer_cursor = try ctx_self.core_cursor.cursor.writeCursor(void, &[_]xitdb.PathPart(void){
+                                var entry_buffer_cursor = try ctx_self.core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
                                     .{ .hash_map_get = .{ .value = hash.hashBuffer("entry-buffer-set") } },
                                     .hash_map_init,
                                     .{ .hash_map_get = .{ .key = hash.hashBuffer(entry_buffer.items) } },
                                 });
                                 const entry_buffer_slot = try entry_buffer_cursor.writeBytes(entry_buffer.items, .once);
-                                _ = try cursor.writeSlot(void, &[_]xitdb.PathPart(void){
+                                _ = try cursor.writePath(void, &[_]xitdb.PathPart(void){
                                     .{ .hash_map_get = .{ .value = path_hash } },
                                     .{ .write = .{ .slot = entry_buffer_slot } },
                                 });
                             }
                         }
                     };
-                    _ = try core_cursor.cursor.writeSlot(Ctx, &[_]xitdb.PathPart(Ctx){
+                    _ = try core_cursor.cursor.writePath(Ctx, &[_]xitdb.PathPart(Ctx){
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("index") } },
                         .hash_map_init,
                         .{ .ctx = Ctx{ .core_cursor = core_cursor, .allocator = allocator, .index = self } },

@@ -68,7 +68,7 @@ pub fn writePatchesForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo
     const patch_hash = try patchHash(repo_kind, allocator, &myers_diff_iter);
 
     // exit early if patch already exists
-    if (try core_cursor.cursor.readCursor(void, &[_]xitdb.PathPart(void){
+    if (try core_cursor.cursor.readPath(void, &[_]xitdb.PathPart(void){
         .{ .hash_map_get = .{ .value = hash.hashBuffer("patches") } },
         .{ .hash_map_get = .{ .key = hash.bytesToHash(&patch_hash) } },
     })) |_| {
@@ -77,13 +77,13 @@ pub fn writePatchesForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo
 
     // init file graph
     const path_hash = hash.hashBuffer(line_iter_pair.path);
-    var path_cursor = try core_cursor.cursor.writeCursor(void, &[_]xitdb.PathPart(void){
+    var path_cursor = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
         .{ .hash_map_get = .{ .value = hash.hashBuffer("path-set") } },
         .hash_map_init,
         .{ .hash_map_get = .{ .key = path_hash } },
     });
     const path_slot = try path_cursor.writeBytes(line_iter_pair.path, .once);
-    _ = try core_cursor.cursor.writeSlot(void, &[_]xitdb.PathPart(void){
+    _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
         .{ .hash_map_get = .{ .value = hash.hashBuffer("file-graphs") } },
         .hash_map_init,
         .{ .hash_map_get = .{ .key = path_hash } },
@@ -111,7 +111,7 @@ pub fn writePatchesForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo
         }
 
         // put change list in the key
-        _ = try core_cursor.cursor.writeSlot(void, &[_]xitdb.PathPart(void){
+        _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
             .{ .hash_map_get = .{ .value = hash.hashBuffer("patches") } },
             .hash_map_init,
             .{ .hash_map_get = .{ .key = hash.bytesToHash(&patch_hash) } },
@@ -122,7 +122,7 @@ pub fn writePatchesForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo
 
         // put content list in the value
         if (edit == .ins) {
-            _ = try core_cursor.cursor.writeSlot(void, &[_]xitdb.PathPart(void){
+            _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("patches") } },
                 .hash_map_init,
                 .{ .hash_map_get = .{ .value = hash.bytesToHash(&patch_hash) } },
