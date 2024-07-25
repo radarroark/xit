@@ -270,7 +270,7 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind
                 const content = try std.fmt.bufPrint(&write_buffer, "ref: refs/heads/{s}", .{target});
                 var ref_content_cursor = try core_cursor.cursor.writeCursor(void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-content-set") } },
-                    .hash_map_create,
+                    .hash_map_init,
                     .{ .hash_map_get = .{ .key = hash.hashBuffer(content) } },
                 });
                 const ref_content_slot = try ref_content_cursor.writeBytes(content, .once);
@@ -283,7 +283,7 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind
                     // the HEAD is detached, so just update it with the oid
                     var ref_content_cursor = try core_cursor.cursor.writeCursor(void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-content-set") } },
-                        .hash_map_create,
+                        .hash_map_init,
                         .{ .hash_map_get = .{ .key = try hash.hexToHash(&oid_hex) } },
                     });
                     const ref_content_slot = try ref_content_cursor.writeBytes(&oid_hex, .once);
@@ -297,7 +297,7 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind
                     const content = try std.fmt.bufPrint(&write_buffer, "ref: refs/heads/{s}", .{target});
                     var ref_content_cursor = try core_cursor.cursor.writeCursor(void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-content-set") } },
-                        .hash_map_create,
+                        .hash_map_init,
                         .{ .hash_map_get = .{ .key = hash.hashBuffer(content) } },
                     });
                     const ref_content_slot = try ref_content_cursor.writeBytes(content, .once);
@@ -382,7 +382,7 @@ pub fn updateRecur(
                     // otherwise, update with the oid
                     var ref_name_cursor = try ctx_self.core_cursor.cursor.writeCursor(void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-name-set") } },
-                        .hash_map_create,
+                        .hash_map_init,
                         .{ .hash_map_get = .{ .key = file_name_hash } },
                     });
                     const ref_name_slot = try ref_name_cursor.writeBytes(ctx_self.file_name, .once);
@@ -392,7 +392,7 @@ pub fn updateRecur(
                     });
                     var ref_content_cursor = try ctx_self.core_cursor.cursor.writeCursor(void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-content-set") } },
-                        .hash_map_create,
+                        .hash_map_init,
                         .{ .hash_map_get = .{ .key = try hash.hexToHash(ctx_self.oid_hex) } },
                     });
                     const ref_content_slot = try ref_content_cursor.writeBytes(ctx_self.oid_hex, .once);
@@ -406,7 +406,7 @@ pub fn updateRecur(
             defer db_path_parts.deinit();
             for (path_parts[0 .. path_parts.len - 1]) |part_name| {
                 try db_path_parts.append(.{ .hash_map_get = .{ .value = hash.hashBuffer(part_name) } });
-                try db_path_parts.append(.hash_map_create);
+                try db_path_parts.append(.hash_map_init);
             }
             try db_path_parts.append(.{ .ctx = Ctx{
                 .core_cursor = core_cursor,

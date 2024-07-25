@@ -209,7 +209,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     };
                     _ = try self.core.db.rootCursor().writeSlot(Ctx, &[_]xitdb.PathPart(Ctx){
                         .{ .array_list_get = .append_copy },
-                        .hash_map_create,
+                        .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator } },
                     });
 
@@ -495,7 +495,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     };
                     _ = try self.core.db.rootCursor().writeSlot(Ctx, &[_]xitdb.PathPart(Ctx){
                         .{ .array_list_get = .append_copy },
-                        .hash_map_create,
+                        .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .parent_oids_maybe = parent_oids_maybe, .message_maybe = message_maybe, .result = &result } },
                     });
                     return result;
@@ -577,7 +577,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     };
                     _ = try self.core.db.rootCursor().writeSlot(Ctx, &[_]xitdb.PathPart(Ctx){
                         .{ .array_list_get = .append_copy },
-                        .hash_map_create,
+                        .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .paths = paths } },
                     });
                 },
@@ -614,7 +614,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     };
                     _ = try self.core.db.rootCursor().writeSlot(Ctx, &[_]xitdb.PathPart(Ctx){
                         .{ .array_list_get = .append_copy },
-                        .hash_map_create,
+                        .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .name = name } },
                     });
                 },
@@ -636,7 +636,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     };
                     _ = try self.core.db.rootCursor().writeSlot(Ctx, &[_]xitdb.PathPart(Ctx){
                         .{ .array_list_get = .append_copy },
-                        .hash_map_create,
+                        .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .name = name } },
                     });
                 },
@@ -660,7 +660,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     };
                     _ = try self.core.db.rootCursor().writeSlot(Ctx, &[_]xitdb.PathPart(Ctx){
                         .{ .array_list_get = .append_copy },
-                        .hash_map_create,
+                        .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .target = target, .result = &result } },
                     });
                     return result;
@@ -683,7 +683,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     };
                     _ = try self.core.db.rootCursor().writeSlot(Ctx, &[_]xitdb.PathPart(Ctx){
                         .{ .array_list_get = .append_copy },
-                        .hash_map_create,
+                        .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .path = path } },
                     });
                 },
@@ -715,7 +715,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     };
                     _ = self.core.db.rootCursor().writeSlot(Ctx, &[_]xitdb.PathPart(Ctx){
                         .{ .array_list_get = .append_copy },
-                        .hash_map_create,
+                        .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .input = input, .result = &result } },
                     }) catch |err| switch (err) {
                         error.CancelTransaction => {},

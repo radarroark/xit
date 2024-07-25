@@ -167,7 +167,7 @@ pub fn writeBlob(
 
                         _ = try ctx_self.core_cursor.cursor.writeSlot(void, &[_]xitdb.PathPart(void){
                             .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
-                            .hash_map_create,
+                            .hash_map_init,
                             .{ .hash_map_get = .{ .value = try hash.hexToHash(&ctx_self.sha1_hex) } },
                             .{ .write = .{ .slot = writer.slot } },
                         });
@@ -176,7 +176,7 @@ pub fn writeBlob(
             };
             _ = try core_cursor.cursor.writeSlot(Ctx, &[_]xitdb.PathPart(Ctx){
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("file-values") } },
-                .hash_map_create,
+                .hash_map_init,
                 .{ .hash_map_get = .{ .value = file_hash } },
                 .{ .ctx = Ctx{ .core_cursor = core_cursor, .reader = &reader, .sha1_hex = sha1_hex, .header = header } },
             });
@@ -271,7 +271,7 @@ fn writeTree(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).Co
                     }
                     var tree_cursor = try ctx_self.cursor.writeCursor(void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("object-values") } },
-                        .hash_map_create,
+                        .hash_map_init,
                         .{ .hash_map_get = .{ .value = hash.bytesToHash(ctx_self.tree_sha1_bytes) } },
                     });
                     const tree_slot = try tree_cursor.writeBytes(ctx_self.tree_bytes, .once);
@@ -282,7 +282,7 @@ fn writeTree(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).Co
             };
             _ = try core_cursor.cursor.writeSlot(Ctx, &[_]xitdb.PathPart(Ctx){
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
-                .hash_map_create,
+                .hash_map_init,
                 .{ .hash_map_get = .{ .value = hash.bytesToHash(sha1_bytes_buffer) } },
                 .{ .ctx = Ctx{
                     .cursor = core_cursor.cursor,
@@ -471,7 +471,7 @@ pub fn writeCommit(
             // write commit content
             var content_cursor = try core_cursor.cursor.writeCursor(void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("object-values") } },
-                .hash_map_create,
+                .hash_map_init,
                 .{ .hash_map_get = .{ .value = hash.bytesToHash(&commit_sha1_bytes_buffer) } },
             });
             const content_slot = try content_cursor.writeBytes(commit, .once);
@@ -479,7 +479,7 @@ pub fn writeCommit(
             // write commit
             _ = try core_cursor.cursor.writeSlot(void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
-                .hash_map_create,
+                .hash_map_init,
                 .{ .hash_map_get = .{ .value = hash.bytesToHash(&commit_sha1_bytes_buffer) } },
                 .{ .write = .{ .slot = content_slot } },
             });

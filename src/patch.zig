@@ -98,9 +98,9 @@ pub fn writePatchesForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo
         // put change list in the key
         _ = try core_cursor.cursor.writeSlot(void, &[_]xitdb.PathPart(void){
             .{ .hash_map_get = .{ .value = hash.hashBuffer("patches") } },
-            .hash_map_create,
+            .hash_map_init,
             .{ .hash_map_get = .{ .key = hash.bytesToHash(&patch_hash) } },
-            .array_list_create,
+            .array_list_init,
             .{ .array_list_get = .append },
             .{ .write = .{ .bytes = entry_buffer.items } },
         });
@@ -109,9 +109,9 @@ pub fn writePatchesForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo
         if (edit == .ins) {
             _ = try core_cursor.cursor.writeSlot(void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("patches") } },
-                .hash_map_create,
+                .hash_map_init,
                 .{ .hash_map_get = .{ .value = hash.bytesToHash(&patch_hash) } },
-                .array_list_create,
+                .array_list_init,
                 .{ .array_list_get = .append },
                 .{ .write = .{ .bytes = edit.ins.new_line.text } },
             });
