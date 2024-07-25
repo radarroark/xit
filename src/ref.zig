@@ -73,7 +73,7 @@ pub const RefList = struct {
                 try ref_list.addRefs(repo_kind, core_cursor, dir_name, heads_dir, &path);
             },
             .xit => {
-                if (try core_cursor.cursor.readCursor(void, &[_]xitdb.PathPart(void){
+                if (try core_cursor.cursor.readCursor(.read_only, void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = .{ .value = hash.hashBuffer("refs") } },
                     .{ .hash_map_get = .{ .value = hash.hashBuffer("heads") } },
                 })) |heads_cursor| {
@@ -268,11 +268,12 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind
                 // point HEAD at the ref
                 var write_buffer = [_]u8{0} ** MAX_READ_BYTES;
                 const content = try std.fmt.bufPrint(&write_buffer, "ref: refs/heads/{s}", .{target});
-                const ref_content_slot = try core_cursor.cursor.writeBytes(content, .once, void, &[_]xitdb.PathPart(void){
+                var ref_content_cursor = (try core_cursor.cursor.readCursor(.read_write, void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-content-set") } },
                     .hash_map_create,
                     .{ .hash_map_get = .{ .key = hash.hashBuffer(content) } },
-                });
+                })) orelse return error.ExpectedRefContent;
+                const ref_content_slot = try ref_content_cursor.writeBytes(content, .once);
                 _ = try core_cursor.cursor.readSlot(.read_write, void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = .{ .value = hash.hashBuffer("HEAD") } },
                     .{ .write = .{ .slot = ref_content_slot } },
@@ -280,11 +281,12 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind
             } else {
                 if (oid_hex_maybe) |oid_hex| {
                     // the HEAD is detached, so just update it with the oid
-                    const ref_content_slot = try core_cursor.cursor.writeBytes(&oid_hex, .once, void, &[_]xitdb.PathPart(void){
+                    var ref_content_cursor = (try core_cursor.cursor.readCursor(.read_write, void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-content-set") } },
                         .hash_map_create,
                         .{ .hash_map_get = .{ .key = try hash.hexToHash(&oid_hex) } },
-                    });
+                    })) orelse return error.ExpectedRefContent;
+                    const ref_content_slot = try ref_content_cursor.writeBytes(&oid_hex, .once);
                     _ = try core_cursor.cursor.readSlot(.read_write, void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("HEAD") } },
                         .{ .write = .{ .slot = ref_content_slot } },
@@ -293,11 +295,12 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind
                     // point HEAD at the ref, even though the ref doesn't exist
                     var write_buffer = [_]u8{0} ** MAX_READ_BYTES;
                     const content = try std.fmt.bufPrint(&write_buffer, "ref: refs/heads/{s}", .{target});
-                    const ref_content_slot = try core_cursor.cursor.writeBytes(content, .once, void, &[_]xitdb.PathPart(void){
+                    var ref_content_cursor = (try core_cursor.cursor.readCursor(.read_write, void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-content-set") } },
                         .hash_map_create,
                         .{ .hash_map_get = .{ .key = hash.hashBuffer(content) } },
-                    });
+                    })) orelse return error.ExpectedRefContent;
+                    const ref_content_slot = try ref_content_cursor.writeBytes(content, .once);
                     _ = try core_cursor.cursor.readSlot(.read_write, void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("HEAD") } },
                         .{ .write = .{ .slot = ref_content_slot } },
@@ -377,20 +380,22 @@ pub fn updateRecur(
                     }
 
                     // otherwise, update with the oid
-                    const ref_name_slot = try ctx_self.core_cursor.cursor.writeBytes(ctx_self.file_name, .once, void, &[_]xitdb.PathPart(void){
+                    var ref_name_cursor = (try ctx_self.core_cursor.cursor.readCursor(.read_write, void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-name-set") } },
                         .hash_map_create,
                         .{ .hash_map_get = .{ .key = file_name_hash } },
-                    });
+                    })) orelse return error.ExpectedRefName;
+                    const ref_name_slot = try ref_name_cursor.writeBytes(ctx_self.file_name, .once);
                     _ = try cursor.readSlot(.read_write, void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = .{ .key = file_name_hash } },
                         .{ .write = .{ .slot = ref_name_slot } },
                     });
-                    const ref_content_slot = try ctx_self.core_cursor.cursor.writeBytes(ctx_self.oid_hex, .once, void, &[_]xitdb.PathPart(void){
+                    var ref_content_cursor = (try ctx_self.core_cursor.cursor.readCursor(.read_write, void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-content-set") } },
                         .hash_map_create,
                         .{ .hash_map_get = .{ .key = try hash.hexToHash(ctx_self.oid_hex) } },
-                    });
+                    })) orelse return error.ExpectedRefContent;
+                    const ref_content_slot = try ref_content_cursor.writeBytes(ctx_self.oid_hex, .once);
                     _ = try cursor.readSlot(.read_write, void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = .{ .value = file_name_hash } },
                         .{ .write = .{ .slot = ref_content_slot } },

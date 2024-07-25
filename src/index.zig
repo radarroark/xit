@@ -134,7 +134,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     _ = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
                 },
                 .xit => {
-                    if (try core_cursor.cursor.readCursor(void, &[_]xitdb.PathPart(void){
+                    if (try core_cursor.cursor.readCursor(.read_only, void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("index") } },
                     })) |index_cursor| {
                         var iter = try index_cursor.iter();
@@ -516,21 +516,23 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                     }
                                 }
 
-                                const path_slot = try ctx_self.core_cursor.cursor.writeBytes(path, .once, void, &[_]xitdb.PathPart(void){
+                                var path_cursor = (try ctx_self.core_cursor.cursor.readCursor(.read_write, void, &[_]xitdb.PathPart(void){
                                     .{ .hash_map_get = .{ .value = hash.hashBuffer("path-set") } },
                                     .hash_map_create,
                                     .{ .hash_map_get = .{ .key = path_hash } },
-                                });
+                                })) orelse return error.ExpectedPath;
+                                const path_slot = try path_cursor.writeBytes(path, .once);
                                 _ = try cursor.readSlot(.read_write, void, &[_]xitdb.PathPart(void){
                                     .{ .hash_map_get = .{ .key = path_hash } },
                                     .{ .write = .{ .slot = path_slot } },
                                 });
 
-                                const entry_buffer_slot = try ctx_self.core_cursor.cursor.writeBytes(entry_buffer.items, .once, void, &[_]xitdb.PathPart(void){
+                                var entry_buffer_cursor = (try ctx_self.core_cursor.cursor.readCursor(.read_write, void, &[_]xitdb.PathPart(void){
                                     .{ .hash_map_get = .{ .value = hash.hashBuffer("entry-buffer-set") } },
                                     .hash_map_create,
                                     .{ .hash_map_get = .{ .key = hash.hashBuffer(entry_buffer.items) } },
-                                });
+                                })) orelse return error.ExpectedEntryBuffer;
+                                const entry_buffer_slot = try entry_buffer_cursor.writeBytes(entry_buffer.items, .once);
                                 _ = try cursor.readSlot(.read_write, void, &[_]xitdb.PathPart(void){
                                     .{ .hash_map_get = .{ .value = path_hash } },
                                     .{ .write = .{ .slot = entry_buffer_slot } },

@@ -68,7 +68,7 @@ pub fn writePatchesForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo
     const patch_hash = try patchHash(repo_kind, allocator, &myers_diff_iter);
 
     // exit early if patch already exists
-    if (try core_cursor.cursor.readCursor(void, &[_]xitdb.PathPart(void){
+    if (try core_cursor.cursor.readCursor(.read_only, void, &[_]xitdb.PathPart(void){
         .{ .hash_map_get = .{ .value = hash.hashBuffer("patches") } },
         .{ .hash_map_get = .{ .key = hash.bytesToHash(&patch_hash) } },
     })) |_| {

@@ -35,7 +35,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
 
         pub fn initFromIndex(core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, entry: idx.Index(repo_kind).Entry) !LineIterator(repo_kind) {
             const oid_hex = std.fmt.bytesToHex(&entry.oid, .lower);
-            var object_reader = try obj.ObjectReader(repo_kind).init(core_cursor, oid_hex, true);
+            var object_reader = try obj.ObjectReader(repo_kind).init(allocator, core_cursor, oid_hex, true);
             errdefer object_reader.deinit();
             return LineIterator(repo_kind){
                 .allocator = allocator,
@@ -94,7 +94,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
 
         pub fn initFromHead(core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, path: []const u8, entry: obj.TreeEntry) !LineIterator(repo_kind) {
             const oid_hex = std.fmt.bytesToHex(&entry.oid, .lower);
-            var object_reader = try obj.ObjectReader(repo_kind).init(core_cursor, oid_hex, true);
+            var object_reader = try obj.ObjectReader(repo_kind).init(allocator, core_cursor, oid_hex, true);
             errdefer object_reader.deinit();
             return LineIterator(repo_kind){
                 .allocator = allocator,
@@ -114,7 +114,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
 
         pub fn initFromOid(core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, oid: [hash.SHA1_BYTES_LEN]u8) !LineIterator(repo_kind) {
             const oid_hex = std.fmt.bytesToHex(&oid, .lower);
-            var object_reader = try obj.ObjectReader(repo_kind).init(core_cursor, oid_hex, true);
+            var object_reader = try obj.ObjectReader(repo_kind).init(allocator, core_cursor, oid_hex, true);
             errdefer object_reader.deinit();
             return LineIterator(repo_kind){
                 .allocator = allocator,
@@ -158,7 +158,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                     errdefer line_arr.deinit();
                     var buffer = [_]u8{0} ** 1;
                     while (true) {
-                        const size = try self.source.object.object_reader.reader().read(&buffer);
+                        const size = try self.source.object.object_reader.reader.read(&buffer);
                         if (size == 0) {
                             self.source.object.eof = true;
                             break;

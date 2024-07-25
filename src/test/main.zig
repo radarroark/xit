@@ -706,7 +706,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 defer repo.deinit();
                 var count: u32 = 0;
                 var cursor = try repo.core.latestCursor();
-                if (try cursor.readCursor(void, &[_]xitdb.PathPart(void){
+                if (try cursor.readCursor(.read_only, void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = .{ .value = hash.hashBuffer("index") } },
                 })) |index_cursor| {
                     var iter = try index_cursor.iter();
@@ -773,7 +773,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 defer repo.deinit();
                 var count: u32 = 0;
                 var cursor = try repo.core.latestCursor();
-                if (try cursor.readCursor(void, &[_]xitdb.PathPart(void){
+                if (try cursor.readCursor(.read_only, void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = .{ .value = hash.hashBuffer("index") } },
                 })) |index_cursor| {
                     var iter = try index_cursor.iter();

@@ -152,7 +152,7 @@ pub fn writeBlob(
 
                 pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
                     if (cursor.pointer() == null) {
-                        var writer = try cursor.writer(void, &[_]xitdb.PathPart(void){});
+                        var writer = try cursor.writer();
                         try writer.writeAll(ctx_self.header);
                         // TODO: use buffered io
                         var read_buffer = [_]u8{0} ** MAX_READ_BYTES;
@@ -269,11 +269,12 @@ fn writeTree(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).Co
                     if (cursor.pointer() != null) {
                         return;
                     }
-                    const tree_slot = try ctx_self.cursor.writeBytes(ctx_self.tree_bytes, .once, void, &[_]xitdb.PathPart(void){
+                    var tree_cursor = (try ctx_self.cursor.readCursor(.read_write, void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("object-values") } },
                         .hash_map_create,
                         .{ .hash_map_get = .{ .value = hash.bytesToHash(ctx_self.tree_sha1_bytes) } },
-                    });
+                    })) orelse return error.ExpectedTree;
+                    const tree_slot = try tree_cursor.writeBytes(ctx_self.tree_bytes, .once);
                     _ = try cursor.readSlot(.read_write, void, &[_]xitdb.PathPart(void){
                         .{ .write = .{ .slot = tree_slot } },
                     });
@@ -468,11 +469,12 @@ pub fn writeCommit(
             const commit_sha1_hex = std.fmt.bytesToHex(commit_sha1_bytes_buffer, .lower);
 
             // write commit content
-            const content_slot = try core_cursor.cursor.writeBytes(commit, .once, void, &[_]xitdb.PathPart(void){
+            var content_cursor = (try core_cursor.cursor.readCursor(.read_write, void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("object-values") } },
                 .hash_map_create,
                 .{ .hash_map_get = .{ .value = hash.bytesToHash(&commit_sha1_bytes_buffer) } },
-            });
+            })) orelse return error.ExpectedContent;
+            const content_slot = try content_cursor.writeBytes(commit, .once);
 
             // write commit
             _ = try core_cursor.cursor.readSlot(.read_write, void, &[_]xitdb.PathPart(void){
@@ -511,16 +513,17 @@ pub fn isTree(entry: TreeEntry) bool {
 
 pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
     return struct {
+        allocator: std.mem.Allocator,
+        reader: Reader,
         internal: switch (repo_kind) {
             .git => struct {
                 file: std.fs.File,
                 skip_header: bool,
-                stream: compress.ZlibStream,
-                rdr: Reader,
+                stream: *compress.ZlibStream,
             },
             .xit => struct {
                 header_offset: u64,
-                rdr: Reader,
+                cursor: *xitdb.Database(.file).Cursor,
             },
         },
 
@@ -529,7 +532,7 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
             .xit => xitdb.Database(.file).Cursor.Reader,
         };
 
-        pub fn init(core_cursor: rp.Repo(repo_kind).CoreCursor, oid: [hash.SHA1_HEX_LEN]u8, skip_header: bool) !@This() {
+        pub fn init(allocator: std.mem.Allocator, core_cursor: rp.Repo(repo_kind).CoreCursor, oid: [hash.SHA1_HEX_LEN]u8, skip_header: bool) !@This() {
             switch (repo_kind) {
                 .git => {
                     // open the objects dir
@@ -542,21 +545,32 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
                     var commit_hash_suffix_file = try commit_hash_prefix_dir.openFile(oid[2..], .{ .mode = .read_only });
                     errdefer commit_hash_suffix_file.close();
 
+                    // put stream on the heap so the pointer is stable (the reader uses it internally)
+                    const stream_ptr = try allocator.create(compress.ZlibStream);
+                    errdefer allocator.destroy(stream_ptr);
+                    stream_ptr.* = try compress.decompressStream(commit_hash_suffix_file, skip_header);
+
                     return .{
+                        .allocator = allocator,
+                        .reader = stream_ptr.reader(),
                         .internal = .{
                             .file = commit_hash_suffix_file,
                             .skip_header = skip_header,
-                            .stream = try compress.decompressStream(commit_hash_suffix_file, skip_header),
-                            .rdr = undefined,
+                            .stream = stream_ptr,
                         },
                     };
                 },
                 .xit => {
-                    var reader_maybe = try core_cursor.cursor.reader(void, &[_]xitdb.PathPart(void){
+                    if (try core_cursor.cursor.readCursor(.read_only, void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
                         .{ .hash_map_get = .{ .value = try hash.hexToHash(&oid) } },
-                    });
-                    if (reader_maybe) |*rdr| {
+                    })) |cursor| {
+                        // put cursor on the heap so the pointer is stable (the reader uses it internally)
+                        const cursor_ptr = try allocator.create(xitdb.Database(.file).Cursor);
+                        errdefer allocator.destroy(cursor_ptr);
+                        cursor_ptr.* = cursor;
+                        var rdr = try cursor_ptr.reader();
+
                         var header_offset: u64 = 0;
                         if (skip_header) {
                             var read_buffer = [_]u8{0} ** 1;
@@ -570,10 +584,13 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
                                 }
                             }
                         }
+
                         return .{
+                            .allocator = allocator,
+                            .reader = rdr,
                             .internal = .{
                                 .header_offset = header_offset,
-                                .rdr = rdr.*,
+                                .cursor = cursor_ptr,
                             },
                         };
                     } else {
@@ -585,25 +602,21 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
 
         pub fn deinit(self: *ObjectReader(repo_kind)) void {
             switch (repo_kind) {
-                .git => self.internal.file.close(),
-                .xit => {},
+                .git => {
+                    self.allocator.destroy(self.internal.stream);
+                    self.internal.file.close();
+                },
+                .xit => self.allocator.destroy(self.internal.cursor),
             }
         }
 
         pub fn reset(self: *ObjectReader(repo_kind)) !void {
             switch (repo_kind) {
-                .git => self.internal.stream = try compress.decompressStream(self.internal.file, self.internal.skip_header),
-                .xit => try self.internal.rdr.seekTo(self.internal.header_offset),
-            }
-        }
-
-        pub fn reader(self: *ObjectReader(repo_kind)) *Reader {
-            switch (repo_kind) {
                 .git => {
-                    self.internal.rdr = self.internal.stream.reader();
-                    return &self.internal.rdr;
+                    self.internal.stream.* = try compress.decompressStream(self.internal.file, self.internal.skip_header);
+                    self.reader = self.internal.stream.reader();
                 },
-                .xit => return &self.internal.rdr,
+                .xit => try self.reader.seekTo(self.internal.header_offset),
             }
         }
     };
@@ -632,16 +645,15 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
         len: u64,
 
         pub fn init(allocator: std.mem.Allocator, core_cursor: rp.Repo(repo_kind).CoreCursor, oid: [hash.SHA1_HEX_LEN]u8) !Object(repo_kind) {
-            var object_reader = try ObjectReader(repo_kind).init(core_cursor, oid, false);
-            defer object_reader.deinit();
-            var reader = object_reader.reader();
+            var obj_rdr = try ObjectReader(repo_kind).init(allocator, core_cursor, oid, false);
+            defer obj_rdr.deinit();
 
             // read the object kind
-            const object_kind = try reader.readUntilDelimiterAlloc(allocator, ' ', MAX_READ_BYTES);
+            const object_kind = try obj_rdr.reader.readUntilDelimiterAlloc(allocator, ' ', MAX_READ_BYTES);
             defer allocator.free(object_kind);
 
             // read the length
-            const object_len_str = try reader.readUntilDelimiterAlloc(allocator, 0, MAX_READ_BYTES);
+            const object_len_str = try obj_rdr.reader.readUntilDelimiterAlloc(allocator, 0, MAX_READ_BYTES);
             defer allocator.free(object_len_str);
             const object_len = try std.fmt.parseInt(usize, object_len_str, 10);
 
@@ -660,16 +672,16 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                 var entries = std.StringArrayHashMap(TreeEntry).init(arena.allocator());
 
                 while (true) {
-                    const entry_mode_str = reader.readUntilDelimiterAlloc(arena.allocator(), ' ', MAX_READ_BYTES) catch |err| {
+                    const entry_mode_str = obj_rdr.reader.readUntilDelimiterAlloc(arena.allocator(), ' ', MAX_READ_BYTES) catch |err| {
                         switch (err) {
                             error.EndOfStream => break,
                             else => return err,
                         }
                     };
                     const entry_mode: io.Mode = @bitCast(try std.fmt.parseInt(u32, entry_mode_str, 8));
-                    const entry_name = try reader.readUntilDelimiterAlloc(arena.allocator(), 0, MAX_READ_BYTES);
+                    const entry_name = try obj_rdr.reader.readUntilDelimiterAlloc(arena.allocator(), 0, MAX_READ_BYTES);
                     var entry_oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-                    try reader.readNoEof(&entry_oid);
+                    try obj_rdr.reader.readNoEof(&entry_oid);
                     try entries.put(entry_name, TreeEntry{ .oid = entry_oid, .mode = entry_mode });
                 }
 
@@ -682,7 +694,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                 };
             } else if (std.mem.eql(u8, "commit", object_kind)) {
                 // read the content kind
-                const content_kind = try reader.readUntilDelimiterAlloc(allocator, ' ', MAX_READ_BYTES);
+                const content_kind = try obj_rdr.reader.readUntilDelimiterAlloc(allocator, ' ', MAX_READ_BYTES);
                 defer allocator.free(content_kind);
                 if (!std.mem.eql(u8, "tree", content_kind)) {
                     return error.InvalidCommitContentKind;
@@ -690,7 +702,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
 
                 // read the tree hash
                 var tree_hash = [_]u8{0} ** (hash.SHA1_HEX_LEN + 1);
-                const tree_hash_slice = try reader.readUntilDelimiter(&tree_hash, '\n');
+                const tree_hash_slice = try obj_rdr.reader.readUntilDelimiter(&tree_hash, '\n');
                 if (tree_hash_slice.len != hash.SHA1_HEX_LEN) {
                     return error.InvalidCommitTreeHash;
                 }
@@ -710,7 +722,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
 
                 // read the metadata
                 while (true) {
-                    const line = try reader.readUntilDelimiterAlloc(arena.allocator(), '\n', MAX_READ_BYTES);
+                    const line = try obj_rdr.reader.readUntilDelimiterAlloc(arena.allocator(), '\n', MAX_READ_BYTES);
                     if (line.len == 0) {
                         break;
                     }
@@ -735,7 +747,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                 }
 
                 // read the message
-                content.commit.message = try reader.readAllAlloc(arena.allocator(), MAX_READ_BYTES);
+                content.commit.message = try obj_rdr.reader.readAllAlloc(arena.allocator(), MAX_READ_BYTES);
 
                 return Object(repo_kind){
                     .allocator = allocator,
