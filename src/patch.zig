@@ -75,6 +75,21 @@ pub fn writePatchesForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo
         return;
     }
 
+    // init file graph
+    const path_hash = hash.hashBuffer(line_iter_pair.path);
+    var path_cursor = try core_cursor.cursor.writeCursor(void, &[_]xitdb.PathPart(void){
+        .{ .hash_map_get = .{ .value = hash.hashBuffer("path-set") } },
+        .hash_map_init,
+        .{ .hash_map_get = .{ .key = path_hash } },
+    });
+    const path_slot = try path_cursor.writeBytes(line_iter_pair.path, .once);
+    _ = try core_cursor.cursor.writeSlot(void, &[_]xitdb.PathPart(void){
+        .{ .hash_map_get = .{ .value = hash.hashBuffer("file-graphs") } },
+        .hash_map_init,
+        .{ .hash_map_get = .{ .key = path_hash } },
+        .{ .write = .{ .slot = path_slot } },
+    });
+
     var new_node_count: u64 = 0;
 
     while (try myers_diff_iter.next()) |edit| {
