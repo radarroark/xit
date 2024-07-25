@@ -230,7 +230,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 defer repo.deinit();
                 var cursor = try repo.core.latestCursor();
                 const head_file_buffer = try ref.readHead(repo_kind, .{ .core = &repo.core, .cursor = &cursor });
-                const bytes_slot_maybe = try cursor.readSlot(.read_only, void, &[_]xitdb.PathPart(void){
+                const bytes_slot_maybe = try cursor.readSlot(void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
                     .{ .hash_map_get = .{ .value = try hash.hexToHash(&head_file_buffer) } },
                 });
@@ -483,7 +483,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 defer repo.deinit();
                 var cursor = try repo.core.latestCursor();
                 const head_file_buffer = try ref.readHead(repo_kind, .{ .core = &repo.core, .cursor = &cursor });
-                const bytes_slot_maybe = try cursor.readSlot(.read_only, void, &[_]xitdb.PathPart(void){
+                const bytes_slot_maybe = try cursor.readSlot(void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
                     .{ .hash_map_get = .{ .value = try hash.hexToHash(&head_file_buffer) } },
                 });
@@ -706,7 +706,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 defer repo.deinit();
                 var count: u32 = 0;
                 var cursor = try repo.core.latestCursor();
-                if (try cursor.readCursor(.read_only, void, &[_]xitdb.PathPart(void){
+                if (try cursor.readCursor(void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = .{ .value = hash.hashBuffer("index") } },
                 })) |index_cursor| {
                     var iter = try index_cursor.iter();
@@ -773,7 +773,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 defer repo.deinit();
                 var count: u32 = 0;
                 var cursor = try repo.core.latestCursor();
-                if (try cursor.readCursor(.read_only, void, &[_]xitdb.PathPart(void){
+                if (try cursor.readCursor(void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = .{ .value = hash.hashBuffer("index") } },
                 })) |index_cursor| {
                     var iter = try index_cursor.iter();

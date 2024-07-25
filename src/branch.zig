@@ -57,13 +57,13 @@ pub fn create(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).C
             const name_hash = hash.hashBuffer(name);
 
             // add key to refs/heads/{refname}
-            var ref_name_cursor = (try core_cursor.cursor.readCursor(.read_write, void, &[_]xitdb.PathPart(void){
+            var ref_name_cursor = try core_cursor.cursor.writeCursor(void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-name-set") } },
                 .hash_map_create,
                 .{ .hash_map_get = .{ .key = name_hash } },
-            })) orelse return error.ExpectedRefName;
+            });
             const ref_name_slot = try ref_name_cursor.writeBytes(name, .once);
-            _ = try core_cursor.cursor.readSlot(.read_write, void, &[_]xitdb.PathPart(void){
+            _ = try core_cursor.cursor.writeSlot(void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("refs") } },
                 .hash_map_create,
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("heads") } },
@@ -74,13 +74,13 @@ pub fn create(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).C
 
             // add value to refs/heads/{refname}
             const head_file_buffer = try ref.readHead(repo_kind, core_cursor);
-            var ref_content_cursor = (try core_cursor.cursor.readCursor(.read_write, void, &[_]xitdb.PathPart(void){
+            var ref_content_cursor = try core_cursor.cursor.writeCursor(void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-content-set") } },
                 .hash_map_create,
                 .{ .hash_map_get = .{ .key = hash.hashBuffer(&head_file_buffer) } },
-            })) orelse return error.ExpectedRefContent;
+            });
             const ref_content_slot = try ref_content_cursor.writeBytes(&head_file_buffer, .once);
-            _ = try core_cursor.cursor.readSlot(.read_write, void, &[_]xitdb.PathPart(void){
+            _ = try core_cursor.cursor.writeSlot(void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("refs") } },
                 .hash_map_create,
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("heads") } },
@@ -149,7 +149,7 @@ pub fn delete(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).C
                     return error.CannotDeleteCurrentBranch;
                 }
             }
-            _ = try core_cursor.cursor.readSlot(.read_write, void, &[_]xitdb.PathPart(void){
+            _ = try core_cursor.cursor.writeSlot(void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("refs") } },
                 .hash_map_create,
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("heads") } },

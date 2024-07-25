@@ -523,7 +523,7 @@ pub const Merge = struct {
                         }
                     },
                     .xit => {
-                        if (try core_cursor.cursor.readCursor(.read_only, void, &[_]xitdb.PathPart(void){
+                        if (try core_cursor.cursor.readCursor(void, &[_]xitdb.PathPart(void){
                             .{ .hash_map_get = .{ .value = hash.hashBuffer("MERGE_HEAD") } },
                         })) |_| {
                             return error.UnfinishedMergeAlreadyInProgress;
@@ -664,15 +664,16 @@ pub const Merge = struct {
 
                         // exit early if there were conflicts
                         if (conflicts.count() > 0) {
-                            var merge_head_cursor = (try core_cursor.cursor.readCursor(.read_write, void, &[_]xitdb.PathPart(void){
+                            var merge_head_cursor = try core_cursor.cursor.writeCursor(void, &[_]xitdb.PathPart(void){
                                 .{ .hash_map_get = .{ .value = hash.hashBuffer("MERGE_HEAD") } },
-                            })) orelse return error.ExpectedMergeHead;
+                            });
                             _ = try merge_head_cursor.writeBytes(&source_oid, .replace);
 
-                            var merge_msg_cursor = (try core_cursor.cursor.readCursor(.read_write, void, &[_]xitdb.PathPart(void){
+                            var merge_msg_cursor = try core_cursor.cursor.writeCursor(void, &[_]xitdb.PathPart(void){
                                 .{ .hash_map_get = .{ .value = hash.hashBuffer("MERGE_MSG") } },
-                            })) orelse return error.ExpectedMergeMsg;
+                            });
                             _ = try merge_msg_cursor.writeBytes(commit_message, .replace);
+
                             return .{
                                 .arena = arena,
                                 .changes = clean_diff.changes,
@@ -748,7 +749,7 @@ pub const Merge = struct {
                         commit_message = try merge_msg.readToEndAlloc(arena.allocator(), MAX_READ_BYTES);
                     },
                     .xit => {
-                        const source_oid_slot = (try core_cursor.cursor.readSlot(.read_only, void, &[_]xitdb.PathPart(void){
+                        const source_oid_slot = (try core_cursor.cursor.readSlot(void, &[_]xitdb.PathPart(void){
                             .{ .hash_map_get = .{ .value = hash.hashBuffer("MERGE_HEAD") } },
                         })) orelse return error.MergeHeadNotFound;
                         const source_oid_slice = try core_cursor.cursor.db.readBytes(&source_oid, source_oid_slot);
@@ -756,7 +757,7 @@ pub const Merge = struct {
                             return error.InvalidMergeHead;
                         }
 
-                        const merge_msg_slot = (try core_cursor.cursor.readSlot(.read_only, void, &[_]xitdb.PathPart(void){
+                        const merge_msg_slot = (try core_cursor.cursor.readSlot(void, &[_]xitdb.PathPart(void){
                             .{ .hash_map_get = .{ .value = hash.hashBuffer("MERGE_MSG") } },
                         })) orelse return error.MergeMessageNotFound;
                         commit_message = try core_cursor.cursor.db.readBytesAlloc(arena.allocator(), MAX_READ_BYTES, merge_msg_slot);
@@ -779,10 +780,10 @@ pub const Merge = struct {
                         try core_cursor.core.git_dir.deleteFile("MERGE_MSG");
                     },
                     .xit => {
-                        _ = try core_cursor.cursor.readSlot(.read_write, void, &[_]xitdb.PathPart(void){
+                        _ = try core_cursor.cursor.writeSlot(void, &[_]xitdb.PathPart(void){
                             .{ .hash_map_remove = hash.hashBuffer("MERGE_HEAD") },
                         });
-                        _ = try core_cursor.cursor.readSlot(.read_write, void, &[_]xitdb.PathPart(void){
+                        _ = try core_cursor.cursor.writeSlot(void, &[_]xitdb.PathPart(void){
                             .{ .hash_map_remove = hash.hashBuffer("MERGE_MSG") },
                         });
                     },
