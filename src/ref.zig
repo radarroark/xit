@@ -272,10 +272,10 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind
                     .hash_map_init,
                     .{ .hash_map_get = .{ .key = hash.hashBuffer(content) } },
                 });
-                const ref_content_slot = try ref_content_cursor.writeBytes(content, .once);
+                try ref_content_cursor.writeBytes(content, .once);
                 _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = .{ .value = hash.hashBuffer("HEAD") } },
-                    .{ .write = .{ .slot = ref_content_slot } },
+                    .{ .write = .{ .slot = ref_content_cursor.slot_ptr.slot } },
                 });
             } else {
                 if (oid_hex_maybe) |oid_hex| {
@@ -285,10 +285,10 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind
                         .hash_map_init,
                         .{ .hash_map_get = .{ .key = try hash.hexToHash(&oid_hex) } },
                     });
-                    const ref_content_slot = try ref_content_cursor.writeBytes(&oid_hex, .once);
+                    try ref_content_cursor.writeBytes(&oid_hex, .once);
                     _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("HEAD") } },
-                        .{ .write = .{ .slot = ref_content_slot } },
+                        .{ .write = .{ .slot = ref_content_cursor.slot_ptr.slot } },
                     });
                 } else {
                     // point HEAD at the ref, even though the ref doesn't exist
@@ -299,10 +299,10 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind
                         .hash_map_init,
                         .{ .hash_map_get = .{ .key = hash.hashBuffer(content) } },
                     });
-                    const ref_content_slot = try ref_content_cursor.writeBytes(content, .once);
+                    try ref_content_cursor.writeBytes(content, .once);
                     _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("HEAD") } },
-                        .{ .write = .{ .slot = ref_content_slot } },
+                        .{ .write = .{ .slot = ref_content_cursor.slot_ptr.slot } },
                     });
                 }
             }
@@ -384,20 +384,20 @@ pub fn updateRecur(
                         .hash_map_init,
                         .{ .hash_map_get = .{ .key = file_name_hash } },
                     });
-                    const ref_name_slot = try ref_name_cursor.writeBytes(ctx_self.file_name, .once);
+                    try ref_name_cursor.writeBytes(ctx_self.file_name, .once);
                     _ = try cursor.writePath(void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = .{ .key = file_name_hash } },
-                        .{ .write = .{ .slot = ref_name_slot } },
+                        .{ .write = .{ .slot = ref_name_cursor.slot_ptr.slot } },
                     });
                     var ref_content_cursor = try ctx_self.core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-content-set") } },
                         .hash_map_init,
                         .{ .hash_map_get = .{ .key = try hash.hexToHash(ctx_self.oid_hex) } },
                     });
-                    const ref_content_slot = try ref_content_cursor.writeBytes(ctx_self.oid_hex, .once);
+                    try ref_content_cursor.writeBytes(ctx_self.oid_hex, .once);
                     _ = try cursor.writePath(void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = .{ .value = file_name_hash } },
-                        .{ .write = .{ .slot = ref_content_slot } },
+                        .{ .write = .{ .slot = ref_content_cursor.slot_ptr.slot } },
                     });
                 }
             };

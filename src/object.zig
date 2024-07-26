@@ -274,9 +274,9 @@ fn writeTree(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).Co
                         .hash_map_init,
                         .{ .hash_map_get = .{ .value = hash.bytesToHash(ctx_self.tree_sha1_bytes) } },
                     });
-                    const tree_slot = try tree_cursor.writeBytes(ctx_self.tree_bytes, .once);
+                    try tree_cursor.writeBytes(ctx_self.tree_bytes, .once);
                     _ = try cursor.writePath(void, &[_]xitdb.PathPart(void){
-                        .{ .write = .{ .slot = tree_slot } },
+                        .{ .write = .{ .slot = tree_cursor.slot_ptr.slot } },
                     });
                 }
             };
@@ -474,14 +474,14 @@ pub fn writeCommit(
                 .hash_map_init,
                 .{ .hash_map_get = .{ .value = hash.bytesToHash(&commit_sha1_bytes_buffer) } },
             });
-            const content_slot = try content_cursor.writeBytes(commit, .once);
+            try content_cursor.writeBytes(commit, .once);
 
             // write commit
             _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
                 .hash_map_init,
                 .{ .hash_map_get = .{ .value = hash.bytesToHash(&commit_sha1_bytes_buffer) } },
-                .{ .write = .{ .slot = content_slot } },
+                .{ .write = .{ .slot = content_cursor.slot_ptr.slot } },
             });
 
             // write commit id to HEAD

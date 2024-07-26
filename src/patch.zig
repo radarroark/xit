@@ -82,12 +82,12 @@ pub fn writePatchesForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo
         .hash_map_init,
         .{ .hash_map_get = .{ .key = path_hash } },
     });
-    const path_slot = try path_cursor.writeBytes(line_iter_pair.path, .once);
+    try path_cursor.writeBytes(line_iter_pair.path, .once);
     _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
         .{ .hash_map_get = .{ .value = hash.hashBuffer("file-graphs") } },
         .hash_map_init,
         .{ .hash_map_get = .{ .key = path_hash } },
-        .{ .write = .{ .slot = path_slot } },
+        .{ .write = .{ .slot = path_cursor.slot_ptr.slot } },
     });
 
     var new_node_count: u64 = 0;

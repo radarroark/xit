@@ -667,12 +667,12 @@ pub const Merge = struct {
                             var merge_head_cursor = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
                                 .{ .hash_map_get = .{ .value = hash.hashBuffer("MERGE_HEAD") } },
                             });
-                            _ = try merge_head_cursor.writeBytes(&source_oid, .replace);
+                            try merge_head_cursor.writeBytes(&source_oid, .replace);
 
                             var merge_msg_cursor = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
                                 .{ .hash_map_get = .{ .value = hash.hashBuffer("MERGE_MSG") } },
                             });
-                            _ = try merge_msg_cursor.writeBytes(commit_message, .replace);
+                            try merge_msg_cursor.writeBytes(commit_message, .replace);
 
                             return .{
                                 .arena = arena,

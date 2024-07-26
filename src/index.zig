@@ -518,10 +518,10 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                     .hash_map_init,
                                     .{ .hash_map_get = .{ .key = path_hash } },
                                 });
-                                const path_slot = try path_cursor.writeBytes(path, .once);
+                                try path_cursor.writeBytes(path, .once);
                                 _ = try cursor.writePath(void, &[_]xitdb.PathPart(void){
                                     .{ .hash_map_get = .{ .key = path_hash } },
-                                    .{ .write = .{ .slot = path_slot } },
+                                    .{ .write = .{ .slot = path_cursor.slot_ptr.slot } },
                                 });
 
                                 var entry_buffer_cursor = try ctx_self.core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
@@ -529,10 +529,10 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                     .hash_map_init,
                                     .{ .hash_map_get = .{ .key = hash.hashBuffer(entry_buffer.items) } },
                                 });
-                                const entry_buffer_slot = try entry_buffer_cursor.writeBytes(entry_buffer.items, .once);
+                                try entry_buffer_cursor.writeBytes(entry_buffer.items, .once);
                                 _ = try cursor.writePath(void, &[_]xitdb.PathPart(void){
                                     .{ .hash_map_get = .{ .value = path_hash } },
-                                    .{ .write = .{ .slot = entry_buffer_slot } },
+                                    .{ .write = .{ .slot = entry_buffer_cursor.slot_ptr.slot } },
                                 });
                             }
                         }
