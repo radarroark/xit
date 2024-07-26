@@ -363,7 +363,7 @@ pub fn updateRecur(
                 oid_hex: *const [hash.SHA1_HEX_LEN]u8,
                 file_name: []const u8,
 
-                pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
+                pub fn run(ctx_self: @This(), cursor: *xitdb.Cursor(.file)) !void {
                     const file_name_hash = hash.hashBuffer(ctx_self.file_name);
 
                     var buffer = [_]u8{0} ** MAX_READ_BYTES;

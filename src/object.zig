@@ -150,7 +150,7 @@ pub fn writeBlob(
                 sha1_hex: [hash.SHA1_HEX_LEN]u8,
                 header: []const u8,
 
-                pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
+                pub fn run(ctx_self: @This(), cursor: *xitdb.Cursor(.file)) !void {
                     if (cursor.pointer() == null) {
                         var writer = try cursor.writer();
                         try writer.writeAll(ctx_self.header);
@@ -260,11 +260,11 @@ fn writeTree(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).Co
         },
         .xit => {
             const Ctx = struct {
-                cursor: *xitdb.Database(.file).Cursor,
+                cursor: *xitdb.Cursor(.file),
                 tree_sha1_bytes: *const [hash.SHA1_BYTES_LEN]u8,
                 tree_bytes: []const u8,
 
-                pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
+                pub fn run(ctx_self: @This(), cursor: *xitdb.Cursor(.file)) !void {
                     // exit early if there is nothing to commit
                     if (cursor.pointer() != null) {
                         return;
@@ -523,13 +523,13 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
             },
             .xit => struct {
                 header_offset: u64,
-                cursor: *xitdb.Database(.file).Cursor,
+                cursor: *xitdb.Cursor(.file),
             },
         },
 
         pub const Reader = switch (repo_kind) {
             .git => compress.ZlibStream.Reader,
-            .xit => xitdb.Database(.file).Cursor.Reader,
+            .xit => xitdb.Cursor(.file).Reader,
         };
 
         pub fn init(allocator: std.mem.Allocator, core_cursor: rp.Repo(repo_kind).CoreCursor, oid: [hash.SHA1_HEX_LEN]u8, skip_header: bool) !@This() {
@@ -566,7 +566,7 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
                         .{ .hash_map_get = .{ .value = try hash.hexToHash(&oid) } },
                     })) |cursor| {
                         // put cursor on the heap so the pointer is stable (the reader uses it internally)
-                        const cursor_ptr = try allocator.create(xitdb.Database(.file).Cursor);
+                        const cursor_ptr = try allocator.create(xitdb.Cursor(.file));
                         errdefer allocator.destroy(cursor_ptr);
                         cursor_ptr.* = cursor;
                         var rdr = try cursor_ptr.reader();

@@ -466,7 +466,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                         allocator: std.mem.Allocator,
                         index: *Index(repo_kind),
 
-                        pub fn run(ctx_self: @This(), cursor: *xitdb.Database(.file).Cursor) !void {
+                        pub fn run(ctx_self: @This(), cursor: *xitdb.Cursor(.file)) !void {
                             // remove items no longer in the index
                             var iter = try cursor.iter();
                             defer iter.deinit();

@@ -1040,7 +1040,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
         core: *rp.Repo(repo_kind).Core,
         cursor: switch (repo_kind) {
             .git => void,
-            .xit => xitdb.Database(.file).Cursor,
+            .xit => xitdb.Cursor(.file),
         },
         diff_kind: DiffKind,
         status: st.Status(repo_kind),
