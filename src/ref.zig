@@ -81,8 +81,7 @@ pub const RefList = struct {
                     defer iter.deinit();
                     while (try iter.next()) |*next_cursor| {
                         const kv_pair = try next_cursor.readKeyValuePair();
-                        const key_cursor = kv_pair.key_cursor orelse return error.ExpectedRefName;
-                        const name = try key_cursor.readBytesAlloc(ref_list.arena.allocator(), MAX_READ_BYTES);
+                        const name = try kv_pair.key_cursor.readBytesAlloc(ref_list.arena.allocator(), MAX_READ_BYTES);
                         const ref = try Ref.initWithName(repo_kind, core_cursor, ref_list.arena.allocator(), dir_name, name);
                         try ref_list.refs.append(ref);
                     }

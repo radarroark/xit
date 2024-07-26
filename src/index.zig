@@ -141,10 +141,8 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                         defer iter.deinit();
                         while (try iter.next()) |*next_cursor| {
                             const kv_pair = try next_cursor.readKeyValuePair();
-                            const key_cursor = kv_pair.key_cursor orelse return error.ExpectedPath;
-                            const path = try key_cursor.readBytesAlloc(index.arena.allocator(), MAX_READ_BYTES);
-                            const value_cursor = kv_pair.value_cursor orelse return error.ExpectedBuffer;
-                            const buffer = try value_cursor.readBytesAlloc(index.allocator, MAX_READ_BYTES);
+                            const path = try kv_pair.key_cursor.readBytesAlloc(index.arena.allocator(), MAX_READ_BYTES);
+                            const buffer = try kv_pair.value_cursor.readBytesAlloc(index.allocator, MAX_READ_BYTES);
                             defer index.allocator.free(buffer);
 
                             var stream = std.io.fixedBufferStream(buffer);
@@ -472,8 +470,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                             defer iter.deinit();
                             while (try iter.next()) |*next_cursor| {
                                 const kv_pair = try next_cursor.readKeyValuePair();
-                                const key_cursor = kv_pair.key_cursor orelse return error.ExpectedPath;
-                                const path = try key_cursor.readBytesAlloc(ctx_self.allocator, MAX_READ_BYTES);
+                                const path = try kv_pair.key_cursor.readBytesAlloc(ctx_self.allocator, MAX_READ_BYTES);
                                 defer ctx_self.allocator.free(path);
 
                                 if (!ctx_self.index.entries.contains(path)) {
