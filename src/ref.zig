@@ -80,9 +80,9 @@ pub const RefList = struct {
                     var iter = try heads_cursor.iter();
                     defer iter.deinit();
                     while (try iter.next()) |*next_cursor| {
-                        const kv_slot = next_cursor.slot_ptr.slot;
-                        const kv_pair = try heads_cursor.db.readKeyValuePair(kv_slot);
-                        const name = try heads_cursor.db.readBytesAlloc(ref_list.arena.allocator(), MAX_READ_BYTES, kv_pair.key_slot);
+                        const kv_pair = try next_cursor.readKeyValuePair();
+                        const key_cursor = kv_pair.key_cursor orelse return error.ExpectedRefName;
+                        const name = try key_cursor.readBytesAlloc(ref_list.arena.allocator(), MAX_READ_BYTES);
                         const ref = try Ref.initWithName(repo_kind, core_cursor, ref_list.arena.allocator(), dir_name, name);
                         try ref_list.refs.append(ref);
                     }
@@ -158,7 +158,7 @@ pub fn resolve(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("heads") } },
                 .{ .hash_map_get = .{ .value = hash.hashBuffer(content) } },
             })) |bytes_cursor| {
-                const bytes = try core_cursor.cursor.db.readBytes(&db_buffer, bytes_cursor.slot_ptr.slot);
+                const bytes = try bytes_cursor.readBytes(&db_buffer);
                 return try resolve(repo_kind, core_cursor, bytes);
             } else {
                 if (content.len >= hash.SHA1_HEX_LEN) {
@@ -185,7 +185,7 @@ pub fn read(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).Cor
             if (try core_cursor.cursor.readPath(void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = .{ .value = hash.hashBuffer(path) } },
             })) |target_bytes_cursor| {
-                return try core_cursor.cursor.db.readBytes(buffer, target_bytes_cursor.slot_ptr.slot);
+                return try target_bytes_cursor.readBytes(buffer);
             } else {
                 return error.KeyNotFound;
             }
@@ -370,7 +370,7 @@ pub fn updateRecur(
                     if (try cursor.readPath(void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = .{ .value = file_name_hash } },
                     })) |old_content_cursor| {
-                        const old_content = try cursor.db.readBytes(&buffer, old_content_cursor.slot_ptr.slot);
+                        const old_content = try old_content_cursor.readBytes(&buffer);
                         // if it's a ref, update it recursively
                         if (std.mem.startsWith(u8, old_content, REF_START_STR) and old_content.len > REF_START_STR.len) {
                             const ref_name = old_content[REF_START_STR.len..];

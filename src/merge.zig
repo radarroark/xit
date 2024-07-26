@@ -752,7 +752,7 @@ pub const Merge = struct {
                         const source_oid_cursor = (try core_cursor.cursor.readPath(void, &[_]xitdb.PathPart(void){
                             .{ .hash_map_get = .{ .value = hash.hashBuffer("MERGE_HEAD") } },
                         })) orelse return error.MergeHeadNotFound;
-                        const source_oid_slice = try core_cursor.cursor.db.readBytes(&source_oid, source_oid_cursor.slot_ptr.slot);
+                        const source_oid_slice = try source_oid_cursor.readBytes(&source_oid);
                         if (source_oid_slice.len != source_oid.len) {
                             return error.InvalidMergeHead;
                         }
@@ -760,7 +760,7 @@ pub const Merge = struct {
                         const merge_msg_cursor = (try core_cursor.cursor.readPath(void, &[_]xitdb.PathPart(void){
                             .{ .hash_map_get = .{ .value = hash.hashBuffer("MERGE_MSG") } },
                         })) orelse return error.MergeMessageNotFound;
-                        commit_message = try core_cursor.cursor.db.readBytesAlloc(arena.allocator(), MAX_READ_BYTES, merge_msg_cursor.slot_ptr.slot);
+                        commit_message = try merge_msg_cursor.readBytesAlloc(arena.allocator(), MAX_READ_BYTES);
                     },
                 }
 
