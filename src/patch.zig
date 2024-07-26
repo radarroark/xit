@@ -110,6 +110,33 @@ pub fn writePatchesForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo
                 try writer.writeInt(u8, @intFromEnum(ChangeKind.new_node), .big);
                 try writer.writeInt(u64, new_node_count, .big);
                 try patch_entries.append(buffer.items);
+
+                // put content from new node in the value
+                _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
+                    .{ .hash_map_get = .{ .value = hash.hashBuffer("patches") } },
+                    .hash_map_init,
+                    .{ .hash_map_get = .{ .value = patch_hash } },
+                    .array_list_init,
+                    .{ .array_list_get = .append },
+                    .{ .write = .{ .bytes = edit.ins.new_line.text } },
+                });
+
+                // add node id to node-sets
+                var node_id_buffer = std.ArrayList(u8).init(allocator);
+                defer node_id_buffer.deinit();
+                var node_id_writer = node_id_buffer.writer();
+                try node_id_writer.writeInt(NodeIdInt, @bitCast(NodeId{ .patch_id = patch_hash, .node = new_node_count }), .big);
+                const node_id_hash = hash.hashBuffer(node_id_buffer.items);
+                _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
+                    .{ .hash_map_get = .{ .value = hash.hashBuffer("node-sets") } },
+                    .hash_map_init,
+                    .{ .hash_map_get = .{ .value = path_hash } },
+                    .hash_map_init,
+                    .{ .hash_map_get = .{ .key = node_id_hash } },
+                    .{ .write = .{ .bytes = node_id_buffer.items } },
+                });
+
+                new_node_count += 1;
             },
             .del => {
                 try writer.writeInt(u8, @intFromEnum(ChangeKind.delete_node), .big);
@@ -128,35 +155,6 @@ pub fn writePatchesForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo
                 .{ .array_list_get = .append },
                 .{ .write = .{ .bytes = entry } },
             });
-        }
-
-        if (edit == .ins) {
-            // put content from new node in the value
-            _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
-                .{ .hash_map_get = .{ .value = hash.hashBuffer("patches") } },
-                .hash_map_init,
-                .{ .hash_map_get = .{ .value = patch_hash } },
-                .array_list_init,
-                .{ .array_list_get = .append },
-                .{ .write = .{ .bytes = edit.ins.new_line.text } },
-            });
-
-            // add node id to node-sets
-            var node_id_buffer = std.ArrayList(u8).init(allocator);
-            defer node_id_buffer.deinit();
-            var node_id_writer = node_id_buffer.writer();
-            try node_id_writer.writeInt(NodeIdInt, @bitCast(NodeId{ .patch_id = patch_hash, .node = new_node_count }), .big);
-            const node_id_hash = hash.hashBuffer(node_id_buffer.items);
-            _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
-                .{ .hash_map_get = .{ .value = hash.hashBuffer("node-sets") } },
-                .hash_map_init,
-                .{ .hash_map_get = .{ .value = path_hash } },
-                .hash_map_init,
-                .{ .hash_map_get = .{ .key = node_id_hash } },
-                .{ .write = .{ .bytes = node_id_buffer.items } },
-            });
-
-            new_node_count += 1;
         }
     }
 }
