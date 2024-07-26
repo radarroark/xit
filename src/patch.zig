@@ -35,9 +35,10 @@ pub fn patchHash(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
     var h = std.crypto.hash.Sha1.init(.{});
     while (try myers_diff_iter.next()) |edit| {
         defer edit.deinit(allocator);
-        var entry_buffer = std.ArrayList(u8).init(allocator);
-        defer entry_buffer.deinit();
-        var writer = entry_buffer.writer();
+
+        var buffer = std.ArrayList(u8).init(allocator);
+        defer buffer.deinit();
+        var writer = buffer.writer();
 
         switch (edit) {
             .eql => {},
@@ -53,7 +54,7 @@ pub fn patchHash(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
             },
         }
 
-        h.update(entry_buffer.items);
+        h.update(buffer.items);
     }
     try myers_diff_iter.reset();
 
@@ -95,31 +96,39 @@ pub fn writePatchesForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo
 
     while (try myers_diff_iter.next()) |edit| {
         defer edit.deinit(allocator);
-        var entry_buffer = std.ArrayList(u8).init(allocator);
-        defer entry_buffer.deinit();
-        var writer = entry_buffer.writer();
+
+        var patch_entries = std.ArrayList([]const u8).init(allocator);
+        defer patch_entries.deinit();
+
+        var buffer = std.ArrayList(u8).init(allocator);
+        defer buffer.deinit();
+        var writer = buffer.writer();
 
         switch (edit) {
             .eql => {},
             .ins => {
                 try writer.writeInt(u8, @intFromEnum(ChangeKind.new_node), .big);
                 try writer.writeInt(u64, new_node_count, .big);
+                try patch_entries.append(buffer.items);
             },
             .del => {
                 try writer.writeInt(u8, @intFromEnum(ChangeKind.delete_node), .big);
                 try writer.writeInt(u64, edit.del.old_line.num, .big);
+                try patch_entries.append(buffer.items);
             },
         }
 
-        // put change list in the key
-        _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
-            .{ .hash_map_get = .{ .value = hash.hashBuffer("patches") } },
-            .hash_map_init,
-            .{ .hash_map_get = .{ .key = patch_hash } },
-            .array_list_init,
-            .{ .array_list_get = .append },
-            .{ .write = .{ .bytes = entry_buffer.items } },
-        });
+        // put changes in the key
+        for (patch_entries.items) |entry| {
+            _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
+                .{ .hash_map_get = .{ .value = hash.hashBuffer("patches") } },
+                .hash_map_init,
+                .{ .hash_map_get = .{ .key = patch_hash } },
+                .array_list_init,
+                .{ .array_list_get = .append },
+                .{ .write = .{ .bytes = entry } },
+            });
+        }
 
         if (edit == .ins) {
             // put content from new node in the value
