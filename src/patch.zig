@@ -5,18 +5,19 @@ const hash = @import("./hash.zig");
 const st = @import("./status.zig");
 const df = @import("./diff.zig");
 
-pub const NodeId = struct {
-    patch_id: [hash.SHA1_BYTES_LEN]u8,
+const NodeIdInt = u224;
+const NodeId = packed struct {
     node: u64,
+    patch_id: xitdb.Hash,
 };
 
-pub const ChangeKind = enum(u8) {
+const ChangeKind = enum(u8) {
     new_node = 0,
     delete_node = 1,
     new_edge = 2,
 };
 
-pub const Change = union(ChangeKind) {
+const Change = union(ChangeKind) {
     new_node: struct {
         id: NodeId,
         contents: []const u8,
@@ -75,7 +76,7 @@ pub fn writePatchesForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo
         return;
     }
 
-    // init file graph
+    // init node-sets
     const path_hash = hash.hashBuffer(line_iter_pair.path);
     var path_cursor = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
         .{ .hash_map_get = .{ .value = hash.hashBuffer("path-set") } },
@@ -84,7 +85,7 @@ pub fn writePatchesForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo
     });
     try path_cursor.writeBytes(line_iter_pair.path, .once);
     _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
-        .{ .hash_map_get = .{ .value = hash.hashBuffer("file-graphs") } },
+        .{ .hash_map_get = .{ .value = hash.hashBuffer("node-sets") } },
         .hash_map_init,
         .{ .hash_map_get = .{ .key = path_hash } },
         .{ .write = .{ .slot = path_cursor.slot_ptr.slot } },
@@ -120,8 +121,8 @@ pub fn writePatchesForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo
             .{ .write = .{ .bytes = entry_buffer.items } },
         });
 
-        // put content list in the value
         if (edit == .ins) {
+            // put content from new node in the value
             _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("patches") } },
                 .hash_map_init,
@@ -129,6 +130,21 @@ pub fn writePatchesForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo
                 .array_list_init,
                 .{ .array_list_get = .append },
                 .{ .write = .{ .bytes = edit.ins.new_line.text } },
+            });
+
+            // add node id to node-sets
+            var node_id_buffer = std.ArrayList(u8).init(allocator);
+            defer node_id_buffer.deinit();
+            var node_id_writer = node_id_buffer.writer();
+            try node_id_writer.writeInt(NodeIdInt, @bitCast(NodeId{ .patch_id = hash.bytesToHash(&patch_hash), .node = new_node_count }), .big);
+            const node_id_hash = hash.hashBuffer(node_id_buffer.items);
+            _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
+                .{ .hash_map_get = .{ .value = hash.hashBuffer("node-sets") } },
+                .hash_map_init,
+                .{ .hash_map_get = .{ .value = path_hash } },
+                .hash_map_init,
+                .{ .hash_map_get = .{ .key = node_id_hash } },
+                .{ .write = .{ .bytes = node_id_buffer.items } },
             });
 
             new_node_count += 1;
