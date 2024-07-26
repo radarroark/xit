@@ -31,7 +31,7 @@ const Change = union(ChangeKind) {
     },
 };
 
-pub fn patchHash(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, myers_diff_iter: *df.MyersDiffIterator(repo_kind)) ![hash.SHA1_BYTES_LEN]u8 {
+pub fn patchHash(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, myers_diff_iter: *df.MyersDiffIterator(repo_kind)) !xitdb.Hash {
     var h = std.crypto.hash.Sha1.init(.{});
     while (try myers_diff_iter.next()) |edit| {
         defer edit.deinit(allocator);
@@ -59,7 +59,7 @@ pub fn patchHash(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
 
     var patch_hash = [_]u8{0} ** hash.SHA1_BYTES_LEN;
     h.final(&patch_hash);
-    return patch_hash;
+    return hash.hashBuffer(&patch_hash);
 }
 
 pub fn writePatchesForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, line_iter_pair: *df.LineIteratorPair(repo_kind)) !void {
@@ -71,7 +71,7 @@ pub fn writePatchesForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo
     // exit early if patch already exists
     if (try core_cursor.cursor.readPath(void, &[_]xitdb.PathPart(void){
         .{ .hash_map_get = .{ .value = hash.hashBuffer("patches") } },
-        .{ .hash_map_get = .{ .key = hash.bytesToHash(&patch_hash) } },
+        .{ .hash_map_get = .{ .key = patch_hash } },
     })) |_| {
         return;
     }
@@ -115,7 +115,7 @@ pub fn writePatchesForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo
         _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
             .{ .hash_map_get = .{ .value = hash.hashBuffer("patches") } },
             .hash_map_init,
-            .{ .hash_map_get = .{ .key = hash.bytesToHash(&patch_hash) } },
+            .{ .hash_map_get = .{ .key = patch_hash } },
             .array_list_init,
             .{ .array_list_get = .append },
             .{ .write = .{ .bytes = entry_buffer.items } },
@@ -126,7 +126,7 @@ pub fn writePatchesForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo
             _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("patches") } },
                 .hash_map_init,
-                .{ .hash_map_get = .{ .value = hash.bytesToHash(&patch_hash) } },
+                .{ .hash_map_get = .{ .value = patch_hash } },
                 .array_list_init,
                 .{ .array_list_get = .append },
                 .{ .write = .{ .bytes = edit.ins.new_line.text } },
@@ -136,7 +136,7 @@ pub fn writePatchesForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo
             var node_id_buffer = std.ArrayList(u8).init(allocator);
             defer node_id_buffer.deinit();
             var node_id_writer = node_id_buffer.writer();
-            try node_id_writer.writeInt(NodeIdInt, @bitCast(NodeId{ .patch_id = hash.bytesToHash(&patch_hash), .node = new_node_count }), .big);
+            try node_id_writer.writeInt(NodeIdInt, @bitCast(NodeId{ .patch_id = patch_hash, .node = new_node_count }), .big);
             const node_id_hash = hash.hashBuffer(node_id_buffer.items);
             _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("node-sets") } },
