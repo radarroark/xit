@@ -93,6 +93,11 @@ pub fn writePatchesForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo
     });
 
     var new_node_count: u64 = 0;
+    const LastNodeId = struct {
+        id: NodeId,
+        origin: enum { old, new },
+    };
+    var last_node_maybe: ?LastNodeId = null;
 
     while (try myers_diff_iter.next()) |edit| {
         defer edit.deinit(allocator);
@@ -100,16 +105,31 @@ pub fn writePatchesForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo
         var patch_entries = std.ArrayList([]const u8).init(allocator);
         defer patch_entries.deinit();
 
-        var buffer = std.ArrayList(u8).init(allocator);
-        defer buffer.deinit();
-        var writer = buffer.writer();
+        var arena = std.heap.ArenaAllocator.init(allocator);
+        defer arena.deinit();
 
         switch (edit) {
             .eql => {},
             .ins => {
-                try writer.writeInt(u8, @intFromEnum(ChangeKind.new_node), .big);
-                try writer.writeInt(u64, new_node_count, .big);
-                try patch_entries.append(buffer.items);
+                {
+                    var buffer = std.ArrayList(u8).init(arena.allocator());
+                    try buffer.writer().writeInt(u8, @intFromEnum(ChangeKind.new_node), .big);
+                    try buffer.writer().writeInt(u64, new_node_count, .big);
+                    try patch_entries.append(buffer.items);
+                }
+
+                const node_id = NodeId{
+                    .node = new_node_count,
+                    .patch_id = patch_hash,
+                };
+                if (last_node_maybe) |last_node| {
+                    var buffer = std.ArrayList(u8).init(arena.allocator());
+                    try buffer.writer().writeInt(u8, @intFromEnum(ChangeKind.new_edge), .big);
+                    try buffer.writer().writeInt(NodeIdInt, @bitCast(last_node.id), .big); // src
+                    try buffer.writer().writeInt(NodeIdInt, @bitCast(node_id), .big); // dest
+                    try patch_entries.append(buffer.items);
+                }
+                last_node_maybe = .{ .id = node_id, .origin = .new };
 
                 // put content from new node in the value
                 _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
@@ -139,8 +159,9 @@ pub fn writePatchesForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo
                 new_node_count += 1;
             },
             .del => {
-                try writer.writeInt(u8, @intFromEnum(ChangeKind.delete_node), .big);
-                try writer.writeInt(u64, edit.del.old_line.num, .big);
+                var buffer = std.ArrayList(u8).init(arena.allocator());
+                try buffer.writer().writeInt(u8, @intFromEnum(ChangeKind.delete_node), .big);
+                try buffer.writer().writeInt(u64, edit.del.old_line.num, .big);
                 try patch_entries.append(buffer.items);
             },
         }
