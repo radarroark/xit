@@ -5,6 +5,8 @@ const hash = @import("./hash.zig");
 const st = @import("./status.zig");
 const df = @import("./diff.zig");
 
+const MAX_READ_BYTES = 1024; // FIXME: this is arbitrary...
+
 const NodeIdInt = u224;
 const NodeId = packed struct {
     node: u64,
@@ -63,7 +65,7 @@ pub fn patchHash(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
     return hash.hashBuffer(&patch_hash);
 }
 
-pub fn writePatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, line_iter_pair: *df.LineIteratorPair(repo_kind)) !void {
+pub fn writePatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, line_iter_pair: *df.LineIteratorPair(repo_kind)) !xitdb.Hash {
     var myers_diff_iter = try df.MyersDiffIterator(repo_kind).init(allocator, &line_iter_pair.a, &line_iter_pair.b);
     defer myers_diff_iter.deinit();
 
@@ -74,10 +76,18 @@ pub fn writePatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(r
         .{ .hash_map_get = .{ .value = hash.hashBuffer("patches") } },
         .{ .hash_map_get = .{ .key = patch_hash } },
     })) |_| {
-        return;
+        return patch_hash;
     }
 
-    // init node-sets
+    // init patch
+    _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
+        .{ .hash_map_get = .{ .value = hash.hashBuffer("patches") } },
+        .hash_map_init,
+        .{ .hash_map_get = .{ .value = patch_hash } },
+        .array_list_init,
+    });
+
+    // init path set and node set
     const path_hash = hash.hashBuffer(line_iter_pair.path);
     var path_cursor = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
         .{ .hash_map_get = .{ .value = hash.hashBuffer("path-set") } },
@@ -178,6 +188,21 @@ pub fn writePatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(r
             });
         }
     }
+
+    return patch_hash;
+}
+
+pub fn applyPatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, patch_hash: xitdb.Hash) !void {
+    var patch_cursor = (try core_cursor.cursor.readPath(void, &[_]xitdb.PathPart(void){
+        .{ .hash_map_get = .{ .value = hash.hashBuffer("patches") } },
+        .{ .hash_map_get = .{ .value = patch_hash } },
+    })) orelse return error.PatchNotFound;
+
+    var iter = try patch_cursor.iter();
+    while (try iter.next()) |*next_cursor| {
+        const change = try next_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
+        defer allocator.free(change);
+    }
 }
 
 pub fn writePatch(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator) !void {
@@ -193,6 +218,7 @@ pub fn writePatch(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kin
     while (try file_iter.next()) |*line_iter_pair_ptr| {
         var line_iter_pair = line_iter_pair_ptr.*;
         defer line_iter_pair.deinit();
-        try writePatchForFile(repo_kind, core_cursor, allocator, &line_iter_pair);
+        const patch_hash = try writePatchForFile(repo_kind, core_cursor, allocator, &line_iter_pair);
+        try applyPatchForFile(repo_kind, core_cursor, allocator, patch_hash);
     }
 }
