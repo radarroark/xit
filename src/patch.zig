@@ -73,21 +73,27 @@ pub fn writePatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(r
 
     // exit early if patch already exists
     if (try core_cursor.cursor.readPath(void, &[_]xitdb.PathPart(void){
-        .{ .hash_map_get = .{ .value = hash.hashBuffer("patches") } },
+        .{ .hash_map_get = .{ .value = hash.hashBuffer("change-lists") } },
         .{ .hash_map_get = .{ .key = patch_hash } },
     })) |_| {
         return patch_hash;
     }
 
-    // init patch
-    _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
-        .{ .hash_map_get = .{ .value = hash.hashBuffer("patches") } },
+    // init change set
+    var change_list_cursor = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
+        .{ .hash_map_get = .{ .value = hash.hashBuffer("change-lists") } },
+        .hash_map_init,
+        .{ .hash_map_get = .{ .key = patch_hash } },
+        .array_list_init,
+    });
+    var change_content_list_cursor = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
+        .{ .hash_map_get = .{ .value = hash.hashBuffer("change-lists") } },
         .hash_map_init,
         .{ .hash_map_get = .{ .value = patch_hash } },
         .array_list_init,
     });
 
-    // init path set and node set
+    // get path slot
     const path_hash = hash.hashBuffer(line_iter_pair.path);
     var path_cursor = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
         .{ .hash_map_get = .{ .value = hash.hashBuffer("path-set") } },
@@ -95,11 +101,20 @@ pub fn writePatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(r
         .{ .hash_map_get = .{ .key = path_hash } },
     });
     try path_cursor.writeBytes(line_iter_pair.path, .once);
+    const path_slot = path_cursor.slot_ptr.slot;
+
+    // init node set
     _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
         .{ .hash_map_get = .{ .value = hash.hashBuffer("node-sets") } },
         .hash_map_init,
         .{ .hash_map_get = .{ .key = path_hash } },
-        .{ .write = .{ .slot = path_cursor.slot_ptr.slot } },
+        .{ .write = .{ .slot = path_slot } },
+    });
+    var node_set_cursor = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
+        .{ .hash_map_get = .{ .value = hash.hashBuffer("node-sets") } },
+        .hash_map_init,
+        .{ .hash_map_get = .{ .value = path_hash } },
+        .hash_map_init,
     });
 
     var new_node_count: u64 = 0;
@@ -142,11 +157,7 @@ pub fn writePatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(r
                 last_node_maybe = .{ .id = node_id, .origin = .new };
 
                 // put content from new node in the value
-                _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
-                    .{ .hash_map_get = .{ .value = hash.hashBuffer("patches") } },
-                    .hash_map_init,
-                    .{ .hash_map_get = .{ .value = patch_hash } },
-                    .array_list_init,
+                _ = try change_content_list_cursor.writePath(void, &[_]xitdb.PathPart(void){
                     .{ .array_list_get = .append },
                     .{ .write = .{ .bytes = edit.ins.new_line.text } },
                 });
@@ -157,11 +168,7 @@ pub fn writePatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(r
                 var node_id_writer = node_id_buffer.writer();
                 try node_id_writer.writeInt(NodeIdInt, @bitCast(NodeId{ .patch_id = patch_hash, .node = new_node_count }), .big);
                 const node_id_hash = hash.hashBuffer(node_id_buffer.items);
-                _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
-                    .{ .hash_map_get = .{ .value = hash.hashBuffer("node-sets") } },
-                    .hash_map_init,
-                    .{ .hash_map_get = .{ .value = path_hash } },
-                    .hash_map_init,
+                _ = try node_set_cursor.writePath(void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = .{ .key = node_id_hash } },
                     .{ .write = .{ .bytes = node_id_buffer.items } },
                 });
@@ -178,11 +185,7 @@ pub fn writePatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(r
 
         // put changes in the key
         for (patch_entries.items) |entry| {
-            _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
-                .{ .hash_map_get = .{ .value = hash.hashBuffer("patches") } },
-                .hash_map_init,
-                .{ .hash_map_get = .{ .key = patch_hash } },
-                .array_list_init,
+            _ = try change_list_cursor.writePath(void, &[_]xitdb.PathPart(void){
                 .{ .array_list_get = .append },
                 .{ .write = .{ .bytes = entry } },
             });
@@ -193,12 +196,12 @@ pub fn writePatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(r
 }
 
 pub fn applyPatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, patch_hash: xitdb.Hash) !void {
-    var patch_cursor = (try core_cursor.cursor.readPath(void, &[_]xitdb.PathPart(void){
-        .{ .hash_map_get = .{ .value = hash.hashBuffer("patches") } },
-        .{ .hash_map_get = .{ .value = patch_hash } },
+    var change_list_cursor = (try core_cursor.cursor.readPath(void, &[_]xitdb.PathPart(void){
+        .{ .hash_map_get = .{ .value = hash.hashBuffer("change-lists") } },
+        .{ .hash_map_get = .{ .key = patch_hash } },
     })) orelse return error.PatchNotFound;
 
-    var iter = try patch_cursor.iter();
+    var iter = try change_list_cursor.iter();
     while (try iter.next()) |*next_cursor| {
         const change = try next_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
         defer allocator.free(change);
