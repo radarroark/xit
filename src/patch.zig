@@ -52,7 +52,7 @@ pub fn patchHash(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
             },
             .del => {
                 try writer.writeInt(u8, @intFromEnum(ChangeKind.delete_node), .big);
-                try writer.writeInt(u64, edit.del.old_line.num, .big);
+                // TODO: store the node id of the line deleted at edit.del.old_line.num
             },
         }
 
@@ -178,7 +178,7 @@ pub fn writePatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(r
             .del => {
                 var buffer = std.ArrayList(u8).init(arena.allocator());
                 try buffer.writer().writeInt(u8, @intFromEnum(ChangeKind.delete_node), .big);
-                try buffer.writer().writeInt(u64, edit.del.old_line.num, .big);
+                // TODO: store the node id of the line deleted at edit.del.old_line.num
                 try patch_entries.append(buffer.items);
             },
         }
@@ -203,8 +203,25 @@ pub fn applyPatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(r
 
     var iter = try change_list_cursor.iter();
     while (try iter.next()) |*next_cursor| {
-        const change = try next_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
-        defer allocator.free(change);
+        const change_buffer = try next_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
+        defer allocator.free(change_buffer);
+
+        var stream = std.io.fixedBufferStream(change_buffer);
+        var reader = stream.reader();
+        const change_kind = try reader.readInt(u8, .big);
+        switch (try std.meta.intToEnum(ChangeKind, change_kind)) {
+            .new_node => {
+                const node = try reader.readInt(u64, .big);
+                _ = node;
+            },
+            .delete_node => {},
+            .new_edge => {
+                const src_node_id = try reader.readInt(NodeIdInt, .big);
+                _ = src_node_id;
+                const dest_node_id = try reader.readInt(NodeIdInt, .big);
+                _ = dest_node_id;
+            },
+        }
     }
 }
 
