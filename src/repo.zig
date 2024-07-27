@@ -489,7 +489,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         result: *[hash.SHA1_HEX_LEN]u8,
 
                         pub fn run(ctx_self: @This(), cursor: *xitdb.Cursor(.file)) !void {
-                            try pch.writePatches(repo_kind, .{ .core = ctx_self.core, .cursor = cursor }, ctx_self.allocator);
+                            try pch.writePatch(repo_kind, .{ .core = ctx_self.core, .cursor = cursor }, ctx_self.allocator);
                             ctx_self.result.* = try obj.writeCommit(repo_kind, .{ .core = ctx_self.core, .cursor = cursor }, ctx_self.allocator, ctx_self.parent_oids_maybe, ctx_self.message_maybe);
                         }
                     };

@@ -63,7 +63,7 @@ pub fn patchHash(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
     return hash.hashBuffer(&patch_hash);
 }
 
-pub fn writePatchesForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, line_iter_pair: *df.LineIteratorPair(repo_kind)) !void {
+pub fn writePatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, line_iter_pair: *df.LineIteratorPair(repo_kind)) !void {
     var myers_diff_iter = try df.MyersDiffIterator(repo_kind).init(allocator, &line_iter_pair.a, &line_iter_pair.b);
     defer myers_diff_iter.deinit();
 
@@ -180,7 +180,7 @@ pub fn writePatchesForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo
     }
 }
 
-pub fn writePatches(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator) !void {
+pub fn writePatch(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator) !void {
     comptime std.debug.assert(repo_kind == .xit);
 
     var file_iter = blk: {
@@ -193,6 +193,6 @@ pub fn writePatches(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_k
     while (try file_iter.next()) |*line_iter_pair_ptr| {
         var line_iter_pair = line_iter_pair_ptr.*;
         defer line_iter_pair.deinit();
-        try writePatchesForFile(repo_kind, core_cursor, allocator, &line_iter_pair);
+        try writePatchForFile(repo_kind, core_cursor, allocator, &line_iter_pair);
     }
 }
