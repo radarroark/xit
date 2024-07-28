@@ -13,10 +13,11 @@ const NodeId = packed struct {
     patch_id: xitdb.Hash,
 };
 
+// reordering is a breaking change
 const ChangeKind = enum(u8) {
-    new_node = 0,
-    delete_node = 1,
-    new_edge = 2,
+    new_node,
+    delete_node,
+    new_edge,
 };
 
 const Change = union(ChangeKind) {
