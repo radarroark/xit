@@ -17,21 +17,6 @@ const NodeId = packed struct {
 const ChangeKind = enum(u8) {
     new_node,
     delete_node,
-    new_edge,
-};
-
-const Change = union(ChangeKind) {
-    new_node: struct {
-        id: NodeId,
-        contents: []const u8,
-    },
-    delete_node: struct {
-        id: NodeId,
-    },
-    new_edge: struct {
-        src: NodeId,
-        dest: NodeId,
-    },
 };
 
 pub fn patchHash(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, myers_diff_iter: *df.MyersDiffIterator(repo_kind)) !xitdb.Hash {
@@ -117,6 +102,9 @@ pub fn writePatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(r
                     var buffer = std.ArrayList(u8).init(arena.allocator());
                     try buffer.writer().writeInt(u8, @intFromEnum(ChangeKind.new_node), .big);
                     try buffer.writer().writeInt(u64, new_node_count, .big);
+                    if (last_node_maybe) |last_node| {
+                        try buffer.writer().writeInt(NodeIdInt, @bitCast(last_node.id), .big);
+                    }
                     try patch_entries.append(buffer.items);
                 }
 
@@ -124,13 +112,6 @@ pub fn writePatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(r
                     .node = new_node_count,
                     .patch_id = patch_hash,
                 };
-                if (last_node_maybe) |last_node| {
-                    var buffer = std.ArrayList(u8).init(arena.allocator());
-                    try buffer.writer().writeInt(u8, @intFromEnum(ChangeKind.new_edge), .big);
-                    try buffer.writer().writeInt(NodeIdInt, @bitCast(last_node.id), .big); // src
-                    try buffer.writer().writeInt(NodeIdInt, @bitCast(node_id), .big); // dest
-                    try patch_entries.append(buffer.items);
-                }
                 last_node_maybe = .{ .id = node_id, .origin = .new };
 
                 // put content from new node in the value
@@ -203,19 +184,30 @@ pub fn applyPatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(r
         switch (try std.meta.intToEnum(ChangeKind, change_kind)) {
             .new_node => {
                 const node = try reader.readInt(u64, .big);
+                const node_id = NodeId{ .patch_id = patch_hash, .node = node };
+                const parent_node_id: NodeId = if (try stream.getPos() == try stream.getEndPos())
+                    @bitCast(@as(NodeIdInt, 0))
+                else
+                    @bitCast(try reader.readInt(NodeIdInt, .big));
 
                 var node_id_buffer = std.ArrayList(u8).init(allocator);
                 defer node_id_buffer.deinit();
                 var node_id_writer = node_id_buffer.writer();
-                try node_id_writer.writeInt(NodeIdInt, @bitCast(NodeId{ .patch_id = patch_hash, .node = node }), .big);
+                try node_id_writer.writeInt(NodeIdInt, @bitCast(node_id), .big);
+
+                var parent_node_id_buffer = std.ArrayList(u8).init(allocator);
+                defer parent_node_id_buffer.deinit();
+                var parent_node_id_writer = parent_node_id_buffer.writer();
+                try parent_node_id_writer.writeInt(NodeIdInt, @bitCast(parent_node_id), .big);
+
+                const parent_node_id_hash = hash.hashBuffer(parent_node_id_buffer.items);
+
+                _ = try file_graph_cursor.writePath(void, &[_]xitdb.PathPart(void){
+                    .{ .hash_map_get = .{ .value = parent_node_id_hash } },
+                    .{ .write = .{ .bytes = node_id_buffer.items } },
+                });
             },
             .delete_node => {},
-            .new_edge => {
-                const src_node_id = try reader.readInt(NodeIdInt, .big);
-                _ = src_node_id;
-                const dest_node_id = try reader.readInt(NodeIdInt, .big);
-                _ = dest_node_id;
-            },
         }
     }
 }
