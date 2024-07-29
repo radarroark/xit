@@ -194,17 +194,36 @@ pub fn applyPatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(r
                 defer node_id_buffer.deinit();
                 var node_id_writer = node_id_buffer.writer();
                 try node_id_writer.writeInt(NodeIdInt, @bitCast(node_id), .big);
+                const node_id_hash = hash.hashBuffer(node_id_buffer.items);
 
                 var parent_node_id_buffer = std.ArrayList(u8).init(allocator);
                 defer parent_node_id_buffer.deinit();
                 var parent_node_id_writer = parent_node_id_buffer.writer();
                 try parent_node_id_writer.writeInt(NodeIdInt, @bitCast(parent_node_id), .big);
-
                 const parent_node_id_hash = hash.hashBuffer(parent_node_id_buffer.items);
 
                 _ = try file_graph_cursor.writePath(void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = .{ .value = parent_node_id_hash } },
+                    .hash_map_init,
+                    .{ .hash_map_get = .{ .key = node_id_hash } },
                     .{ .write = .{ .bytes = node_id_buffer.items } },
+                });
+
+                const node_cursor = (try file_graph_cursor.readPath(void, &[_]xitdb.PathPart(void){
+                    .{ .hash_map_get = .{ .value = parent_node_id_hash } },
+                })) orelse return error.ExpectedCursor;
+                var node_iter = try node_cursor.iter();
+                defer node_iter.deinit();
+                var node_count: u64 = 0;
+                while (try node_iter.next()) |_| {
+                    node_count += 1;
+                }
+
+                _ = try file_graph_cursor.writePath(void, &[_]xitdb.PathPart(void){
+                    .{ .hash_map_get = .{ .value = parent_node_id_hash } },
+                    .hash_map_init,
+                    .{ .hash_map_get = .{ .value = node_id_hash } },
+                    .{ .write = .{ .uint = node_count } },
                 });
             },
             .delete_node => {},
