@@ -7,7 +7,7 @@ const df = @import("./diff.zig");
 
 const MAX_READ_BYTES = 1024; // FIXME: this is arbitrary...
 
-const NodeIdInt = u224;
+const NodeIdInt = @typeInfo(NodeId).Struct.backing_integer.?;
 const NodeId = packed struct {
     node: u64,
     patch_id: xitdb.Hash,
