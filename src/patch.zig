@@ -125,7 +125,13 @@ pub fn writePatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(r
             .del => {
                 var buffer = std.ArrayList(u8).init(arena.allocator());
                 try buffer.writer().writeInt(u8, @intFromEnum(ChangeKind.delete_node), .big);
-                // TODO: store the node id of the line deleted at edit.del.old_line.num
+                // TODO: store the node id of the line deleted at `edit.del.old_line.num`.
+                // getting this node id is tricky. we need to query the file graph for the
+                // node id at line `edit.del.old_line.num`, but currently it is a hash map
+                // that cannot be queried by index (i.e., line number). it can only be
+                // queried by the hash of the node id it depends on. keeping the nodes
+                // associated with the correct line number in the face of random insertions
+                // is a difficult problem that i haven't figured out yet...
                 try patch_entries.append(buffer.items);
             },
         }
