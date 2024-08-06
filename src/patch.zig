@@ -149,44 +149,23 @@ fn patchHash(
 fn writePatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, line_iter_pair: *df.LineIteratorPair(repo_kind)) !xitdb.Hash {
     const patch_hash = try patchHash(repo_kind, core_cursor, allocator, line_iter_pair);
 
-    // get path slot
-    const path_hash = hash.hashBuffer(line_iter_pair.path);
-    var path_cursor = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
-        .{ .hash_map_get = .{ .value = hash.hashBuffer("path-set") } },
-        .hash_map_init,
-        .{ .hash_map_get = .{ .key = path_hash } },
-    });
-    try path_cursor.writeBytes(line_iter_pair.path, .once);
-    const path_slot = path_cursor.slot_ptr.slot;
-
     // exit early if patch already exists
     if (try core_cursor.cursor.readPath(void, &[_]xitdb.PathPart(void){
-        .{ .hash_map_get = .{ .value = hash.hashBuffer("path->patch-id->change-list") } },
-        .{ .hash_map_get = .{ .value = path_hash } },
+        .{ .hash_map_get = .{ .value = hash.hashBuffer("patch-id->change-list") } },
         .{ .hash_map_get = .{ .key = patch_hash } },
     })) |_| {
         return patch_hash;
     }
 
     // init change list
-    _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
-        .{ .hash_map_get = .{ .value = hash.hashBuffer("path->patch-id->change-list") } },
-        .hash_map_init,
-        .{ .hash_map_get = .{ .key = path_hash } },
-        .{ .write = .{ .slot = path_slot } },
-    });
     var change_list = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
-        .{ .hash_map_get = .{ .value = hash.hashBuffer("path->patch-id->change-list") } },
-        .hash_map_init,
-        .{ .hash_map_get = .{ .value = path_hash } },
+        .{ .hash_map_get = .{ .value = hash.hashBuffer("patch-id->change-list") } },
         .hash_map_init,
         .{ .hash_map_get = .{ .key = patch_hash } },
         .array_list_init,
     });
     var change_content_list = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
-        .{ .hash_map_get = .{ .value = hash.hashBuffer("path->patch-id->change-list") } },
-        .hash_map_init,
-        .{ .hash_map_get = .{ .value = path_hash } },
+        .{ .hash_map_get = .{ .value = hash.hashBuffer("patch-id->change-list") } },
         .hash_map_init,
         .{ .hash_map_get = .{ .value = patch_hash } },
         .array_list_init,
@@ -232,8 +211,7 @@ fn applyPatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_
     const path_slot = path_cursor.slot_ptr.slot;
 
     var change_list = (try core_cursor.cursor.readPath(void, &[_]xitdb.PathPart(void){
-        .{ .hash_map_get = .{ .value = hash.hashBuffer("path->patch-id->change-list") } },
-        .{ .hash_map_get = .{ .value = path_hash } },
+        .{ .hash_map_get = .{ .value = hash.hashBuffer("patch-id->change-list") } },
         .{ .hash_map_get = .{ .key = patch_hash } },
     })) orelse return error.PatchNotFound;
 
