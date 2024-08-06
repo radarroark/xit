@@ -34,6 +34,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             .xit => struct {
                 repo_dir: std.fs.Dir,
                 xit_dir: std.fs.Dir,
+                db_file: std.fs.File,
                 db: xitdb.Database(.file),
 
                 pub fn latestCursor(self: *@This()) !xitdb.Cursor(.file) {
@@ -92,6 +93,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         .core = .{
                             .repo_dir = repo_dir,
                             .xit_dir = xit_dir,
+                            .db_file = db_file,
                             .db = try xitdb.Database(.file).init(allocator, .{ .file = db_file }),
                         },
                         .init_opts = opts,
@@ -180,20 +182,18 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     var xit_dir = try repo_dir.makeOpenPath(".xit", .{});
                     errdefer xit_dir.close();
 
-                    // make the db
-                    var db = blk: {
-                        const db_file = try xit_dir.createFile("db", .{ .exclusive = true, .lock = .exclusive, .read = true });
-                        errdefer db_file.close();
-                        break :blk try xitdb.Database(.file).init(allocator, .{ .file = db_file });
-                    };
-                    errdefer db.deinit();
+                    // create the db file
+                    const db_file = try xit_dir.createFile("db", .{ .exclusive = true, .lock = .exclusive, .read = true });
+                    errdefer db_file.close();
 
+                    // make the db
                     var self = Repo(repo_kind){
                         .allocator = allocator,
                         .core = .{
                             .repo_dir = repo_dir,
                             .xit_dir = xit_dir,
-                            .db = db,
+                            .db_file = db_file,
+                            .db = try xitdb.Database(.file).init(allocator, .{ .file = db_file }),
                         },
                         .init_opts = .{ .cwd = dir },
                     };
@@ -225,8 +225,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     self.core.repo_dir.close();
                 },
                 .xit => {
-                    self.core.db.deinit();
                     self.core.xit_dir.close();
+                    self.core.db_file.close();
                     self.core.repo_dir.close();
                 },
             }
