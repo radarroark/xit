@@ -273,6 +273,16 @@ fn applyPatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_
                     .{ .write = .{ .bytes = &node_id_bytes } },
                 });
 
+                if (try child_to_parent.readPath(void, &[_]xitdb.PathPart(void){
+                    .{ .hash_map_get = .{ .value = node_id_hash } },
+                })) |*parent_cursor| {
+                    const existing_parent_node_id_bytes = try parent_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
+                    defer allocator.free(existing_parent_node_id_bytes);
+                    if (!std.mem.eql(u8, existing_parent_node_id_bytes, &parent_node_id_bytes)) {
+                        return error.ChildNodeAlreadyExists;
+                    }
+                }
+
                 _ = try child_to_parent.writePath(void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = .{ .value = node_id_hash } },
                     .{ .write = .{ .bytes = &parent_node_id_bytes } },
