@@ -20,7 +20,7 @@ const ChangeKind = enum(u8) {
     delete_node,
 };
 
-const first_node_id: NodeId = @bitCast(@as(NodeIdInt, 0));
+const FIRST_NODE_ID_INT: NodeIdInt = 0;
 
 /// TODO: turn this into an iterator all entries don't need to be in memory at the same time
 fn createPatchEntries(
@@ -69,7 +69,31 @@ fn createPatchEntries(
         defer edit.deinit(allocator);
 
         switch (edit) {
-            .eql => {},
+            .eql => {
+                const node_list = node_list_maybe orelse return error.NodeListNotFound;
+                const node_id_cursor = (try node_list.readPath(void, &[_]xitdb.PathPart(void){
+                    .{ .array_list_get = .{ .index = edit.eql.old_line.num - 1 } },
+                })) orelse return error.ExpectedNode;
+
+                const node_id_bytes = try node_id_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
+                defer allocator.free(node_id_bytes);
+
+                var stream = std.io.fixedBufferStream(node_id_bytes);
+                var reader = stream.reader();
+                const node_id: NodeId = @bitCast(try reader.readInt(NodeIdInt, .big));
+
+                if (last_node_maybe) |last_node| {
+                    if (last_node.origin == .new) {
+                        var buffer = std.ArrayList(u8).init(arena.allocator());
+                        try buffer.writer().writeInt(u8, @intFromEnum(ChangeKind.new_edge), .big);
+                        try buffer.writer().writeInt(NodeIdInt, @bitCast(node_id), .big);
+                        try buffer.writer().writeInt(NodeIdInt, @bitCast(last_node.id), .big);
+                        try patch_entries.append(buffer.items);
+                    }
+                }
+
+                last_node_maybe = .{ .id = node_id, .origin = .old };
+            },
             .ins => {
                 const node_id = NodeId{
                     .node = new_node_count,
@@ -82,7 +106,7 @@ fn createPatchEntries(
                 if (last_node_maybe) |last_node| {
                     try buffer.writer().writeInt(NodeIdInt, @bitCast(last_node.id), .big);
                 } else {
-                    try buffer.writer().writeInt(NodeIdInt, @bitCast(first_node_id), .big);
+                    try buffer.writer().writeInt(NodeIdInt, FIRST_NODE_ID_INT, .big);
                 }
                 try patch_entries.append(buffer.items);
 
@@ -266,22 +290,26 @@ fn applyPatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_
                 const node_id_hash = hash.hashBuffer(&node_id_bytes);
                 const parent_node_id_hash = hash.hashBuffer(&parent_node_id_bytes);
 
+                // if child has an existing parent, remove it
+                if (try child_to_parent.readPath(void, &[_]xitdb.PathPart(void){
+                    .{ .hash_map_get = .{ .value = node_id_hash } },
+                })) |*existing_parent_cursor| {
+                    const existing_parent_node_id_bytes = try existing_parent_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
+                    defer allocator.free(existing_parent_node_id_bytes);
+                    const existing_parent_node_id_hash = hash.hashBuffer(existing_parent_node_id_bytes);
+                    _ = try parent_to_children.writePath(void, &[_]xitdb.PathPart(void){
+                        .{ .hash_map_get = .{ .value = existing_parent_node_id_hash } },
+                        .hash_map_init,
+                        .{ .hash_map_remove = node_id_hash },
+                    });
+                }
+
                 _ = try parent_to_children.writePath(void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = .{ .value = parent_node_id_hash } },
                     .hash_map_init,
                     .{ .hash_map_get = .{ .key = node_id_hash } },
                     .{ .write = .{ .bytes = &node_id_bytes } },
                 });
-
-                if (try child_to_parent.readPath(void, &[_]xitdb.PathPart(void){
-                    .{ .hash_map_get = .{ .value = node_id_hash } },
-                })) |*parent_cursor| {
-                    const existing_parent_node_id_bytes = try parent_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
-                    defer allocator.free(existing_parent_node_id_bytes);
-                    if (!std.mem.eql(u8, existing_parent_node_id_bytes, &parent_node_id_bytes)) {
-                        return error.ChildNodeAlreadyExists;
-                    }
-                }
 
                 _ = try child_to_parent.writePath(void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = .{ .value = node_id_hash } },
@@ -329,17 +357,14 @@ fn applyPatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_
         .array_list_init,
     });
 
-    var current_node_id = first_node_id;
+    var current_node_id_int = FIRST_NODE_ID_INT;
 
     while (true) {
-        var node_id_buffer = std.ArrayList(u8).init(allocator);
-        defer node_id_buffer.deinit();
-        var node_id_writer = node_id_buffer.writer();
-        try node_id_writer.writeInt(NodeIdInt, @bitCast(current_node_id), .big);
-        const node_id_hash = hash.hashBuffer(node_id_buffer.items);
+        const current_node_id_bytes = try hash.numToBytes(NodeIdInt, current_node_id_int);
+        const current_node_id_hash = hash.hashBuffer(&current_node_id_bytes);
 
         if (try parent_to_children.readPath(void, &[_]xitdb.PathPart(void){
-            .{ .hash_map_get = .{ .value = node_id_hash } },
+            .{ .hash_map_get = .{ .value = current_node_id_hash } },
         })) |child_node_id_set| {
             var count: usize = 0;
             {
@@ -376,7 +401,7 @@ fn applyPatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_
 
                 var stream = std.io.fixedBufferStream(child_node_id_bytes);
                 var reader = stream.reader();
-                current_node_id = @bitCast(try reader.readInt(NodeIdInt, .big));
+                current_node_id_int = try reader.readInt(NodeIdInt, .big);
             }
         } else {
             break;
