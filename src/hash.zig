@@ -64,3 +64,11 @@ pub fn hexToBytes(hex_buffer: [SHA1_HEX_LEN]u8) ![SHA1_BYTES_LEN]u8 {
     _ = try std.fmt.hexToBytes(&bytes, &hex_buffer);
     return bytes;
 }
+
+pub fn numToBytes(comptime T: type, num: T) ![@bitSizeOf(T) / 8]u8 {
+    var bytes = [_]u8{0} ** (@bitSizeOf(T) / 8);
+    var stream = std.io.fixedBufferStream(&bytes);
+    var writer = stream.writer();
+    try writer.writeInt(T, @bitCast(num), .big);
+    return bytes;
+}

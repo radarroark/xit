@@ -16,9 +16,11 @@ const NodeId = packed struct {
 
 // reordering is a breaking change
 const ChangeKind = enum(u8) {
-    new_node,
+    new_edge,
     delete_node,
 };
+
+const first_node_id: NodeId = @bitCast(@as(NodeIdInt, 0));
 
 /// TODO: turn this into an iterator all entries don't need to be in memory at the same time
 fn createPatchEntries(
@@ -69,20 +71,21 @@ fn createPatchEntries(
         switch (edit) {
             .eql => {},
             .ins => {
-                {
-                    var buffer = std.ArrayList(u8).init(arena.allocator());
-                    try buffer.writer().writeInt(u8, @intFromEnum(ChangeKind.new_node), .big);
-                    try buffer.writer().writeInt(u64, new_node_count, .big);
-                    if (last_node_maybe) |last_node| {
-                        try buffer.writer().writeInt(NodeIdInt, @bitCast(last_node.id), .big);
-                    }
-                    try patch_entries.append(buffer.items);
-                }
-
                 const node_id = NodeId{
                     .node = new_node_count,
                     .patch_id = patch_hash,
                 };
+
+                var buffer = std.ArrayList(u8).init(arena.allocator());
+                try buffer.writer().writeInt(u8, @intFromEnum(ChangeKind.new_edge), .big);
+                try buffer.writer().writeInt(NodeIdInt, @bitCast(node_id), .big);
+                if (last_node_maybe) |last_node| {
+                    try buffer.writer().writeInt(NodeIdInt, @bitCast(last_node.id), .big);
+                } else {
+                    try buffer.writer().writeInt(NodeIdInt, @bitCast(first_node_id), .big);
+                }
+                try patch_entries.append(buffer.items);
+
                 last_node_maybe = .{ .id = node_id, .origin = .new };
 
                 const content = try arena.allocator().dupe(u8, edit.ins.new_line.text);
@@ -243,8 +246,6 @@ fn applyPatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_
         .hash_map_init,
     });
 
-    const first_node_id: NodeId = @bitCast(@as(NodeIdInt, 0));
-
     var iter = try change_list.iter();
     defer iter.deinit();
     while (try iter.next()) |*next_cursor| {
@@ -255,46 +256,32 @@ fn applyPatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_
         var reader = stream.reader();
         const change_kind = try reader.readInt(u8, .big);
         switch (try std.meta.intToEnum(ChangeKind, change_kind)) {
-            .new_node => {
-                const node = try reader.readInt(u64, .big);
-                const node_id = NodeId{ .patch_id = patch_hash, .node = node };
-                const parent_node_id: NodeId = if (try stream.getPos() == try stream.getEndPos())
-                    first_node_id
-                else
-                    @bitCast(try reader.readInt(NodeIdInt, .big));
+            .new_edge => {
+                const node_id_int = try reader.readInt(NodeIdInt, .big);
+                const parent_node_id_int = try reader.readInt(NodeIdInt, .big);
 
-                var node_id_buffer = std.ArrayList(u8).init(allocator);
-                defer node_id_buffer.deinit();
-                var node_id_writer = node_id_buffer.writer();
-                try node_id_writer.writeInt(NodeIdInt, @bitCast(node_id), .big);
-                const node_id_hash = hash.hashBuffer(node_id_buffer.items);
+                const node_id_bytes = try hash.numToBytes(NodeIdInt, node_id_int);
+                const parent_node_id_bytes = try hash.numToBytes(NodeIdInt, parent_node_id_int);
 
-                var parent_node_id_buffer = std.ArrayList(u8).init(allocator);
-                defer parent_node_id_buffer.deinit();
-                var parent_node_id_writer = parent_node_id_buffer.writer();
-                try parent_node_id_writer.writeInt(NodeIdInt, @bitCast(parent_node_id), .big);
-                const parent_node_id_hash = hash.hashBuffer(parent_node_id_buffer.items);
+                const node_id_hash = hash.hashBuffer(&node_id_bytes);
+                const parent_node_id_hash = hash.hashBuffer(&parent_node_id_bytes);
 
                 _ = try parent_to_children.writePath(void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = .{ .value = parent_node_id_hash } },
                     .hash_map_init,
                     .{ .hash_map_get = .{ .key = node_id_hash } },
-                    .{ .write = .{ .bytes = node_id_buffer.items } },
+                    .{ .write = .{ .bytes = &node_id_bytes } },
                 });
 
                 _ = try child_to_parent.writePath(void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = .{ .value = node_id_hash } },
-                    .{ .write = .{ .bytes = parent_node_id_buffer.items } },
+                    .{ .write = .{ .bytes = &parent_node_id_bytes } },
                 });
             },
             .delete_node => {
-                const node_id: NodeId = @bitCast(try reader.readInt(NodeIdInt, .big));
-
-                var node_id_buffer = std.ArrayList(u8).init(allocator);
-                defer node_id_buffer.deinit();
-                var node_id_writer = node_id_buffer.writer();
-                try node_id_writer.writeInt(NodeIdInt, @bitCast(node_id), .big);
-                const node_id_hash = hash.hashBuffer(node_id_buffer.items);
+                const node_id_int = try reader.readInt(NodeIdInt, .big);
+                const node_id_bytes = try hash.numToBytes(NodeIdInt, node_id_int);
+                const node_id_hash = hash.hashBuffer(&node_id_bytes);
 
                 var parent_cursor = (try child_to_parent.readPath(void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = .{ .value = node_id_hash } },
@@ -306,6 +293,10 @@ fn applyPatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_
 
                 _ = try parent_to_children.writePath(void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = .{ .value = parent_node_id_hash } },
+                    .{ .hash_map_remove = node_id_hash },
+                });
+
+                _ = try child_to_parent.writePath(void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_remove = node_id_hash },
                 });
             },
