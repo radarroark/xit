@@ -10,10 +10,6 @@ const obj = @import("../object.zig");
 const mrg = @import("../merge.zig");
 const df = @import("../diff.zig");
 
-fn expectEqual(expected: anytype, actual: anytype) !void {
-    try std.testing.expectEqual(@as(@TypeOf(actual), expected), actual);
-}
-
 fn addFile(comptime repo_kind: rp.RepoKind, repo: *rp.Repo(repo_kind), path: []const u8, content: []const u8) !void {
     if (std.fs.path.dirname(path)) |parent_path| {
         try repo.core.repo_dir.makePath(parent_path);
@@ -77,7 +73,7 @@ fn testSimple(comptime repo_kind: rp.RepoKind) !void {
         defer commit_object.deinit();
         _ = oid_set.swapRemove(&commit_object.oid);
     }
-    try expectEqual(0, oid_set.count());
+    try std.testing.expectEqual(0, oid_set.count());
 }
 
 test "simple" {
@@ -192,7 +188,7 @@ fn testMerge(comptime repo_kind: rp.RepoKind) !void {
         try std.testing.expect(.fast_forward == merge_result.data);
 
         const head_oid = try ref.readHead(repo_kind, core_cursor);
-        try expectEqual(commit_k, head_oid);
+        try std.testing.expectEqual(commit_k, head_oid);
 
         // make sure file from commit k exists
         var master_md = try repo.core.repo_dir.openFile("master.md", .{});

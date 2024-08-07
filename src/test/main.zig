@@ -17,10 +17,6 @@ const c = @cImport({
     @cInclude("git2.h");
 });
 
-fn expectEqual(expected: anytype, actual: anytype) !void {
-    try std.testing.expectEqual(@as(@TypeOf(actual), expected), actual);
-}
-
 fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     const allocator = std.testing.allocator;
     const temp_dir_name = "temp-test-main";
@@ -191,15 +187,15 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 // read the commit with libgit
                 {
                     var repo: ?*c.git_repository = null;
-                    try expectEqual(0, c.git_repository_open(&repo, repo_path));
+                    try std.testing.expectEqual(0, c.git_repository_open(&repo, repo_path));
                     defer c.git_repository_free(repo);
                     var head: ?*c.git_reference = null;
-                    try expectEqual(0, c.git_repository_head(&head, repo));
+                    try std.testing.expectEqual(0, c.git_repository_head(&head, repo));
                     defer c.git_reference_free(head);
                     const oid = c.git_reference_target(head);
                     try std.testing.expect(null != oid);
                     var commit: ?*c.git_commit = null;
-                    try expectEqual(0, c.git_commit_lookup(&commit, repo, oid));
+                    try std.testing.expectEqual(0, c.git_commit_lookup(&commit, repo, oid));
                     defer c.git_commit_free(commit);
                     try std.testing.expectEqualStrings("first commit", std.mem.sliceTo(c.git_commit_message(commit), 0));
                 }
@@ -217,7 +213,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                     const sha1_hex = std.fmt.bytesToHex(&sha1_bytes_buffer, .lower);
 
                     var oid: c.git_oid = undefined;
-                    try expectEqual(0, c.git_odb_hashfile(&oid, "README", c.GIT_OBJECT_BLOB));
+                    try std.testing.expectEqual(0, c.git_odb_hashfile(&oid, "README", c.GIT_OBJECT_BLOB));
                     const oid_str = c.git_oid_tostr_s(&oid);
                     try std.testing.expect(oid_str != null);
 
@@ -366,9 +362,9 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             }
 
             if (builtin.os.tag != .windows) {
-                try expectEqual(3, diff_iter.next_index);
+                try std.testing.expectEqual(3, diff_iter.next_index);
             } else {
-                try expectEqual(2, diff_iter.next_index);
+                try std.testing.expectEqual(2, diff_iter.next_index);
             }
         }
 
@@ -427,9 +423,9 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             }
 
             if (builtin.os.tag != .windows) {
-                try expectEqual(5, diff_iter.next_index);
+                try std.testing.expectEqual(5, diff_iter.next_index);
             } else {
-                try expectEqual(4, diff_iter.next_index);
+                try std.testing.expectEqual(4, diff_iter.next_index);
             }
         }
 
@@ -464,15 +460,15 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 // read the commit with libgit
                 {
                     var repo: ?*c.git_repository = null;
-                    try expectEqual(0, c.git_repository_open(&repo, repo_path));
+                    try std.testing.expectEqual(0, c.git_repository_open(&repo, repo_path));
                     defer c.git_repository_free(repo);
                     var head: ?*c.git_reference = null;
-                    try expectEqual(0, c.git_repository_head(&head, repo));
+                    try std.testing.expectEqual(0, c.git_repository_head(&head, repo));
                     defer c.git_reference_free(head);
                     const oid = c.git_reference_target(head);
                     try std.testing.expect(null != oid);
                     var commit: ?*c.git_commit = null;
-                    try expectEqual(0, c.git_commit_lookup(&commit, repo, oid));
+                    try std.testing.expectEqual(0, c.git_commit_lookup(&commit, repo, oid));
                     defer c.git_commit_free(commit);
                     try std.testing.expectEqualStrings("second commit", std.mem.sliceTo(c.git_commit_message(commit), 0));
                 }
@@ -525,7 +521,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 var result = try repo.switch_head(&commit1);
                 defer result.deinit();
                 try std.testing.expect(result.data == .conflict);
-                try expectEqual(1, result.data.conflict.stale_files.count());
+                try std.testing.expectEqual(1, result.data.conflict.stale_files.count());
             }
 
             // delete the file
@@ -576,7 +572,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 var result = try repo.switch_head(&commit1);
                 defer result.deinit();
                 try std.testing.expect(result.data == .conflict);
-                try expectEqual(1, result.data.conflict.stale_files.count());
+                try std.testing.expectEqual(1, result.data.conflict.stale_files.count());
             }
 
             // change the file back
@@ -605,7 +601,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 var result = try repo.switch_head(&commit1);
                 defer result.deinit();
                 try std.testing.expect(result.data == .conflict);
-                try expectEqual(1, result.data.conflict.stale_dirs.count());
+                try std.testing.expectEqual(1, result.data.conflict.stale_dirs.count());
             }
 
             // delete the dir
@@ -646,7 +642,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         try std.testing.expectEqualStrings(new_hello_txt_content, content);
 
         const license_or_err = repo_dir.openFile("LICENSE", .{ .mode = .read_only });
-        try expectEqual(error.FileNotFound, license_or_err);
+        try std.testing.expectEqual(error.FileNotFound, license_or_err);
     }
 
     // replacing file with dir and dir with file
@@ -679,7 +675,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             };
             var index = try idx.Index(repo_kind).init(allocator, core_cursor);
             defer index.deinit();
-            try expectEqual(6, index.entries.count());
+            try std.testing.expectEqual(6, index.entries.count());
             try std.testing.expect(index.entries.contains("README"));
             try std.testing.expect(index.entries.contains("src/zig/main.zig"));
             try std.testing.expect(index.entries.contains("tests/main_test.zig"));
@@ -692,12 +688,12 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             .git => {
                 // read index with libgit
                 var repo: ?*c.git_repository = null;
-                try expectEqual(0, c.git_repository_open(&repo, repo_path));
+                try std.testing.expectEqual(0, c.git_repository_open(&repo, repo_path));
                 defer c.git_repository_free(repo);
                 var index: ?*c.git_index = null;
-                try expectEqual(0, c.git_repository_index(&index, repo));
+                try std.testing.expectEqual(0, c.git_repository_index(&index, repo));
                 defer c.git_index_free(index);
-                try expectEqual(6, c.git_index_entrycount(index));
+                try std.testing.expectEqual(6, c.git_index_entrycount(index));
             },
             .xit => {
                 // read the index in xitdb
@@ -715,7 +711,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                         count += 1;
                     }
                 }
-                try expectEqual(6, count);
+                try std.testing.expectEqual(6, count);
             },
         }
 
@@ -747,7 +743,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             };
             var index = try idx.Index(repo_kind).init(allocator, core_cursor);
             defer index.deinit();
-            try expectEqual(5, index.entries.count());
+            try std.testing.expectEqual(5, index.entries.count());
             try std.testing.expect(index.entries.contains("README"));
             try std.testing.expect(index.entries.contains("src/zig/main.zig"));
             try std.testing.expect(index.entries.contains("tests/main_test.zig"));
@@ -759,12 +755,12 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             .git => {
                 // read index with libgit
                 var repo: ?*c.git_repository = null;
-                try expectEqual(0, c.git_repository_open(&repo, repo_path));
+                try std.testing.expectEqual(0, c.git_repository_open(&repo, repo_path));
                 defer c.git_repository_free(repo);
                 var index: ?*c.git_index = null;
-                try expectEqual(0, c.git_repository_index(&index, repo));
+                try std.testing.expectEqual(0, c.git_repository_index(&index, repo));
                 defer c.git_index_free(index);
-                try expectEqual(5, c.git_index_entrycount(index));
+                try std.testing.expectEqual(5, c.git_index_entrycount(index));
             },
             .xit => {
                 // read the index in xitdb
@@ -782,7 +778,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                         count += 1;
                     }
                 }
-                try expectEqual(5, count);
+                try std.testing.expectEqual(5, count);
             },
         }
 
@@ -790,12 +786,12 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         args.clearAndFree();
         try args.append("add");
         try args.append("no-such-file");
-        try expectEqual(error.FileNotFound, main.xitMain(repo_kind, allocator, &args, writers));
+        try std.testing.expectEqual(error.FileNotFound, main.xitMain(repo_kind, allocator, &args, writers));
 
         // a stale index lock file isn't hanging around
         if (repo_kind == .git) {
             const lock_file_or_err = state.git_dir.openFile("index.lock", .{ .mode = .read_only });
-            try expectEqual(error.FileNotFound, lock_file_or_err);
+            try std.testing.expectEqual(error.FileNotFound, lock_file_or_err);
         }
     }
 
@@ -847,7 +843,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             // check the untracked entries
             var untracked_map = std.StringHashMap(void).init(allocator);
             defer untracked_map.deinit();
-            try expectEqual(2, status.untracked.items.len);
+            try std.testing.expectEqual(2, status.untracked.items.len);
             for (status.untracked.items) |entry| {
                 try untracked_map.put(entry.path, {});
             }
@@ -857,7 +853,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             // check the workspace_modified entries
             var workspace_modified_map = std.StringHashMap(void).init(allocator);
             defer workspace_modified_map.deinit();
-            try expectEqual(2, status.workspace_modified.items.len);
+            try std.testing.expectEqual(2, status.workspace_modified.items.len);
             for (status.workspace_modified.items) |entry| {
                 try workspace_modified_map.put(entry.path, {});
             }
@@ -867,7 +863,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             // check the workspace_deleted entries
             var workspace_deleted_map = std.StringHashMap(void).init(allocator);
             defer workspace_deleted_map.deinit();
-            try expectEqual(1, status.workspace_deleted.items.len);
+            try std.testing.expectEqual(1, status.workspace_deleted.items.len);
             for (status.workspace_deleted.items) |path| {
                 try workspace_deleted_map.put(path, {});
             }
@@ -877,16 +873,16 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         // get status with libgit
         if (repo_kind == .git) {
             var repo: ?*c.git_repository = null;
-            try expectEqual(0, c.git_repository_open(&repo, repo_path));
+            try std.testing.expectEqual(0, c.git_repository_open(&repo, repo_path));
             defer c.git_repository_free(repo);
             var status_list: ?*c.git_status_list = null;
             var status_options: c.git_status_options = undefined;
-            try expectEqual(0, c.git_status_options_init(&status_options, c.GIT_STATUS_OPTIONS_VERSION));
+            try std.testing.expectEqual(0, c.git_status_options_init(&status_options, c.GIT_STATUS_OPTIONS_VERSION));
             status_options.show = c.GIT_STATUS_SHOW_WORKDIR_ONLY;
             status_options.flags = c.GIT_STATUS_OPT_INCLUDE_UNTRACKED;
-            try expectEqual(0, c.git_status_list_new(&status_list, repo, &status_options));
+            try std.testing.expectEqual(0, c.git_status_list_new(&status_list, repo, &status_options));
             defer c.git_status_list_free(status_list);
-            try expectEqual(5, c.git_status_list_entrycount(status_list));
+            try std.testing.expectEqual(5, c.git_status_list_entrycount(status_list));
         }
 
         // index changes
@@ -914,7 +910,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             // check the index_added entries
             var index_added_map = std.StringHashMap(void).init(allocator);
             defer index_added_map.deinit();
-            try expectEqual(1, status.index_added.items.len);
+            try std.testing.expectEqual(1, status.index_added.items.len);
             for (status.index_added.items) |path| {
                 try index_added_map.put(path, {});
             }
@@ -923,7 +919,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             // check the index_modified entries
             var index_modified_map = std.StringHashMap(void).init(allocator);
             defer index_modified_map.deinit();
-            try expectEqual(1, status.index_modified.items.len);
+            try std.testing.expectEqual(1, status.index_modified.items.len);
             for (status.index_modified.items) |path| {
                 try index_modified_map.put(path, {});
             }
@@ -932,7 +928,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             // check the index_deleted entries
             var index_deleted_map = std.StringHashMap(void).init(allocator);
             defer index_deleted_map.deinit();
-            try expectEqual(1, status.index_deleted.items.len);
+            try std.testing.expectEqual(1, status.index_deleted.items.len);
             for (status.index_deleted.items) |path| {
                 try index_deleted_map.put(path, {});
             }
@@ -950,11 +946,11 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
 
             var workspace_modified_map = std.StringHashMap(void).init(allocator);
             defer workspace_modified_map.deinit();
-            try expectEqual(2, status.workspace_modified.items.len);
+            try std.testing.expectEqual(2, status.workspace_modified.items.len);
 
             var index_deleted_map = std.StringHashMap(void).init(allocator);
             defer index_deleted_map.deinit();
-            try expectEqual(1, status.index_deleted.items.len);
+            try std.testing.expectEqual(1, status.index_deleted.items.len);
         }
 
         args.clearAndFree();
@@ -996,11 +992,11 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
 
             var workspace_modified_map = std.StringHashMap(void).init(allocator);
             defer workspace_modified_map.deinit();
-            try expectEqual(0, status.workspace_modified.items.len);
+            try std.testing.expectEqual(0, status.workspace_modified.items.len);
 
             var index_deleted_map = std.StringHashMap(void).init(allocator);
             defer index_deleted_map.deinit();
-            try expectEqual(0, status.index_deleted.items.len);
+            try std.testing.expectEqual(0, status.index_deleted.items.len);
         }
     }
 
@@ -1022,7 +1018,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         // read tree
         var tree_object = try obj.Object(repo_kind).init(allocator, core_cursor, commit_object.content.commit.tree);
         defer tree_object.deinit();
-        try expectEqual(5, tree_object.content.tree.entries.count());
+        try std.testing.expectEqual(5, tree_object.content.tree.entries.count());
     }
 
     // create a branch
@@ -1046,8 +1042,8 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             .git => .{ .core = &repo.core },
             .xit => .{ .core = &repo.core, .cursor = &cursor },
         };
-        try expectEqual(commit2, try ref.readHead(repo_kind, core_cursor));
-        try expectEqual(commit2, try ref.resolve(repo_kind, core_cursor, "stuff"));
+        try std.testing.expectEqual(commit2, try ref.readHead(repo_kind, core_cursor));
+        try std.testing.expectEqual(commit2, try ref.resolve(repo_kind, core_cursor, "stuff"));
     }
 
     // list all branches
@@ -1061,7 +1057,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         };
         var ref_list = try ref.RefList.init(repo_kind, core_cursor, allocator, "heads");
         defer ref_list.deinit();
-        try expectEqual(2, ref_list.refs.items.len);
+        try std.testing.expectEqual(2, ref_list.refs.items.len);
     }
 
     // get the current branch
@@ -1081,10 +1077,10 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     // get the current branch with libgit
     if (repo_kind == .git) {
         var repo: ?*c.git_repository = null;
-        try expectEqual(0, c.git_repository_open(&repo, repo_path));
+        try std.testing.expectEqual(0, c.git_repository_open(&repo, repo_path));
         defer c.git_repository_free(repo);
         var head: ?*c.git_reference = null;
-        try expectEqual(0, c.git_repository_head(&head, repo));
+        try std.testing.expectEqual(0, c.git_repository_head(&head, repo));
         defer c.git_reference_free(head);
         const branch_name = c.git_reference_shorthand(head);
         try std.testing.expectEqualStrings("stuff", std.mem.sliceTo(branch_name, 0));
@@ -1094,7 +1090,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
-        try expectEqual(error.CannotDeleteCurrentBranch, repo.delete_branch("stuff"));
+        try std.testing.expectEqual(error.CannotDeleteCurrentBranch, repo.delete_branch("stuff"));
     }
 
     // make a few commits on the stuff branch
@@ -1172,7 +1168,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         };
         var ref_list = try ref.RefList.init(repo_kind, core_cursor, allocator, "heads");
         defer ref_list.deinit();
-        try expectEqual(3, ref_list.refs.items.len);
+        try std.testing.expectEqual(3, ref_list.refs.items.len);
         var ref_map = std.StringHashMap(void).init(allocator);
         defer ref_map.deinit();
         for (ref_list.refs.items) |r| {
@@ -1192,9 +1188,9 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
 
     // make sure the subdirs are deleted
     if (repo_kind == .git) {
-        try expectEqual(error.FileNotFound, state.git_dir.openFile("refs/heads/a/b/c", .{}));
-        try expectEqual(error.FileNotFound, state.git_dir.openDir("refs/heads/a/b", .{}));
-        try expectEqual(error.FileNotFound, state.git_dir.openDir("refs/heads/a", .{}));
+        try std.testing.expectEqual(error.FileNotFound, state.git_dir.openFile("refs/heads/a/b/c", .{}));
+        try std.testing.expectEqual(error.FileNotFound, state.git_dir.openDir("refs/heads/a/b", .{}));
+        try std.testing.expectEqual(error.FileNotFound, state.git_dir.openDir("refs/heads/a", .{}));
     }
 
     // switch to master
@@ -1244,7 +1240,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             .git => .{ .core = &repo.core },
             .xit => .{ .core = &repo.core, .cursor = &cursor },
         };
-        try expectEqual(commit3, try ref.resolve(repo_kind, core_cursor, "master"));
+        try std.testing.expectEqual(commit3, try ref.resolve(repo_kind, core_cursor, "master"));
     }
 
     // log
@@ -1255,18 +1251,18 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         defer iter.deinit();
 
         var object3 = try iter.next();
-        try expectEqual(commit3, object3.?.oid);
+        try std.testing.expectEqual(commit3, object3.?.oid);
         object3.?.deinit();
 
         var object2 = try iter.next();
-        try expectEqual(commit2, object2.?.oid);
+        try std.testing.expectEqual(commit2, object2.?.oid);
         object2.?.deinit();
 
         var object1 = try iter.next();
-        try expectEqual(commit1, object1.?.oid);
+        try std.testing.expectEqual(commit1, object1.?.oid);
         object1.?.deinit();
 
-        try expectEqual(null, try iter.next());
+        try std.testing.expectEqual(null, try iter.next());
     }
 
     // common ancestor
