@@ -56,23 +56,26 @@ pub fn create(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).C
         .xit => {
             const name_hash = hash.hashBuffer(name);
 
-            // add key to refs/heads/{refname}
+            // store ref name
             var ref_name_cursor = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-name-set") } },
                 .hash_map_init,
                 .{ .hash_map_get = .{ .key = name_hash } },
             });
             try ref_name_cursor.writeBytes(name, .once);
+            const name_slot = ref_name_cursor.slot_ptr.slot;
+
+            // add ref name to refs/heads/{refname}
             _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("refs") } },
                 .hash_map_init,
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("heads") } },
                 .hash_map_init,
                 .{ .hash_map_get = .{ .key = name_hash } },
-                .{ .write = .{ .slot = ref_name_cursor.slot_ptr.slot } },
+                .{ .write = .{ .slot = name_slot } },
             });
 
-            // add value to refs/heads/{refname}
+            // store ref content
             const head_file_buffer = try ref.readHead(repo_kind, core_cursor);
             var ref_content_cursor = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-content-set") } },
@@ -80,14 +83,42 @@ pub fn create(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).C
                 .{ .hash_map_get = .{ .key = hash.hashBuffer(&head_file_buffer) } },
             });
             try ref_content_cursor.writeBytes(&head_file_buffer, .once);
+            const ref_content_slot = ref_content_cursor.slot_ptr.slot;
+
+            // add ref content to refs/heads/{refname}
             _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("refs") } },
                 .hash_map_init,
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("heads") } },
                 .hash_map_init,
                 .{ .hash_map_get = .{ .value = name_hash } },
-                .{ .write = .{ .slot = ref_content_cursor.slot_ptr.slot } },
+                .{ .write = .{ .slot = ref_content_slot } },
             });
+
+            // get current branch name
+            const current_branch_name = try ref.readHeadName(repo_kind, core_cursor, allocator);
+            defer allocator.free(current_branch_name);
+
+            // if there is a branch map for the current branch,
+            // make one for the new branch with the same value
+            const branch_name_hash = hash.hashBuffer(current_branch_name);
+            if (try core_cursor.cursor.readPath(void, &[_]xitdb.PathPart(void){
+                .{ .hash_map_get = .{ .value = hash.hashBuffer("branches") } },
+                .{ .hash_map_get = .{ .value = branch_name_hash } },
+            })) |*current_branch_cursor| {
+                _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
+                    .{ .hash_map_get = .{ .value = hash.hashBuffer("branches") } },
+                    .hash_map_init,
+                    .{ .hash_map_get = .{ .key = name_hash } },
+                    .{ .write = .{ .slot = name_slot } },
+                });
+                _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
+                    .{ .hash_map_get = .{ .value = hash.hashBuffer("branches") } },
+                    .hash_map_init,
+                    .{ .hash_map_get = .{ .value = name_hash } },
+                    .{ .write = .{ .slot = current_branch_cursor.slot_ptr.slot } },
+                });
+            }
         },
     }
 }
@@ -149,12 +180,23 @@ pub fn delete(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).C
                     return error.CannotDeleteCurrentBranch;
                 }
             }
+
+            const name_hash = hash.hashBuffer(name);
+
+            // remove from refs/heads/{name}
             _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("refs") } },
                 .hash_map_init,
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("heads") } },
                 .hash_map_init,
-                .{ .hash_map_remove = hash.hashBuffer(name) },
+                .{ .hash_map_remove = name_hash },
+            });
+
+            // remove branch map
+            _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
+                .{ .hash_map_get = .{ .value = hash.hashBuffer("branches") } },
+                .hash_map_init,
+                .{ .hash_map_remove = name_hash },
             });
         },
     }

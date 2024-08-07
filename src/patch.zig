@@ -26,6 +26,7 @@ const FIRST_NODE_ID_INT: NodeIdInt = 0;
 fn createPatchEntries(
     comptime repo_kind: rp.RepoKind,
     core_cursor: rp.Repo(repo_kind).CoreCursor,
+    branch_cursor: *xitdb.Cursor(.file),
     allocator: std.mem.Allocator,
     arena: *std.heap.ArenaAllocator,
     line_iter_pair: *df.LineIteratorPair(repo_kind),
@@ -47,13 +48,13 @@ fn createPatchEntries(
     const path_slot = path_cursor.slot_ptr.slot;
 
     // init node list
-    _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
+    _ = try branch_cursor.writePath(void, &[_]xitdb.PathPart(void){
         .{ .hash_map_get = .{ .value = hash.hashBuffer("path->node-id-list") } },
         .hash_map_init,
         .{ .hash_map_get = .{ .key = path_hash } },
         .{ .write = .{ .slot = path_slot } },
     });
-    const node_list_maybe = try core_cursor.cursor.readPath(void, &[_]xitdb.PathPart(void){
+    const node_list_maybe = try branch_cursor.readPath(void, &[_]xitdb.PathPart(void){
         .{ .hash_map_get = .{ .value = hash.hashBuffer("path->node-id-list") } },
         .{ .hash_map_get = .{ .value = path_hash } },
     });
@@ -144,6 +145,7 @@ fn createPatchEntries(
 fn patchHash(
     comptime repo_kind: rp.RepoKind,
     core_cursor: rp.Repo(repo_kind).CoreCursor,
+    branch_cursor: *xitdb.Cursor(.file),
     allocator: std.mem.Allocator,
     line_iter_pair: *df.LineIteratorPair(repo_kind),
 ) !xitdb.Hash {
@@ -156,7 +158,7 @@ fn patchHash(
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    try createPatchEntries(repo_kind, core_cursor, allocator, &arena, line_iter_pair, &patch_entries, &patch_content_entries, 0);
+    try createPatchEntries(repo_kind, core_cursor, branch_cursor, allocator, &arena, line_iter_pair, &patch_entries, &patch_content_entries, 0);
 
     var h = std.crypto.hash.Sha1.init(.{});
 
@@ -173,8 +175,14 @@ fn patchHash(
     return hash.hashBuffer(&patch_hash);
 }
 
-fn writePatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, line_iter_pair: *df.LineIteratorPair(repo_kind)) !xitdb.Hash {
-    const patch_hash = try patchHash(repo_kind, core_cursor, allocator, line_iter_pair);
+fn writePatchForFile(
+    comptime repo_kind: rp.RepoKind,
+    core_cursor: rp.Repo(repo_kind).CoreCursor,
+    branch_cursor: *xitdb.Cursor(.file),
+    allocator: std.mem.Allocator,
+    line_iter_pair: *df.LineIteratorPair(repo_kind),
+) !xitdb.Hash {
+    const patch_hash = try patchHash(repo_kind, core_cursor, branch_cursor, allocator, line_iter_pair);
 
     // exit early if patch already exists
     if (try core_cursor.cursor.readPath(void, &[_]xitdb.PathPart(void){
@@ -207,7 +215,7 @@ fn writePatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    try createPatchEntries(repo_kind, core_cursor, allocator, &arena, line_iter_pair, &patch_entries, &patch_content_entries, patch_hash);
+    try createPatchEntries(repo_kind, core_cursor, branch_cursor, allocator, &arena, line_iter_pair, &patch_entries, &patch_content_entries, patch_hash);
 
     for (patch_entries.items) |patch_entry| {
         _ = try change_list.writePath(void, &[_]xitdb.PathPart(void){
@@ -226,7 +234,19 @@ fn writePatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_
     return patch_hash;
 }
 
-fn applyPatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, patch_hash: xitdb.Hash, path: []const u8) !void {
+fn applyPatchForFile(
+    comptime repo_kind: rp.RepoKind,
+    core_cursor: rp.Repo(repo_kind).CoreCursor,
+    branch_cursor: *xitdb.Cursor(.file),
+    allocator: std.mem.Allocator,
+    patch_hash: xitdb.Hash,
+    path: []const u8,
+) !void {
+    var change_list = (try core_cursor.cursor.readPath(void, &[_]xitdb.PathPart(void){
+        .{ .hash_map_get = .{ .value = hash.hashBuffer("patch-id->change-list") } },
+        .{ .hash_map_get = .{ .key = patch_hash } },
+    })) orelse return error.PatchNotFound;
+
     // get path slot
     const path_hash = hash.hashBuffer(path);
     var path_cursor = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
@@ -237,19 +257,14 @@ fn applyPatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_
     try path_cursor.writeBytes(path, .once);
     const path_slot = path_cursor.slot_ptr.slot;
 
-    var change_list = (try core_cursor.cursor.readPath(void, &[_]xitdb.PathPart(void){
-        .{ .hash_map_get = .{ .value = hash.hashBuffer("patch-id->change-list") } },
-        .{ .hash_map_get = .{ .key = patch_hash } },
-    })) orelse return error.PatchNotFound;
-
     // init parent->children node map
-    _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
+    _ = try branch_cursor.writePath(void, &[_]xitdb.PathPart(void){
         .{ .hash_map_get = .{ .value = hash.hashBuffer("path->parent->children") } },
         .hash_map_init,
         .{ .hash_map_get = .{ .key = path_hash } },
         .{ .write = .{ .slot = path_slot } },
     });
-    var parent_to_children = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
+    var parent_to_children = try branch_cursor.writePath(void, &[_]xitdb.PathPart(void){
         .{ .hash_map_get = .{ .value = hash.hashBuffer("path->parent->children") } },
         .hash_map_init,
         .{ .hash_map_get = .{ .value = path_hash } },
@@ -257,13 +272,13 @@ fn applyPatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_
     });
 
     // init child->parent node map
-    _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
+    _ = try branch_cursor.writePath(void, &[_]xitdb.PathPart(void){
         .{ .hash_map_get = .{ .value = hash.hashBuffer("path->child->parent") } },
         .hash_map_init,
         .{ .hash_map_get = .{ .key = path_hash } },
         .{ .write = .{ .slot = path_slot } },
     });
-    var child_to_parent = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
+    var child_to_parent = try branch_cursor.writePath(void, &[_]xitdb.PathPart(void){
         .{ .hash_map_get = .{ .value = hash.hashBuffer("path->child->parent") } },
         .hash_map_init,
         .{ .hash_map_get = .{ .value = path_hash } },
@@ -342,13 +357,13 @@ fn applyPatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_
     }
 
     // init node list
-    _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
+    _ = try branch_cursor.writePath(void, &[_]xitdb.PathPart(void){
         .{ .hash_map_get = .{ .value = hash.hashBuffer("path->node-id-list") } },
         .hash_map_init,
         .{ .hash_map_get = .{ .key = path_hash } },
         .{ .write = .{ .slot = path_slot } },
     });
-    var node_list = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
+    var node_list = try branch_cursor.writePath(void, &[_]xitdb.PathPart(void){
         .{ .hash_map_get = .{ .value = hash.hashBuffer("path->node-id-list") } },
         .hash_map_init,
         .{ .hash_map_get = .{ .value = path_hash } },
@@ -378,7 +393,7 @@ fn applyPatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_
             if (count != 1) {
                 // remove node list because there is a conflict, and thus
                 // the node map cannot be "flattened" into a list
-                _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
+                _ = try branch_cursor.writePath(void, &[_]xitdb.PathPart(void){
                     .{ .hash_map_get = .{ .value = hash.hashBuffer("path->node-id-list") } },
                     .hash_map_init,
                     .{ .hash_map_get = .{ .value = path_hash } },
@@ -412,13 +427,35 @@ fn applyPatchForFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_
 pub fn writePatch(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator) !void {
     comptime std.debug.assert(repo_kind == .xit);
 
-    // exit early if we're not on master (doesn't handle separate branches currently)
+    // get current branch name
     const current_branch_name = try ref.readHeadName(repo_kind, core_cursor, allocator);
     defer allocator.free(current_branch_name);
-    if (!std.mem.eql(u8, "master", current_branch_name)) {
-        return;
-    }
 
+    // get current branch name slot
+    const branch_name_hash = hash.hashBuffer(current_branch_name);
+    var branch_name_cursor = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
+        .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-name-set") } },
+        .hash_map_init,
+        .{ .hash_map_get = .{ .key = branch_name_hash } },
+    });
+    try branch_name_cursor.writeBytes(current_branch_name, .once);
+    const branch_name_slot = branch_name_cursor.slot_ptr.slot;
+
+    // init branch map
+    _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
+        .{ .hash_map_get = .{ .value = hash.hashBuffer("branches") } },
+        .hash_map_init,
+        .{ .hash_map_get = .{ .key = branch_name_hash } },
+        .{ .write = .{ .slot = branch_name_slot } },
+    });
+    var branch_cursor = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
+        .{ .hash_map_get = .{ .value = hash.hashBuffer("branches") } },
+        .hash_map_init,
+        .{ .hash_map_get = .{ .value = branch_name_hash } },
+        .hash_map_init,
+    });
+
+    // init file iterator for index diff
     var file_iter = blk: {
         var stat = try st.Status(repo_kind).init(allocator, core_cursor);
         errdefer stat.deinit();
@@ -426,10 +463,11 @@ pub fn writePatch(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kin
     };
     defer file_iter.deinit();
 
+    // iterate over each modified file and create/apply the patch
     while (try file_iter.next()) |*line_iter_pair_ptr| {
         var line_iter_pair = line_iter_pair_ptr.*;
         defer line_iter_pair.deinit();
-        const patch_hash = try writePatchForFile(repo_kind, core_cursor, allocator, &line_iter_pair);
-        try applyPatchForFile(repo_kind, core_cursor, allocator, patch_hash, line_iter_pair.path);
+        const patch_hash = try writePatchForFile(repo_kind, core_cursor, &branch_cursor, allocator, &line_iter_pair);
+        try applyPatchForFile(repo_kind, core_cursor, &branch_cursor, allocator, patch_hash, line_iter_pair.path);
     }
 }
