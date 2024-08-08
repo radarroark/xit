@@ -4,10 +4,7 @@ const std = @import("std");
 const df = @import("./diff.zig");
 const mrg = @import("./merge.zig");
 
-pub const CommandKind = enum {
-    invalid,
-    none,
-    help,
+pub const SubCommandKind = enum {
     init,
     add,
     commit,
@@ -20,12 +17,7 @@ pub const CommandKind = enum {
     merge,
 };
 
-pub const CommandData = union(CommandKind) {
-    invalid: struct {
-        name: []const u8,
-    },
-    none,
-    help,
+pub const SubCommand = union(SubCommandKind) {
     init: struct {
         dir: []const u8,
     },
@@ -51,11 +43,27 @@ pub const CommandData = union(CommandKind) {
     log,
     merge: mrg.MergeInput,
 
-    /// returns the data from the process args in a nicer format.
-    /// right now it just parses the args into a sorted map.
-    /// way dumber than many all those fancy libraries out there.
-    /// let's keep it that way.
-    pub fn init(allocator: std.mem.Allocator, args: []const []const u8) !CommandData {
+    pub fn deinit(self: *SubCommand) void {
+        switch (self.*) {
+            .add => {
+                self.add.paths.deinit();
+            },
+            else => {},
+        }
+    }
+};
+
+pub const Command = union(enum) {
+    invalid: struct {
+        name: []const u8,
+    },
+    tui: ?SubCommandKind,
+    cli: ?SubCommand,
+
+    /// parses the process args into a much nicer format. this
+    /// is way dumber than all those fancy command line parsing
+    /// libraries out there. let's keep it that way.
+    pub fn init(allocator: std.mem.Allocator, args: []const []const u8) !Command {
         // put args into data structures for easy access
         var positional_args = std.ArrayList([]const u8).init(allocator);
         defer positional_args.deinit();
@@ -87,17 +95,40 @@ pub const CommandData = union(CommandKind) {
         }
 
         if (positional_args.items.len == 0) {
-            return .none;
+            if (map_args.count() == 0) {
+                return .{ .tui = null };
+            } else {
+                return .{ .cli = null };
+            }
         }
 
         const sub_command = positional_args.items[0];
         const extra_args = positional_args.items[1..];
 
-        // branch on the sub command
-        if (std.mem.eql(u8, sub_command, "help")) {
-            return .help;
-        } else if (std.mem.eql(u8, sub_command, "init")) {
-            return .{ .init = .{ .dir = if (extra_args.len > 0) extra_args[0] else "." } };
+        if (extra_args.len == 0 and map_args.count() == 0) {
+            if (std.mem.eql(u8, sub_command, "add")) {
+                return .{ .tui = .add };
+            } else if (std.mem.eql(u8, sub_command, "commit")) {
+                return .{ .tui = .commit };
+            } else if (std.mem.eql(u8, sub_command, "status")) {
+                return .{ .tui = .status };
+            } else if (std.mem.eql(u8, sub_command, "diff")) {
+                return .{ .tui = .diff };
+            } else if (std.mem.eql(u8, sub_command, "branch")) {
+                return .{ .tui = .branch };
+            } else if (std.mem.eql(u8, sub_command, "switch")) {
+                return .{ .tui = .switch_head };
+            } else if (std.mem.eql(u8, sub_command, "restore")) {
+                return .{ .tui = .restore };
+            } else if (std.mem.eql(u8, sub_command, "log")) {
+                return .{ .tui = .log };
+            } else if (std.mem.eql(u8, sub_command, "merge")) {
+                return .{ .tui = .merge };
+            }
+        }
+
+        if (std.mem.eql(u8, sub_command, "init")) {
+            return .{ .cli = .{ .init = .{ .dir = if (extra_args.len > 0) extra_args[0] else "." } } };
         } else if (std.mem.eql(u8, sub_command, "add")) {
             if (extra_args.len == 0) {
                 return error.AddPathsMissing;
@@ -105,14 +136,14 @@ pub const CommandData = union(CommandKind) {
             var paths = try std.ArrayList([]const u8).initCapacity(allocator, extra_args.len);
             errdefer paths.deinit(); // pointless for now but for future sake
             paths.appendSliceAssumeCapacity(extra_args);
-            return .{ .add = .{ .paths = paths } };
+            return .{ .cli = .{ .add = .{ .paths = paths } } };
         } else if (std.mem.eql(u8, sub_command, "commit")) {
             // if a message is included, it must have a non-null value
             const message_maybe = map_args.get("-m");
             const message = if (message_maybe == null) null else (message_maybe.? orelse return error.CommitMessageMissing);
-            return .{ .commit = .{ .message = message } };
+            return .{ .cli = .{ .commit = .{ .message = message } } };
         } else if (std.mem.eql(u8, sub_command, "status")) {
-            return .{ .status = {} };
+            return .{ .cli = .{ .status = {} } };
         } else if (std.mem.eql(u8, sub_command, "diff")) {
             const diff_kind: df.DiffKind = if (map_args.contains("--staged"))
                 .index
@@ -125,21 +156,21 @@ pub const CommandData = union(CommandKind) {
                     .{ .workspace = .{ .conflict_diff_kind = .source } }
                 else
                     .{ .workspace = .{ .conflict_diff_kind = .current } });
-            return .{ .diff = .{ .diff_kind = diff_kind } };
+            return .{ .cli = .{ .diff = .{ .diff_kind = diff_kind } } };
         } else if (std.mem.eql(u8, sub_command, "branch")) {
-            return .{ .branch = .{ .name = if (extra_args.len == 0) null else extra_args[0] } };
+            return .{ .cli = .{ .branch = .{ .name = if (extra_args.len == 0) null else extra_args[0] } } };
         } else if (std.mem.eql(u8, sub_command, "switch")) {
             if (extra_args.len == 0) {
                 return error.SwitchTargetMissing;
             }
-            return .{ .switch_head = .{ .target = extra_args[0] } };
+            return .{ .cli = .{ .switch_head = .{ .target = extra_args[0] } } };
         } else if (std.mem.eql(u8, sub_command, "restore")) {
             if (extra_args.len == 0) {
                 return error.RestorePathMissing;
             }
-            return .{ .restore = .{ .path = extra_args[0] } };
+            return .{ .cli = .{ .restore = .{ .path = extra_args[0] } } };
         } else if (std.mem.eql(u8, sub_command, "log")) {
-            return .{ .log = {} };
+            return .{ .cli = .log };
         } else if (std.mem.eql(u8, sub_command, "merge")) {
             var merge_input_maybe: ?mrg.MergeInput = null;
             if (extra_args.len > 0) {
@@ -152,29 +183,21 @@ pub const CommandData = union(CommandKind) {
                 merge_input_maybe = .cont;
             }
             if (merge_input_maybe) |merge_input| {
-                return .{ .merge = merge_input };
+                return .{ .cli = .{ .merge = merge_input } };
             } else {
                 return error.InsufficientMergeArgs;
             }
-        } else {
-            return .{ .invalid = .{ .name = sub_command } };
         }
-    }
-};
 
-pub const Command = struct {
-    data: CommandData,
-
-    pub fn init(allocator: std.mem.Allocator, args: []const []const u8) !Command {
-        return .{
-            .data = try CommandData.init(allocator, args),
-        };
+        return .{ .invalid = .{ .name = sub_command } };
     }
 
     pub fn deinit(self: *Command) void {
-        switch (self.data) {
-            .add => {
-                self.data.add.paths.deinit();
+        switch (self.*) {
+            .cli => {
+                if (self.cli) |*sub_command| {
+                    sub_command.deinit();
+                }
             },
             else => {},
         }
@@ -186,42 +209,42 @@ test "command" {
     var args = std.ArrayList([]const u8).init(allocator);
     defer args.deinit();
 
-    args.clearAndFree();
-    try args.append("add");
-    try std.testing.expect(error.AddPathsMissing == Command.init(allocator, args.items));
-
-    args.clearAndFree();
-    try args.append("add");
-    try args.append("file.txt");
     {
-        var command = try Command.init(allocator, args.items);
-        defer command.deinit();
-        try std.testing.expect(command.data == .add);
+        var command_or_err = Command.init(allocator, &[_][]const u8{ "add", "--cli" });
+        if (command_or_err) |*command| {
+            defer command.deinit();
+            return error.ExpectedError;
+        } else |err| {
+            try std.testing.expect(error.AddPathsMissing == err);
+        }
     }
 
-    args.clearAndFree();
-    try args.append("commit");
-    try args.append("-m");
-    try std.testing.expect(error.CommitMessageMissing == Command.init(allocator, args.items));
-
-    args.clearAndFree();
-    try args.append("commit");
     {
-        var command = try Command.init(allocator, args.items);
+        var command = try Command.init(allocator, &[_][]const u8{ "add", "file.txt" });
         defer command.deinit();
-        try std.testing.expect(command.data == .commit);
-        try std.testing.expect(null == command.data.commit.message);
+        try std.testing.expect(command == .cli and command.cli.? == .add);
     }
 
-    args.clearAndFree();
-    try args.append("commit");
-    try args.append("-m");
-    try args.append("let there be light");
     {
-        var command = try Command.init(allocator, args.items);
+        var command_or_err = Command.init(allocator, &[_][]const u8{ "commit", "-m" });
+        if (command_or_err) |*command| {
+            defer command.deinit();
+            return error.ExpectedError;
+        } else |err| {
+            try std.testing.expect(error.CommitMessageMissing == err);
+        }
+    }
+
+    {
+        var command = try Command.init(allocator, &[_][]const u8{"commit"});
         defer command.deinit();
-        try std.testing.expect(command.data == .commit);
-        try std.testing.expect(null != command.data.commit.message);
-        try std.testing.expect(std.mem.eql(u8, "let there be light", command.data.commit.message.?));
+        try std.testing.expect(command == .tui and command.tui.? == .commit);
+    }
+
+    {
+        var command = try Command.init(allocator, &[_][]const u8{ "commit", "-m", "let there be light" });
+        defer command.deinit();
+        try std.testing.expect(command == .cli and command.cli.? == .commit);
+        try std.testing.expect(std.mem.eql(u8, "let there be light", command.cli.?.commit.message.?));
     }
 }

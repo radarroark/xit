@@ -102,15 +102,15 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             }
         }
 
-        pub fn initWithCommand(allocator: std.mem.Allocator, opts: InitOpts, cmd_data: cmd.CommandData, writers: anytype) !Repo(repo_kind) {
+        pub fn initWithCommand(allocator: std.mem.Allocator, opts: InitOpts, sub_command: cmd.SubCommand, writers: anytype) !Repo(repo_kind) {
             var repo = Repo(repo_kind).init(allocator, opts) catch |err| switch (err) {
                 error.RepoDoesNotExist => {
-                    if (cmd_data == .init) {
+                    if (sub_command == .init) {
                         var repo = switch (repo_kind) {
                             .git => Repo(repo_kind){ .allocator = allocator, .core = undefined, .init_opts = opts },
                             .xit => Repo(repo_kind){ .allocator = allocator, .core = undefined, .init_opts = opts },
                         };
-                        try repo.command(cmd_data, writers);
+                        try repo.runCommand(sub_command, writers);
                         return repo;
                     } else {
                         return error.NotARepo;
@@ -119,7 +119,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 else => return err,
             };
             errdefer repo.deinit();
-            try repo.command(cmd_data, writers);
+            try repo.runCommand(sub_command, writers);
             return repo;
         }
 
@@ -232,27 +232,13 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             }
         }
 
-        fn command(self: *Repo(repo_kind), cmd_data: cmd.CommandData, writers: anytype) !void {
-            switch (cmd_data) {
-                .invalid => {
-                    try writers.err.print("\"{s}\" is not a valid command\n", .{cmd_data.invalid.name});
-                    return;
-                },
-                .none => {},
-                .help => {
-                    try writers.out.print(
-                        \\usage: xit
-                        \\
-                        \\start a working area:
-                        \\   init
-                        \\
-                    , .{});
-                },
+        fn runCommand(self: *Repo(repo_kind), sub_command: cmd.SubCommand, writers: anytype) !void {
+            switch (sub_command) {
                 .init => {
-                    self.* = Repo(repo_kind).initNew(self.allocator, self.init_opts.cwd, cmd_data.init.dir) catch |err| {
+                    self.* = Repo(repo_kind).initNew(self.allocator, self.init_opts.cwd, sub_command.init.dir) catch |err| {
                         switch (err) {
                             error.RepoAlreadyExists => {
-                                try writers.err.print("{s} is already a repository\n", .{cmd_data.init.dir});
+                                try writers.err.print("{s} is already a repository\n", .{sub_command.init.dir});
                                 return;
                             },
                             else => return err,
@@ -260,10 +246,10 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     };
                 },
                 .add => {
-                    try self.add(cmd_data.add.paths.items);
+                    try self.add(sub_command.add.paths.items);
                 },
                 .commit => {
-                    _ = try self.commit(null, cmd_data.commit.message);
+                    _ = try self.commit(null, sub_command.commit.message);
                 },
                 .status => {
                     var stat = try self.status();
@@ -326,7 +312,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     }
                 },
                 .diff => {
-                    var diff_iter = try self.diff(cmd_data.diff.diff_kind);
+                    var diff_iter = try self.diff(sub_command.diff.diff_kind);
                     defer diff_iter.deinit();
 
                     while (try diff_iter.next()) |*line_iter_pair_ptr| {
@@ -365,7 +351,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     }
                 },
                 .branch => {
-                    if (cmd_data.branch.name) |name| {
+                    if (sub_command.branch.name) |name| {
                         try self.create_branch(name);
                     } else {
                         var cursor = try self.core.latestCursor();
@@ -390,11 +376,11 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     }
                 },
                 .switch_head => {
-                    var result = try self.switch_head(cmd_data.switch_head.target);
+                    var result = try self.switch_head(sub_command.switch_head.target);
                     defer result.deinit();
                 },
                 .restore => {
-                    try self.restore(cmd_data.restore.path);
+                    try self.restore(sub_command.restore.path);
                 },
                 .log => {
                     var cursor = try self.core.latestCursor();
@@ -421,7 +407,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     }
                 },
                 .merge => {
-                    var result = try self.merge(cmd_data.merge);
+                    var result = try self.merge(sub_command.merge);
                     defer result.deinit();
                     for (result.auto_resolved_conflicts.keys()) |path| {
                         if (result.changes.contains(path)) {

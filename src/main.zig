@@ -13,9 +13,17 @@ const std = @import("std");
 const cmd = @import("./command.zig");
 const rp = @import("./repo.zig");
 
+const USAGE =
+    \\
+    \\start a working area:
+    \\   init
+    \\
+;
+
 /// this is meant to be the main entry point if you wanted to use xit
 /// as a CLI tool. to use xit programmatically, build a Repo struct
-/// and call method on it directly.
+/// and call methods on it directly. to use xit subconsciously, just
+/// think about it really often and eventually you'll dream about it.
 pub fn xitMain(comptime kind: rp.RepoKind, allocator: std.mem.Allocator, args: []const []const u8, writers: anytype) !void {
     var command = try cmd.Command.init(allocator, args);
     defer command.deinit();
@@ -26,8 +34,21 @@ pub fn xitMain(comptime kind: rp.RepoKind, allocator: std.mem.Allocator, args: [
     var cwd = try std.fs.openDirAbsolute(cwd_path, .{});
     defer cwd.close();
 
-    var repo = try rp.Repo(kind).initWithCommand(allocator, .{ .cwd = cwd }, command.data, writers);
-    defer repo.deinit();
+    switch (command) {
+        .invalid => {
+            try writers.err.print("\"{s}\" is not a valid command\n", .{command.invalid.name});
+            try writers.out.print(USAGE, .{});
+        },
+        .tui => return error.NotImplemented,
+        .cli => {
+            if (command.cli) |sub_command| {
+                var repo = try rp.Repo(kind).initWithCommand(allocator, .{ .cwd = cwd }, sub_command, writers);
+                defer repo.deinit();
+            } else {
+                try writers.out.print(USAGE, .{});
+            }
+        },
+    }
 }
 
 /// this is the main "main". it's even mainier than xitMain.
