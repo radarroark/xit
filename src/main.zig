@@ -28,12 +28,6 @@ pub fn xitMain(comptime kind: rp.RepoKind, allocator: std.mem.Allocator, args: [
     var command = try cmd.Command.init(allocator, args);
     defer command.deinit();
 
-    // get the cwd path
-    var cwd_path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
-    const cwd_path = try std.fs.cwd().realpath(".", &cwd_path_buffer);
-    var cwd = try std.fs.openDirAbsolute(cwd_path, .{});
-    defer cwd.close();
-
     switch (command) {
         .invalid => {
             try writers.err.print("\"{s}\" is not a valid command\n", .{command.invalid.name});
@@ -42,7 +36,7 @@ pub fn xitMain(comptime kind: rp.RepoKind, allocator: std.mem.Allocator, args: [
         .tui => return error.NotImplemented,
         .cli => {
             if (command.cli) |sub_command| {
-                var repo = try rp.Repo(kind).initWithCommand(allocator, .{ .cwd = cwd }, sub_command, writers);
+                var repo = try rp.Repo(kind).initWithCommand(allocator, .{ .cwd = std.fs.cwd() }, sub_command, writers);
                 defer repo.deinit();
             } else {
                 try writers.out.print(USAGE, .{});
