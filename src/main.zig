@@ -13,29 +13,10 @@ const std = @import("std");
 const cmd = @import("./command.zig");
 const rp = @import("./repo.zig");
 
-/// takes the args passed to this program and puts them
-/// in an arraylist. do we need to do this? i don't know,
-/// but i'd rather have it in an arraylist so it's easier
-/// to look at. so yeah, i do need it. fight me.
-fn appendArgs(out: *std.ArrayList([]const u8)) !void {
-    var arg_it = std.process.args();
-    _ = arg_it.skip();
-
-    while (true) {
-        const s = arg_it.next();
-        if (s == null) {
-            break;
-        }
-        try out.append(s.?);
-    }
-}
-
 /// this is meant to be the main entry point if you wanted to use xit
-/// as a library. there will definitely be more specialized functions
-/// you can call as well, but if you just want to pass the CLI args and
-/// have it behave just like the standalone xit client than this is
-/// where it's at, homie.
-pub fn xitMain(comptime kind: rp.RepoKind, allocator: std.mem.Allocator, args: *std.ArrayList([]const u8), writers: anytype) !void {
+/// as a CLI tool. to use xit programmatically, build a Repo struct
+/// and call method on it directly.
+pub fn xitMain(comptime kind: rp.RepoKind, allocator: std.mem.Allocator, args: []const []const u8, writers: anytype) !void {
     var command = try cmd.Command.init(allocator, args);
     defer command.deinit();
 
@@ -61,6 +42,11 @@ pub fn main() !void {
     var args = std.ArrayList([]const u8).init(allocator);
     defer args.deinit();
 
-    try appendArgs(&args);
-    try xitMain(.xit, allocator, &args, .{ .out = std.io.getStdOut().writer(), .err = std.io.getStdErr().writer() });
+    var arg_it = std.process.args();
+    _ = arg_it.skip();
+    while (arg_it.next()) |arg| {
+        try args.append(arg);
+    }
+
+    try xitMain(.xit, allocator, args.items, .{ .out = std.io.getStdOut().writer(), .err = std.io.getStdErr().writer() });
 }

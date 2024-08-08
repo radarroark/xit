@@ -6,7 +6,8 @@ const mrg = @import("./merge.zig");
 
 pub const CommandKind = enum {
     invalid,
-    usage,
+    none,
+    help,
     init,
     add,
     commit,
@@ -23,7 +24,8 @@ pub const CommandData = union(CommandKind) {
     invalid: struct {
         name: []const u8,
     },
-    usage,
+    none,
+    help,
     init: struct {
         dir: []const u8,
     },
@@ -48,22 +50,18 @@ pub const CommandData = union(CommandKind) {
     },
     log,
     merge: mrg.MergeInput,
-};
 
-/// returns the data from the process args in a nicer format.
-/// right now it just parses the args into a sorted map. i was
-/// thinking of using an existing arg parser lib but i decided
-/// i should roll my own and let it evolve along with my needs.
-/// i'm actually pretty happy with this already...it's stupid
-/// but it works, and unlike those libs i understand every line.
-pub fn parseArgs(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8)) !CommandData {
-    if (args.items.len >= 1) {
+    /// returns the data from the process args in a nicer format.
+    /// right now it just parses the args into a sorted map.
+    /// way dumber than many all those fancy libraries out there.
+    /// let's keep it that way.
+    pub fn init(allocator: std.mem.Allocator, args: []const []const u8) !CommandData {
         // put args into data structures for easy access
-        var pos_args = std.ArrayList([]const u8).init(allocator);
-        defer pos_args.deinit();
+        var positional_args = std.ArrayList([]const u8).init(allocator);
+        defer positional_args.deinit();
         var map_args = std.StringArrayHashMap(?[]const u8).init(allocator);
         defer map_args.deinit();
-        for (args.items[1..]) |arg| {
+        for (args) |arg| {
             if (arg.len == 0) {
                 continue;
             } else if (arg.len > 1 and arg[0] == '-') {
@@ -76,36 +74,46 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8))
                     // if there isn't a spot for this arg in the map,
                     // it is a positional arg
                     if (last_val == null or last_val.? != null) {
-                        try pos_args.append(arg);
+                        try positional_args.append(arg);
                     }
                     // otherwise put it in the map
                     else if (last_val.? == null) {
                         try map_args.put(last_key, arg);
                     }
                 } else {
-                    try pos_args.append(arg);
+                    try positional_args.append(arg);
                 }
             }
         }
-        // branch on the first arg
-        if (std.mem.eql(u8, args.items[0], "init")) {
-            return CommandData{ .init = .{ .dir = if (args.items.len > 1) args.items[1] else "." } };
-        } else if (std.mem.eql(u8, args.items[0], "add")) {
-            if (pos_args.items.len == 0) {
+
+        if (positional_args.items.len == 0) {
+            return .none;
+        }
+
+        const sub_command = positional_args.items[0];
+        const extra_args = positional_args.items[1..];
+
+        // branch on the sub command
+        if (std.mem.eql(u8, sub_command, "help")) {
+            return .help;
+        } else if (std.mem.eql(u8, sub_command, "init")) {
+            return .{ .init = .{ .dir = if (extra_args.len > 0) extra_args[0] else "." } };
+        } else if (std.mem.eql(u8, sub_command, "add")) {
+            if (extra_args.len == 0) {
                 return error.AddPathsMissing;
             }
-            var paths = try std.ArrayList([]const u8).initCapacity(allocator, pos_args.capacity);
+            var paths = try std.ArrayList([]const u8).initCapacity(allocator, extra_args.len);
             errdefer paths.deinit(); // pointless for now but for future sake
-            paths.appendSliceAssumeCapacity(pos_args.items);
-            return CommandData{ .add = .{ .paths = paths } };
-        } else if (std.mem.eql(u8, args.items[0], "commit")) {
+            paths.appendSliceAssumeCapacity(extra_args);
+            return .{ .add = .{ .paths = paths } };
+        } else if (std.mem.eql(u8, sub_command, "commit")) {
             // if a message is included, it must have a non-null value
             const message_maybe = map_args.get("-m");
             const message = if (message_maybe == null) null else (message_maybe.? orelse return error.CommitMessageMissing);
-            return CommandData{ .commit = .{ .message = message } };
-        } else if (std.mem.eql(u8, args.items[0], "status")) {
-            return CommandData{ .status = {} };
-        } else if (std.mem.eql(u8, args.items[0], "diff")) {
+            return .{ .commit = .{ .message = message } };
+        } else if (std.mem.eql(u8, sub_command, "status")) {
+            return .{ .status = {} };
+        } else if (std.mem.eql(u8, sub_command, "diff")) {
             const diff_kind: df.DiffKind = if (map_args.contains("--staged"))
                 .index
             else
@@ -117,25 +125,25 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8))
                     .{ .workspace = .{ .conflict_diff_kind = .source } }
                 else
                     .{ .workspace = .{ .conflict_diff_kind = .current } });
-            return CommandData{ .diff = .{ .diff_kind = diff_kind } };
-        } else if (std.mem.eql(u8, args.items[0], "branch")) {
-            return CommandData{ .branch = .{ .name = if (pos_args.items.len == 0) null else pos_args.items[0] } };
-        } else if (std.mem.eql(u8, args.items[0], "switch")) {
-            if (pos_args.items.len == 0) {
+            return .{ .diff = .{ .diff_kind = diff_kind } };
+        } else if (std.mem.eql(u8, sub_command, "branch")) {
+            return .{ .branch = .{ .name = if (extra_args.len == 0) null else extra_args[0] } };
+        } else if (std.mem.eql(u8, sub_command, "switch")) {
+            if (extra_args.len == 0) {
                 return error.SwitchTargetMissing;
             }
-            return CommandData{ .switch_head = .{ .target = pos_args.items[0] } };
-        } else if (std.mem.eql(u8, args.items[0], "restore")) {
-            if (pos_args.items.len == 0) {
+            return .{ .switch_head = .{ .target = extra_args[0] } };
+        } else if (std.mem.eql(u8, sub_command, "restore")) {
+            if (extra_args.len == 0) {
                 return error.RestorePathMissing;
             }
-            return CommandData{ .restore = .{ .path = pos_args.items[0] } };
-        } else if (std.mem.eql(u8, args.items[0], "log")) {
-            return CommandData{ .log = {} };
-        } else if (std.mem.eql(u8, args.items[0], "merge")) {
+            return .{ .restore = .{ .path = extra_args[0] } };
+        } else if (std.mem.eql(u8, sub_command, "log")) {
+            return .{ .log = {} };
+        } else if (std.mem.eql(u8, sub_command, "merge")) {
             var merge_input_maybe: ?mrg.MergeInput = null;
-            if (pos_args.items.len > 0) {
-                merge_input_maybe = .{ .new = .{ .source_name = pos_args.items[0] } };
+            if (extra_args.len > 0) {
+                merge_input_maybe = .{ .new = .{ .source_name = extra_args[0] } };
             }
             if (map_args.contains("--continue")) {
                 if (merge_input_maybe != null) {
@@ -144,24 +152,22 @@ pub fn parseArgs(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8))
                 merge_input_maybe = .cont;
             }
             if (merge_input_maybe) |merge_input| {
-                return CommandData{ .merge = merge_input };
+                return .{ .merge = merge_input };
             } else {
                 return error.InsufficientMergeArgs;
             }
         } else {
-            return CommandData{ .invalid = .{ .name = args.items[0] } };
+            return .{ .invalid = .{ .name = sub_command } };
         }
     }
-
-    return CommandData{ .usage = {} };
-}
+};
 
 pub const Command = struct {
     data: CommandData,
 
-    pub fn init(allocator: std.mem.Allocator, args: *std.ArrayList([]const u8)) !Command {
+    pub fn init(allocator: std.mem.Allocator, args: []const []const u8) !Command {
         return .{
-            .data = try parseArgs(allocator, args),
+            .data = try CommandData.init(allocator, args),
         };
     }
 
@@ -182,13 +188,13 @@ test "command" {
 
     args.clearAndFree();
     try args.append("add");
-    try std.testing.expect(error.AddPathsMissing == Command.init(allocator, &args));
+    try std.testing.expect(error.AddPathsMissing == Command.init(allocator, args.items));
 
     args.clearAndFree();
     try args.append("add");
     try args.append("file.txt");
     {
-        var command = try Command.init(allocator, &args);
+        var command = try Command.init(allocator, args.items);
         defer command.deinit();
         try std.testing.expect(command.data == .add);
     }
@@ -196,12 +202,12 @@ test "command" {
     args.clearAndFree();
     try args.append("commit");
     try args.append("-m");
-    try std.testing.expect(error.CommitMessageMissing == Command.init(allocator, &args));
+    try std.testing.expect(error.CommitMessageMissing == Command.init(allocator, args.items));
 
     args.clearAndFree();
     try args.append("commit");
     {
-        var command = try Command.init(allocator, &args);
+        var command = try Command.init(allocator, args.items);
         defer command.deinit();
         try std.testing.expect(command.data == .commit);
         try std.testing.expect(null == command.data.commit.message);
@@ -212,7 +218,7 @@ test "command" {
     try args.append("-m");
     try args.append("let there be light");
     {
-        var command = try Command.init(allocator, &args);
+        var command = try Command.init(allocator, args.items);
         defer command.deinit();
         try std.testing.expect(command.data == .commit);
         try std.testing.expect(null != command.data.commit.message);

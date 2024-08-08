@@ -234,11 +234,12 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
         fn command(self: *Repo(repo_kind), cmd_data: cmd.CommandData, writers: anytype) !void {
             switch (cmd_data) {
-                cmd.CommandData.invalid => {
+                .invalid => {
                     try writers.err.print("\"{s}\" is not a valid command\n", .{cmd_data.invalid.name});
                     return;
                 },
-                cmd.CommandData.usage => {
+                .none => {},
+                .help => {
                     try writers.out.print(
                         \\usage: xit
                         \\
@@ -247,7 +248,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         \\
                     , .{});
                 },
-                cmd.CommandData.init => {
+                .init => {
                     self.* = Repo(repo_kind).initNew(self.allocator, self.init_opts.cwd, cmd_data.init.dir) catch |err| {
                         switch (err) {
                             error.RepoAlreadyExists => {
@@ -258,13 +259,13 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         }
                     };
                 },
-                cmd.CommandData.add => {
+                .add => {
                     try self.add(cmd_data.add.paths.items);
                 },
-                cmd.CommandData.commit => {
+                .commit => {
                     _ = try self.commit(null, cmd_data.commit.message);
                 },
-                cmd.CommandData.status => {
+                .status => {
                     var stat = try self.status();
                     defer stat.deinit();
 
@@ -324,7 +325,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         }
                     }
                 },
-                cmd.CommandData.diff => {
+                .diff => {
                     var diff_iter = try self.diff(cmd_data.diff.diff_kind);
                     defer diff_iter.deinit();
 
@@ -363,7 +364,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         }
                     }
                 },
-                cmd.CommandData.branch => {
+                .branch => {
                     if (cmd_data.branch.name) |name| {
                         try self.create_branch(name);
                     } else {
@@ -388,14 +389,14 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         }
                     }
                 },
-                cmd.CommandData.switch_head => {
+                .switch_head => {
                     var result = try self.switch_head(cmd_data.switch_head.target);
                     defer result.deinit();
                 },
-                cmd.CommandData.restore => {
+                .restore => {
                     try self.restore(cmd_data.restore.path);
                 },
-                cmd.CommandData.log => {
+                .log => {
                     var cursor = try self.core.latestCursor();
                     const core_cursor = switch (repo_kind) {
                         .git => .{ .core = &self.core },
@@ -419,7 +420,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         }
                     }
                 },
-                cmd.CommandData.merge => {
+                .merge => {
                     var result = try self.merge(cmd_data.merge);
                     defer result.deinit();
                     for (result.auto_resolved_conflicts.keys()) |path| {
