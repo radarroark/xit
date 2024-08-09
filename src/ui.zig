@@ -8,6 +8,7 @@ const Grid = xitui.grid.Grid;
 const Focus = xitui.focus.Focus;
 const ui_root = @import("./ui/root.zig");
 const ui_log = @import("./ui/log.zig");
+const ui_diff = @import("./ui/diff.zig");
 const rp = @import("./repo.zig");
 
 pub fn Widget(comptime repo_kind: rp.RepoKind) type {
@@ -21,6 +22,7 @@ pub fn Widget(comptime repo_kind: rp.RepoKind) type {
         ui_root_tabs: ui_root.RootTabs(Widget(repo_kind)),
         ui_log: ui_log.Log(Widget(repo_kind), repo_kind),
         ui_log_commit_list: ui_log.LogCommitList(Widget(repo_kind), repo_kind),
+        ui_diff: ui_diff.Diff(Widget(repo_kind), repo_kind),
 
         pub fn deinit(self: *Widget(repo_kind)) void {
             switch (self.*) {

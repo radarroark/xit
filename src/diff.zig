@@ -903,9 +903,12 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind) type {
                 }
             }
 
+            var myers_diff = try MyersDiffIterator(repo_kind).init(allocator, line_iter_a, line_iter_b);
+            errdefer myers_diff.deinit();
+
             return HunkIterator(repo_kind){
                 .header_lines = header_lines,
-                .myers_diff = try MyersDiffIterator(repo_kind).init(allocator, line_iter_a, line_iter_b),
+                .myers_diff = myers_diff,
                 .eof = false,
                 .allocator = allocator,
                 .arena = arena,

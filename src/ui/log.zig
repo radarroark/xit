@@ -5,7 +5,9 @@ const layout = xitui.layout;
 const inp = xitui.input;
 const Grid = xitui.grid.Grid;
 const Focus = xitui.focus.Focus;
+const ui_diff = @import("./diff.zig");
 const rp = @import("../repo.zig");
+const df = @import("../diff.zig");
 const ref = @import("../ref.zig");
 const obj = @import("../object.zig");
 
@@ -166,6 +168,7 @@ pub fn Log(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
     return struct {
         box: wgt.Box(Widget),
         repo: *rp.Repo(repo_kind),
+        allocator: std.mem.Allocator,
 
         pub fn init(allocator: std.mem.Allocator, repo: *rp.Repo(repo_kind)) !Log(Widget, repo_kind) {
             var box = try wgt.Box(Widget).init(allocator, null, .horiz);
@@ -180,7 +183,7 @@ pub fn Log(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
 
             // add diff
             {
-                var diff = Widget{ .text_box = try wgt.TextBox(Widget).init(allocator, "Diff", .hidden) };
+                var diff = Widget{ .ui_diff = try ui_diff.Diff(Widget, repo_kind).init(allocator, repo) };
                 errdefer diff.deinit();
                 diff.getFocus().focusable = true;
                 try box.children.put(diff.getFocus().id, .{ .widget = diff, .rect = null, .min_size = .{ .width = 60, .height = null } });
@@ -189,6 +192,7 @@ pub fn Log(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
             var git_log = Log(Widget, repo_kind){
                 .box = box,
                 .repo = repo,
+                .allocator = allocator,
             };
             git_log.getFocus().child_id = box.children.keys()[0];
             try git_log.updateDiff();
@@ -206,14 +210,24 @@ pub fn Log(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
         }
 
         pub fn input(self: *Log(Widget, repo_kind), key: inp.Key, root_focus: *Focus) !void {
+            const diff_scroll_x = self.box.children.values()[1].widget.ui_diff.box.children.values()[0].widget.scroll.x;
+
             if (self.getFocus().child_id) |child_id| {
                 if (self.box.children.getIndex(child_id)) |current_index| {
                     const child = &self.box.children.values()[current_index].widget;
 
                     const index = blk: {
                         switch (key) {
-                            .arrow_left => {},
-                            .arrow_right => {},
+                            .arrow_left => {
+                                if (child.* == .ui_diff and diff_scroll_x == 0) {
+                                    break :blk 0;
+                                }
+                            },
+                            .arrow_right => {
+                                if (child.* == .ui_log_commit_list) {
+                                    break :blk 1;
+                                }
+                            },
                             .codepoint => {
                                 switch (key.codepoint) {
                                     13 => {
@@ -221,7 +235,11 @@ pub fn Log(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                                             break :blk 1;
                                         }
                                     },
-                                    127, '\x1B' => {},
+                                    127, '\x1B' => {
+                                        if (child.* == .ui_diff) {
+                                            break :blk 0;
+                                        }
+                                    },
                                     else => {},
                                 }
                             },
@@ -264,6 +282,10 @@ pub fn Log(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                                 return commit_index == 0;
                             }
                         },
+                        .ui_diff => {
+                            const diff = &child.ui_diff;
+                            return diff.getScrollY() == 0;
+                        },
                         else => {},
                     }
                 }
@@ -272,7 +294,33 @@ pub fn Log(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
         }
 
         fn updateDiff(self: *Log(Widget, repo_kind)) !void {
-            _ = self;
+            const commit_list = &self.box.children.values()[0].widget.ui_log_commit_list;
+            if (commit_list.getSelectedIndex()) |commit_index| {
+                const commit_object = commit_list.commits.items[commit_index];
+
+                const commit_oid = commit_object.oid;
+
+                const parent_oid_maybe = if (commit_object.content.commit.parents.items.len == 1)
+                    commit_object.content.commit.parents.items[0]
+                else
+                    null;
+
+                var tree_diff = try self.repo.treeDiff(parent_oid_maybe, commit_oid);
+                defer tree_diff.deinit();
+
+                var diff_iter = try self.repo.diff(.{ .tree = .{ .tree_diff = &tree_diff } });
+
+                var diff = &self.box.children.values()[1].widget.ui_diff;
+                try diff.clearDiffs();
+
+                while (try diff_iter.next()) |*line_iter_pair_ptr| {
+                    var line_iter_pair = line_iter_pair_ptr.*;
+                    defer line_iter_pair.deinit();
+                    var hunk_iter = try df.HunkIterator(repo_kind).init(self.allocator, &line_iter_pair.a, &line_iter_pair.b);
+                    defer hunk_iter.deinit();
+                    try diff.addHunks(&hunk_iter);
+                }
+            }
         }
     };
 }
