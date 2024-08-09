@@ -12,6 +12,7 @@
 const std = @import("std");
 const cmd = @import("./command.zig");
 const rp = @import("./repo.zig");
+const ui = @import("./ui.zig");
 
 const USAGE =
     \\
@@ -33,7 +34,9 @@ pub fn xitMain(comptime kind: rp.RepoKind, allocator: std.mem.Allocator, args: [
             try writers.err.print("\"{s}\" is not a valid command\n", .{command.invalid.name});
             try writers.out.print(USAGE, .{});
         },
-        .tui => return error.NotImplemented,
+        .tui => {
+            try ui.start(allocator);
+        },
         .cli => {
             if (command.cli) |sub_command| {
                 var repo = try rp.Repo(kind).initWithCommand(allocator, .{ .cwd = std.fs.cwd() }, sub_command, writers);
