@@ -315,30 +315,35 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     const DiffState = union(df.DiffKind) {
                         workspace: st.Status(repo_kind),
                         index: st.Status(repo_kind),
+                        tree: obj.TreeDiff(repo_kind),
 
                         fn deinit(diff_state: *@This()) void {
                             switch (diff_state.*) {
                                 .workspace => diff_state.workspace.deinit(),
                                 .index => diff_state.index.deinit(),
+                                .tree => diff_state.tree.deinit(),
                             }
                         }
                     };
-                    var diff_state: DiffState = switch (sub_command.diff.diff_opts) {
+                    const diff_opts = sub_command.diff.diff_opts;
+                    var diff_state: DiffState = switch (diff_opts) {
                         .workspace => .{ .workspace = try self.status() },
                         .index => .{ .index = try self.status() },
+                        .tree => .{ .tree = try self.treeDiff(diff_opts.tree.old, diff_opts.tree.new) },
                     };
                     defer diff_state.deinit();
-                    var diff_iter = try self.diff(switch (sub_command.diff.diff_opts) {
+                    var diff_iter = try self.diff(switch (diff_opts) {
                         .workspace => .{
                             .workspace = .{
-                                .conflict_diff_kind = sub_command.diff.diff_opts.workspace.conflict_diff_kind,
+                                .conflict_diff_kind = diff_opts.workspace.conflict_diff_kind,
                                 .status = &diff_state.workspace,
                             },
                         },
                         .index => .{
-                            .index = .{
-                                .status = &diff_state.index,
-                            },
+                            .index = .{ .status = &diff_state.index },
+                        },
+                        .tree => .{
+                            .tree = .{ .tree_diff = &diff_state.tree },
                         },
                     });
 
@@ -609,6 +614,18 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
         pub fn diff(self: *Repo(repo_kind), diff_opts: df.DiffOptions(repo_kind)) !df.FileIterator(repo_kind) {
             return try df.FileIterator(repo_kind).init(self.allocator, &self.core, diff_opts);
+        }
+
+        pub fn treeDiff(self: *Repo(repo_kind), old_oid_maybe: ?[hash.SHA1_HEX_LEN]u8, new_oid_maybe: ?[hash.SHA1_HEX_LEN]u8) !obj.TreeDiff(repo_kind) {
+            var cursor = try self.core.latestCursor();
+            const core_cursor = switch (repo_kind) {
+                .git => .{ .core = &self.core },
+                .xit => .{ .core = &self.core, .cursor = &cursor },
+            };
+            var tree_diff = obj.TreeDiff(repo_kind).init(self.allocator);
+            errdefer tree_diff.deinit();
+            try tree_diff.compare(core_cursor, old_oid_maybe, new_oid_maybe, null);
+            return tree_diff;
         }
 
         pub fn create_branch(self: *Repo(repo_kind), name: []const u8) !void {

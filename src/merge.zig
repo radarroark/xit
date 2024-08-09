@@ -34,13 +34,13 @@ fn writeBlobWithConflict(
     has_conflict: *bool,
 ) ![hash.SHA1_BYTES_LEN]u8 {
     var common_iter = if (common_oid_maybe) |common_oid|
-        try df.LineIterator(repo_kind).initFromOid(core_cursor, allocator, common_oid)
+        try df.LineIterator(repo_kind).initFromOid(core_cursor, allocator, "", common_oid, null)
     else
         try df.LineIterator(repo_kind).initFromNothing(allocator, "");
     defer common_iter.deinit();
-    var current_iter = try df.LineIterator(repo_kind).initFromOid(core_cursor, allocator, current_oid);
+    var current_iter = try df.LineIterator(repo_kind).initFromOid(core_cursor, allocator, "", current_oid, null);
     defer current_iter.deinit();
-    var source_iter = try df.LineIterator(repo_kind).initFromOid(core_cursor, allocator, source_oid);
+    var source_iter = try df.LineIterator(repo_kind).initFromOid(core_cursor, allocator, "", source_oid, null);
     defer source_iter.deinit();
     var diff3_iter = try df.Diff3Iterator(repo_kind).init(allocator, &common_iter, &current_iter, &source_iter);
     defer diff3_iter.deinit();

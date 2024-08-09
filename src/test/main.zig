@@ -478,6 +478,54 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         break :blk try ref.readHead(repo_kind, core_cursor);
     };
 
+    // tree diff
+    {
+        var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
+        defer repo.deinit();
+        var tree_diff = try repo.treeDiff(commit1, commit2);
+        defer tree_diff.deinit();
+        var diff_iter = try repo.diff(.{
+            .tree = .{ .tree_diff = &tree_diff },
+        });
+
+        while (try diff_iter.next()) |*line_iter_pair_ptr| {
+            var line_iter_pair = line_iter_pair_ptr.*;
+            defer line_iter_pair.deinit();
+            var hunk_iter = try df.HunkIterator(repo_kind).init(allocator, &line_iter_pair.a, &line_iter_pair.b);
+            defer hunk_iter.deinit();
+            if (std.mem.eql(u8, "LICENSE", line_iter_pair.path)) {
+                try std.testing.expectEqualStrings("diff --git a/LICENSE b/LICENSE", hunk_iter.header_lines.items[0]);
+                try std.testing.expectEqualStrings("deleted file mode 100644", hunk_iter.header_lines.items[1]);
+            } else if (std.mem.eql(u8, "docs/design.md", line_iter_pair.path)) {
+                try std.testing.expectEqualStrings("diff --git a/docs/design.md b/docs/design.md", hunk_iter.header_lines.items[0]);
+                try std.testing.expectEqualStrings("deleted file mode 100644", hunk_iter.header_lines.items[1]);
+            } else if (std.mem.eql(u8, "hello.txt", line_iter_pair.path)) {
+                try std.testing.expectEqualStrings("diff --git a/hello.txt b/hello.txt", hunk_iter.header_lines.items[0]);
+            } else if (std.mem.eql(u8, "run.sh", line_iter_pair.path)) {
+                try std.testing.expectEqualStrings("diff --git a/run.sh b/run.sh", hunk_iter.header_lines.items[0]);
+                try std.testing.expectEqualStrings("old mode 100644", hunk_iter.header_lines.items[1]);
+                try std.testing.expectEqualStrings("new mode 100755", hunk_iter.header_lines.items[2]);
+            } else if (std.mem.eql(u8, "src/zig/main.zig", line_iter_pair.path)) {
+                try std.testing.expectEqualStrings("diff --git a/src/zig/main.zig b/src/zig/main.zig", hunk_iter.header_lines.items[0]);
+                try std.testing.expectEqualStrings("new file mode 100644", hunk_iter.header_lines.items[1]);
+            } else if (std.mem.eql(u8, "tests/main_test.zig", line_iter_pair.path)) {
+                try std.testing.expectEqualStrings("diff --git a/tests/main_test.zig b/tests/main_test.zig", hunk_iter.header_lines.items[0]);
+                try std.testing.expectEqualStrings("new file mode 100644", hunk_iter.header_lines.items[1]);
+            } else if (std.mem.eql(u8, "tests", line_iter_pair.path)) {
+                try std.testing.expectEqualStrings("diff --git a/tests b/tests", hunk_iter.header_lines.items[0]);
+                try std.testing.expectEqualStrings("deleted file mode 100644", hunk_iter.header_lines.items[1]);
+            } else {
+                return error.EntryNotExpected;
+            }
+        }
+
+        if (builtin.os.tag != .windows) {
+            try std.testing.expectEqual(7, diff_iter.next_index);
+        } else {
+            try std.testing.expectEqual(6, diff_iter.next_index);
+        }
+    }
+
     // try to switch to first commit after making conflicting change
     {
         {
