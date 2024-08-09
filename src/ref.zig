@@ -142,7 +142,7 @@ pub fn resolve(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).
                 return try resolve(repo_kind, core_cursor, std.mem.sliceTo(buffer[0..size], '\n'));
             }
 
-            if (content.len >= hash.SHA1_HEX_LEN) {
+            if (content.len == hash.SHA1_HEX_LEN) {
                 var buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
                 @memcpy(&buffer, content[0..hash.SHA1_HEX_LEN]);
                 return buffer;
@@ -160,7 +160,7 @@ pub fn resolve(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).
                 const bytes = try bytes_cursor.readBytes(&db_buffer);
                 return try resolve(repo_kind, core_cursor, bytes);
             } else {
-                if (content.len >= hash.SHA1_HEX_LEN) {
+                if (content.len == hash.SHA1_HEX_LEN) {
                     var buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
                     @memcpy(&buffer, content[0..hash.SHA1_HEX_LEN]);
                     return buffer;
