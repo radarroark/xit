@@ -139,7 +139,7 @@ pub fn resolve(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).
                 defer ref_file.close();
                 var buffer = [_]u8{0} ** MAX_READ_BYTES;
                 const size = try ref_file.reader().readAll(&buffer);
-                return try resolve(repo_kind, core_cursor, buffer[0..size]);
+                return try resolve(repo_kind, core_cursor, std.mem.sliceTo(buffer[0..size], '\n'));
             }
 
             if (content.len >= hash.SHA1_HEX_LEN) {
@@ -178,7 +178,7 @@ pub fn read(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).Cor
             const head_file = try core_cursor.core.git_dir.openFile(path, .{ .mode = .read_only });
             defer head_file.close();
             const size = try head_file.reader().readAll(buffer);
-            return buffer[0..size];
+            return std.mem.sliceTo(buffer[0..size], '\n');
         },
         .xit => {
             if (try core_cursor.cursor.readPath(void, &[_]xitdb.PathPart(void){
