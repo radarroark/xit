@@ -6,53 +6,60 @@ const layout = xitui.layout;
 const inp = xitui.input;
 const Grid = xitui.grid.Grid;
 const Focus = xitui.focus.Focus;
+const ui_root = @import("./ui/root.zig");
+const rp = @import("./repo.zig");
 
-pub const Widget = union(enum) {
-    text: wgt.Text(Widget),
-    box: wgt.Box(Widget),
-    text_box: wgt.TextBox(Widget),
-    scroll: wgt.Scroll(Widget),
+pub fn Widget(comptime repo_kind: rp.RepoKind) type {
+    return union(enum) {
+        text: wgt.Text(Widget(repo_kind)),
+        box: wgt.Box(Widget(repo_kind)),
+        text_box: wgt.TextBox(Widget(repo_kind)),
+        scroll: wgt.Scroll(Widget(repo_kind)),
+        ui_root: ui_root.Root(Widget(repo_kind), repo_kind),
+        ui_root_stack: ui_root.RootStack(Widget(repo_kind)),
+        ui_root_tabs: ui_root.RootTabs(Widget(repo_kind)),
 
-    pub fn deinit(self: *Widget) void {
-        switch (self.*) {
-            inline else => |*case| case.deinit(),
+        pub fn deinit(self: *Widget(repo_kind)) void {
+            switch (self.*) {
+                inline else => |*case| case.deinit(),
+            }
         }
-    }
 
-    pub fn build(self: *Widget, constraint: layout.Constraint, root_focus: *Focus) anyerror!void {
-        switch (self.*) {
-            inline else => |*case| try case.build(constraint, root_focus),
+        pub fn build(self: *Widget(repo_kind), constraint: layout.Constraint, root_focus: *Focus) anyerror!void {
+            switch (self.*) {
+                inline else => |*case| try case.build(constraint, root_focus),
+            }
         }
-    }
 
-    pub fn input(self: *Widget, key: inp.Key, root_focus: *Focus) anyerror!void {
-        switch (self.*) {
-            inline else => |*case| try case.input(key, root_focus),
+        pub fn input(self: *Widget(repo_kind), key: inp.Key, root_focus: *Focus) anyerror!void {
+            switch (self.*) {
+                inline else => |*case| try case.input(key, root_focus),
+            }
         }
-    }
 
-    pub fn clearGrid(self: *Widget) void {
-        switch (self.*) {
-            inline else => |*case| case.clearGrid(),
+        pub fn clearGrid(self: *Widget(repo_kind)) void {
+            switch (self.*) {
+                inline else => |*case| case.clearGrid(),
+            }
         }
-    }
 
-    pub fn getGrid(self: Widget) ?Grid {
-        switch (self) {
-            inline else => |*case| return case.getGrid(),
+        pub fn getGrid(self: Widget(repo_kind)) ?Grid {
+            switch (self) {
+                inline else => |*case| return case.getGrid(),
+            }
         }
-    }
 
-    pub fn getFocus(self: *Widget) *Focus {
-        switch (self.*) {
-            inline else => |*case| return case.getFocus(),
+        pub fn getFocus(self: *Widget(repo_kind)) *Focus {
+            switch (self.*) {
+                inline else => |*case| return case.getFocus(),
+            }
         }
-    }
-};
+    };
+}
 
-pub fn start(allocator: std.mem.Allocator) !void {
+pub fn start(comptime repo_kind: rp.RepoKind, repo: *rp.Repo(repo_kind), allocator: std.mem.Allocator) !void {
     // init root widget
-    var root = Widget{ .text_box = try wgt.TextBox(Widget).init(allocator, "Hello, world!", .single) };
+    var root = Widget(repo_kind){ .ui_root = try ui_root.Root(Widget(repo_kind), repo_kind).init(allocator, repo) };
     defer root.deinit();
 
     // set initial focus for root widget

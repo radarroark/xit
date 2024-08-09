@@ -25,7 +25,7 @@ const USAGE =
 /// as a CLI tool. to use xit programmatically, build a Repo struct
 /// and call methods on it directly. to use xit subconsciously, just
 /// think about it really often and eventually you'll dream about it.
-pub fn xitMain(comptime kind: rp.RepoKind, allocator: std.mem.Allocator, args: []const []const u8, writers: anytype) !void {
+pub fn xitMain(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, args: []const []const u8, writers: anytype) !void {
     var command = try cmd.Command.init(allocator, args);
     defer command.deinit();
 
@@ -35,11 +35,37 @@ pub fn xitMain(comptime kind: rp.RepoKind, allocator: std.mem.Allocator, args: [
             try writers.out.print(USAGE, .{});
         },
         .tui => {
-            try ui.start(allocator);
+            // xit repo
+            {
+                var repo_or_err = rp.Repo(.xit).init(allocator, .{ .cwd = std.fs.cwd() });
+                if (repo_or_err) |*repo| {
+                    defer repo.deinit();
+                    try ui.start(.xit, repo, allocator);
+                    return;
+                } else |err| switch (err) {
+                    error.RepoDoesNotExist => {},
+                    else => return err,
+                }
+            }
+
+            // git repo
+            {
+                var repo_or_err = rp.Repo(.git).init(allocator, .{ .cwd = std.fs.cwd() });
+                if (repo_or_err) |*repo| {
+                    defer repo.deinit();
+                    try ui.start(.git, repo, allocator);
+                    return;
+                } else |err| switch (err) {
+                    error.RepoDoesNotExist => {},
+                    else => return err,
+                }
+            }
+
+            return error.NotAXitOrGitRepo;
         },
         .cli => {
             if (command.cli) |sub_command| {
-                var repo = try rp.Repo(kind).initWithCommand(allocator, .{ .cwd = std.fs.cwd() }, sub_command, writers);
+                var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = std.fs.cwd() }, sub_command, writers);
                 defer repo.deinit();
             } else {
                 try writers.out.print(USAGE, .{});
