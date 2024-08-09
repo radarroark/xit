@@ -5,6 +5,7 @@ const layout = xitui.layout;
 const inp = xitui.input;
 const Grid = xitui.grid.Grid;
 const Focus = xitui.focus.Focus;
+const ui_log = @import("./log.zig");
 const rp = @import("../repo.zig");
 
 pub fn RootTabs(comptime Widget: type) type {
@@ -172,8 +173,6 @@ pub fn Root(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
         const FocusKind = enum { tabs, stack };
 
         pub fn init(allocator: std.mem.Allocator, repo: *rp.Repo(repo_kind)) !Root(Widget, repo_kind) {
-            _ = repo;
-
             var box = try wgt.Box(Widget).init(allocator, null, .vert);
             errdefer box.deinit();
 
@@ -190,7 +189,7 @@ pub fn Root(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                         errdefer stack.deinit();
 
                         {
-                            var log = Widget{ .text_box = try wgt.TextBox(Widget).init(allocator, "Log", .hidden) };
+                            var log = Widget{ .ui_log = try ui_log.Log(Widget, repo_kind).init(allocator, repo) };
                             errdefer log.deinit();
                             try stack.children.put(log.getFocus().id, log);
                         }
@@ -239,7 +238,20 @@ pub fn Root(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                                 .ui_root_tabs => {
                                     try child.input(key, root_focus);
                                 },
-                                .ui_root_stack => {},
+                                .ui_root_stack => {
+                                    if (child.ui_root_stack.getSelected()) |selected_widget| {
+                                        switch (selected_widget.*) {
+                                            .ui_log => {
+                                                if (selected_widget.ui_log.scrolledToTop()) {
+                                                    index = @intFromEnum(FocusKind.tabs);
+                                                } else {
+                                                    try child.input(key, root_focus);
+                                                }
+                                            },
+                                            else => {},
+                                        }
+                                    }
+                                },
                                 else => {},
                             }
                         },
