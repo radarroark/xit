@@ -203,8 +203,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         core: *Repo(repo_kind).Core,
                         allocator: std.mem.Allocator,
 
-                        pub fn run(ctx_self: @This(), cursor: *xitdb.Cursor(.file)) !void {
-                            try ref.writeHead(repo_kind, .{ .core = ctx_self.core, .cursor = cursor }, ctx_self.allocator, "master", null);
+                        pub fn run(ctx: @This(), cursor: *xitdb.Cursor(.file)) !void {
+                            try ref.writeHead(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, "master", null);
                         }
                     };
                     _ = try self.core.db.rootCursor().writePath(Ctx, &[_]xitdb.PathPart(Ctx){
@@ -316,10 +316,10 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         workspace: st.Status(repo_kind),
                         index: st.Status(repo_kind),
 
-                        fn deinit(diff_state_self: *@This()) void {
-                            switch (diff_state_self.*) {
-                                .workspace => diff_state_self.workspace.deinit(),
-                                .index => diff_state_self.index.deinit(),
+                        fn deinit(diff_state: *@This()) void {
+                            switch (diff_state.*) {
+                                .workspace => diff_state.workspace.deinit(),
+                                .index => diff_state.index.deinit(),
                             }
                         }
                     };
@@ -502,9 +502,9 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         message_maybe: ?[]const u8,
                         result: *[hash.SHA1_HEX_LEN]u8,
 
-                        pub fn run(ctx_self: @This(), cursor: *xitdb.Cursor(.file)) !void {
-                            try pch.writePatch(repo_kind, .{ .core = ctx_self.core, .cursor = cursor }, ctx_self.allocator);
-                            ctx_self.result.* = try obj.writeCommit(repo_kind, .{ .core = ctx_self.core, .cursor = cursor }, ctx_self.allocator, ctx_self.parent_oids_maybe, ctx_self.message_maybe);
+                        pub fn run(ctx: @This(), cursor: *xitdb.Cursor(.file)) !void {
+                            try pch.writePatch(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator);
+                            ctx.result.* = try obj.writeCommit(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, ctx.parent_oids_maybe, ctx.message_maybe);
                         }
                     };
                     _ = try self.core.db.rootCursor().writePath(Ctx, &[_]xitdb.PathPart(Ctx){
@@ -559,14 +559,14 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         allocator: std.mem.Allocator,
                         paths: []const []const u8,
 
-                        pub fn run(ctx_self: @This(), cursor: *xitdb.Cursor(.file)) !void {
+                        pub fn run(ctx: @This(), cursor: *xitdb.Cursor(.file)) !void {
                             // read index
-                            var index = try idx.Index(.xit).init(ctx_self.allocator, .{ .core = ctx_self.core, .cursor = cursor });
+                            var index = try idx.Index(.xit).init(ctx.allocator, .{ .core = ctx.core, .cursor = cursor });
                             defer index.deinit();
 
                             // read all the new entries
-                            for (ctx_self.paths) |path| {
-                                if (ctx_self.core.repo_dir.openFile(path, .{ .mode = .read_only })) |file| {
+                            for (ctx.paths) |path| {
+                                if (ctx.core.repo_dir.openFile(path, .{ .mode = .read_only })) |file| {
                                     file.close();
                                 } else |err| {
                                     switch (err) {
@@ -582,11 +582,11 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                                         else => return err,
                                     }
                                 }
-                                try index.addPath(.{ .core = ctx_self.core, .cursor = cursor }, path);
+                                try index.addPath(.{ .core = ctx.core, .cursor = cursor }, path);
                             }
 
                             // write index
-                            try index.write(ctx_self.allocator, .{ .core = ctx_self.core, .cursor = cursor });
+                            try index.write(ctx.allocator, .{ .core = ctx.core, .cursor = cursor });
                         }
                     };
                     _ = try self.core.db.rootCursor().writePath(Ctx, &[_]xitdb.PathPart(Ctx){
@@ -620,8 +620,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         allocator: std.mem.Allocator,
                         name: []const u8,
 
-                        pub fn run(ctx_self: @This(), cursor: *xitdb.Cursor(.file)) !void {
-                            try bch.create(repo_kind, .{ .core = ctx_self.core, .cursor = cursor }, ctx_self.allocator, ctx_self.name);
+                        pub fn run(ctx: @This(), cursor: *xitdb.Cursor(.file)) !void {
+                            try bch.create(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, ctx.name);
                         }
                     };
                     _ = try self.core.db.rootCursor().writePath(Ctx, &[_]xitdb.PathPart(Ctx){
@@ -642,8 +642,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         allocator: std.mem.Allocator,
                         name: []const u8,
 
-                        pub fn run(ctx_self: @This(), cursor: *xitdb.Cursor(.file)) !void {
-                            try bch.delete(repo_kind, .{ .core = ctx_self.core, .cursor = cursor }, ctx_self.allocator, ctx_self.name);
+                        pub fn run(ctx: @This(), cursor: *xitdb.Cursor(.file)) !void {
+                            try bch.delete(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, ctx.name);
                         }
                     };
                     _ = try self.core.db.rootCursor().writePath(Ctx, &[_]xitdb.PathPart(Ctx){
@@ -666,8 +666,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         target: []const u8,
                         result: *chk.Switch,
 
-                        pub fn run(ctx_self: @This(), cursor: *xitdb.Cursor(.file)) !void {
-                            ctx_self.result.* = try chk.Switch.init(repo_kind, .{ .core = ctx_self.core, .cursor = cursor }, ctx_self.allocator, ctx_self.target);
+                        pub fn run(ctx: @This(), cursor: *xitdb.Cursor(.file)) !void {
+                            ctx.result.* = try chk.Switch.init(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, ctx.target);
                         }
                     };
                     _ = try self.core.db.rootCursor().writePath(Ctx, &[_]xitdb.PathPart(Ctx){
@@ -689,8 +689,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         allocator: std.mem.Allocator,
                         path: []const u8,
 
-                        pub fn run(ctx_self: @This(), cursor: *xitdb.Cursor(.file)) !void {
-                            try chk.restore(repo_kind, .{ .core = ctx_self.core, .cursor = cursor }, ctx_self.allocator, ctx_self.path);
+                        pub fn run(ctx: @This(), cursor: *xitdb.Cursor(.file)) !void {
+                            try chk.restore(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, ctx.path);
                         }
                     };
                     _ = try self.core.db.rootCursor().writePath(Ctx, &[_]xitdb.PathPart(Ctx){
@@ -717,10 +717,10 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         input: mrg.MergeInput,
                         result: *mrg.Merge,
 
-                        pub fn run(ctx_self: @This(), cursor: *xitdb.Cursor(.file)) !void {
-                            ctx_self.result.* = try mrg.Merge.init(repo_kind, .{ .core = ctx_self.core, .cursor = cursor }, ctx_self.allocator, ctx_self.input);
+                        pub fn run(ctx: @This(), cursor: *xitdb.Cursor(.file)) !void {
+                            ctx.result.* = try mrg.Merge.init(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, ctx.input);
                             // no need to make a new transaction if nothing was done
-                            if (.nothing == ctx_self.result.data) {
+                            if (.nothing == ctx.result.data) {
                                 return error.CancelTransaction;
                             }
                         }

@@ -362,8 +362,8 @@ pub fn updateRecur(
                 oid_hex: *const [hash.SHA1_HEX_LEN]u8,
                 file_name: []const u8,
 
-                pub fn run(ctx_self: @This(), cursor: *xitdb.Cursor(.file)) !void {
-                    const file_name_hash = hash.hashBuffer(ctx_self.file_name);
+                pub fn run(ctx: @This(), cursor: *xitdb.Cursor(.file)) !void {
+                    const file_name_hash = hash.hashBuffer(ctx.file_name);
 
                     var buffer = [_]u8{0} ** MAX_READ_BYTES;
                     if (try cursor.readPath(void, &[_]xitdb.PathPart(void){
@@ -373,28 +373,28 @@ pub fn updateRecur(
                         // if it's a ref, update it recursively
                         if (std.mem.startsWith(u8, old_content, REF_START_STR) and old_content.len > REF_START_STR.len) {
                             const ref_name = old_content[REF_START_STR.len..];
-                            try updateRecur(repo_kind, ctx_self.core_cursor, ctx_self.allocator, &[_][]const u8{ "refs", "heads", ref_name }, ctx_self.oid_hex);
+                            try updateRecur(repo_kind, ctx.core_cursor, ctx.allocator, &[_][]const u8{ "refs", "heads", ref_name }, ctx.oid_hex);
                             return;
                         }
                     }
 
                     // otherwise, update with the oid
-                    var ref_name_cursor = try ctx_self.core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
+                    var ref_name_cursor = try ctx.core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-name-set") } },
                         .hash_map_init,
                         .{ .hash_map_get = .{ .key = file_name_hash } },
                     });
-                    try ref_name_cursor.writeBytes(ctx_self.file_name, .once);
+                    try ref_name_cursor.writeBytes(ctx.file_name, .once);
                     _ = try cursor.writePath(void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = .{ .key = file_name_hash } },
                         .{ .write = .{ .slot = ref_name_cursor.slot_ptr.slot } },
                     });
-                    var ref_content_cursor = try ctx_self.core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
+                    var ref_content_cursor = try ctx.core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-content-set") } },
                         .hash_map_init,
-                        .{ .hash_map_get = .{ .key = try hash.hexToHash(ctx_self.oid_hex) } },
+                        .{ .hash_map_get = .{ .key = try hash.hexToHash(ctx.oid_hex) } },
                     });
-                    try ref_content_cursor.writeBytes(ctx_self.oid_hex, .once);
+                    try ref_content_cursor.writeBytes(ctx.oid_hex, .once);
                     _ = try cursor.writePath(void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = .{ .value = file_name_hash } },
                         .{ .write = .{ .slot = ref_content_cursor.slot_ptr.slot } },

@@ -464,24 +464,24 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                         allocator: std.mem.Allocator,
                         index: *Index(repo_kind),
 
-                        pub fn run(ctx_self: @This(), cursor: *xitdb.Cursor(.file)) !void {
+                        pub fn run(ctx: @This(), cursor: *xitdb.Cursor(.file)) !void {
                             // remove items no longer in the index
                             var iter = try cursor.iter();
                             defer iter.deinit();
                             while (try iter.next()) |*next_cursor| {
                                 const kv_pair = try next_cursor.readKeyValuePair();
-                                const path = try kv_pair.key_cursor.readBytesAlloc(ctx_self.allocator, MAX_READ_BYTES);
-                                defer ctx_self.allocator.free(path);
+                                const path = try kv_pair.key_cursor.readBytesAlloc(ctx.allocator, MAX_READ_BYTES);
+                                defer ctx.allocator.free(path);
 
-                                if (!ctx_self.index.entries.contains(path)) {
+                                if (!ctx.index.entries.contains(path)) {
                                     _ = try cursor.writePath(void, &[_]xitdb.PathPart(void){
                                         .{ .hash_map_remove = hash.hashBuffer(path) },
                                     });
                                 }
                             }
 
-                            for (ctx_self.index.entries.keys(), ctx_self.index.entries.values()) |path, *entries_for_path| {
-                                var entry_buffer = std.ArrayList(u8).init(ctx_self.allocator);
+                            for (ctx.index.entries.keys(), ctx.index.entries.values()) |path, *entries_for_path| {
+                                var entry_buffer = std.ArrayList(u8).init(ctx.allocator);
                                 defer entry_buffer.deinit();
                                 const writer = entry_buffer.writer();
 
@@ -506,14 +506,14 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                 if (try cursor.readPath(void, &[_]xitdb.PathPart(void){
                                     .{ .hash_map_get = .{ .value = path_hash } },
                                 })) |existing_entry_cursor| {
-                                    const existing_entry = try existing_entry_cursor.readBytesAlloc(ctx_self.allocator, MAX_READ_BYTES);
-                                    defer ctx_self.allocator.free(existing_entry);
+                                    const existing_entry = try existing_entry_cursor.readBytesAlloc(ctx.allocator, MAX_READ_BYTES);
+                                    defer ctx.allocator.free(existing_entry);
                                     if (std.mem.eql(u8, entry_buffer.items, existing_entry)) {
                                         continue;
                                     }
                                 }
 
-                                var path_cursor = try ctx_self.core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
+                                var path_cursor = try ctx.core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
                                     .{ .hash_map_get = .{ .value = hash.hashBuffer("path-set") } },
                                     .hash_map_init,
                                     .{ .hash_map_get = .{ .key = path_hash } },
@@ -524,7 +524,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                     .{ .write = .{ .slot = path_cursor.slot_ptr.slot } },
                                 });
 
-                                var entry_buffer_cursor = try ctx_self.core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
+                                var entry_buffer_cursor = try ctx.core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
                                     .{ .hash_map_get = .{ .value = hash.hashBuffer("entry-buffer-set") } },
                                     .hash_map_init,
                                     .{ .hash_map_get = .{ .key = hash.hashBuffer(entry_buffer.items) } },

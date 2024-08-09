@@ -150,14 +150,14 @@ pub fn writeBlob(
                 sha1_hex: [hash.SHA1_HEX_LEN]u8,
                 header: []const u8,
 
-                pub fn run(ctx_self: @This(), cursor: *xitdb.Cursor(.file)) !void {
+                pub fn run(ctx: @This(), cursor: *xitdb.Cursor(.file)) !void {
                     if (cursor.pointer() == null) {
                         var writer = try cursor.writer();
-                        try writer.writeAll(ctx_self.header);
+                        try writer.writeAll(ctx.header);
                         // TODO: use buffered io
                         var read_buffer = [_]u8{0} ** MAX_READ_BYTES;
                         while (true) {
-                            const size = try ctx_self.reader.read(&read_buffer);
+                            const size = try ctx.reader.read(&read_buffer);
                             if (size == 0) {
                                 break;
                             }
@@ -165,10 +165,10 @@ pub fn writeBlob(
                         }
                         try writer.finish();
 
-                        _ = try ctx_self.core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
+                        _ = try ctx.core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
                             .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
                             .hash_map_init,
-                            .{ .hash_map_get = .{ .value = try hash.hexToHash(&ctx_self.sha1_hex) } },
+                            .{ .hash_map_get = .{ .value = try hash.hexToHash(&ctx.sha1_hex) } },
                             .{ .write = .{ .slot = writer.slot } },
                         });
                     }
@@ -264,17 +264,17 @@ fn writeTree(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).Co
                 tree_sha1_bytes: *const [hash.SHA1_BYTES_LEN]u8,
                 tree_bytes: []const u8,
 
-                pub fn run(ctx_self: @This(), cursor: *xitdb.Cursor(.file)) !void {
+                pub fn run(ctx: @This(), cursor: *xitdb.Cursor(.file)) !void {
                     // exit early if there is nothing to commit
                     if (cursor.pointer() != null) {
                         return;
                     }
-                    var tree_cursor = try ctx_self.cursor.writePath(void, &[_]xitdb.PathPart(void){
+                    var tree_cursor = try ctx.cursor.writePath(void, &[_]xitdb.PathPart(void){
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("object-values") } },
                         .hash_map_init,
-                        .{ .hash_map_get = .{ .value = hash.bytesToHash(ctx_self.tree_sha1_bytes) } },
+                        .{ .hash_map_get = .{ .value = hash.bytesToHash(ctx.tree_sha1_bytes) } },
                     });
-                    try tree_cursor.writeBytes(ctx_self.tree_bytes, .once);
+                    try tree_cursor.writeBytes(ctx.tree_bytes, .once);
                     _ = try cursor.writePath(void, &[_]xitdb.PathPart(void){
                         .{ .write = .{ .slot = tree_cursor.slot_ptr.slot } },
                     });
