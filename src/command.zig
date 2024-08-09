@@ -29,7 +29,7 @@ pub const SubCommand = union(SubCommandKind) {
     },
     status,
     diff: struct {
-        diff_kind: df.DiffKind,
+        diff_opts: df.BasicDiffOptions,
     },
     branch: struct {
         name: ?[]const u8,
@@ -145,7 +145,7 @@ pub const Command = union(enum) {
         } else if (std.mem.eql(u8, sub_command, "status")) {
             return .{ .cli = .{ .status = {} } };
         } else if (std.mem.eql(u8, sub_command, "diff")) {
-            const diff_kind: df.DiffKind = if (map_args.contains("--staged"))
+            const diff_opts: df.BasicDiffOptions = if (map_args.contains("--staged"))
                 .index
             else
                 (if (map_args.contains("--base"))
@@ -156,7 +156,7 @@ pub const Command = union(enum) {
                     .{ .workspace = .{ .conflict_diff_kind = .source } }
                 else
                     .{ .workspace = .{ .conflict_diff_kind = .current } });
-            return .{ .cli = .{ .diff = .{ .diff_kind = diff_kind } } };
+            return .{ .cli = .{ .diff = .{ .diff_opts = diff_opts } } };
         } else if (std.mem.eql(u8, sub_command, "branch")) {
             return .{ .cli = .{ .branch = .{ .name = if (extra_args.len == 0) null else extra_args[0] } } };
         } else if (std.mem.eql(u8, sub_command, "switch")) {

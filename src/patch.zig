@@ -455,12 +455,9 @@ pub fn writePatch(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kin
     });
 
     // init file iterator for index diff
-    var file_iter = blk: {
-        var stat = try st.Status(repo_kind).init(allocator, core_cursor);
-        errdefer stat.deinit();
-        break :blk try df.FileIterator(repo_kind).init(allocator, core_cursor.core, .index, stat);
-    };
-    defer file_iter.deinit();
+    var status = try st.Status(repo_kind).init(allocator, core_cursor);
+    defer status.deinit();
+    var file_iter = try df.FileIterator(repo_kind).init(allocator, core_cursor.core, .{ .index = .{ .status = &status } });
 
     // iterate over each modified file and create/apply the patch
     while (try file_iter.next()) |*line_iter_pair_ptr| {

@@ -311,8 +311,14 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         );
 
         // generate diff
-        var diff_iter = try repo.diff(.{ .workspace = .{ .conflict_diff_kind = .current } });
-        defer diff_iter.deinit();
+        var status = try repo.status();
+        defer status.deinit();
+        var diff_iter = try repo.diff(.{
+            .workspace = .{
+                .conflict_diff_kind = .current,
+                .status = &status,
+            },
+        });
         if (try diff_iter.next()) |*line_iter_pair_ptr| {
             var line_iter_pair = line_iter_pair_ptr.*;
             defer line_iter_pair.deinit();
@@ -393,8 +399,14 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         );
 
         // generate diff
-        var diff_iter = try repo.diff(.{ .workspace = .{ .conflict_diff_kind = .current } });
-        defer diff_iter.deinit();
+        var status = try repo.status();
+        defer status.deinit();
+        var diff_iter = try repo.diff(.{
+            .workspace = .{
+                .conflict_diff_kind = .current,
+                .status = &status,
+            },
+        });
         if (try diff_iter.next()) |*line_iter_pair_ptr| {
             var line_iter_pair = line_iter_pair_ptr.*;
             defer line_iter_pair.deinit();
@@ -434,8 +446,14 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         }
 
         // generate diff
-        var diff_iter = try repo.diff(.{ .workspace = .{ .conflict_diff_kind = .current } });
-        defer diff_iter.deinit();
+        var status = try repo.status();
+        defer status.deinit();
+        var diff_iter = try repo.diff(.{
+            .workspace = .{
+                .conflict_diff_kind = .current,
+                .status = &status,
+            },
+        });
         if (try diff_iter.next()) |*line_iter_pair_ptr| {
             var line_iter_pair = line_iter_pair_ptr.*;
             defer line_iter_pair.deinit();
@@ -488,8 +506,14 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         }
 
         // generate diff
-        var diff_iter = try repo.diff(.{ .workspace = .{ .conflict_diff_kind = .current } });
-        defer diff_iter.deinit();
+        var status = try repo.status();
+        defer status.deinit();
+        var diff_iter = try repo.diff(.{
+            .workspace = .{
+                .conflict_diff_kind = .current,
+                .status = &status,
+            },
+        });
         if (try diff_iter.next()) |*line_iter_pair_ptr| {
             var line_iter_pair = line_iter_pair_ptr.*;
             defer line_iter_pair.deinit();
@@ -540,8 +564,14 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         }
 
         // generate diff
-        var diff_iter = try repo.diff(.{ .workspace = .{ .conflict_diff_kind = .current } });
-        defer diff_iter.deinit();
+        var status = try repo.status();
+        defer status.deinit();
+        var diff_iter = try repo.diff(.{
+            .workspace = .{
+                .conflict_diff_kind = .current,
+                .status = &status,
+            },
+        });
         if (try diff_iter.next()) |*line_iter_pair_ptr| {
             var line_iter_pair = line_iter_pair_ptr.*;
             defer line_iter_pair.deinit();
@@ -602,8 +632,14 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         defer renamed_file.close();
 
         // generate diff
-        var diff_iter = try repo.diff(.{ .workspace = .{ .conflict_diff_kind = .current } });
-        defer diff_iter.deinit();
+        var status = try repo.status();
+        defer status.deinit();
+        var diff_iter = try repo.diff(.{
+            .workspace = .{
+                .conflict_diff_kind = .current,
+                .status = &status,
+            },
+        });
         if (try diff_iter.next()) |*line_iter_pair_ptr| {
             var line_iter_pair = line_iter_pair_ptr.*;
             defer line_iter_pair.deinit();
@@ -711,8 +747,14 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind) !void {
     );
 
     // generate diff
-    var diff_iter = try repo.diff(.{ .workspace = .{ .conflict_diff_kind = .current } });
-    defer diff_iter.deinit();
+    var status = try repo.status();
+    defer status.deinit();
+    var diff_iter = try repo.diff(.{
+        .workspace = .{
+            .conflict_diff_kind = .current,
+            .status = &status,
+        },
+    });
     if (try diff_iter.next()) |*line_iter_pair_ptr| {
         var line_iter_pair = line_iter_pair_ptr.*;
         defer line_iter_pair.deinit();

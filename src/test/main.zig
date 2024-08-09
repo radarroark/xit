@@ -289,8 +289,14 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         {
             var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
-            var diff_iter = try repo.diff(.{ .workspace = .{ .conflict_diff_kind = .current } });
-            defer diff_iter.deinit();
+            var status = try repo.status();
+            defer status.deinit();
+            var diff_iter = try repo.diff(.{
+                .workspace = .{
+                    .conflict_diff_kind = .current,
+                    .status = &status,
+                },
+            });
 
             while (try diff_iter.next()) |*line_iter_pair_ptr| {
                 var line_iter_pair = line_iter_pair_ptr.*;
@@ -370,8 +376,11 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         {
             var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
-            var diff_iter = try repo.diff(.index);
-            defer diff_iter.deinit();
+            var status = try repo.status();
+            defer status.deinit();
+            var diff_iter = try repo.diff(.{
+                .index = .{ .status = &status },
+            });
 
             while (try diff_iter.next()) |*line_iter_pair_ptr| {
                 var line_iter_pair = line_iter_pair_ptr.*;
