@@ -861,6 +861,10 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind) type {
     return struct {
         allocator: std.mem.Allocator,
         core: *rp.Repo(repo_kind).Core,
+        cursor: switch (repo_kind) {
+            .git => void,
+            .xit => xitdb.Cursor(.file),
+        },
         oid_queue: std.DoublyLinkedList([hash.SHA1_HEX_LEN]u8),
         object: Object(repo_kind),
 
@@ -873,6 +877,7 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind) type {
             return .{
                 .allocator = allocator,
                 .core = core,
+                .cursor = try core.latestCursor(),
                 .oid_queue = oid_queue,
                 .object = undefined,
             };
@@ -885,12 +890,9 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind) type {
         }
 
         pub fn next(self: *ObjectIterator(repo_kind)) !?*Object(repo_kind) {
-            // TODO: instead of latest cursor, store the tx id so we always use the
-            // same transaction even if the db is written to while calling next
-            var cursor = try self.core.latestCursor();
             const core_cursor = switch (repo_kind) {
                 .git => .{ .core = self.core },
-                .xit => .{ .core = self.core, .cursor = &cursor },
+                .xit => .{ .core = self.core, .cursor = &self.cursor },
             };
             if (self.oid_queue.popFirst()) |node| {
                 const next_oid = node.data;
