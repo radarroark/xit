@@ -431,14 +431,10 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
             const backtrack_index = self.backtrack.items.len - i - 1;
             self.next_index += 1;
 
-            const edit = self.backtrack.items[backtrack_index];
-            const prev_xx = edit[0];
-            const prev_yy = edit[1];
-            const xx = edit[2];
-            const yy = edit[3];
+            const x1, const y1, const x2, const y2 = self.backtrack.items[backtrack_index];
 
-            if (xx == prev_xx) {
-                const new_idx = absIndex(prev_yy, self.line_count_b);
+            if (x1 == x2) {
+                const new_idx = absIndex(y1, self.line_count_b);
                 const line_b = (try self.line_iter_b.get(new_idx)) orelse return error.ExpectedLine;
                 errdefer self.allocator.free(line_b);
                 return .{
@@ -446,8 +442,8 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
                         .new_line = .{ .num = new_idx + 1, .text = line_b },
                     },
                 };
-            } else if (yy == prev_yy) {
-                const old_idx = absIndex(prev_xx, self.line_count_a);
+            } else if (y1 == y2) {
+                const old_idx = absIndex(x1, self.line_count_a);
                 const line_a = (try self.line_iter_a.get(old_idx)) orelse return error.ExpectedLine;
                 errdefer self.allocator.free(line_a);
                 return .{
@@ -456,8 +452,8 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
                     },
                 };
             } else {
-                const old_idx = absIndex(prev_xx, self.line_count_a);
-                const new_idx = absIndex(prev_yy, self.line_count_b);
+                const old_idx = absIndex(x1, self.line_count_a);
+                const new_idx = absIndex(y1, self.line_count_b);
                 const line_a = (try self.line_iter_a.get(old_idx)) orelse return error.ExpectedLine;
                 errdefer self.allocator.free(line_a);
                 const line_b = (try self.line_iter_b.get(new_idx)) orelse return error.ExpectedLine;
