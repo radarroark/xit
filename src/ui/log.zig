@@ -23,7 +23,6 @@ pub fn LogCommitList(comptime Widget: type, comptime repo_kind: rp.RepoKind) typ
             errdefer commits.deinit();
 
             // walk the commits
-            var commit_count: usize = 0; // FIXME: temporary
             var cursor = try repo.core.latestCursor();
             const core_cursor = switch (repo_kind) {
                 .git => .{ .core = &repo.core },
@@ -35,10 +34,6 @@ pub fn LogCommitList(comptime Widget: type, comptime repo_kind: rp.RepoKind) typ
                 while (try commit_iter.next()) |commit_object| {
                     errdefer commit_object.deinit();
                     try commits.append(commit_object.*);
-                    commit_count += 1;
-                    if (commit_count == 10) {
-                        break;
-                    }
                 }
             }
 
