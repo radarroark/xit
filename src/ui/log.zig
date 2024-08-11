@@ -20,7 +20,12 @@ pub fn LogCommitList(comptime Widget: type, comptime repo_kind: rp.RepoKind) typ
         pub fn init(allocator: std.mem.Allocator, repo: *rp.Repo(repo_kind)) !LogCommitList(Widget, repo_kind) {
             // init commits
             var commits = std.ArrayList(obj.Object(repo_kind)).init(allocator);
-            errdefer commits.deinit();
+            errdefer {
+                for (commits.items) |*commit| {
+                    commit.deinit();
+                }
+                commits.deinit();
+            }
 
             // walk the commits
             var cursor = try repo.core.latestCursor();
