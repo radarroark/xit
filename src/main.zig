@@ -35,33 +35,9 @@ pub fn xitMain(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, ar
             try writers.out.print(USAGE, .{});
         },
         .tui => {
-            // xit repo
-            {
-                var repo_or_err = rp.Repo(.xit).init(allocator, .{ .cwd = std.fs.cwd() });
-                if (repo_or_err) |*repo| {
-                    defer repo.deinit();
-                    try ui.start(.xit, repo, allocator);
-                    return;
-                } else |err| switch (err) {
-                    error.RepoDoesNotExist => {},
-                    else => return err,
-                }
-            }
-
-            // git repo
-            {
-                var repo_or_err = rp.Repo(.git).init(allocator, .{ .cwd = std.fs.cwd() });
-                if (repo_or_err) |*repo| {
-                    defer repo.deinit();
-                    try ui.start(.git, repo, allocator);
-                    return;
-                } else |err| switch (err) {
-                    error.RepoDoesNotExist => {},
-                    else => return err,
-                }
-            }
-
-            return error.NotAXitOrGitRepo;
+            var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = std.fs.cwd() });
+            defer repo.deinit();
+            try ui.start(repo_kind, &repo, allocator);
         },
         .cli => {
             if (command.cli) |sub_command| {
