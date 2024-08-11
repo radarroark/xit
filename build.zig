@@ -5,7 +5,7 @@ pub fn build(b: *std.Build) !void {
 
     const optimize = b.standardOptimizeOption(.{});
 
-    // exe
+    // main
     {
         const exe = b.addExecutable(.{
             .name = "xit",
@@ -28,6 +28,32 @@ pub fn build(b: *std.Build) !void {
         }
 
         const run_step = b.step("run", "Run the app");
+        run_step.dependOn(&run_cmd.step);
+    }
+
+    // try
+    {
+        const exe = b.addExecutable(.{
+            .name = "try",
+            .root_source_file = b.path("src/try.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        exe.root_module.addAnonymousImport("xitdb", .{
+            .root_source_file = b.path("../xitdb/src/lib.zig"),
+        });
+        exe.root_module.addAnonymousImport("xitui", .{
+            .root_source_file = b.path("../xitui/src/lib.zig"),
+        });
+        b.installArtifact(exe);
+
+        const run_cmd = b.addRunArtifact(exe);
+        run_cmd.step.dependOn(b.getInstallStep());
+        if (b.args) |args| {
+            run_cmd.addArgs(args);
+        }
+
+        const run_step = b.step("try", "Try the app");
         run_step.dependOn(&run_cmd.step);
     }
 
