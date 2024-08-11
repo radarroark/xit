@@ -211,14 +211,9 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
             }
         }
 
-        pub fn get(self: *LineIterator(repo_kind), index: usize) !?[]const u8 {
+        pub fn get(self: *LineIterator(repo_kind), index: usize) ![]const u8 {
             try self.seekTo(self.line_offsets[index]);
-
-            if (try self.next()) |line| {
-                return line;
-            }
-
-            return null;
+            return try self.next() orelse return error.ExpectedLine;
         }
 
         pub fn reset(self: *LineIterator(repo_kind)) !void {
@@ -378,9 +373,9 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
 
                     while (true) {
                         if (xx < right and yy < bottom) {
-                            const line_a = (try line_iter_a.get(absIndex(xx, line_count_a))) orelse return error.ExpectedLine;
+                            const line_a = try line_iter_a.get(absIndex(xx, line_count_a));
                             defer line_iter_a.allocator.free(line_a);
-                            const line_b = (try line_iter_b.get(absIndex(yy, line_count_b))) orelse return error.ExpectedLine;
+                            const line_b = try line_iter_b.get(absIndex(yy, line_count_b));
                             defer line_iter_b.allocator.free(line_b);
                             if (std.mem.eql(u8, line_a, line_b)) {
                                 xx += 1;
@@ -432,9 +427,9 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
 
                     while (true) {
                         if (xx > left and yy > top) {
-                            const line_a = (try line_iter_a.get(absIndex(xx - 1, line_count_a))) orelse return error.ExpectedLine;
+                            const line_a = try line_iter_a.get(absIndex(xx - 1, line_count_a));
                             defer line_iter_a.allocator.free(line_a);
-                            const line_b = (try line_iter_b.get(absIndex(yy - 1, line_count_b))) orelse return error.ExpectedLine;
+                            const line_b = try line_iter_b.get(absIndex(yy - 1, line_count_b));
                             defer line_iter_b.allocator.free(line_b);
                             if (std.mem.eql(u8, line_a, line_b)) {
                                 xx -= 1;
@@ -535,9 +530,9 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
             var p = p1;
             while (true) {
                 if (p.x < p2.x and p.y < p2.y) {
-                    const line_a = (try line_iter_a.get(p.x)) orelse return error.ExpectedLine;
+                    const line_a = try line_iter_a.get(p.x);
                     defer line_iter_a.allocator.free(line_a);
-                    const line_b = (try line_iter_b.get(p.y)) orelse return error.ExpectedLine;
+                    const line_b = try line_iter_b.get(p.y);
                     defer line_iter_b.allocator.free(line_b);
                     if (std.mem.eql(u8, line_a, line_b)) {
                         try out.append([2]Point{ p, .{ .x = p.x + 1, .y = p.y + 1 } });
@@ -598,7 +593,7 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
 
             if (p1.x == p2.x) {
                 const new_idx = p1.y;
-                const line_b = (try self.line_iter_b.get(new_idx)) orelse return error.ExpectedLine;
+                const line_b = try self.line_iter_b.get(new_idx);
                 errdefer self.allocator.free(line_b);
                 return .{
                     .ins = .{
@@ -607,7 +602,7 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
                 };
             } else if (p1.y == p2.y) {
                 const old_idx = p1.x;
-                const line_a = (try self.line_iter_a.get(old_idx)) orelse return error.ExpectedLine;
+                const line_a = try self.line_iter_a.get(old_idx);
                 errdefer self.allocator.free(line_a);
                 return .{
                     .del = .{
@@ -617,9 +612,9 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
             } else {
                 const old_idx = p1.x;
                 const new_idx = p1.y;
-                const line_a = (try self.line_iter_a.get(old_idx)) orelse return error.ExpectedLine;
+                const line_a = try self.line_iter_a.get(old_idx);
                 errdefer self.allocator.free(line_a);
-                const line_b = (try self.line_iter_b.get(new_idx)) orelse return error.ExpectedLine;
+                const line_b = try self.line_iter_b.get(new_idx);
                 errdefer self.allocator.free(line_b);
                 return .{
                     .eql = .{

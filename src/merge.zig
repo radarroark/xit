@@ -67,7 +67,7 @@ fn writeBlobWithConflict(
             }
             if (range_maybe) |range| {
                 for (range.begin..range.end) |line_num| {
-                    const line = try iter.get(line_num) orelse return error.ExpectedLine;
+                    const line = try iter.get(line_num);
                     errdefer alctr.free(line);
                     try lines.append(line);
                 }
@@ -154,7 +154,7 @@ fn writeBlobWithConflict(
                     switch (chunk) {
                         .clean => {
                             for (chunk.clean.begin..chunk.clean.end) |line_num| {
-                                const common_line = (try self.parent.common_iter.get(line_num)) orelse return error.ExpectedLine;
+                                const common_line = try self.parent.common_iter.get(line_num);
                                 {
                                     errdefer self.parent.allocator.free(common_line);
                                     try self.parent.line_buffer.append(common_line);
