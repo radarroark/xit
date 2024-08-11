@@ -415,27 +415,20 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     try self.restore(sub_command.restore.path);
                 },
                 .log => {
-                    var cursor = try self.core.latestCursor();
-                    const core_cursor = switch (repo_kind) {
-                        .git => .{ .core = &self.core },
-                        .xit => .{ .core = &self.core, .cursor = &cursor },
-                    };
-                    if (try ref.readHeadMaybe(repo_kind, core_cursor)) |oid| {
-                        var commit_iter = try self.log(oid);
-                        defer commit_iter.deinit();
-                        while (try commit_iter.next()) |commit_object| {
-                            defer commit_object.deinit();
-                            try writers.out.print("commit {s}\n", .{commit_object.oid});
-                            if (commit_object.content.commit.author) |author| {
-                                try writers.out.print("Author {s}\n", .{author});
-                            }
-                            try writers.out.print("\n", .{});
-                            var split_iter = std.mem.split(u8, commit_object.content.commit.message, "\n");
-                            while (split_iter.next()) |line| {
-                                try writers.out.print("    {s}\n", .{line});
-                            }
-                            try writers.out.print("\n", .{});
+                    var commit_iter = try self.log(null);
+                    defer commit_iter.deinit();
+                    while (try commit_iter.next()) |commit_object| {
+                        defer commit_object.deinit();
+                        try writers.out.print("commit {s}\n", .{commit_object.oid});
+                        if (commit_object.content.commit.author) |author| {
+                            try writers.out.print("Author {s}\n", .{author});
                         }
+                        try writers.out.print("\n", .{});
+                        var split_iter = std.mem.split(u8, commit_object.content.commit.message, "\n");
+                        while (split_iter.next()) |line| {
+                            try writers.out.print("    {s}\n", .{line});
+                        }
+                        try writers.out.print("\n", .{});
                     }
                 },
                 .merge => {
@@ -719,7 +712,15 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             }
         }
 
-        pub fn log(self: *Repo(repo_kind), oid: [hash.SHA1_HEX_LEN]u8) !obj.ObjectIterator(repo_kind) {
+        pub fn log(self: *Repo(repo_kind), oid_maybe: ?[hash.SHA1_HEX_LEN]u8) !obj.ObjectIterator(repo_kind) {
+            const oid = oid_maybe orelse blk: {
+                var cursor = try self.core.latestCursor();
+                const core_cursor = switch (repo_kind) {
+                    .git => .{ .core = &self.core },
+                    .xit => .{ .core = &self.core, .cursor = &cursor },
+                };
+                break :blk try ref.readHead(repo_kind, core_cursor);
+            };
             return try obj.ObjectIterator(repo_kind).init(self.allocator, &self.core, oid);
         }
 
