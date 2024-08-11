@@ -622,7 +622,7 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
 
         pub fn seekTo(self: *ObjectReader(repo_kind), position: u64) !void {
             switch (repo_kind) {
-                .git => try self.internal.stream.reader().skipBytes(position, .{}),
+                .git => try self.internal.stream.reader().skipBytes(position, .{}), // assumes that reset() has just been called!
                 .xit => try self.reader.seekTo(self.internal.header_offset + position),
             }
         }
