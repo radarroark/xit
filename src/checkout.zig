@@ -6,7 +6,7 @@
 //! it's one of those times when you have to set aside your
 //! engineer brain and think about it as a user. oh well.
 //! anyway, i didn't mix them up internally, at least.
-//! the switch_head fn below only switches branches/commits,
+//! the Switch struct below only switches branches/commits,
 //! while the restore fn can be used to restore files.
 
 const std = @import("std");
