@@ -285,11 +285,9 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
 pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
     return struct {
         allocator: std.mem.Allocator,
-        backtrack: std.ArrayList([4]isize),
+        points: std.ArrayList([2]Point),
         line_iter_a: *LineIterator(repo_kind),
         line_iter_b: *LineIterator(repo_kind),
-        line_count_a: usize,
-        line_count_b: usize,
         next_index: usize,
 
         pub const Line = struct {
@@ -321,120 +319,285 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
             }
         };
 
-        pub fn init(allocator: std.mem.Allocator, line_iter_a: *LineIterator(repo_kind), line_iter_b: *LineIterator(repo_kind)) !MyersDiffIterator(repo_kind) {
-            var trace = std.ArrayList(std.ArrayList(isize)).init(allocator);
-            defer {
-                for (trace.items) |*arr| {
-                    arr.deinit();
-                }
-                trace.deinit();
+        const Point = struct {
+            x: usize,
+            y: usize,
+        };
+
+        const Box = struct {
+            left: usize,
+            top: usize,
+            right: usize,
+            bottom: usize,
+
+            fn width(self: Box) usize {
+                return self.right - self.left;
             }
 
-            const line_count_a = line_iter_a.count();
-            const line_count_b = line_iter_b.count();
+            fn height(self: Box) usize {
+                return self.bottom - self.top;
+            }
 
-            {
-                const max = line_count_a + line_count_b;
-                var v = try std.ArrayList(isize).initCapacity(allocator, 2 * max + 1);
-                defer v.deinit();
-                v.expandToCapacity();
-                for (v.items) |*item| {
+            fn size(self: Box) usize {
+                return self.width() + self.height();
+            }
+
+            fn delta(self: Box) isize {
+                const w: isize = @intCast(self.width());
+                const h: isize = @intCast(self.height());
+                return w - h;
+            }
+
+            fn forward(self: Box, vf: []isize, vb: []isize, d: usize, line_iter_a: *LineIterator(repo_kind), line_iter_b: *LineIterator(repo_kind)) !?[2]Point {
+                const line_count_a = line_iter_a.count();
+                const line_count_b = line_iter_b.count();
+
+                const dd: isize = @intCast(d);
+                for (0..d + 1) |i| {
+                    const ii: isize = @intCast(i);
+                    const kk: isize = dd - ii * 2;
+                    const cc: isize = kk - self.delta();
+
+                    var px: isize = undefined;
+                    var xx: isize = undefined;
+                    if (kk == -dd or (kk != dd and vf[absIndex(kk - 1, vf.len)] < vf[absIndex(kk + 1, vf.len)])) {
+                        px = vf[absIndex(kk + 1, vf.len)];
+                        xx = px;
+                    } else {
+                        px = vf[absIndex(kk - 1, vf.len)];
+                        xx = px + 1;
+                    }
+
+                    const left: isize = @intCast(self.left);
+                    const right: isize = @intCast(self.right);
+                    const top: isize = @intCast(self.top);
+                    const bottom: isize = @intCast(self.bottom);
+
+                    var yy = top + (xx - left) - kk;
+                    const py = if (d == 0 or xx != px) yy else yy - 1;
+
+                    while (true) {
+                        if (xx < right and yy < bottom) {
+                            const line_a = (try line_iter_a.get(absIndex(xx, line_count_a))) orelse return error.ExpectedLine;
+                            defer line_iter_a.allocator.free(line_a);
+                            const line_b = (try line_iter_b.get(absIndex(yy, line_count_b))) orelse return error.ExpectedLine;
+                            defer line_iter_b.allocator.free(line_b);
+                            if (std.mem.eql(u8, line_a, line_b)) {
+                                xx += 1;
+                                yy += 1;
+                                continue;
+                            }
+                        }
+                        break;
+                    }
+
+                    vf[absIndex(kk, vf.len)] = xx;
+
+                    if (@abs(self.delta()) % 2 != 0 and -(dd - 1) <= cc and cc <= (dd - 1) and yy >= vb[absIndex(cc, vb.len)]) {
+                        return [2]Point{
+                            .{ .x = @intCast(px), .y = @intCast(py) },
+                            .{ .x = @intCast(xx), .y = @intCast(yy) },
+                        };
+                    }
+                }
+
+                return null;
+            }
+
+            fn backward(self: Box, vf: []isize, vb: []isize, d: usize, line_iter_a: *LineIterator(repo_kind), line_iter_b: *LineIterator(repo_kind)) !?[2]Point {
+                const line_count_a = line_iter_a.count();
+                const line_count_b = line_iter_b.count();
+
+                const dd: isize = @intCast(d);
+                for (0..d + 1) |i| {
+                    const ii: isize = @intCast(i);
+                    const cc: isize = dd - ii * 2;
+                    const kk: isize = cc + self.delta();
+
+                    var py: isize = undefined;
+                    var yy: isize = undefined;
+                    if (cc == -dd or (cc != dd and vb[absIndex(cc - 1, vb.len)] > vb[absIndex(cc + 1, vb.len)])) {
+                        py = vb[absIndex(cc + 1, vb.len)];
+                        yy = py;
+                    } else {
+                        py = vb[absIndex(cc - 1, vb.len)];
+                        yy = py - 1;
+                    }
+
+                    const left: isize = @intCast(self.left);
+                    const top: isize = @intCast(self.top);
+
+                    var xx = left + (yy - top) + kk;
+                    const px = if (d == 0 or yy != py) xx else xx + 1;
+
+                    while (true) {
+                        if (xx > left and yy > top) {
+                            const line_a = (try line_iter_a.get(absIndex(xx - 1, line_count_a))) orelse return error.ExpectedLine;
+                            defer line_iter_a.allocator.free(line_a);
+                            const line_b = (try line_iter_b.get(absIndex(yy - 1, line_count_b))) orelse return error.ExpectedLine;
+                            defer line_iter_b.allocator.free(line_b);
+                            if (std.mem.eql(u8, line_a, line_b)) {
+                                xx -= 1;
+                                yy -= 1;
+                                continue;
+                            }
+                        }
+                        break;
+                    }
+
+                    vb[absIndex(cc, vb.len)] = yy;
+
+                    if (@abs(self.delta()) % 2 == 0 and -dd <= kk and kk <= dd and xx <= vf[absIndex(kk, vf.len)]) {
+                        return [2]Point{
+                            .{ .x = @intCast(xx), .y = @intCast(yy) },
+                            .{ .x = @intCast(px), .y = @intCast(py) },
+                        };
+                    }
+                }
+
+                return null;
+            }
+
+            fn midpoint(self: Box, allocator: std.mem.Allocator, line_iter_a: *LineIterator(repo_kind), line_iter_b: *LineIterator(repo_kind)) !?[2]Point {
+                if (self.size() == 0) {
+                    return null;
+                }
+
+                const box_size: f64 = @floatFromInt(self.size());
+                const max: usize = @intFromFloat(std.math.ceil(box_size / 2));
+
+                var vf = try std.ArrayList(isize).initCapacity(allocator, 2 * max + 1);
+                defer vf.deinit();
+                vf.expandToCapacity();
+                for (vf.items) |*item| {
                     item.* = 0;
                 }
-                blk: for (0..max + 1) |d| {
-                    try trace.append(try v.clone());
-                    for (0..d + 1) |i| {
-                        const dd: isize = @intCast(d);
-                        const ii: isize = @intCast(i);
-                        const kk: isize = -dd + ii * 2;
-                        var xx: isize = undefined;
-                        if (kk == -dd or (kk != dd and v.items[absIndex(kk - 1, v.items.len)] < v.items[absIndex(kk + 1, v.items.len)])) {
-                            xx = v.items[absIndex(kk + 1, v.items.len)];
-                        } else {
-                            xx = v.items[absIndex(kk - 1, v.items.len)] + 1;
-                        }
-                        var yy = xx - kk;
-                        while (true) {
-                            if (xx < line_count_a and yy < line_count_b) {
-                                const line_a = (try line_iter_a.get(absIndex(xx, line_count_a))) orelse return error.ExpectedLine;
-                                defer allocator.free(line_a);
-                                const line_b = (try line_iter_b.get(absIndex(yy, line_count_b))) orelse return error.ExpectedLine;
-                                defer allocator.free(line_b);
-                                if (std.mem.eql(u8, line_a, line_b)) {
-                                    xx += 1;
-                                    yy += 1;
-                                    continue;
-                                }
-                            }
-                            break;
-                        }
-                        v.items[absIndex(kk, v.items.len)] = xx;
-                        if (xx >= line_count_a and yy >= line_count_b) {
-                            break :blk;
-                        }
+                vf.items[1] = @intCast(self.left);
+
+                var vb = try std.ArrayList(isize).initCapacity(allocator, 2 * max + 1);
+                defer vb.deinit();
+                vb.expandToCapacity();
+                for (vb.items) |*item| {
+                    item.* = 0;
+                }
+                vb.items[1] = @intCast(self.bottom);
+
+                for (0..max + 1) |d| {
+                    if (try self.forward(vf.items, vb.items, d, line_iter_a, line_iter_b)) |snake| {
+                        return snake;
+                    }
+                    if (try self.backward(vf.items, vb.items, d, line_iter_a, line_iter_b)) |snake| {
+                        return snake;
                     }
                 }
+
+                return null;
             }
 
-            var backtrack = std.ArrayList([4]isize).init(allocator);
-            errdefer backtrack.deinit();
-            {
-                var xx: isize = @intCast(line_count_a);
-                var yy: isize = @intCast(line_count_b);
-                for (0..trace.items.len) |i| {
-                    const d = trace.items.len - i - 1;
-                    const v = trace.items[d];
-                    const dd: isize = @intCast(d);
-                    const kk = xx - yy;
+            fn findPath(self: Box, allocator: std.mem.Allocator, line_iter_a: *LineIterator(repo_kind), line_iter_b: *LineIterator(repo_kind)) !?std.DoublyLinkedList(Point) {
+                if (try self.midpoint(allocator, line_iter_a, line_iter_b)) |snake| {
+                    const start, const finish = snake;
 
-                    var prev_kk: isize = undefined;
-                    if (kk == -dd or (kk != dd and v.items[absIndex(kk - 1, v.items.len)] < v.items[absIndex(kk + 1, v.items.len)])) {
-                        prev_kk = kk + 1;
+                    const head_box = Box{ .left = self.left, .top = self.top, .right = start.x, .bottom = start.y };
+                    const tail_box = Box{ .left = finish.x, .top = finish.y, .right = self.right, .bottom = self.bottom };
+
+                    const head_maybe = try head_box.findPath(allocator, line_iter_a, line_iter_b);
+                    const tail_maybe = try tail_box.findPath(allocator, line_iter_a, line_iter_b);
+
+                    var head_list = std.DoublyLinkedList(Point){};
+                    if (head_maybe) |head| {
+                        head_list = head;
                     } else {
-                        prev_kk = kk - 1;
-                    }
-                    const prev_xx = v.items[absIndex(prev_kk, v.items.len)];
-                    const prev_yy = prev_xx - prev_kk;
-
-                    while (xx > prev_xx and yy > prev_yy) {
-                        try backtrack.append(.{ xx - 1, yy - 1, xx, yy });
-                        xx -= 1;
-                        yy -= 1;
+                        var node = try allocator.create(std.DoublyLinkedList(Point).Node);
+                        node.data = start;
+                        head_list.append(node);
                     }
 
-                    if (dd > 0) {
-                        try backtrack.append(.{ prev_xx, prev_yy, xx, yy });
+                    var tail_list = std.DoublyLinkedList(Point){};
+                    if (tail_maybe) |tail| {
+                        tail_list = tail;
+                    } else {
+                        var node = try allocator.create(std.DoublyLinkedList(Point).Node);
+                        node.data = finish;
+                        tail_list.append(node);
                     }
 
-                    xx = prev_xx;
-                    yy = prev_yy;
+                    head_list.concatByMoving(&tail_list);
+
+                    return head_list;
+                } else {
+                    return null;
+                }
+            }
+        };
+
+        fn walkDiagonal(p1: Point, p2: Point, line_iter_a: *LineIterator(repo_kind), line_iter_b: *LineIterator(repo_kind), out: *std.ArrayList([2]Point)) !Point {
+            var p = p1;
+            while (true) {
+                if (p.x < p2.x and p.y < p2.y) {
+                    const line_a = (try line_iter_a.get(p.x)) orelse return error.ExpectedLine;
+                    defer line_iter_a.allocator.free(line_a);
+                    const line_b = (try line_iter_b.get(p.y)) orelse return error.ExpectedLine;
+                    defer line_iter_b.allocator.free(line_b);
+                    if (std.mem.eql(u8, line_a, line_b)) {
+                        try out.append([2]Point{ p, .{ .x = p.x + 1, .y = p.y + 1 } });
+                        p.x += 1;
+                        p.y += 1;
+                        continue;
+                    }
+                }
+                break;
+            }
+            return p;
+        }
+
+        pub fn init(allocator: std.mem.Allocator, line_iter_a: *LineIterator(repo_kind), line_iter_b: *LineIterator(repo_kind)) !MyersDiffIterator(repo_kind) {
+            var points = std.ArrayList([2]Point).init(allocator);
+            errdefer points.deinit();
+
+            var arena = std.heap.ArenaAllocator.init(allocator);
+            defer arena.deinit();
+
+            const box = Box{ .left = 0, .top = 0, .right = line_iter_a.count(), .bottom = line_iter_b.count() };
+            if (try box.findPath(arena.allocator(), line_iter_a, line_iter_b)) |path| {
+                var node = path.first orelse return error.ExpectedFirstNode;
+                while (true) {
+                    const next_node = node.next orelse break;
+                    const next_p = next_node.data;
+
+                    var p = try walkDiagonal(node.data, next_p, line_iter_a, line_iter_b, &points);
+                    if (next_p.x - p.x < next_p.y - p.y) {
+                        try points.append([2]Point{ p, .{ .x = p.x, .y = p.y + 1 } });
+                        p.y += 1;
+                    } else if (next_p.x - p.x > next_p.y - p.y) {
+                        try points.append([2]Point{ p, .{ .x = p.x + 1, .y = p.y } });
+                        p.x += 1;
+                    }
+                    _ = try walkDiagonal(p, next_p, line_iter_a, line_iter_b, &points);
+
+                    node = next_node;
                 }
             }
 
             return MyersDiffIterator(repo_kind){
                 .allocator = allocator,
-                .backtrack = backtrack,
+                .points = points,
                 .line_iter_a = line_iter_a,
                 .line_iter_b = line_iter_b,
-                .line_count_a = line_count_a,
-                .line_count_b = line_count_b,
                 .next_index = 0,
             };
         }
 
         pub fn next(self: *MyersDiffIterator(repo_kind)) !?Edit {
-            if (self.next_index == self.backtrack.items.len) {
+            if (self.next_index == self.points.items.len) {
                 return null;
             }
 
-            const i = self.next_index;
-            const backtrack_index = self.backtrack.items.len - i - 1;
+            const p1, const p2 = self.points.items[self.next_index];
             self.next_index += 1;
 
-            const x1, const y1, const x2, const y2 = self.backtrack.items[backtrack_index];
-
-            if (x1 == x2) {
-                const new_idx = absIndex(y1, self.line_count_b);
+            if (p1.x == p2.x) {
+                const new_idx = p1.y;
                 const line_b = (try self.line_iter_b.get(new_idx)) orelse return error.ExpectedLine;
                 errdefer self.allocator.free(line_b);
                 return .{
@@ -442,8 +605,8 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
                         .new_line = .{ .num = new_idx + 1, .text = line_b },
                     },
                 };
-            } else if (y1 == y2) {
-                const old_idx = absIndex(x1, self.line_count_a);
+            } else if (p1.y == p2.y) {
+                const old_idx = p1.x;
                 const line_a = (try self.line_iter_a.get(old_idx)) orelse return error.ExpectedLine;
                 errdefer self.allocator.free(line_a);
                 return .{
@@ -452,8 +615,8 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
                     },
                 };
             } else {
-                const old_idx = absIndex(x1, self.line_count_a);
-                const new_idx = absIndex(y1, self.line_count_b);
+                const old_idx = p1.x;
+                const new_idx = p1.y;
                 const line_a = (try self.line_iter_a.get(old_idx)) orelse return error.ExpectedLine;
                 errdefer self.allocator.free(line_a);
                 const line_b = (try self.line_iter_b.get(new_idx)) orelse return error.ExpectedLine;
@@ -500,7 +663,7 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
         }
 
         pub fn deinit(self: *MyersDiffIterator(repo_kind)) void {
-            self.backtrack.deinit();
+            self.points.deinit();
         }
 
         fn absIndex(i: isize, len: usize) usize {
@@ -523,10 +686,10 @@ test "myers diff" {
             .{ .del = .{ .old_line = .{ .num = 1, .text = "A" } } },
             .{ .del = .{ .old_line = .{ .num = 2, .text = "B" } } },
             .{ .eql = .{ .old_line = .{ .num = 3, .text = "C" }, .new_line = .{ .num = 1, .text = "C" } } },
-            .{ .ins = .{ .new_line = .{ .num = 2, .text = "B" } } },
-            .{ .eql = .{ .old_line = .{ .num = 4, .text = "A" }, .new_line = .{ .num = 3, .text = "A" } } },
-            .{ .eql = .{ .old_line = .{ .num = 5, .text = "B" }, .new_line = .{ .num = 4, .text = "B" } } },
-            .{ .del = .{ .old_line = .{ .num = 6, .text = "B" } } },
+            .{ .del = .{ .old_line = .{ .num = 4, .text = "A" } } },
+            .{ .eql = .{ .old_line = .{ .num = 5, .text = "B" }, .new_line = .{ .num = 2, .text = "B" } } },
+            .{ .ins = .{ .new_line = .{ .num = 3, .text = "A" } } },
+            .{ .eql = .{ .old_line = .{ .num = 6, .text = "B" }, .new_line = .{ .num = 4, .text = "B" } } },
             .{ .eql = .{ .old_line = .{ .num = 7, .text = "A" }, .new_line = .{ .num = 5, .text = "A" } } },
             .{ .ins = .{ .new_line = .{ .num = 6, .text = "C" } } },
         };
