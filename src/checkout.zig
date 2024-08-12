@@ -195,8 +195,6 @@ pub fn migrate(
     defer edit_files.deinit();
     var remove_files = std.StringHashMap(void).init(allocator);
     defer remove_files.deinit();
-    var add_dirs = std.StringHashMap(void).init(allocator);
-    defer add_dirs.deinit();
     var remove_dirs = std.StringHashMap(void).init(allocator);
     defer remove_dirs.deinit();
 
@@ -208,9 +206,6 @@ pub fn migrate(
             // if the old change doesn't exist and the new change does, it's an added file
             if (change.new) |new| {
                 try add_files.put(path, new);
-                if (std.fs.path.dirname(path)) |parent_path| {
-                    try add_dirs.put(parent_path, {});
-                }
             }
         } else if (change.new == null) {
             // if the new change doesn't exist, it's a removed file
@@ -222,9 +217,6 @@ pub fn migrate(
             // otherwise, it's an edited file
             if (change.new) |new| {
                 try edit_files.put(path, new);
-                if (std.fs.path.dirname(path)) |parent_path| {
-                    try add_dirs.put(parent_path, {});
-                }
             }
         }
         // check for conflicts
@@ -307,18 +299,13 @@ pub fn migrate(
     var remove_dirs_iter = remove_dirs.keyIterator();
     while (remove_dirs_iter.next()) |key| {
         // update working tree
-        try core_cursor.core.repo_dir.deleteTree(key.*);
+        core_cursor.core.repo_dir.deleteDir(key.*) catch |err| switch (err) {
+            error.DirNotEmpty => continue,
+            else => return err,
+        };
         // update index
         index.removePath(key.*);
         try index.removeChildren(key.*);
-    }
-
-    var add_dirs_iter = add_dirs.keyIterator();
-    while (add_dirs_iter.next()) |key| {
-        // update working tree
-        try core_cursor.core.repo_dir.makePath(key.*);
-        // update index
-        try index.addPath(core_cursor, key.*);
     }
 
     var add_files_iter = add_files.iterator();
