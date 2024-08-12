@@ -512,9 +512,10 @@ pub fn isTree(entry: TreeEntry) bool {
 }
 
 pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
+    const BUFFER_SIZE = 2048;
     return struct {
         allocator: std.mem.Allocator,
-        reader: Reader,
+        reader: std.io.BufferedReader(BUFFER_SIZE, Reader),
         internal: switch (repo_kind) {
             .git => struct {
                 file: std.fs.File,
@@ -552,7 +553,7 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
 
                     return .{
                         .allocator = allocator,
-                        .reader = stream_ptr.reader(),
+                        .reader = std.io.bufferedReaderSize(BUFFER_SIZE, stream_ptr.reader()),
                         .internal = .{
                             .file = commit_hash_suffix_file,
                             .skip_header = skip_header,
@@ -587,7 +588,7 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
 
                         return .{
                             .allocator = allocator,
-                            .reader = rdr,
+                            .reader = std.io.bufferedReaderSize(BUFFER_SIZE, rdr),
                             .internal = .{
                                 .header_offset = header_offset,
                                 .cursor = cursor_ptr,
@@ -614,16 +615,19 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
             switch (repo_kind) {
                 .git => {
                     self.internal.stream.* = try compress.decompressStream(self.internal.file, self.internal.skip_header);
-                    self.reader = self.internal.stream.reader();
+                    self.reader = std.io.bufferedReaderSize(BUFFER_SIZE, self.internal.stream.reader());
                 },
-                .xit => try self.reader.seekTo(self.internal.header_offset),
+                .xit => {
+                    try self.reader.unbuffered_reader.seekTo(self.internal.header_offset);
+                    self.reader = std.io.bufferedReaderSize(BUFFER_SIZE, self.reader.unbuffered_reader);
+                },
             }
         }
 
         pub fn seekTo(self: *ObjectReader(repo_kind), position: u64) !void {
             switch (repo_kind) {
-                .git => try self.internal.stream.reader().skipBytes(position, .{}), // assumes that reset() has just been called!
-                .xit => try self.reader.seekTo(self.internal.header_offset + position),
+                .git => try self.reader.unbuffered_reader.skipBytes(position, .{}), // assumes that reset() has just been called!
+                .xit => try self.reader.unbuffered_reader.seekTo(self.internal.header_offset + position),
             }
         }
     };
@@ -656,11 +660,11 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
             defer obj_rdr.deinit();
 
             // read the object kind
-            const object_kind = try obj_rdr.reader.readUntilDelimiterAlloc(allocator, ' ', MAX_READ_BYTES);
+            const object_kind = try obj_rdr.reader.unbuffered_reader.readUntilDelimiterAlloc(allocator, ' ', MAX_READ_BYTES);
             defer allocator.free(object_kind);
 
             // read the length
-            const object_len_str = try obj_rdr.reader.readUntilDelimiterAlloc(allocator, 0, MAX_READ_BYTES);
+            const object_len_str = try obj_rdr.reader.unbuffered_reader.readUntilDelimiterAlloc(allocator, 0, MAX_READ_BYTES);
             defer allocator.free(object_len_str);
             const object_len = try std.fmt.parseInt(usize, object_len_str, 10);
 
@@ -679,16 +683,16 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                 var entries = std.StringArrayHashMap(TreeEntry).init(arena.allocator());
 
                 while (true) {
-                    const entry_mode_str = obj_rdr.reader.readUntilDelimiterAlloc(arena.allocator(), ' ', MAX_READ_BYTES) catch |err| {
+                    const entry_mode_str = obj_rdr.reader.unbuffered_reader.readUntilDelimiterAlloc(arena.allocator(), ' ', MAX_READ_BYTES) catch |err| {
                         switch (err) {
                             error.EndOfStream => break,
                             else => return err,
                         }
                     };
                     const entry_mode: io.Mode = @bitCast(try std.fmt.parseInt(u32, entry_mode_str, 8));
-                    const entry_name = try obj_rdr.reader.readUntilDelimiterAlloc(arena.allocator(), 0, MAX_READ_BYTES);
+                    const entry_name = try obj_rdr.reader.unbuffered_reader.readUntilDelimiterAlloc(arena.allocator(), 0, MAX_READ_BYTES);
                     var entry_oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-                    try obj_rdr.reader.readNoEof(&entry_oid);
+                    try obj_rdr.reader.unbuffered_reader.readNoEof(&entry_oid);
                     try entries.put(entry_name, TreeEntry{ .oid = entry_oid, .mode = entry_mode });
                 }
 
@@ -701,7 +705,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                 };
             } else if (std.mem.eql(u8, "commit", object_kind)) {
                 // read the content kind
-                const content_kind = try obj_rdr.reader.readUntilDelimiterAlloc(allocator, ' ', MAX_READ_BYTES);
+                const content_kind = try obj_rdr.reader.unbuffered_reader.readUntilDelimiterAlloc(allocator, ' ', MAX_READ_BYTES);
                 defer allocator.free(content_kind);
                 if (!std.mem.eql(u8, "tree", content_kind)) {
                     return error.InvalidCommitContentKind;
@@ -709,7 +713,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
 
                 // read the tree hash
                 var tree_hash = [_]u8{0} ** (hash.SHA1_HEX_LEN + 1);
-                const tree_hash_slice = try obj_rdr.reader.readUntilDelimiter(&tree_hash, '\n');
+                const tree_hash_slice = try obj_rdr.reader.unbuffered_reader.readUntilDelimiter(&tree_hash, '\n');
                 if (tree_hash_slice.len != hash.SHA1_HEX_LEN) {
                     return error.InvalidCommitTreeHash;
                 }
@@ -729,7 +733,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
 
                 // read the metadata
                 while (true) {
-                    const line = try obj_rdr.reader.readUntilDelimiterAlloc(arena.allocator(), '\n', MAX_READ_BYTES);
+                    const line = try obj_rdr.reader.unbuffered_reader.readUntilDelimiterAlloc(arena.allocator(), '\n', MAX_READ_BYTES);
                     if (line.len == 0) {
                         break;
                     }
@@ -754,7 +758,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                 }
 
                 // read the message
-                content.commit.message = try obj_rdr.reader.readAllAlloc(arena.allocator(), MAX_READ_BYTES);
+                content.commit.message = try obj_rdr.reader.unbuffered_reader.readAllAlloc(arena.allocator(), MAX_READ_BYTES);
 
                 return Object(repo_kind){
                     .allocator = allocator,
