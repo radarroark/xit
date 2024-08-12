@@ -65,13 +65,8 @@ test "compress and decompress" {
     var args = std.ArrayList([]const u8).init(allocator);
     defer args.deinit();
 
-    // get the current working directory path
-    var cwd_path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
-    const cwd_path = try std.fs.cwd().realpath(".", &cwd_path_buffer);
-    var cwd = try std.fs.openDirAbsolute(cwd_path, .{});
-    defer cwd.close();
-
     // create the temp dir
+    const cwd = std.fs.cwd();
     var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();

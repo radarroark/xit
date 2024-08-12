@@ -34,16 +34,8 @@ pub fn main() !void {
 
     const temp_dir_name = "temp-try";
 
-    // get the current working directory path.
-    // we can't just call std.fs.cwd() all the time because we're
-    // gonna change it later. and since defers run at the end,
-    // if you call std.fs.cwd() in them you're gonna have a bad time.
-    var cwd_path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
-    const cwd_path = try std.fs.cwd().realpath(".", &cwd_path_buffer);
-    var cwd = try std.fs.openDirAbsolute(cwd_path, .{});
-    defer cwd.close();
-
     // create the temp dir
+    const cwd = std.fs.cwd();
     var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
     if (temp_dir_or_err) |*temp_dir| {
         temp_dir.close();
@@ -64,10 +56,6 @@ pub fn main() !void {
 
         try copyDir(src_git_dir, dest_git_dir);
     }
-
-    // change the cwd
-    try temp_dir.setAsCwd();
-    defer cwd.setAsCwd() catch {};
 
     const writers = .{ .out = std.io.getStdOut().writer(), .err = std.io.getStdErr().writer() };
 
@@ -136,5 +124,5 @@ pub fn main() !void {
         try args.append(arg);
     }
 
-    try mn.xitMain(.xit, allocator, args.items, writers);
+    try mn.xitMain(.xit, allocator, args.items, temp_dir, writers);
 }

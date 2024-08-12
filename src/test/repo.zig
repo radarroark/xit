@@ -28,9 +28,9 @@ fn removeFile(comptime repo_kind: rp.RepoKind, repo: *rp.Repo(repo_kind), path: 
 fn testSimple(comptime repo_kind: rp.RepoKind) !void {
     const allocator = std.testing.allocator;
     const temp_dir_name = "temp-test-repo-simple";
-    const cwd = std.fs.cwd();
 
     // create the temp dir
+    const cwd = std.fs.cwd();
     var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
     if (temp_dir_or_err) |*temp_dir| {
         temp_dir.close();
@@ -85,9 +85,9 @@ test "simple" {
 fn testMerge(comptime repo_kind: rp.RepoKind) !void {
     const allocator = std.testing.allocator;
     const temp_dir_name = "temp-test-repo-merge";
-    const cwd = std.fs.cwd();
 
     // create the temp dir
+    const cwd = std.fs.cwd();
     var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
     if (temp_dir_or_err) |*temp_dir| {
         temp_dir.close();
@@ -209,9 +209,9 @@ test "merge" {
 fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
     const allocator = std.testing.allocator;
     const temp_dir_name = "temp-test-repo-merge-conflict";
-    const cwd = std.fs.cwd();
 
     // create the temp dir
+    const cwd = std.fs.cwd();
     var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
     if (temp_dir_or_err) |*temp_dir| {
         temp_dir.close();
@@ -672,9 +672,9 @@ test "merge conflict" {
 fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind) !void {
     const allocator = std.testing.allocator;
     const temp_dir_name = "temp-test-repo-merge-conflict-shuffle";
-    const cwd = std.fs.cwd();
 
     // create the temp dir
+    const cwd = std.fs.cwd();
     var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
     if (temp_dir_or_err) |*temp_dir| {
         temp_dir.close();

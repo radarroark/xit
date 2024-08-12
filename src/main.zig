@@ -25,7 +25,13 @@ const USAGE =
 /// as a CLI tool. to use xit programmatically, build a Repo struct
 /// and call methods on it directly. to use xit subconsciously, just
 /// think about it really often and eventually you'll dream about it.
-pub fn xitMain(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, args: []const []const u8, writers: anytype) !void {
+pub fn xitMain(
+    comptime repo_kind: rp.RepoKind,
+    allocator: std.mem.Allocator,
+    args: []const []const u8,
+    cwd: std.fs.Dir,
+    writers: anytype,
+) !void {
     var command = try cmd.Command.init(allocator, args);
     defer command.deinit();
 
@@ -35,13 +41,13 @@ pub fn xitMain(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, ar
             try writers.out.print(USAGE, .{});
         },
         .tui => {
-            var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = std.fs.cwd() });
+            var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = cwd });
             defer repo.deinit();
             try ui.start(repo_kind, &repo, allocator);
         },
         .cli => {
             if (command.cli) |sub_command| {
-                var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = std.fs.cwd() }, sub_command, writers);
+                var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = cwd }, sub_command, writers);
                 defer repo.deinit();
             } else {
                 try writers.out.print(USAGE, .{});
@@ -69,5 +75,11 @@ pub fn main() !void {
         try args.append(arg);
     }
 
-    try xitMain(.xit, allocator, args.items, .{ .out = std.io.getStdOut().writer(), .err = std.io.getStdErr().writer() });
+    try xitMain(
+        .xit,
+        allocator,
+        args.items,
+        std.fs.cwd(),
+        .{ .out = std.io.getStdOut().writer(), .err = std.io.getStdErr().writer() },
+    );
 }
