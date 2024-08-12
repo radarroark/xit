@@ -380,42 +380,39 @@ fn applyPatchForFile(
         if (try parent_to_children.readPath(void, &[_]xitdb.PathPart(void){
             .{ .hash_map_get = .{ .value = current_node_id_hash } },
         })) |child_node_id_set| {
-            var count: usize = 0;
-            {
-                var child_node_id_iter = try child_node_id_set.iter();
-                defer child_node_id_iter.deinit();
-                while (try child_node_id_iter.next()) |_| {
-                    count += 1;
+            var child_node_id_iter = try child_node_id_set.iter();
+            defer child_node_id_iter.deinit();
+
+            if (try child_node_id_iter.next()) |node_id_cursor| {
+                // if there are any other children, remove the node list
+                // because there is a conflict, and thus the node map
+                // cannot be "flattened" into a list
+                if (try child_node_id_iter.next() != null) {
+                    _ = try branch_cursor.writePath(void, &[_]xitdb.PathPart(void){
+                        .{ .hash_map_get = .{ .value = hash.hashBuffer("path->node-id-list") } },
+                        .hash_map_init,
+                        .{ .hash_map_get = .{ .value = path_hash } },
+                        .{ .write = .none },
+                    });
+                    break;
                 }
-            }
+                // append child to the node list
+                else {
+                    const kv_pair = try node_id_cursor.readKeyValuePair();
+                    const child_node_id_bytes = try kv_pair.key_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
+                    defer allocator.free(child_node_id_bytes);
 
-            if (count != 1) {
-                // remove node list because there is a conflict, and thus
-                // the node map cannot be "flattened" into a list
-                _ = try branch_cursor.writePath(void, &[_]xitdb.PathPart(void){
-                    .{ .hash_map_get = .{ .value = hash.hashBuffer("path->node-id-list") } },
-                    .hash_map_init,
-                    .{ .hash_map_get = .{ .value = path_hash } },
-                    .{ .write = .none },
-                });
-                break;
+                    _ = try node_list.writePath(void, &[_]xitdb.PathPart(void){
+                        .{ .array_list_get = .append },
+                        .{ .write = .{ .bytes = child_node_id_bytes } },
+                    });
+
+                    var stream = std.io.fixedBufferStream(child_node_id_bytes);
+                    var reader = stream.reader();
+                    current_node_id_int = try reader.readInt(NodeIdInt, .big);
+                }
             } else {
-                var child_node_id_iter = try child_node_id_set.iter();
-                defer child_node_id_iter.deinit();
-                var node_id_cursor = (try child_node_id_iter.next()) orelse return error.ExpectedChildNode;
-
-                const kv_pair = try node_id_cursor.readKeyValuePair();
-                const child_node_id_bytes = try kv_pair.key_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
-                defer allocator.free(child_node_id_bytes);
-
-                _ = try node_list.writePath(void, &[_]xitdb.PathPart(void){
-                    .{ .array_list_get = .append },
-                    .{ .write = .{ .bytes = child_node_id_bytes } },
-                });
-
-                var stream = std.io.fixedBufferStream(child_node_id_bytes);
-                var reader = stream.reader();
-                current_node_id_int = try reader.readInt(NodeIdInt, .big);
+                break;
             }
         } else {
             break;
