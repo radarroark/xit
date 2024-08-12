@@ -44,8 +44,9 @@ pub fn main() !void {
     defer cwd.close();
 
     // create the temp dir
-    if (cwd.openFile(temp_dir_name, .{})) |file| {
-        file.close();
+    var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
+    if (temp_dir_or_err) |*temp_dir| {
+        temp_dir.close();
         try cwd.deleteTree(temp_dir_name);
     } else |_| {}
     var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
