@@ -125,7 +125,8 @@ pub fn main() !void {
     var args = std.ArrayList([]const u8).init(allocator);
     defer args.deinit();
 
-    var arg_it = std.process.args();
+    var arg_it = try std.process.argsWithAllocator(allocator);
+    defer arg_it.deinit();
     _ = arg_it.skip();
     while (arg_it.next()) |arg| {
         try args.append(arg);
