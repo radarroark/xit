@@ -116,11 +116,10 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                         if (entry.path.len != entry.flags.name_length) {
                             return error.InvalidPathSize;
                         }
-                        var entry_size = try reader.context.getPos() - start_pos;
-                        while (entry_size % 8 != 0) {
-                            entry_size += 1;
-                            const bytes = try reader.readBytesNoEof(1);
-                            if (bytes[0] != 0) {
+                        const entry_size = try reader.context.getPos() - start_pos;
+                        const entry_zeroes = (8 - (entry_size % 8)) % 8;
+                        for (0..entry_zeroes) |_| {
+                            if (0 != try reader.readByte()) {
                                 return error.InvalidNullPadding;
                             }
                         }
@@ -444,8 +443,11 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                 try writer.writeAll(&entry.oid);
                                 try writer.writeInt(u16, @as(u16, @bitCast(entry.flags)), .big);
                                 try writer.writeAll(entry.path);
-                                while (entry_buffer.items.len % 8 != 0) {
-                                    try writer.print("\x00", .{});
+                                try writer.writeByte(0);
+                                const entry_size = entry_buffer.items.len;
+                                const entry_zeroes = (8 - (entry_size % 8)) % 8;
+                                for (0..entry_zeroes) |_| {
+                                    try writer.writeByte(0);
                                 }
                                 try lock_file.writeAll(entry_buffer.items);
                                 h.update(entry_buffer.items);
