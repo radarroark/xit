@@ -64,7 +64,7 @@ fn createPatchEntries(
         id: NodeId,
         origin: enum { old, new },
     };
-    var last_node_maybe: ?LastNodeId = null;
+    var last_node = LastNodeId{ .id = @bitCast(FIRST_NODE_ID_INT), .origin = .old };
 
     while (try myers_diff_iter.next()) |edit| {
         defer edit.deinit(allocator);
@@ -83,17 +83,15 @@ fn createPatchEntries(
                 var reader = stream.reader();
                 const node_id: NodeId = @bitCast(try reader.readInt(NodeIdInt, .big));
 
-                if (last_node_maybe) |last_node| {
-                    if (last_node.origin == .new) {
-                        var buffer = std.ArrayList(u8).init(arena.allocator());
-                        try buffer.writer().writeInt(u8, @intFromEnum(ChangeKind.new_edge), .big);
-                        try buffer.writer().writeInt(NodeIdInt, @bitCast(node_id), .big);
-                        try buffer.writer().writeInt(NodeIdInt, @bitCast(last_node.id), .big);
-                        try patch_entries.append(buffer.items);
-                    }
+                if (last_node.origin == .new) {
+                    var buffer = std.ArrayList(u8).init(arena.allocator());
+                    try buffer.writer().writeInt(u8, @intFromEnum(ChangeKind.new_edge), .big);
+                    try buffer.writer().writeInt(NodeIdInt, @bitCast(node_id), .big);
+                    try buffer.writer().writeInt(NodeIdInt, @bitCast(last_node.id), .big);
+                    try patch_entries.append(buffer.items);
                 }
 
-                last_node_maybe = .{ .id = node_id, .origin = .old };
+                last_node = .{ .id = node_id, .origin = .old };
             },
             .ins => {
                 const node_id = NodeId{
@@ -104,19 +102,15 @@ fn createPatchEntries(
                 var buffer = std.ArrayList(u8).init(arena.allocator());
                 try buffer.writer().writeInt(u8, @intFromEnum(ChangeKind.new_edge), .big);
                 try buffer.writer().writeInt(NodeIdInt, @bitCast(node_id), .big);
-                if (last_node_maybe) |last_node| {
-                    try buffer.writer().writeInt(NodeIdInt, @bitCast(last_node.id), .big);
-                } else {
-                    try buffer.writer().writeInt(NodeIdInt, FIRST_NODE_ID_INT, .big);
-                }
+                try buffer.writer().writeInt(NodeIdInt, @bitCast(last_node.id), .big);
                 try patch_entries.append(buffer.items);
-
-                last_node_maybe = .{ .id = node_id, .origin = .new };
 
                 const content = try arena.allocator().dupe(u8, edit.ins.new_line.text);
                 try patch_content_entries.append(content);
 
                 new_node_count += 1;
+
+                last_node = .{ .id = node_id, .origin = .new };
             },
             .del => {
                 var buffer = std.ArrayList(u8).init(arena.allocator());
@@ -137,6 +131,8 @@ fn createPatchEntries(
                 try buffer.writer().writeInt(NodeIdInt, @bitCast(node_id), .big);
 
                 try patch_entries.append(buffer.items);
+
+                last_node = .{ .id = last_node.id, .origin = .new };
             },
         }
     }
