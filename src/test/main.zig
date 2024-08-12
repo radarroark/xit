@@ -541,7 +541,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             {
                 var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
-                var result = try repo.switch_head(&commit1);
+                var result = try repo.switch_head(&commit1, .{ .force = false });
                 defer result.deinit();
                 try std.testing.expect(result.data == .conflict);
                 try std.testing.expectEqual(1, result.data.conflict.stale_files.count());
@@ -566,7 +566,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             {
                 var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
-                var result = try repo.switch_head(&commit1);
+                var result = try repo.switch_head(&commit1, .{ .force = false });
                 defer result.deinit();
                 try std.testing.expect(result.data == .conflict);
             }
@@ -589,7 +589,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             {
                 var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
-                var result = try repo.switch_head(&commit1);
+                var result = try repo.switch_head(&commit1, .{ .force = false });
                 defer result.deinit();
                 try std.testing.expect(result.data == .conflict);
                 try std.testing.expectEqual(1, result.data.conflict.stale_files.count());
@@ -618,7 +618,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             {
                 var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
-                var result = try repo.switch_head(&commit1);
+                var result = try repo.switch_head(&commit1, .{ .force = false });
                 defer result.deinit();
                 try std.testing.expect(result.data == .conflict);
                 try std.testing.expectEqual(1, result.data.conflict.stale_dirs.count());

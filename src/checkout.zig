@@ -363,7 +363,11 @@ pub const Switch = struct {
         },
     },
 
-    pub fn init(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, target: []const u8) !Switch {
+    pub const Options = struct {
+        force: bool,
+    };
+
+    pub fn init(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, target: []const u8, options: Options) !Switch {
         // get the current commit and target oid
         const current_oid = try ref.readHead(repo_kind, core_cursor);
         const target_oid = try ref.resolve(repo_kind, core_cursor, target) orelse return error.InvalidTarget;
@@ -387,7 +391,7 @@ pub const Switch = struct {
                 defer index.deinit();
 
                 // update the working tree
-                try migrate(repo_kind, core_cursor, allocator, tree_diff, &index, &result);
+                try migrate(repo_kind, core_cursor, allocator, tree_diff, &index, if (options.force) null else &result);
 
                 // return early if conflict
                 if (result.data == .conflict) {
@@ -409,7 +413,7 @@ pub const Switch = struct {
                 defer index.deinit();
 
                 // update the working tree
-                try migrate(repo_kind, core_cursor, allocator, tree_diff, &index, &result);
+                try migrate(repo_kind, core_cursor, allocator, tree_diff, &index, if (options.force) null else &result);
 
                 // return early if conflict
                 if (result.data == .conflict) {

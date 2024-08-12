@@ -408,7 +408,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     }
                 },
                 .switch_head => {
-                    var result = try self.switch_head(sub_command.switch_head.target);
+                    var result = try self.switch_head(sub_command.switch_head.target, .{ .force = false });
                     defer result.deinit();
                 },
                 .restore => {
@@ -665,25 +665,26 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             }
         }
 
-        pub fn switch_head(self: *Repo(repo_kind), target: []const u8) !chk.Switch {
+        pub fn switch_head(self: *Repo(repo_kind), target: []const u8, options: chk.Switch.Options) !chk.Switch {
             switch (repo_kind) {
-                .git => return try chk.Switch.init(repo_kind, .{ .core = &self.core }, self.allocator, target),
+                .git => return try chk.Switch.init(repo_kind, .{ .core = &self.core }, self.allocator, target, options),
                 .xit => {
                     var result: chk.Switch = undefined;
                     const Ctx = struct {
                         core: *Repo(repo_kind).Core,
                         allocator: std.mem.Allocator,
                         target: []const u8,
+                        options: chk.Switch.Options,
                         result: *chk.Switch,
 
                         pub fn run(ctx: @This(), cursor: *xitdb.Cursor(.file)) !void {
-                            ctx.result.* = try chk.Switch.init(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, ctx.target);
+                            ctx.result.* = try chk.Switch.init(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, ctx.target, ctx.options);
                         }
                     };
                     _ = try self.core.db.rootCursor().writePath(Ctx, &[_]xitdb.PathPart(Ctx){
                         .{ .array_list_get = .append_copy },
                         .hash_map_init,
-                        .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .target = target, .result = &result } },
+                        .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .target = target, .options = options, .result = &result } },
                     });
                     return result;
                 },

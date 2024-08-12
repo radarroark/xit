@@ -114,8 +114,11 @@ pub fn main() !void {
             const commit_object = commits.items[commits.items.len - i - 1];
             try writers.out.print("Creating commit: {s}", .{commit_object.content.commit.message});
 
-            var switch_result = try git_repo.switch_head(&commit_object.oid);
+            var switch_result = try git_repo.switch_head(&commit_object.oid, .{ .force = true });
             defer switch_result.deinit();
+            if (switch_result.data != .success) {
+                return error.CheckoutFailed;
+            }
 
             try xit_repo.add(&[_][]const u8{ "build.zig", "build.zig.zon", "src" });
             _ = try xit_repo.commit(null, commit_object.content.commit.message);
