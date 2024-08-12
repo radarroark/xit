@@ -77,8 +77,8 @@ pub fn start(comptime repo_kind: rp.RepoKind, repo: *rp.Repo(repo_kind), allocat
     }
 
     // init term
-    term.terminal = try term.Terminal.init(allocator);
-    defer term.terminal.deinit();
+    var terminal = try term.Terminal.init(allocator);
+    defer terminal.deinit();
 
     var last_size = layout.Size{ .width = 0, .height = 0 };
     var last_grid = try Grid.init(allocator, last_size);
@@ -86,10 +86,10 @@ pub fn start(comptime repo_kind: rp.RepoKind, repo: *rp.Repo(repo_kind), allocat
 
     while (true) {
         // render to tty
-        try term.terminal.render(&root, &last_grid, &last_size);
+        try terminal.render(&root, &last_grid, &last_size);
 
         // process any inputs
-        while (try term.terminal.readKey()) |key| {
+        while (try terminal.readKey()) |key| {
             if (key == .codepoint and key.codepoint == 'q') {
                 return;
             }
