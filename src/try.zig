@@ -112,6 +112,17 @@ pub fn main() !void {
             try xit_repo.add(&[_][]const u8{ "build.zig", "build.zig.zon", "src" });
             _ = try xit_repo.commit(null, commit_object.content.commit.message);
         }
+
+        // make changes so we see things in the status UI
+        {
+            var build_zig = try temp_dir.openFile("build.zig", .{ .mode = .read_write });
+            defer build_zig.close();
+            try build_zig.seekFromEnd(0);
+            try build_zig.writeAll("\n// ...just felt like adding a new line!");
+            try xit_repo.add(&[_][]const u8{"build.zig"});
+            try build_zig.writeAll("\n// ...and here's another one!");
+        }
+        try temp_dir.deleteFile("build.zig.zon");
     }
 
     var args = std.ArrayList([]const u8).init(allocator);

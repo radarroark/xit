@@ -9,6 +9,8 @@ const ui_diff = @import("./diff.zig");
 const ui_root = @import("./root.zig");
 const rp = @import("../repo.zig");
 const st = @import("../status.zig");
+const df = @import("../diff.zig");
+const io = @import("../io.zig");
 
 pub const IndexKind = enum {
     added,
@@ -341,6 +343,8 @@ pub fn StatusContent(comptime Widget: type, comptime repo_kind: rp.RepoKind) typ
         box: wgt.Box(Widget),
         filtered_statuses: std.ArrayList(StatusItem),
         repo: *rp.Repo(repo_kind),
+        status: *st.Status(repo_kind),
+        allocator: std.mem.Allocator,
 
         const FocusKind = enum { status_list, diff };
 
@@ -399,6 +403,8 @@ pub fn StatusContent(comptime Widget: type, comptime repo_kind: rp.RepoKind) typ
                 .box = box,
                 .filtered_statuses = filtered_statuses,
                 .repo = repo,
+                .status = status,
+                .allocator = allocator,
             };
             status_content.getFocus().child_id = box.children.keys()[0];
             try status_content.updateDiff();
@@ -514,7 +520,72 @@ pub fn StatusContent(comptime Widget: type, comptime repo_kind: rp.RepoKind) typ
                 var diff = &self.box.children.values()[1].widget.ui_diff;
                 try diff.clearDiffs();
 
-                _ = status_item;
+                // TODO: add method to Repo for diffing individual files,
+                // so this logic can be moved there
+                var cursor = try self.repo.core.latestCursor();
+                const core_cursor = switch (repo_kind) {
+                    .git => .{ .core = &self.repo.core },
+                    .xit => .{ .core = &self.repo.core, .cursor = &cursor },
+                };
+
+                var line_iter_pair: df.LineIteratorPair(repo_kind) = switch (status_item.kind) {
+                    .added => blk: {
+                        switch (status_item.kind.added) {
+                            .created => {
+                                var a = try df.LineIterator(repo_kind).initFromNothing(self.allocator, status_item.path);
+                                errdefer a.deinit();
+                                const index_entries_for_path = self.status.index.entries.get(status_item.path) orelse return error.EntryNotFound;
+                                var b = try df.LineIterator(repo_kind).initFromIndex(core_cursor, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
+                                errdefer b.deinit();
+                                break :blk .{ .path = status_item.path, .a = a, .b = b };
+                            },
+                            .modified => {
+                                var a = try df.LineIterator(repo_kind).initFromHead(core_cursor, self.allocator, status_item.path, self.status.head_tree.entries.get(status_item.path) orelse return error.EntryNotFound);
+                                errdefer a.deinit();
+                                const index_entries_for_path = self.status.index.entries.get(status_item.path) orelse return error.EntryNotFound;
+                                var b = try df.LineIterator(repo_kind).initFromIndex(core_cursor, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
+                                errdefer b.deinit();
+                                break :blk .{ .path = status_item.path, .a = a, .b = b };
+                            },
+                            .deleted => {
+                                var a = try df.LineIterator(repo_kind).initFromHead(core_cursor, self.allocator, status_item.path, self.status.head_tree.entries.get(status_item.path) orelse return error.EntryNotFound);
+                                errdefer a.deinit();
+                                var b = try df.LineIterator(repo_kind).initFromNothing(self.allocator, status_item.path);
+                                errdefer b.deinit();
+                                break :blk .{ .path = status_item.path, .a = a, .b = b };
+                            },
+                        }
+                    },
+                    .not_added => blk: {
+                        switch (status_item.kind.not_added) {
+                            .modified => {
+                                const meta = try io.getMetadata(self.repo.core.repo_dir, status_item.path);
+                                const mode = io.getMode(meta);
+
+                                const index_entries_for_path = self.status.index.entries.get(status_item.path) orelse return error.EntryNotFound;
+                                var a = try df.LineIterator(repo_kind).initFromIndex(core_cursor, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
+                                errdefer a.deinit();
+                                var b = try df.LineIterator(repo_kind).initFromWorkspace(core_cursor, self.allocator, status_item.path, mode);
+                                errdefer b.deinit();
+                                break :blk .{ .path = status_item.path, .a = a, .b = b };
+                            },
+                            .deleted => {
+                                const index_entries_for_path = self.status.index.entries.get(status_item.path) orelse return error.EntryNotFound;
+                                var a = try df.LineIterator(repo_kind).initFromIndex(core_cursor, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
+                                errdefer a.deinit();
+                                var b = try df.LineIterator(repo_kind).initFromNothing(self.allocator, status_item.path);
+                                errdefer b.deinit();
+                                break :blk .{ .path = status_item.path, .a = a, .b = b };
+                            },
+                        }
+                    },
+                    .not_tracked => return,
+                };
+                defer line_iter_pair.deinit();
+
+                var hunk_iter = try df.HunkIterator(repo_kind).init(self.allocator, &line_iter_pair.a, &line_iter_pair.b);
+                defer hunk_iter.deinit();
+                try diff.addHunks(&hunk_iter);
             }
         }
     };
@@ -523,7 +594,7 @@ pub fn StatusContent(comptime Widget: type, comptime repo_kind: rp.RepoKind) typ
 pub fn Status(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
     return struct {
         box: wgt.Box(Widget),
-        status: st.Status(repo_kind),
+        status: *st.Status(repo_kind),
         allocator: std.mem.Allocator,
 
         const FocusKind = enum { status_tabs, status_content };
@@ -531,6 +602,11 @@ pub fn Status(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
         pub fn init(allocator: std.mem.Allocator, repo: *rp.Repo(repo_kind)) !Status(Widget, repo_kind) {
             var status = try repo.status();
             errdefer status.deinit();
+
+            // put Status object on the heap so the pointer is stable
+            const status_ptr = try allocator.create(st.Status(repo_kind));
+            errdefer allocator.destroy(status_ptr);
+            status_ptr.* = status;
 
             // init box
             var box = try wgt.Box(Widget).init(allocator, null, .vert);
@@ -540,7 +616,7 @@ pub fn Status(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                 const focus_kind: FocusKind = @enumFromInt(focus_kind_field.value);
                 switch (focus_kind) {
                     .status_tabs => {
-                        var status_tabs = try StatusTabs(Widget, repo_kind).init(allocator, &status);
+                        var status_tabs = try StatusTabs(Widget, repo_kind).init(allocator, status_ptr);
                         errdefer status_tabs.deinit();
                         try box.children.put(status_tabs.getFocus().id, .{ .widget = .{ .ui_status_tabs = status_tabs }, .rect = null, .min_size = null });
                     },
@@ -550,7 +626,7 @@ pub fn Status(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
 
                         inline for (@typeInfo(IndexKind).Enum.fields) |index_kind_field| {
                             const index_kind: IndexKind = @enumFromInt(index_kind_field.value);
-                            var status_content = try StatusContent(Widget, repo_kind).init(allocator, repo, &status, index_kind);
+                            var status_content = try StatusContent(Widget, repo_kind).init(allocator, repo, status_ptr, index_kind);
                             errdefer status_content.deinit();
                             try stack.children.put(status_content.getFocus().id, .{ .ui_status_content = status_content });
                         }
@@ -562,7 +638,7 @@ pub fn Status(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
 
             var ui_status = Status(Widget, repo_kind){
                 .box = box,
-                .status = status,
+                .status = status_ptr,
                 .allocator = allocator,
             };
             ui_status.getFocus().child_id = box.children.keys()[0];
@@ -572,6 +648,7 @@ pub fn Status(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
         pub fn deinit(self: *Status(Widget, repo_kind)) void {
             self.box.deinit();
             self.status.deinit();
+            self.allocator.destroy(self.status);
         }
 
         pub fn build(self: *Status(Widget, repo_kind), constraint: layout.Constraint, root_focus: *Focus) !void {
