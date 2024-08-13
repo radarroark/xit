@@ -9,6 +9,7 @@ const Focus = xitui.focus.Focus;
 const ui_root = @import("./ui/root.zig");
 const ui_log = @import("./ui/log.zig");
 const ui_diff = @import("./ui/diff.zig");
+const ui_status = @import("./ui/status.zig");
 const rp = @import("./repo.zig");
 
 pub fn Widget(comptime repo_kind: rp.RepoKind) type {
@@ -23,6 +24,11 @@ pub fn Widget(comptime repo_kind: rp.RepoKind) type {
         ui_log: ui_log.Log(Widget(repo_kind), repo_kind),
         ui_log_commit_list: ui_log.LogCommitList(Widget(repo_kind), repo_kind),
         ui_diff: ui_diff.Diff(Widget(repo_kind), repo_kind),
+        ui_status: ui_status.Status(Widget(repo_kind), repo_kind),
+        ui_status_content: ui_status.StatusContent(Widget(repo_kind), repo_kind),
+        ui_status_tabs: ui_status.StatusTabs(Widget(repo_kind), repo_kind),
+        ui_status_list: ui_status.StatusList(Widget(repo_kind)),
+        ui_status_list_item: ui_status.StatusListItem(Widget(repo_kind)),
 
         pub fn deinit(self: *Widget(repo_kind)) void {
             switch (self.*) {
