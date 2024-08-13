@@ -195,8 +195,6 @@ pub fn migrate(
     defer edit_files.deinit();
     var remove_files = std.StringHashMap(void).init(allocator);
     defer remove_files.deinit();
-    var remove_dirs = std.StringHashMap(void).init(allocator);
-    defer remove_dirs.deinit();
 
     var iter = tree_diff.changes.iterator();
     while (iter.next()) |entry| {
@@ -210,9 +208,6 @@ pub fn migrate(
         } else if (change.new == null) {
             // if the new change doesn't exist, it's a removed file
             try remove_files.put(path, {});
-            if (std.fs.path.dirname(path)) |parent_path| {
-                try remove_dirs.put(parent_path, {});
-            }
         } else {
             // otherwise, it's an edited file
             if (change.new) |new| {
@@ -288,24 +283,18 @@ pub fn migrate(
     var remove_files_iter = remove_files.iterator();
     while (remove_files_iter.next()) |entry| {
         // update working tree
-        var path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
-        const path = try core_cursor.core.repo_dir.realpath(entry.key_ptr.*, &path_buffer);
-        try std.fs.deleteFileAbsolute(path);
+        try core_cursor.core.repo_dir.deleteFile(entry.key_ptr.*);
+        var dir_path_maybe = std.fs.path.dirname(entry.key_ptr.*);
+        while (dir_path_maybe) |dir_path| {
+            core_cursor.core.repo_dir.deleteDir(dir_path) catch |err| switch (err) {
+                error.DirNotEmpty => break,
+                else => return err,
+            };
+            dir_path_maybe = std.fs.path.dirname(dir_path);
+        }
         // update index
         index.removePath(entry.key_ptr.*);
         try index.removeChildren(entry.key_ptr.*);
-    }
-
-    var remove_dirs_iter = remove_dirs.keyIterator();
-    while (remove_dirs_iter.next()) |key| {
-        // update working tree
-        core_cursor.core.repo_dir.deleteDir(key.*) catch |err| switch (err) {
-            error.DirNotEmpty => continue,
-            else => return err,
-        };
-        // update index
-        index.removePath(key.*);
-        try index.removeChildren(key.*);
     }
 
     var add_files_iter = add_files.iterator();

@@ -267,6 +267,13 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         defer main_zig.close();
         try main_zig.writeAll("pub fn main() !void {}");
 
+        // make file in a nested dir
+        var two_dir = try repo_dir.makeOpenPath("one/two", .{});
+        defer two_dir.close();
+        var three_txt = try two_dir.createFile("three.txt", .{});
+        defer three_txt.close();
+        try three_txt.writeAll("one, two, three!");
+
         // change permissions of a file
         if (builtin.os.tag != .windows) {
             const run_sh = try repo_dir.openFile("run.sh", .{ .mode = .read_write });
@@ -503,15 +510,18 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             } else if (std.mem.eql(u8, "tests", line_iter_pair.path)) {
                 try std.testing.expectEqualStrings("diff --git a/tests b/tests", hunk_iter.header_lines.items[0]);
                 try std.testing.expectEqualStrings("deleted file mode 100644", hunk_iter.header_lines.items[1]);
+            } else if (std.mem.eql(u8, "one/two/three.txt", line_iter_pair.path)) {
+                try std.testing.expectEqualStrings("diff --git a/one/two/three.txt b/one/two/three.txt", hunk_iter.header_lines.items[0]);
+                try std.testing.expectEqualStrings("new file mode 100644", hunk_iter.header_lines.items[1]);
             } else {
                 return error.EntryNotExpected;
             }
         }
 
         if (builtin.os.tag != .windows) {
-            try std.testing.expectEqual(7, diff_iter.next_index);
+            try std.testing.expectEqual(8, diff_iter.next_index);
         } else {
-            try std.testing.expectEqual(6, diff_iter.next_index);
+            try std.testing.expectEqual(7, diff_iter.next_index);
         }
     }
 
@@ -631,6 +641,18 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
 
         const license = try repo_dir.openFile("LICENSE", .{ .mode = .read_only });
         defer license.close();
+
+        var two_dir_or_err = repo_dir.openDir("one/two", .{});
+        if (two_dir_or_err) |*dir| {
+            dir.close();
+            return error.UnexpectedDir;
+        } else |_| {}
+
+        var one_dir_or_err = repo_dir.openDir("one", .{});
+        if (one_dir_or_err) |*dir| {
+            dir.close();
+            return error.UnexpectedDir;
+        } else |_| {}
     }
 
     // switch to master
@@ -675,13 +697,14 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             };
             var index = try idx.Index(repo_kind).init(allocator, core_cursor);
             defer index.deinit();
-            try std.testing.expectEqual(6, index.entries.count());
+            try std.testing.expectEqual(7, index.entries.count());
             try std.testing.expect(index.entries.contains("README"));
             try std.testing.expect(index.entries.contains("src/zig/main.zig"));
             try std.testing.expect(index.entries.contains("tests/main_test.zig"));
             try std.testing.expect(index.entries.contains("hello.txt/nested.txt"));
             try std.testing.expect(index.entries.contains("hello.txt/nested2.txt"));
             try std.testing.expect(index.entries.contains("run.sh"));
+            try std.testing.expect(index.entries.contains("one/two/three.txt"));
         }
 
         switch (repo_kind) {
@@ -693,11 +716,10 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 var index: ?*c.git_index = null;
                 try std.testing.expectEqual(0, c.git_repository_index(&index, repo));
                 defer c.git_index_free(index);
-                try std.testing.expectEqual(6, c.git_index_entrycount(index));
+                try std.testing.expectEqual(7, c.git_index_entrycount(index));
             },
             .xit => {
                 // read the index in xitdb
-                // TODO: use more efficient way to get map size
                 var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
                 var count: u32 = 0;
@@ -711,7 +733,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                         count += 1;
                     }
                 }
-                try std.testing.expectEqual(6, count);
+                try std.testing.expectEqual(7, count);
             },
         }
 
@@ -740,7 +762,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             };
             var index = try idx.Index(repo_kind).init(allocator, core_cursor);
             defer index.deinit();
-            try std.testing.expectEqual(5, index.entries.count());
+            try std.testing.expectEqual(6, index.entries.count());
             try std.testing.expect(index.entries.contains("README"));
             try std.testing.expect(index.entries.contains("src/zig/main.zig"));
             try std.testing.expect(index.entries.contains("tests/main_test.zig"));
@@ -757,11 +779,10 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 var index: ?*c.git_index = null;
                 try std.testing.expectEqual(0, c.git_repository_index(&index, repo));
                 defer c.git_index_free(index);
-                try std.testing.expectEqual(5, c.git_index_entrycount(index));
+                try std.testing.expectEqual(6, c.git_index_entrycount(index));
             },
             .xit => {
                 // read the index in xitdb
-                // TODO: use more efficient way to get map size
                 var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
                 var count: u32 = 0;
@@ -775,7 +796,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                         count += 1;
                     }
                 }
-                try std.testing.expectEqual(5, count);
+                try std.testing.expectEqual(6, count);
             },
         }
 
@@ -990,7 +1011,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         // read tree
         var tree_object = try obj.Object(repo_kind).init(allocator, core_cursor, commit_object.content.commit.tree);
         defer tree_object.deinit();
-        try std.testing.expectEqual(5, tree_object.content.tree.entries.count());
+        try std.testing.expectEqual(6, tree_object.content.tree.entries.count());
     }
 
     // create a branch
