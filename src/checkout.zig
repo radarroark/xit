@@ -189,17 +189,14 @@ pub fn migrate(
     index: *idx.Index(repo_kind),
     result_maybe: ?*Switch,
 ) !void {
-    var add_files = std.StringHashMap(obj.TreeEntry).init(allocator);
+    var add_files = std.StringArrayHashMap(obj.TreeEntry).init(allocator);
     defer add_files.deinit();
-    var edit_files = std.StringHashMap(obj.TreeEntry).init(allocator);
+    var edit_files = std.StringArrayHashMap(obj.TreeEntry).init(allocator);
     defer edit_files.deinit();
-    var remove_files = std.StringHashMap(void).init(allocator);
+    var remove_files = std.StringArrayHashMap(void).init(allocator);
     defer remove_files.deinit();
 
-    var iter = tree_diff.changes.iterator();
-    while (iter.next()) |entry| {
-        const path = entry.key_ptr.*;
-        const change = entry.value_ptr.*;
+    for (tree_diff.changes.keys(), tree_diff.changes.values()) |path, change| {
         if (change.old == null) {
             // if the old change doesn't exist and the new change does, it's an added file
             if (change.new) |new| {
@@ -280,11 +277,10 @@ pub fn migrate(
         }
     }
 
-    var remove_files_iter = remove_files.iterator();
-    while (remove_files_iter.next()) |entry| {
+    for (remove_files.keys()) |path| {
         // update working tree
-        try core_cursor.core.repo_dir.deleteFile(entry.key_ptr.*);
-        var dir_path_maybe = std.fs.path.dirname(entry.key_ptr.*);
+        try core_cursor.core.repo_dir.deleteFile(path);
+        var dir_path_maybe = std.fs.path.dirname(path);
         while (dir_path_maybe) |dir_path| {
             core_cursor.core.repo_dir.deleteDir(dir_path) catch |err| switch (err) {
                 error.DirNotEmpty => break,
@@ -293,24 +289,22 @@ pub fn migrate(
             dir_path_maybe = std.fs.path.dirname(dir_path);
         }
         // update index
-        index.removePath(entry.key_ptr.*);
-        try index.removeChildren(entry.key_ptr.*);
+        index.removePath(path);
+        try index.removeChildren(path);
     }
 
-    var add_files_iter = add_files.iterator();
-    while (add_files_iter.next()) |entry| {
+    for (add_files.keys(), add_files.values()) |path, tree_entry| {
         // update working tree
-        try objectToFile(repo_kind, core_cursor, allocator, entry.key_ptr.*, entry.value_ptr.*);
+        try objectToFile(repo_kind, core_cursor, allocator, path, tree_entry);
         // update index
-        try index.addPath(core_cursor, entry.key_ptr.*);
+        try index.addPath(core_cursor, path);
     }
 
-    var edit_files_iter = edit_files.iterator();
-    while (edit_files_iter.next()) |entry| {
+    for (edit_files.keys(), edit_files.values()) |path, tree_entry| {
         // update working tree
-        try objectToFile(repo_kind, core_cursor, allocator, entry.key_ptr.*, entry.value_ptr.*);
+        try objectToFile(repo_kind, core_cursor, allocator, path, tree_entry);
         // update index
-        try index.addPath(core_cursor, entry.key_ptr.*);
+        try index.addPath(core_cursor, path);
     }
 }
 
@@ -345,10 +339,10 @@ pub const Switch = struct {
     data: union(enum) {
         success,
         conflict: struct {
-            stale_files: std.StringHashMap(void),
-            stale_dirs: std.StringHashMap(void),
-            untracked_overwritten: std.StringHashMap(void),
-            untracked_removed: std.StringHashMap(void),
+            stale_files: std.StringArrayHashMap(void),
+            stale_dirs: std.StringArrayHashMap(void),
+            untracked_overwritten: std.StringArrayHashMap(void),
+            untracked_removed: std.StringArrayHashMap(void),
         },
     },
 
@@ -436,10 +430,10 @@ pub const Switch = struct {
         if (self.data != .conflict) {
             self.data = .{
                 .conflict = .{
-                    .stale_files = std.StringHashMap(void).init(allocator),
-                    .stale_dirs = std.StringHashMap(void).init(allocator),
-                    .untracked_overwritten = std.StringHashMap(void).init(allocator),
-                    .untracked_removed = std.StringHashMap(void).init(allocator),
+                    .stale_files = std.StringArrayHashMap(void).init(allocator),
+                    .stale_dirs = std.StringArrayHashMap(void).init(allocator),
+                    .untracked_overwritten = std.StringArrayHashMap(void).init(allocator),
+                    .untracked_removed = std.StringArrayHashMap(void).init(allocator),
                 },
             };
         }
