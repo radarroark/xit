@@ -343,6 +343,10 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
                 return w - h;
             }
 
+            fn absIndex(i: isize, len: usize) usize {
+                return if (i < 0) len - @abs(i) else @intCast(i);
+            }
+
             fn forward(self: Box, vf: []isize, vb: []isize, d: usize, line_iter_a: *LineIterator(repo_kind), line_iter_b: *LineIterator(repo_kind)) !?[2]Point {
                 const line_count_a = line_iter_a.count();
                 const line_count_b = line_iter_b.count();
@@ -659,10 +663,6 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
 
         pub fn deinit(self: *MyersDiffIterator(repo_kind)) void {
             self.points.deinit();
-        }
-
-        fn absIndex(i: isize, len: usize) usize {
-            return if (i < 0) len - @abs(i) else @intCast(i);
         }
     };
 }
