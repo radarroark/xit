@@ -545,7 +545,7 @@ pub fn Status(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                         try box.children.put(status_tabs.getFocus().id, .{ .widget = .{ .ui_status_tabs = status_tabs }, .rect = null, .min_size = null });
                     },
                     .status_content => {
-                        var stack = ui_root.RootStack(Widget).init(allocator);
+                        var stack = wgt.Stack(Widget).init(allocator);
                         errdefer stack.deinit();
 
                         inline for (@typeInfo(st.IndexKind).Enum.fields) |index_kind_field| {
@@ -555,7 +555,7 @@ pub fn Status(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                             try stack.children.put(status_content.getFocus().id, .{ .ui_status_content = status_content });
                         }
 
-                        try box.children.put(stack.getFocus().id, .{ .widget = .{ .ui_root_stack = stack }, .rect = null, .min_size = null });
+                        try box.children.put(stack.getFocus().id, .{ .widget = .{ .stack = stack }, .rect = null, .min_size = null });
                     },
                 }
             }
@@ -578,7 +578,7 @@ pub fn Status(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
         pub fn build(self: *Status(Widget, repo_kind), constraint: layout.Constraint, root_focus: *Focus) !void {
             self.clearGrid();
             const status_tabs = &self.box.children.values()[@intFromEnum(FocusKind.status_tabs)].widget.ui_status_tabs;
-            const stack = &self.box.children.values()[@intFromEnum(FocusKind.status_content)].widget.ui_root_stack;
+            const stack = &self.box.children.values()[@intFromEnum(FocusKind.status_content)].widget.stack;
             if (status_tabs.getSelectedIndex()) |index| {
                 stack.getFocus().child_id = stack.children.keys()[index];
             }
@@ -600,8 +600,8 @@ pub fn Status(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                                     try status_tabs.input(key, root_focus);
                                 }
                             },
-                            .ui_root_stack => {
-                                const stack = &child.ui_root_stack;
+                            .stack => {
+                                const stack = &child.stack;
                                 if (stack.getSelected()) |selected_widget| {
                                     if (key == .arrow_up and selected_widget.ui_status_content.scrolledToTop()) {
                                         break :blk @intFromEnum(FocusKind.status_tabs);
@@ -616,7 +616,7 @@ pub fn Status(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                     };
 
                     if (index == @intFromEnum(FocusKind.status_content)) {
-                        if (self.box.children.values()[@intFromEnum(FocusKind.status_content)].widget.ui_root_stack.getSelected()) |selected_widget| {
+                        if (self.box.children.values()[@intFromEnum(FocusKind.status_content)].widget.stack.getSelected()) |selected_widget| {
                             if (selected_widget.ui_status_content.getGrid() == null) {
                                 index = @intFromEnum(FocusKind.status_tabs);
                             }

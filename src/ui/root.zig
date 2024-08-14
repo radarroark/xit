@@ -101,72 +101,6 @@ pub fn RootTabs(comptime Widget: type) type {
     };
 }
 
-pub fn RootStack(comptime Widget: type) type {
-    return struct {
-        focus: Focus,
-        children: std.AutoArrayHashMap(usize, Widget),
-
-        pub fn init(allocator: std.mem.Allocator) RootStack(Widget) {
-            return .{
-                .focus = Focus.init(allocator),
-                .children = std.AutoArrayHashMap(usize, Widget).init(allocator),
-            };
-        }
-
-        pub fn deinit(self: *RootStack(Widget)) void {
-            self.focus.deinit();
-            for (self.children.values()) |*child| {
-                child.deinit();
-            }
-            self.children.deinit();
-        }
-
-        pub fn build(self: *RootStack(Widget), constraint: layout.Constraint, root_focus: *Focus) !void {
-            self.clearGrid();
-            self.getFocus().clear();
-            if (self.getSelected()) |selected_widget| {
-                try selected_widget.build(constraint, root_focus);
-                if (selected_widget.getGrid()) |child_grid| {
-                    try self.getFocus().addChild(selected_widget.getFocus(), child_grid.size, 0, 0);
-                }
-            }
-        }
-
-        pub fn input(self: *RootStack(Widget), key: inp.Key, root_focus: *Focus) !void {
-            if (self.getSelected()) |selected_widget| {
-                try selected_widget.input(key, root_focus);
-            }
-        }
-
-        pub fn clearGrid(self: *RootStack(Widget)) void {
-            if (self.getSelected()) |selected_widget| {
-                selected_widget.clearGrid();
-            }
-        }
-
-        pub fn getGrid(self: RootStack(Widget)) ?Grid {
-            if (self.getSelected()) |selected_widget| {
-                return selected_widget.getGrid();
-            } else {
-                return null;
-            }
-        }
-
-        pub fn getFocus(self: *RootStack(Widget)) *Focus {
-            return &self.focus;
-        }
-
-        pub fn getSelected(self: RootStack(Widget)) ?*Widget {
-            if (self.focus.child_id) |child_id| {
-                if (self.children.getIndex(child_id)) |current_index| {
-                    return &self.children.values()[current_index];
-                }
-            }
-            return null;
-        }
-    };
-}
-
 pub fn Root(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
     return struct {
         box: wgt.Box(Widget),
@@ -186,7 +120,7 @@ pub fn Root(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                         try box.children.put(ui_root_tabs.getFocus().id, .{ .widget = .{ .ui_root_tabs = ui_root_tabs }, .rect = null, .min_size = null });
                     },
                     .stack => {
-                        var stack = RootStack(Widget).init(allocator);
+                        var stack = wgt.Stack(Widget).init(allocator);
                         errdefer stack.deinit();
 
                         {
@@ -201,7 +135,7 @@ pub fn Root(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                             try stack.children.put(status.getFocus().id, status);
                         }
 
-                        try box.children.put(stack.getFocus().id, .{ .widget = .{ .ui_root_stack = stack }, .rect = null, .min_size = null });
+                        try box.children.put(stack.getFocus().id, .{ .widget = .{ .stack = stack }, .rect = null, .min_size = null });
                     },
                 }
             }
@@ -220,7 +154,7 @@ pub fn Root(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
         pub fn build(self: *Root(Widget, repo_kind), constraint: layout.Constraint, root_focus: *Focus) !void {
             self.clearGrid();
             const ui_root_tabs = &self.box.children.values()[@intFromEnum(FocusKind.tabs)].widget.ui_root_tabs;
-            const ui_root_stack = &self.box.children.values()[@intFromEnum(FocusKind.stack)].widget.ui_root_stack;
+            const ui_root_stack = &self.box.children.values()[@intFromEnum(FocusKind.stack)].widget.stack;
             if (ui_root_tabs.getSelectedIndex()) |index| {
                 ui_root_stack.getFocus().child_id = ui_root_stack.children.keys()[index];
             }
@@ -239,8 +173,8 @@ pub fn Root(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                                 .ui_root_tabs => {
                                     try child.input(key, root_focus);
                                 },
-                                .ui_root_stack => {
-                                    if (child.ui_root_stack.getSelected()) |selected_widget| {
+                                .stack => {
+                                    if (child.stack.getSelected()) |selected_widget| {
                                         switch (selected_widget.*) {
                                             .ui_log => {
                                                 if (selected_widget.ui_log.scrolledToTop()) {
@@ -268,7 +202,7 @@ pub fn Root(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                                 .ui_root_tabs => {
                                     index = @intFromEnum(FocusKind.stack);
                                 },
-                                .ui_root_stack => {
+                                .stack => {
                                     try child.input(key, root_focus);
                                 },
                                 else => {},
