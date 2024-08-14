@@ -308,12 +308,12 @@ pub fn Log(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                 var tree_diff = try self.repo.treeDiff(parent_oid_maybe, commit_oid);
                 defer tree_diff.deinit();
 
-                var diff_iter = try self.repo.diff(.{ .tree = .{ .tree_diff = &tree_diff } });
+                var file_iter = try self.repo.filePairs(.{ .tree = .{ .tree_diff = &tree_diff } });
 
                 var diff = &self.box.children.values()[1].widget.ui_diff;
                 try diff.clearDiffs();
 
-                while (try diff_iter.next()) |*line_iter_pair_ptr| {
+                while (try file_iter.next()) |*line_iter_pair_ptr| {
                     var line_iter_pair = line_iter_pair_ptr.*;
                     defer line_iter_pair.deinit();
                     var hunk_iter = try df.HunkIterator(repo_kind).init(self.allocator, &line_iter_pair.a, &line_iter_pair.b);

@@ -14,6 +14,25 @@ const ref = @import("./ref.zig");
 const io = @import("./io.zig");
 const rp = @import("./repo.zig");
 
+pub const IndexKind = enum {
+    added,
+    not_added,
+    not_tracked,
+};
+
+pub const StatusKind = union(IndexKind) {
+    added: enum {
+        created,
+        modified,
+        deleted,
+    },
+    not_added: enum {
+        modified,
+        deleted,
+    },
+    not_tracked,
+};
+
 pub const MergeConflictStatus = struct {
     common: bool,
     current: bool,

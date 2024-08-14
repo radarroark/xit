@@ -12,27 +12,8 @@ const st = @import("../status.zig");
 const df = @import("../diff.zig");
 const io = @import("../io.zig");
 
-pub const IndexKind = enum {
-    added,
-    not_added,
-    not_tracked,
-};
-
-pub const StatusKind = union(IndexKind) {
-    added: enum {
-        created,
-        modified,
-        deleted,
-    },
-    not_added: enum {
-        modified,
-        deleted,
-    },
-    not_tracked,
-};
-
 pub const StatusItem = struct {
-    kind: StatusKind,
+    kind: st.StatusKind,
     path: []const u8,
 };
 
@@ -231,7 +212,7 @@ pub fn StatusTabs(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
         box: wgt.Box(Widget),
         arena: std.heap.ArenaAllocator,
 
-        const tab_count = @typeInfo(IndexKind).Enum.fields.len;
+        const tab_count = @typeInfo(st.IndexKind).Enum.fields.len;
 
         pub fn init(allocator: std.mem.Allocator, status: *st.Status(repo_kind)) !StatusTabs(Widget, repo_kind) {
             var box = try wgt.Box(Widget).init(allocator, null, .horiz);
@@ -246,10 +227,10 @@ pub fn StatusTabs(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                 status.untracked.items.len,
             };
 
-            var selected_maybe: ?IndexKind = null;
+            var selected_maybe: ?st.IndexKind = null;
 
-            inline for (@typeInfo(IndexKind).Enum.fields, 0..) |field, i| {
-                const index_kind: IndexKind = @enumFromInt(field.value);
+            inline for (@typeInfo(st.IndexKind).Enum.fields, 0..) |field, i| {
+                const index_kind: st.IndexKind = @enumFromInt(field.value);
                 if (selected_maybe == null and counts[i] > 0) {
                     selected_maybe = index_kind;
                 }
@@ -348,7 +329,7 @@ pub fn StatusContent(comptime Widget: type, comptime repo_kind: rp.RepoKind) typ
 
         const FocusKind = enum { status_list, diff };
 
-        pub fn init(allocator: std.mem.Allocator, repo: *rp.Repo(repo_kind), status: *st.Status(repo_kind), selected: IndexKind) !StatusContent(Widget, repo_kind) {
+        pub fn init(allocator: std.mem.Allocator, repo: *rp.Repo(repo_kind), status: *st.Status(repo_kind), selected: st.IndexKind) !StatusContent(Widget, repo_kind) {
             var filtered_statuses = std.ArrayList(StatusItem).init(allocator);
             errdefer filtered_statuses.deinit();
 
@@ -520,67 +501,7 @@ pub fn StatusContent(comptime Widget: type, comptime repo_kind: rp.RepoKind) typ
                 var diff = &self.box.children.values()[1].widget.ui_diff;
                 try diff.clearDiffs();
 
-                // TODO: add method to Repo for diffing individual files,
-                // so this logic can be moved there
-                var cursor = try self.repo.core.latestCursor();
-                const core_cursor = switch (repo_kind) {
-                    .git => .{ .core = &self.repo.core },
-                    .xit => .{ .core = &self.repo.core, .cursor = &cursor },
-                };
-
-                var line_iter_pair: df.LineIteratorPair(repo_kind) = switch (status_item.kind) {
-                    .added => blk: {
-                        switch (status_item.kind.added) {
-                            .created => {
-                                var a = try df.LineIterator(repo_kind).initFromNothing(self.allocator, status_item.path);
-                                errdefer a.deinit();
-                                const index_entries_for_path = self.status.index.entries.get(status_item.path) orelse return error.EntryNotFound;
-                                var b = try df.LineIterator(repo_kind).initFromIndex(core_cursor, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
-                                errdefer b.deinit();
-                                break :blk .{ .path = status_item.path, .a = a, .b = b };
-                            },
-                            .modified => {
-                                var a = try df.LineIterator(repo_kind).initFromHead(core_cursor, self.allocator, status_item.path, self.status.head_tree.entries.get(status_item.path) orelse return error.EntryNotFound);
-                                errdefer a.deinit();
-                                const index_entries_for_path = self.status.index.entries.get(status_item.path) orelse return error.EntryNotFound;
-                                var b = try df.LineIterator(repo_kind).initFromIndex(core_cursor, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
-                                errdefer b.deinit();
-                                break :blk .{ .path = status_item.path, .a = a, .b = b };
-                            },
-                            .deleted => {
-                                var a = try df.LineIterator(repo_kind).initFromHead(core_cursor, self.allocator, status_item.path, self.status.head_tree.entries.get(status_item.path) orelse return error.EntryNotFound);
-                                errdefer a.deinit();
-                                var b = try df.LineIterator(repo_kind).initFromNothing(self.allocator, status_item.path);
-                                errdefer b.deinit();
-                                break :blk .{ .path = status_item.path, .a = a, .b = b };
-                            },
-                        }
-                    },
-                    .not_added => blk: {
-                        switch (status_item.kind.not_added) {
-                            .modified => {
-                                const meta = try io.getMetadata(self.repo.core.repo_dir, status_item.path);
-                                const mode = io.getMode(meta);
-
-                                const index_entries_for_path = self.status.index.entries.get(status_item.path) orelse return error.EntryNotFound;
-                                var a = try df.LineIterator(repo_kind).initFromIndex(core_cursor, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
-                                errdefer a.deinit();
-                                var b = try df.LineIterator(repo_kind).initFromWorkspace(core_cursor, self.allocator, status_item.path, mode);
-                                errdefer b.deinit();
-                                break :blk .{ .path = status_item.path, .a = a, .b = b };
-                            },
-                            .deleted => {
-                                const index_entries_for_path = self.status.index.entries.get(status_item.path) orelse return error.EntryNotFound;
-                                var a = try df.LineIterator(repo_kind).initFromIndex(core_cursor, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
-                                errdefer a.deinit();
-                                var b = try df.LineIterator(repo_kind).initFromNothing(self.allocator, status_item.path);
-                                errdefer b.deinit();
-                                break :blk .{ .path = status_item.path, .a = a, .b = b };
-                            },
-                        }
-                    },
-                    .not_tracked => return,
-                };
+                var line_iter_pair = (try self.repo.filePair(status_item.path, status_item.kind, self.status)) orelse return;
                 defer line_iter_pair.deinit();
 
                 var hunk_iter = try df.HunkIterator(repo_kind).init(self.allocator, &line_iter_pair.a, &line_iter_pair.b);
@@ -624,8 +545,8 @@ pub fn Status(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                         var stack = ui_root.RootStack(Widget).init(allocator);
                         errdefer stack.deinit();
 
-                        inline for (@typeInfo(IndexKind).Enum.fields) |index_kind_field| {
-                            const index_kind: IndexKind = @enumFromInt(index_kind_field.value);
+                        inline for (@typeInfo(st.IndexKind).Enum.fields) |index_kind_field| {
+                            const index_kind: st.IndexKind = @enumFromInt(index_kind_field.value);
                             var status_content = try StatusContent(Widget, repo_kind).init(allocator, repo, status_ptr, index_kind);
                             errdefer status_content.deinit();
                             try stack.children.put(status_content.getFocus().id, .{ .ui_status_content = status_content });

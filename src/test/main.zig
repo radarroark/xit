@@ -287,14 +287,14 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             defer repo.deinit();
             var status = try repo.status();
             defer status.deinit();
-            var diff_iter = try repo.diff(.{
+            var file_iter = try repo.filePairs(.{
                 .workspace = .{
                     .conflict_diff_kind = .current,
                     .status = &status,
                 },
             });
 
-            while (try diff_iter.next()) |*line_iter_pair_ptr| {
+            while (try file_iter.next()) |*line_iter_pair_ptr| {
                 var line_iter_pair = line_iter_pair_ptr.*;
                 defer line_iter_pair.deinit();
                 var hunk_iter = try df.HunkIterator(repo_kind).init(allocator, &line_iter_pair.a, &line_iter_pair.b);
@@ -351,9 +351,9 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             }
 
             if (builtin.os.tag != .windows) {
-                try std.testing.expectEqual(3, diff_iter.next_index);
+                try std.testing.expectEqual(3, file_iter.next_index);
             } else {
-                try std.testing.expectEqual(2, diff_iter.next_index);
+                try std.testing.expectEqual(2, file_iter.next_index);
             }
         }
 
@@ -374,11 +374,11 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             defer repo.deinit();
             var status = try repo.status();
             defer status.deinit();
-            var diff_iter = try repo.diff(.{
+            var file_iter = try repo.filePairs(.{
                 .index = .{ .status = &status },
             });
 
-            while (try diff_iter.next()) |*line_iter_pair_ptr| {
+            while (try file_iter.next()) |*line_iter_pair_ptr| {
                 var line_iter_pair = line_iter_pair_ptr.*;
                 defer line_iter_pair.deinit();
                 var hunk_iter = try df.HunkIterator(repo_kind).init(allocator, &line_iter_pair.a, &line_iter_pair.b);
@@ -404,9 +404,9 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             }
 
             if (builtin.os.tag != .windows) {
-                try std.testing.expectEqual(5, diff_iter.next_index);
+                try std.testing.expectEqual(5, file_iter.next_index);
             } else {
-                try std.testing.expectEqual(4, diff_iter.next_index);
+                try std.testing.expectEqual(4, file_iter.next_index);
             }
         }
 
@@ -480,11 +480,11 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         defer repo.deinit();
         var tree_diff = try repo.treeDiff(commit1, commit2);
         defer tree_diff.deinit();
-        var diff_iter = try repo.diff(.{
+        var file_iter = try repo.filePairs(.{
             .tree = .{ .tree_diff = &tree_diff },
         });
 
-        while (try diff_iter.next()) |*line_iter_pair_ptr| {
+        while (try file_iter.next()) |*line_iter_pair_ptr| {
             var line_iter_pair = line_iter_pair_ptr.*;
             defer line_iter_pair.deinit();
             var hunk_iter = try df.HunkIterator(repo_kind).init(allocator, &line_iter_pair.a, &line_iter_pair.b);
@@ -519,9 +519,9 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         }
 
         if (builtin.os.tag != .windows) {
-            try std.testing.expectEqual(8, diff_iter.next_index);
+            try std.testing.expectEqual(8, file_iter.next_index);
         } else {
-            try std.testing.expectEqual(7, diff_iter.next_index);
+            try std.testing.expectEqual(7, file_iter.next_index);
         }
     }
 

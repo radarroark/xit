@@ -316,13 +316,13 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         // generate diff
         var status = try repo.status();
         defer status.deinit();
-        var diff_iter = try repo.diff(.{
+        var file_iter = try repo.filePairs(.{
             .workspace = .{
                 .conflict_diff_kind = .current,
                 .status = &status,
             },
         });
-        if (try diff_iter.next()) |*line_iter_pair_ptr| {
+        if (try file_iter.next()) |*line_iter_pair_ptr| {
             var line_iter_pair = line_iter_pair_ptr.*;
             defer line_iter_pair.deinit();
         } else {
@@ -404,13 +404,13 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         // generate diff
         var status = try repo.status();
         defer status.deinit();
-        var diff_iter = try repo.diff(.{
+        var file_iter = try repo.filePairs(.{
             .workspace = .{
                 .conflict_diff_kind = .current,
                 .status = &status,
             },
         });
-        if (try diff_iter.next()) |*line_iter_pair_ptr| {
+        if (try file_iter.next()) |*line_iter_pair_ptr| {
             var line_iter_pair = line_iter_pair_ptr.*;
             defer line_iter_pair.deinit();
             return error.DiffResultNotExpected;
@@ -451,13 +451,13 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         // generate diff
         var status = try repo.status();
         defer status.deinit();
-        var diff_iter = try repo.diff(.{
+        var file_iter = try repo.filePairs(.{
             .workspace = .{
                 .conflict_diff_kind = .current,
                 .status = &status,
             },
         });
-        if (try diff_iter.next()) |*line_iter_pair_ptr| {
+        if (try file_iter.next()) |*line_iter_pair_ptr| {
             var line_iter_pair = line_iter_pair_ptr.*;
             defer line_iter_pair.deinit();
             try std.testing.expectEqualStrings("f.txt", line_iter_pair.path);
@@ -511,13 +511,13 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         // generate diff
         var status = try repo.status();
         defer status.deinit();
-        var diff_iter = try repo.diff(.{
+        var file_iter = try repo.filePairs(.{
             .workspace = .{
                 .conflict_diff_kind = .current,
                 .status = &status,
             },
         });
-        if (try diff_iter.next()) |*line_iter_pair_ptr| {
+        if (try file_iter.next()) |*line_iter_pair_ptr| {
             var line_iter_pair = line_iter_pair_ptr.*;
             defer line_iter_pair.deinit();
             return error.DiffResultNotExpected;
@@ -569,13 +569,13 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         // generate diff
         var status = try repo.status();
         defer status.deinit();
-        var diff_iter = try repo.diff(.{
+        var file_iter = try repo.filePairs(.{
             .workspace = .{
                 .conflict_diff_kind = .current,
                 .status = &status,
             },
         });
-        if (try diff_iter.next()) |*line_iter_pair_ptr| {
+        if (try file_iter.next()) |*line_iter_pair_ptr| {
             var line_iter_pair = line_iter_pair_ptr.*;
             defer line_iter_pair.deinit();
             try std.testing.expectEqualStrings("f.txt", line_iter_pair.path);
@@ -637,13 +637,13 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         // generate diff
         var status = try repo.status();
         defer status.deinit();
-        var diff_iter = try repo.diff(.{
+        var file_iter = try repo.filePairs(.{
             .workspace = .{
                 .conflict_diff_kind = .current,
                 .status = &status,
             },
         });
-        if (try diff_iter.next()) |*line_iter_pair_ptr| {
+        if (try file_iter.next()) |*line_iter_pair_ptr| {
             var line_iter_pair = line_iter_pair_ptr.*;
             defer line_iter_pair.deinit();
             return error.DiffResultNotExpected;
@@ -753,13 +753,13 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind) !void {
     // generate diff
     var status = try repo.status();
     defer status.deinit();
-    var diff_iter = try repo.diff(.{
+    var file_iter = try repo.filePairs(.{
         .workspace = .{
             .conflict_diff_kind = .current,
             .status = &status,
         },
     });
-    if (try diff_iter.next()) |*line_iter_pair_ptr| {
+    if (try file_iter.next()) |*line_iter_pair_ptr| {
         var line_iter_pair = line_iter_pair_ptr.*;
         defer line_iter_pair.deinit();
         return error.DiffResultNotExpected;
