@@ -250,18 +250,13 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     defer dir.close();
                     var iter = dir.iterate();
                     while (try iter.next()) |entry| {
-                        // ignore internal dir/file
-                        switch (repo_kind) {
-                            .git => {
-                                if (std.mem.eql(u8, entry.name, ".git")) {
-                                    continue;
-                                }
-                            },
-                            .xit => {
-                                if (std.mem.eql(u8, entry.name, ".xit")) {
-                                    continue;
-                                }
-                            },
+                        // ignore internal dir
+                        const file_name = switch (repo_kind) {
+                            .git => ".git",
+                            .xit => ".xit",
+                        };
+                        if (std.mem.eql(u8, file_name, entry.name)) {
+                            continue;
                         }
 
                         const subpath = if (std.mem.eql(u8, path, "."))
