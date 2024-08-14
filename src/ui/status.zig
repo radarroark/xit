@@ -501,7 +501,10 @@ pub fn StatusContent(comptime Widget: type, comptime repo_kind: rp.RepoKind) typ
                 var diff = &self.box.children.values()[1].widget.ui_diff;
                 try diff.clearDiffs();
 
-                var line_iter_pair = (try self.repo.filePair(status_item.path, status_item.kind, self.status)) orelse return;
+                var line_iter_pair = self.repo.filePair(status_item.path, status_item.kind, self.status) catch |err| switch (err) {
+                    error.IsDir => return,
+                    else => return err,
+                };
                 defer line_iter_pair.deinit();
 
                 var hunk_iter = try df.HunkIterator(repo_kind).init(self.allocator, &line_iter_pair.a, &line_iter_pair.b);

@@ -605,14 +605,14 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             return try st.Status(repo_kind).init(self.allocator, core_cursor);
         }
 
-        pub fn filePair(self: *Repo(repo_kind), path: []const u8, status_kind: st.StatusKind, stat: *st.Status(repo_kind)) !?df.LineIteratorPair(repo_kind) {
+        pub fn filePair(self: *Repo(repo_kind), path: []const u8, status_kind: st.StatusKind, stat: *st.Status(repo_kind)) !df.LineIteratorPair(repo_kind) {
             var cursor = try self.core.latestCursor();
             const core_cursor = switch (repo_kind) {
                 .git => .{ .core = &self.core },
                 .xit => .{ .core = &self.core, .cursor = &cursor },
             };
-            return switch (status_kind) {
-                .added => blk: {
+            switch (status_kind) {
+                .added => {
                     switch (status_kind.added) {
                         .created => {
                             var a = try df.LineIterator(repo_kind).initFromNothing(self.allocator, path);
@@ -620,7 +620,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                             const index_entries_for_path = stat.index.entries.get(path) orelse return error.EntryNotFound;
                             var b = try df.LineIterator(repo_kind).initFromIndex(core_cursor, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
                             errdefer b.deinit();
-                            break :blk .{ .path = path, .a = a, .b = b };
+                            return .{ .path = path, .a = a, .b = b };
                         },
                         .modified => {
                             var a = try df.LineIterator(repo_kind).initFromHead(core_cursor, self.allocator, path, stat.head_tree.entries.get(path) orelse return error.EntryNotFound);
@@ -628,18 +628,18 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                             const index_entries_for_path = stat.index.entries.get(path) orelse return error.EntryNotFound;
                             var b = try df.LineIterator(repo_kind).initFromIndex(core_cursor, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
                             errdefer b.deinit();
-                            break :blk .{ .path = path, .a = a, .b = b };
+                            return .{ .path = path, .a = a, .b = b };
                         },
                         .deleted => {
                             var a = try df.LineIterator(repo_kind).initFromHead(core_cursor, self.allocator, path, stat.head_tree.entries.get(path) orelse return error.EntryNotFound);
                             errdefer a.deinit();
                             var b = try df.LineIterator(repo_kind).initFromNothing(self.allocator, path);
                             errdefer b.deinit();
-                            break :blk .{ .path = path, .a = a, .b = b };
+                            return .{ .path = path, .a = a, .b = b };
                         },
                     }
                 },
-                .not_added => blk: {
+                .not_added => {
                     switch (status_kind.not_added) {
                         .modified => {
                             const meta = try io.getMetadata(self.core.repo_dir, path);
@@ -650,7 +650,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                             errdefer a.deinit();
                             var b = try df.LineIterator(repo_kind).initFromWorkspace(core_cursor, self.allocator, path, mode);
                             errdefer b.deinit();
-                            break :blk .{ .path = path, .a = a, .b = b };
+                            return .{ .path = path, .a = a, .b = b };
                         },
                         .deleted => {
                             const index_entries_for_path = stat.index.entries.get(path) orelse return error.EntryNotFound;
@@ -658,12 +658,21 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                             errdefer a.deinit();
                             var b = try df.LineIterator(repo_kind).initFromNothing(self.allocator, path);
                             errdefer b.deinit();
-                            break :blk .{ .path = path, .a = a, .b = b };
+                            return .{ .path = path, .a = a, .b = b };
                         },
                     }
                 },
-                .not_tracked => return null,
-            };
+                .not_tracked => {
+                    const meta = try io.getMetadata(self.core.repo_dir, path);
+                    const mode = io.getMode(meta);
+
+                    var a = try df.LineIterator(repo_kind).initFromNothing(self.allocator, path);
+                    errdefer a.deinit();
+                    var b = try df.LineIterator(repo_kind).initFromWorkspace(core_cursor, self.allocator, path, mode);
+                    errdefer b.deinit();
+                    return .{ .path = path, .a = a, .b = b };
+                },
+            }
         }
 
         pub fn filePairs(self: *Repo(repo_kind), diff_opts: df.DiffOptions(repo_kind)) !df.FileIterator(repo_kind) {
