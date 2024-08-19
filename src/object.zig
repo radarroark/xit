@@ -1,6 +1,6 @@
 //! an object is a file or dir stored in the repo.
-//! at least, that's how i think of it. no packed
-//! objects for now, but that'll come eventually.
+//! at least, that's how i think of it. it's a
+//! pretty generic name. may as well call it thing.
 
 const std = @import("std");
 const xitdb = @import("xitdb");
