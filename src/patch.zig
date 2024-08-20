@@ -24,17 +24,16 @@ const FIRST_NODE_ID_INT: NodeIdInt = 0;
 
 /// TODO: turn this into an iterator all entries don't need to be in memory at the same time
 fn createPatchEntries(
-    comptime repo_kind: rp.RepoKind,
     root_cursor: *xitdb.Cursor(.file),
     branch_cursor: *xitdb.Cursor(.file),
     allocator: std.mem.Allocator,
     arena: *std.heap.ArenaAllocator,
-    line_iter_pair: *df.LineIteratorPair(repo_kind),
+    line_iter_pair: *df.LineIteratorPair(.xit),
     patch_entries: *std.ArrayList([]const u8),
     patch_content_entries: *std.ArrayList([]const u8),
     patch_hash: xitdb.Hash,
 ) !void {
-    var myers_diff_iter = try df.MyersDiffIterator(repo_kind).init(allocator, &line_iter_pair.a, &line_iter_pair.b);
+    var myers_diff_iter = try df.MyersDiffIterator(.xit).init(allocator, &line_iter_pair.a, &line_iter_pair.b);
     defer myers_diff_iter.deinit();
 
     // get path slot
@@ -139,11 +138,10 @@ fn createPatchEntries(
 }
 
 fn patchHash(
-    comptime repo_kind: rp.RepoKind,
     root_cursor: *xitdb.Cursor(.file),
     branch_cursor: *xitdb.Cursor(.file),
     allocator: std.mem.Allocator,
-    line_iter_pair: *df.LineIteratorPair(repo_kind),
+    line_iter_pair: *df.LineIteratorPair(.xit),
 ) !xitdb.Hash {
     var patch_entries = std.ArrayList([]const u8).init(allocator);
     defer patch_entries.deinit();
@@ -154,7 +152,7 @@ fn patchHash(
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    try createPatchEntries(repo_kind, root_cursor, branch_cursor, allocator, &arena, line_iter_pair, &patch_entries, &patch_content_entries, 0);
+    try createPatchEntries(root_cursor, branch_cursor, allocator, &arena, line_iter_pair, &patch_entries, &patch_content_entries, 0);
 
     var h = std.crypto.hash.Sha1.init(.{});
 
@@ -172,13 +170,12 @@ fn patchHash(
 }
 
 fn writePatchForFile(
-    comptime repo_kind: rp.RepoKind,
     root_cursor: *xitdb.Cursor(.file),
     branch_cursor: *xitdb.Cursor(.file),
     allocator: std.mem.Allocator,
-    line_iter_pair: *df.LineIteratorPair(repo_kind),
+    line_iter_pair: *df.LineIteratorPair(.xit),
 ) !xitdb.Hash {
-    const patch_hash = try patchHash(repo_kind, root_cursor, branch_cursor, allocator, line_iter_pair);
+    const patch_hash = try patchHash(root_cursor, branch_cursor, allocator, line_iter_pair);
 
     // exit early if patch already exists
     if (try root_cursor.readPath(void, &[_]xitdb.PathPart(void){
@@ -211,7 +208,7 @@ fn writePatchForFile(
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    try createPatchEntries(repo_kind, root_cursor, branch_cursor, allocator, &arena, line_iter_pair, &patch_entries, &patch_content_entries, patch_hash);
+    try createPatchEntries(root_cursor, branch_cursor, allocator, &arena, line_iter_pair, &patch_entries, &patch_content_entries, patch_hash);
 
     for (patch_entries.items) |patch_entry| {
         _ = try change_list.writePath(void, &[_]xitdb.PathPart(void){
@@ -416,11 +413,9 @@ fn applyPatchForFile(
     }
 }
 
-pub fn writePatch(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator) !void {
-    comptime std.debug.assert(repo_kind == .xit);
-
+pub fn writePatch(core_cursor: rp.Repo(.xit).CoreCursor, allocator: std.mem.Allocator) !void {
     // get current branch name
-    const current_branch_name = try ref.readHeadName(repo_kind, core_cursor, allocator);
+    const current_branch_name = try ref.readHeadName(.xit, core_cursor, allocator);
     defer allocator.free(current_branch_name);
 
     // get current branch name slot
@@ -448,15 +443,15 @@ pub fn writePatch(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kin
     });
 
     // init file iterator for index diff
-    var status = try st.Status(repo_kind).init(allocator, core_cursor);
+    var status = try st.Status(.xit).init(allocator, core_cursor);
     defer status.deinit();
-    var file_iter = try df.FileIterator(repo_kind).init(allocator, core_cursor.core, .{ .index = .{ .status = &status } });
+    var file_iter = try df.FileIterator(.xit).init(allocator, core_cursor.core, .{ .index = .{ .status = &status } });
 
     // iterate over each modified file and create/apply the patch
     while (try file_iter.next()) |*line_iter_pair_ptr| {
         var line_iter_pair = line_iter_pair_ptr.*;
         defer line_iter_pair.deinit();
-        const patch_hash = try writePatchForFile(repo_kind, core_cursor.cursor, &branch_cursor, allocator, &line_iter_pair);
+        const patch_hash = try writePatchForFile(core_cursor.cursor, &branch_cursor, allocator, &line_iter_pair);
         try applyPatchForFile(core_cursor.cursor, &branch_cursor, allocator, patch_hash, line_iter_pair.path);
     }
 }
