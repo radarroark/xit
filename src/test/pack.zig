@@ -173,14 +173,29 @@ test "pack" {
         try std.testing.expectEqual(2, entries.items.len);
     }
 
-    {
-        var commit_oid_hex1 = [_]u8{0} ** hash.SHA1_HEX_LEN;
-        try std.testing.expectEqual(0, c.git_oid_fmt(@ptrCast(&commit_oid_hex1), &commit_oid1));
+    // delete the loose objects
+    for (&[_]*c.git_oid{ &commit_oid1, &commit_oid2 }) |commit_oid| {
+        var commit_oid_hex = [_]u8{0} ** hash.SHA1_HEX_LEN;
+        try std.testing.expectEqual(0, c.git_oid_fmt(@ptrCast(&commit_oid_hex), commit_oid));
+
+        var path_buf = [_]u8{0} ** (hash.SHA1_HEX_LEN + 1);
+        const path = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ commit_oid_hex[0..2], commit_oid_hex[2..] });
+
+        var objects_dir = try repo_dir.openDir(".git/objects", .{});
+        defer objects_dir.close();
+
+        try objects_dir.deleteFile(path);
+    }
+
+    // read the pack objects
+    for (&[_]*c.git_oid{ &commit_oid1, &commit_oid2 }) |commit_oid| {
+        var commit_oid_hex = [_]u8{0} ** hash.SHA1_HEX_LEN;
+        try std.testing.expectEqual(0, c.git_oid_fmt(@ptrCast(&commit_oid_hex), commit_oid));
 
         var r = try rp.Repo(.git).init(allocator, .{ .cwd = repo_dir });
         defer r.deinit();
 
-        var pack_reader = try pack.PackObjectReader.init(r.core, commit_oid_hex1);
+        var pack_reader = try pack.PackObjectReader.init(r.core, commit_oid_hex);
         defer pack_reader.deinit();
 
         var buf = [_]u8{0} ** 32;
