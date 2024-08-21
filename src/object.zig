@@ -541,21 +541,24 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
                     defer objects_dir.close();
 
                     // open the object file
-                    var commit_hash_prefix_dir = try objects_dir.openDir(oid[0..2], .{});
-                    defer commit_hash_prefix_dir.close();
-                    var commit_hash_suffix_file = try commit_hash_prefix_dir.openFile(oid[2..], .{ .mode = .read_only });
-                    errdefer commit_hash_suffix_file.close();
+                    var path_buf = [_]u8{0} ** (hash.SHA1_HEX_LEN + 1);
+                    const path = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ oid[0..2], oid[2..] });
+                    var object_file = objects_dir.openFile(path, .{ .mode = .read_only }) catch |err| switch (err) {
+                        error.FileNotFound => return error.ObjectNotFound,
+                        else => return err,
+                    };
+                    errdefer object_file.close();
 
                     // put stream on the heap so the pointer is stable (the reader uses it internally)
                     const stream_ptr = try allocator.create(compress.ZlibStream);
                     errdefer allocator.destroy(stream_ptr);
-                    stream_ptr.* = try compress.decompressStream(commit_hash_suffix_file, skip_header);
+                    stream_ptr.* = try compress.decompressStream(object_file, skip_header);
 
                     return .{
                         .allocator = allocator,
                         .reader = std.io.bufferedReaderSize(BUFFER_SIZE, stream_ptr.reader()),
                         .internal = .{
-                            .file = commit_hash_suffix_file,
+                            .file = object_file,
                             .skip_header = skip_header,
                             .stream = stream_ptr,
                         },
