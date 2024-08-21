@@ -1,6 +1,7 @@
 const std = @import("std");
 const hash = @import("./hash.zig");
 const rp = @import("./repo.zig");
+const compress = @import("./compress.zig");
 
 fn findOid(idx_file: std.fs.File, oid_list_pos: u64, index: usize) ![hash.SHA1_BYTES_LEN]u8 {
     const reader = idx_file.reader();
@@ -96,11 +97,8 @@ const PackOffset = struct {
     value: u64,
 };
 
-fn searchPackIndexes(core: rp.Repo(.git).Core, oid_hex: [hash.SHA1_HEX_LEN]u8) !PackOffset {
+fn searchPackIndexes(pack_dir: std.fs.Dir, oid_hex: [hash.SHA1_HEX_LEN]u8) !PackOffset {
     const oid_bytes = try hash.hexToBytes(oid_hex);
-
-    var pack_dir = try core.git_dir.openDir("objects/pack", .{ .iterate = true });
-    defer pack_dir.close();
 
     const prefix = "pack-";
     const suffix = ".idx";
@@ -131,3 +129,102 @@ fn searchPackIndexes(core: rp.Repo(.git).Core, oid_hex: [hash.SHA1_HEX_LEN]u8) !
 
     return error.PackObjectNotFound;
 }
+
+pub const PackObjectReader = struct {
+    pack_file: std.fs.File,
+    stream: compress.ZlibStream,
+    position: u64,
+    size: u64,
+
+    pub fn init(core: rp.Repo(.git).Core, oid_hex: [hash.SHA1_HEX_LEN]u8) !PackObjectReader {
+        var pack_dir = try core.git_dir.openDir("objects/pack", .{ .iterate = true });
+        defer pack_dir.close();
+
+        const pack_offset = try searchPackIndexes(pack_dir, oid_hex);
+
+        const prefix = "pack-";
+        const suffix = ".pack";
+
+        var file_name_buf = [_]u8{0} ** (prefix.len + hash.SHA1_HEX_LEN + suffix.len);
+        const file_name = try std.fmt.bufPrint(&file_name_buf, "{s}{s}{s}", .{ prefix, pack_offset.pack_id, suffix });
+
+        var pack_file = try pack_dir.openFile(file_name, .{ .mode = .read_only });
+        errdefer pack_file.close();
+        const reader = pack_file.reader();
+
+        // parse header
+        const sig = try reader.readBytesNoEof(4);
+        if (!std.mem.eql(u8, "PACK", &sig)) {
+            return error.InvalidPackFileSig;
+        }
+        const version = try reader.readInt(u32, .big);
+        if (version != 2) {
+            return error.InvalidPackFileVersion;
+        }
+        _ = try reader.readInt(u32, .big); // number of objects
+
+        try pack_file.seekTo(pack_offset.value);
+
+        // parse object header
+        const PackObjectKind = enum(u3) {
+            commit = 1,
+            tree = 2,
+            blob = 3,
+            tag = 4,
+            ofs_delta = 6,
+            ref_delta = 7,
+        };
+        const obj_header: packed struct {
+            size: u4,
+            kind: PackObjectKind,
+            high_bit: u1,
+        } = @bitCast(try reader.readByte());
+
+        // get size of object (variable length format)
+        var size: u64 = obj_header.size;
+        var size_shift: u6 = @bitSizeOf(@TypeOf(obj_header.size));
+        var cont = obj_header.high_bit == 1;
+        while (cont) {
+            const next_byte: packed struct {
+                value: u7,
+                high_bit: u1,
+            } = @bitCast(try reader.readByte());
+            cont = next_byte.high_bit == 1;
+            const value: u64 = next_byte.value;
+            size += (value << size_shift);
+            size_shift += @bitSizeOf(@TypeOf(next_byte.value));
+        }
+
+        switch (obj_header.kind) {
+            .commit, .tree, .blob, .tag => {},
+            .ofs_delta => return error.UnsupportedPackObjectKind,
+            .ref_delta => {
+                const base_oid = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
+                const new_pack_reader = try PackObjectReader.init(core, std.fmt.bytesToHex(base_oid, .lower));
+                pack_file.close();
+                return new_pack_reader;
+            },
+        }
+
+        return .{
+            .pack_file = pack_file,
+            .stream = std.compress.zlib.decompressor(reader),
+            .position = 0,
+            .size = size,
+        };
+    }
+
+    pub fn deinit(self: *PackObjectReader) void {
+        self.pack_file.close();
+    }
+
+    pub fn read(self: *PackObjectReader, dest: []u8) !usize {
+        const size = @min(dest.len, self.size - self.position);
+        if (size == 0) {
+            return 0;
+        }
+        const read_size = try self.stream.reader().read(dest[0..size]);
+        self.position += size;
+        return read_size;
+    }
+};

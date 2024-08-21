@@ -1,4 +1,7 @@
 const std = @import("std");
+const hash = @import("../hash.zig");
+const rp = @import("../repo.zig");
+const pack = @import("../pack.zig");
 
 const c = @cImport({
     @cInclude("git2.h");
@@ -168,5 +171,24 @@ test "pack" {
             }
         }
         try std.testing.expectEqual(2, entries.items.len);
+    }
+
+    {
+        var commit_oid_hex1 = [_]u8{0} ** hash.SHA1_HEX_LEN;
+        try std.testing.expectEqual(0, c.git_oid_fmt(@ptrCast(&commit_oid_hex1), &commit_oid1));
+
+        var r = try rp.Repo(.git).init(allocator, .{ .cwd = repo_dir });
+        defer r.deinit();
+
+        var pack_reader = try pack.PackObjectReader.init(r.core, commit_oid_hex1);
+        defer pack_reader.deinit();
+
+        var buf = [_]u8{0} ** 32;
+        while (true) {
+            const size = try pack_reader.read(&buf);
+            if (size == 0) {
+                break;
+            }
+        }
     }
 }
