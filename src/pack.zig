@@ -133,7 +133,8 @@ fn searchPackIndexes(pack_dir: std.fs.Dir, oid_hex: [hash.SHA1_HEX_LEN]u8) !Pack
 pub const PackObjectReader = struct {
     pack_file: std.fs.File,
     stream: compress.ZlibStream,
-    position: u64,
+    start_position: u64,
+    relative_position: u64,
     size: u64,
 
     pub fn init(core: *rp.Repo(.git).Core, oid_hex: [hash.SHA1_HEX_LEN]u8) !PackObjectReader {
@@ -209,7 +210,8 @@ pub const PackObjectReader = struct {
         return .{
             .pack_file = pack_file,
             .stream = std.compress.zlib.decompressor(reader),
-            .position = 0,
+            .start_position = try pack_file.getPos(),
+            .relative_position = 0,
             .size = size,
         };
     }
@@ -219,52 +221,67 @@ pub const PackObjectReader = struct {
     }
 
     pub fn reset(self: *PackObjectReader) !void {
-        _ = self;
-        return error.NotImplemented;
+        try self.pack_file.seekTo(self.start_position);
+        self.stream = std.compress.zlib.decompressor(self.pack_file.reader());
+        self.relative_position = 0;
     }
 
     pub fn skipBytes(self: *PackObjectReader, num_bytes: u64) !void {
-        _ = self;
-        _ = num_bytes;
-        return error.NotImplemented;
+        if (num_bytes > self.size - self.relative_position) return error.EndOfStream;
+        try self.stream.reader().skipBytes(num_bytes, .{});
+        self.relative_position += num_bytes;
     }
 
     pub fn read(self: *PackObjectReader, dest: []u8) !usize {
-        const size = @min(dest.len, self.size - self.position);
+        const size = @min(dest.len, self.size - self.relative_position);
         if (size == 0) {
             return 0;
         }
         const read_size = try self.stream.reader().read(dest[0..size]);
-        self.position += size;
+        self.relative_position += size;
         return read_size;
     }
 
     pub fn readNoEof(self: *PackObjectReader, dest: []u8) !void {
-        _ = self;
-        _ = dest;
-        return error.NotImplemented;
+        const new_position = self.relative_position + dest.len;
+        if (new_position > self.relative_position + self.size) return error.EndOfStream;
+        try self.stream.reader().readNoEof(dest);
+        self.relative_position = new_position;
     }
 
     pub fn readUntilDelimiter(self: *PackObjectReader, dest: []u8, delimiter: u8) ![]u8 {
-        _ = self;
-        _ = dest;
-        _ = delimiter;
-        return error.NotImplemented;
+        if (self.size < self.relative_position) return error.EndOfStream;
+        const buf_slice = self.stream.reader().readUntilDelimiter(dest[0..@min(dest.len, self.size - self.relative_position)], delimiter) catch |err| switch (err) {
+            error.StreamTooLong => return error.EndOfStream,
+            else => return err,
+        };
+        self.relative_position += buf_slice.len;
+        self.relative_position += 1; // for the delimiter
+        return buf_slice;
     }
 
     pub fn readUntilDelimiterAlloc(self: *PackObjectReader, allocator: std.mem.Allocator, delimiter: u8, max_size: usize) ![]u8 {
-        _ = self;
-        _ = allocator;
-        _ = delimiter;
-        _ = max_size;
-        return error.NotImplemented;
+        if (self.size < self.relative_position) return error.EndOfStream;
+        const buf_slice = self.stream.reader().readUntilDelimiterAlloc(allocator, delimiter, @min(max_size, self.size - self.relative_position)) catch |err| switch (err) {
+            error.StreamTooLong => return error.EndOfStream,
+            else => return err,
+        };
+        self.relative_position += buf_slice.len;
+        self.relative_position += 1; // for the delimiter
+        return buf_slice;
     }
 
     pub fn readAllAlloc(self: *PackObjectReader, allocator: std.mem.Allocator, max_size: usize) ![]u8 {
-        _ = self;
-        _ = allocator;
-        _ = max_size;
-        return error.NotImplemented;
+        if (self.size < self.relative_position) return error.EndOfStream;
+        if (self.size - self.relative_position > max_size) return error.StreamTooLong;
+        const buffer = try allocator.alloc(u8, self.size - self.relative_position);
+        errdefer allocator.free(buffer);
+        const size = try self.stream.reader().read(buffer);
+        if (size != buffer.len) {
+            return error.UnexpectedReadSize;
+        }
+        self.relative_position += size;
+        return buffer;
     }
 };
 
@@ -287,8 +304,11 @@ pub const LooseOrPackObjectReader = union(enum) {
         var path_buf = [_]u8{0} ** (hash.SHA1_HEX_LEN + 1);
         const path = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ oid_hex[0..2], oid_hex[2..] });
         var object_file = objects_dir.openFile(path, .{ .mode = .read_only }) catch |err| switch (err) {
-            error.FileNotFound => return .{
-                .pack = PackObjectReader.init(core, oid_hex) catch return error.ObjectNotFound,
+            error.FileNotFound => {
+                if (skip_header) return error.NotImplemented;
+                return .{
+                    .pack = PackObjectReader.init(core, oid_hex) catch return error.ObjectNotFound,
+                };
             },
             else => return err,
         };
