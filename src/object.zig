@@ -524,6 +524,7 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
         internal: switch (repo_kind) {
             .git => void,
             .xit => struct {
+                skip_header: bool,
                 header_offset: u64,
                 cursor: *xitdb.Cursor(.file),
             },
@@ -573,6 +574,7 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
                             .allocator = allocator,
                             .reader = std.io.bufferedReaderSize(BUFFER_SIZE, rdr),
                             .internal = .{
+                                .skip_header = skip_header,
                                 .header_offset = header_offset,
                                 .cursor = cursor_ptr,
                             },
@@ -616,6 +618,10 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
                 .git => {
                     switch (self.reader.unbuffered_reader) {
                         .loose => {
+                            if (self.reader.unbuffered_reader.loose.skip_header) {
+                                return error.HeaderWasSkipped;
+                            }
+
                             // read the object kind
                             const object_kind = try self.reader.unbuffered_reader.readUntilDelimiterAlloc(self.allocator, ' ', MAX_READ_BYTES);
                             defer self.allocator.free(object_kind);
@@ -634,6 +640,10 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
                     }
                 },
                 .xit => {
+                    if (self.internal.skip_header) {
+                        return error.HeaderWasSkipped;
+                    }
+
                     // read the object kind
                     const object_kind = try self.reader.unbuffered_reader.readUntilDelimiterAlloc(self.allocator, ' ', MAX_READ_BYTES);
                     defer self.allocator.free(object_kind);
