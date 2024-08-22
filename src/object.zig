@@ -12,6 +12,7 @@ const idx = @import("./index.zig");
 const ref = @import("./ref.zig");
 const io = @import("./io.zig");
 const rp = @import("./repo.zig");
+const pack = @import("./pack.zig");
 
 const MAX_READ_BYTES = 1024; // FIXME: this is arbitrary...
 
@@ -517,11 +518,7 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
         allocator: std.mem.Allocator,
         reader: std.io.BufferedReader(BUFFER_SIZE, Reader),
         internal: switch (repo_kind) {
-            .git => struct {
-                file: std.fs.File,
-                skip_header: bool,
-                stream: *compress.ZlibStream,
-            },
+            .git => void,
             .xit => struct {
                 header_offset: u64,
                 cursor: *xitdb.Cursor(.file),
@@ -529,39 +526,18 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
         },
 
         pub const Reader = switch (repo_kind) {
-            .git => compress.ZlibStream.Reader,
+            .git => pack.LooseOrPackObjectReader,
             .xit => xitdb.Cursor(.file).Reader,
         };
 
         pub fn init(allocator: std.mem.Allocator, core_cursor: rp.Repo(repo_kind).CoreCursor, oid: [hash.SHA1_HEX_LEN]u8, skip_header: bool) !@This() {
             switch (repo_kind) {
                 .git => {
-                    // open the objects dir
-                    var objects_dir = try core_cursor.core.git_dir.openDir("objects", .{});
-                    defer objects_dir.close();
-
-                    // open the object file
-                    var path_buf = [_]u8{0} ** (hash.SHA1_HEX_LEN + 1);
-                    const path = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ oid[0..2], oid[2..] });
-                    var object_file = objects_dir.openFile(path, .{ .mode = .read_only }) catch |err| switch (err) {
-                        error.FileNotFound => return error.ObjectNotFound,
-                        else => return err,
-                    };
-                    errdefer object_file.close();
-
-                    // put stream on the heap so the pointer is stable (the reader uses it internally)
-                    const stream_ptr = try allocator.create(compress.ZlibStream);
-                    errdefer allocator.destroy(stream_ptr);
-                    stream_ptr.* = try compress.decompressStream(object_file, skip_header);
-
+                    const reader = try pack.LooseOrPackObjectReader.init(core_cursor.core, oid, skip_header);
                     return .{
                         .allocator = allocator,
-                        .reader = std.io.bufferedReaderSize(BUFFER_SIZE, stream_ptr.reader()),
-                        .internal = .{
-                            .file = object_file,
-                            .skip_header = skip_header,
-                            .stream = stream_ptr,
-                        },
+                        .reader = std.io.bufferedReaderSize(BUFFER_SIZE, reader),
+                        .internal = {},
                     };
                 },
                 .xit => {
@@ -606,10 +582,7 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
 
         pub fn deinit(self: *ObjectReader(repo_kind)) void {
             switch (repo_kind) {
-                .git => {
-                    self.allocator.destroy(self.internal.stream);
-                    self.internal.file.close();
-                },
+                .git => self.reader.unbuffered_reader.deinit(),
                 .xit => self.allocator.destroy(self.internal.cursor),
             }
         }
@@ -617,8 +590,8 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
         pub fn reset(self: *ObjectReader(repo_kind)) !void {
             switch (repo_kind) {
                 .git => {
-                    self.internal.stream.* = try compress.decompressStream(self.internal.file, self.internal.skip_header);
-                    self.reader = std.io.bufferedReaderSize(BUFFER_SIZE, self.internal.stream.reader());
+                    try self.reader.unbuffered_reader.reset();
+                    self.reader = std.io.bufferedReaderSize(BUFFER_SIZE, self.reader.unbuffered_reader);
                 },
                 .xit => {
                     try self.reader.unbuffered_reader.seekTo(self.internal.header_offset);
@@ -629,7 +602,7 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
 
         pub fn seekTo(self: *ObjectReader(repo_kind), position: u64) !void {
             switch (repo_kind) {
-                .git => try self.reader.unbuffered_reader.skipBytes(position, .{}), // assumes that reset() has just been called!
+                .git => try self.reader.unbuffered_reader.skipBytes(position), // assumes that reset() has just been called!
                 .xit => try self.reader.unbuffered_reader.seekTo(self.internal.header_offset + position),
             }
         }

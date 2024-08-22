@@ -136,7 +136,7 @@ pub const PackObjectReader = struct {
     position: u64,
     size: u64,
 
-    pub fn init(core: rp.Repo(.git).Core, oid_hex: [hash.SHA1_HEX_LEN]u8) !PackObjectReader {
+    pub fn init(core: *rp.Repo(.git).Core, oid_hex: [hash.SHA1_HEX_LEN]u8) !PackObjectReader {
         var pack_dir = try core.git_dir.openDir("objects/pack", .{ .iterate = true });
         defer pack_dir.close();
 
@@ -218,6 +218,17 @@ pub const PackObjectReader = struct {
         self.pack_file.close();
     }
 
+    pub fn reset(self: *PackObjectReader) !void {
+        _ = self;
+        return error.NotImplemented;
+    }
+
+    pub fn skipBytes(self: *PackObjectReader, num_bytes: u64) !void {
+        _ = self;
+        _ = num_bytes;
+        return error.NotImplemented;
+    }
+
     pub fn read(self: *PackObjectReader, dest: []u8) !usize {
         const size = @min(dest.len, self.size - self.position);
         if (size == 0) {
@@ -226,5 +237,125 @@ pub const PackObjectReader = struct {
         const read_size = try self.stream.reader().read(dest[0..size]);
         self.position += size;
         return read_size;
+    }
+
+    pub fn readNoEof(self: *PackObjectReader, dest: []u8) !void {
+        _ = self;
+        _ = dest;
+        return error.NotImplemented;
+    }
+
+    pub fn readUntilDelimiter(self: *PackObjectReader, dest: []u8, delimiter: u8) ![]u8 {
+        _ = self;
+        _ = dest;
+        _ = delimiter;
+        return error.NotImplemented;
+    }
+
+    pub fn readUntilDelimiterAlloc(self: *PackObjectReader, allocator: std.mem.Allocator, delimiter: u8, max_size: usize) ![]u8 {
+        _ = self;
+        _ = allocator;
+        _ = delimiter;
+        _ = max_size;
+        return error.NotImplemented;
+    }
+
+    pub fn readAllAlloc(self: *PackObjectReader, allocator: std.mem.Allocator, max_size: usize) ![]u8 {
+        _ = self;
+        _ = allocator;
+        _ = max_size;
+        return error.NotImplemented;
+    }
+};
+
+pub const LooseOrPackObjectReader = union(enum) {
+    loose: struct {
+        file: std.fs.File,
+        skip_header: bool,
+        stream: compress.ZlibStream,
+    },
+    pack: PackObjectReader,
+
+    pub const Error = compress.ZlibStream.Reader.Error;
+
+    pub fn init(core: *rp.Repo(.git).Core, oid_hex: [hash.SHA1_HEX_LEN]u8, skip_header: bool) !LooseOrPackObjectReader {
+        // open the objects dir
+        var objects_dir = try core.git_dir.openDir("objects", .{});
+        defer objects_dir.close();
+
+        // open the object file
+        var path_buf = [_]u8{0} ** (hash.SHA1_HEX_LEN + 1);
+        const path = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ oid_hex[0..2], oid_hex[2..] });
+        var object_file = objects_dir.openFile(path, .{ .mode = .read_only }) catch |err| switch (err) {
+            error.FileNotFound => return .{
+                .pack = PackObjectReader.init(core, oid_hex) catch return error.ObjectNotFound,
+            },
+            else => return err,
+        };
+        errdefer object_file.close();
+
+        return .{
+            .loose = .{
+                .file = object_file,
+                .skip_header = skip_header,
+                .stream = try compress.decompressStream(object_file, skip_header),
+            },
+        };
+    }
+
+    pub fn deinit(self: *LooseOrPackObjectReader) void {
+        switch (self.*) {
+            .loose => self.loose.file.close(),
+            .pack => self.pack.deinit(),
+        }
+    }
+
+    pub fn reset(self: *LooseOrPackObjectReader) !void {
+        switch (self.*) {
+            .loose => self.loose.stream = try compress.decompressStream(self.loose.file, self.loose.skip_header),
+            .pack => try self.pack.reset(),
+        }
+    }
+
+    pub fn skipBytes(self: *LooseOrPackObjectReader, num_bytes: u64) !void {
+        switch (self.*) {
+            .loose => try self.loose.stream.reader().skipBytes(num_bytes, .{}),
+            .pack => try self.pack.skipBytes(num_bytes),
+        }
+    }
+
+    pub fn read(self: *LooseOrPackObjectReader, dest: []u8) !usize {
+        switch (self.*) {
+            .loose => return try self.loose.stream.reader().read(dest),
+            .pack => return try self.pack.read(dest),
+        }
+    }
+
+    pub fn readNoEof(self: *LooseOrPackObjectReader, dest: []u8) !void {
+        switch (self.*) {
+            .loose => try self.loose.stream.reader().readNoEof(dest),
+            .pack => try self.pack.readNoEof(dest),
+        }
+    }
+
+    pub fn readUntilDelimiter(self: *LooseOrPackObjectReader, dest: []u8, delimiter: u8) ![]u8 {
+        switch (self.*) {
+            .loose => return try self.loose.stream.reader().readUntilDelimiter(dest, delimiter),
+            .pack => return try self.pack.readUntilDelimiter(dest, delimiter),
+        }
+    }
+
+    pub fn readUntilDelimiterAlloc(self: *LooseOrPackObjectReader, allocator: std.mem.Allocator, delimiter: u8, max_size: usize) ![]u8 {
+        switch (self.*) {
+            .loose => return try self.loose.stream.reader().readUntilDelimiterAlloc(allocator, delimiter, max_size),
+            .pack => return try self.pack.readUntilDelimiterAlloc(allocator, delimiter, max_size),
+        }
+    }
+
+    pub fn readAllAlloc(self: *LooseOrPackObjectReader, allocator: std.mem.Allocator, max_size: usize) ![]u8 {
+        switch (self.*) {
+            .loose => return try self.loose.stream.reader().readAllAlloc(allocator, max_size),
+            .pack => return try self.pack.readAllAlloc(allocator, max_size),
+        }
     }
 };

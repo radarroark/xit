@@ -195,7 +195,7 @@ test "pack" {
         var r = try rp.Repo(.git).init(allocator, .{ .cwd = repo_dir });
         defer r.deinit();
 
-        var pack_reader = try pack.PackObjectReader.init(r.core, commit_oid_hex);
+        var pack_reader = try pack.PackObjectReader.init(&r.core, commit_oid_hex);
         defer pack_reader.deinit();
 
         var buf = [_]u8{0} ** 32;
