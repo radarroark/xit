@@ -217,6 +217,9 @@ pub const PackObjectReader = struct {
                     },
                 };
             },
+            // TODO: actually implement deltas.
+            // right now we're just returning the base object for REF_DELTA
+            // and returning an error for OFS_DELTA
             .ofs_delta => return error.UnsupportedPackObjectKind,
             .ref_delta => {
                 const base_oid = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
