@@ -2,6 +2,7 @@ const std = @import("std");
 const hash = @import("./hash.zig");
 const rp = @import("./repo.zig");
 const compress = @import("./compress.zig");
+const obj = @import("./object.zig");
 
 fn findOid(idx_file: std.fs.File, oid_list_pos: u64, index: usize) ![hash.SHA1_BYTES_LEN]u8 {
     const reader = idx_file.reader();
@@ -136,6 +137,7 @@ pub const PackObjectReader = struct {
     start_position: u64,
     relative_position: u64,
     size: u64,
+    header: obj.ObjectHeader,
 
     pub fn init(core: *rp.Repo(.git).Core, oid_hex: [hash.SHA1_HEX_LEN]u8) !PackObjectReader {
         var pack_dir = try core.git_dir.openDir("objects/pack", .{ .iterate = true });
@@ -197,7 +199,24 @@ pub const PackObjectReader = struct {
         }
 
         switch (obj_header.kind) {
-            .commit, .tree, .blob, .tag => {},
+            .commit, .tree, .blob, .tag => {
+                return .{
+                    .pack_file = pack_file,
+                    .stream = std.compress.zlib.decompressor(reader),
+                    .start_position = try pack_file.getPos(),
+                    .relative_position = 0,
+                    .size = size,
+                    .header = .{
+                        .kind = switch (obj_header.kind) {
+                            .commit => .commit,
+                            .tree => .tree,
+                            .blob => .blob,
+                            else => return error.InvalidObjectHeader,
+                        },
+                        .size = size,
+                    },
+                };
+            },
             .ofs_delta => return error.UnsupportedPackObjectKind,
             .ref_delta => {
                 const base_oid = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
@@ -206,14 +225,6 @@ pub const PackObjectReader = struct {
                 return new_pack_reader;
             },
         }
-
-        return .{
-            .pack_file = pack_file,
-            .stream = std.compress.zlib.decompressor(reader),
-            .start_position = try pack_file.getPos(),
-            .relative_position = 0,
-            .size = size,
-        };
     }
 
     pub fn deinit(self: *PackObjectReader) void {
@@ -293,7 +304,7 @@ pub const LooseOrPackObjectReader = union(enum) {
     },
     pack: PackObjectReader,
 
-    pub const Error = compress.ZlibStream.Reader.Error;
+    pub const Error = compress.ZlibStream.Reader.Error || error{NotImplemented};
 
     pub fn init(core: *rp.Repo(.git).Core, oid_hex: [hash.SHA1_HEX_LEN]u8, skip_header: bool) !LooseOrPackObjectReader {
         // open the objects dir
@@ -304,11 +315,8 @@ pub const LooseOrPackObjectReader = union(enum) {
         var path_buf = [_]u8{0} ** (hash.SHA1_HEX_LEN + 1);
         const path = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ oid_hex[0..2], oid_hex[2..] });
         var object_file = objects_dir.openFile(path, .{ .mode = .read_only }) catch |err| switch (err) {
-            error.FileNotFound => {
-                if (skip_header) return error.NotImplemented;
-                return .{
-                    .pack = PackObjectReader.init(core, oid_hex) catch return error.ObjectNotFound,
-                };
+            error.FileNotFound => return .{
+                .pack = PackObjectReader.init(core, oid_hex) catch return error.ObjectNotFound,
             },
             else => return err,
         };

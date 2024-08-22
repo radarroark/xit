@@ -1,7 +1,7 @@
 const std = @import("std");
 const hash = @import("../hash.zig");
 const rp = @import("../repo.zig");
-const pack = @import("../pack.zig");
+const obj = @import("../object.zig");
 
 const c = @cImport({
     @cInclude("git2.h");
@@ -195,15 +195,7 @@ test "pack" {
         var r = try rp.Repo(.git).init(allocator, .{ .cwd = repo_dir });
         defer r.deinit();
 
-        var pack_reader = try pack.PackObjectReader.init(&r.core, commit_oid_hex);
-        defer pack_reader.deinit();
-
-        var buf = [_]u8{0} ** 32;
-        while (true) {
-            const size = try pack_reader.read(&buf);
-            if (size == 0) {
-                break;
-            }
-        }
+        var object = try obj.Object(.git).init(allocator, .{ .core = &r.core }, commit_oid_hex);
+        defer object.deinit();
     }
 }

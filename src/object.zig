@@ -497,6 +497,10 @@ pub const ObjectKind = enum {
     blob,
     tree,
     commit,
+
+    pub fn init(kind_str: []const u8) !ObjectKind {
+        return if (std.mem.eql(u8, "blob", kind_str)) .blob else if (std.mem.eql(u8, "tree", kind_str)) .tree else if (std.mem.eql(u8, "commit", kind_str)) .commit else error.InvalidObjectKind;
+    }
 };
 
 pub const TreeEntry = struct {
@@ -606,8 +610,53 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
                 .xit => try self.reader.unbuffered_reader.seekTo(self.internal.header_offset + position),
             }
         }
+
+        pub fn readHeader(self: *ObjectReader(repo_kind)) !ObjectHeader {
+            switch (repo_kind) {
+                .git => {
+                    switch (self.reader.unbuffered_reader) {
+                        .loose => {
+                            // read the object kind
+                            const object_kind = try self.reader.unbuffered_reader.readUntilDelimiterAlloc(self.allocator, ' ', MAX_READ_BYTES);
+                            defer self.allocator.free(object_kind);
+
+                            // read the length
+                            const object_len_str = try self.reader.unbuffered_reader.readUntilDelimiterAlloc(self.allocator, 0, MAX_READ_BYTES);
+                            defer self.allocator.free(object_len_str);
+                            const object_len = try std.fmt.parseInt(usize, object_len_str, 10);
+
+                            return .{
+                                .kind = try ObjectKind.init(object_kind),
+                                .size = object_len,
+                            };
+                        },
+                        .pack => return self.reader.unbuffered_reader.pack.header,
+                    }
+                },
+                .xit => {
+                    // read the object kind
+                    const object_kind = try self.reader.unbuffered_reader.readUntilDelimiterAlloc(self.allocator, ' ', MAX_READ_BYTES);
+                    defer self.allocator.free(object_kind);
+
+                    // read the length
+                    const object_len_str = try self.reader.unbuffered_reader.readUntilDelimiterAlloc(self.allocator, 0, MAX_READ_BYTES);
+                    defer self.allocator.free(object_len_str);
+                    const object_len = try std.fmt.parseInt(usize, object_len_str, 10);
+
+                    return .{
+                        .kind = try ObjectKind.init(object_kind),
+                        .size = object_len,
+                    };
+                },
+            }
+        }
     };
 }
+
+pub const ObjectHeader = struct {
+    kind: ObjectKind,
+    size: u64,
+};
 
 pub const ObjectContent = union(ObjectKind) {
     blob,
@@ -635,116 +684,109 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
             var obj_rdr = try ObjectReader(repo_kind).init(allocator, core_cursor, oid, false);
             defer obj_rdr.deinit();
 
-            // read the object kind
-            const object_kind = try obj_rdr.reader.unbuffered_reader.readUntilDelimiterAlloc(allocator, ' ', MAX_READ_BYTES);
-            defer allocator.free(object_kind);
+            const header = try obj_rdr.readHeader();
 
-            // read the length
-            const object_len_str = try obj_rdr.reader.unbuffered_reader.readUntilDelimiterAlloc(allocator, 0, MAX_READ_BYTES);
-            defer allocator.free(object_len_str);
-            const object_len = try std.fmt.parseInt(usize, object_len_str, 10);
-
-            if (std.mem.eql(u8, "blob", object_kind)) {
-                return Object(repo_kind){
+            switch (header.kind) {
+                .blob => return Object(repo_kind){
                     .allocator = allocator,
                     .arena = std.heap.ArenaAllocator.init(allocator),
                     .content = ObjectContent{ .blob = {} },
                     .oid = oid,
-                    .len = object_len,
-                };
-            } else if (std.mem.eql(u8, "tree", object_kind)) {
-                var arena = std.heap.ArenaAllocator.init(allocator);
-                errdefer arena.deinit();
+                    .len = header.size,
+                },
+                .tree => {
+                    var arena = std.heap.ArenaAllocator.init(allocator);
+                    errdefer arena.deinit();
 
-                var entries = std.StringArrayHashMap(TreeEntry).init(arena.allocator());
+                    var entries = std.StringArrayHashMap(TreeEntry).init(arena.allocator());
 
-                while (true) {
-                    const entry_mode_str = obj_rdr.reader.unbuffered_reader.readUntilDelimiterAlloc(arena.allocator(), ' ', MAX_READ_BYTES) catch |err| {
-                        switch (err) {
-                            error.EndOfStream => break,
-                            else => return err,
-                        }
-                    };
-                    const entry_mode: io.Mode = @bitCast(try std.fmt.parseInt(u32, entry_mode_str, 8));
-                    const entry_name = try obj_rdr.reader.unbuffered_reader.readUntilDelimiterAlloc(arena.allocator(), 0, MAX_READ_BYTES);
-                    var entry_oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-                    try obj_rdr.reader.unbuffered_reader.readNoEof(&entry_oid);
-                    try entries.put(entry_name, TreeEntry{ .oid = entry_oid, .mode = entry_mode });
-                }
-
-                return Object(repo_kind){
-                    .allocator = allocator,
-                    .arena = arena,
-                    .content = ObjectContent{ .tree = .{ .entries = entries } },
-                    .oid = oid,
-                    .len = object_len,
-                };
-            } else if (std.mem.eql(u8, "commit", object_kind)) {
-                // read the content kind
-                const content_kind = try obj_rdr.reader.unbuffered_reader.readUntilDelimiterAlloc(allocator, ' ', MAX_READ_BYTES);
-                defer allocator.free(content_kind);
-                if (!std.mem.eql(u8, "tree", content_kind)) {
-                    return error.InvalidCommitContentKind;
-                }
-
-                // read the tree hash
-                var tree_hash = [_]u8{0} ** (hash.SHA1_HEX_LEN + 1);
-                const tree_hash_slice = try obj_rdr.reader.unbuffered_reader.readUntilDelimiter(&tree_hash, '\n');
-                if (tree_hash_slice.len != hash.SHA1_HEX_LEN) {
-                    return error.InvalidCommitTreeHash;
-                }
-
-                // init the content
-                var arena = std.heap.ArenaAllocator.init(allocator);
-                errdefer arena.deinit();
-                var content = ObjectContent{
-                    .commit = .{
-                        .tree = tree_hash_slice[0..hash.SHA1_HEX_LEN].*,
-                        .parents = std.ArrayList([hash.SHA1_HEX_LEN]u8).init(arena.allocator()),
-                        .author = null,
-                        .committer = null,
-                        .message = undefined,
-                    },
-                };
-
-                // read the metadata
-                while (true) {
-                    const line = try obj_rdr.reader.unbuffered_reader.readUntilDelimiterAlloc(arena.allocator(), '\n', MAX_READ_BYTES);
-                    if (line.len == 0) {
-                        break;
+                    while (true) {
+                        const entry_mode_str = obj_rdr.reader.unbuffered_reader.readUntilDelimiterAlloc(arena.allocator(), ' ', MAX_READ_BYTES) catch |err| {
+                            switch (err) {
+                                error.EndOfStream => break,
+                                else => return err,
+                            }
+                        };
+                        const entry_mode: io.Mode = @bitCast(try std.fmt.parseInt(u32, entry_mode_str, 8));
+                        const entry_name = try obj_rdr.reader.unbuffered_reader.readUntilDelimiterAlloc(arena.allocator(), 0, MAX_READ_BYTES);
+                        var entry_oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+                        try obj_rdr.reader.unbuffered_reader.readNoEof(&entry_oid);
+                        try entries.put(entry_name, TreeEntry{ .oid = entry_oid, .mode = entry_mode });
                     }
-                    if (std.mem.indexOf(u8, line, " ")) |line_idx| {
-                        if (line_idx == line.len) {
+
+                    return Object(repo_kind){
+                        .allocator = allocator,
+                        .arena = arena,
+                        .content = ObjectContent{ .tree = .{ .entries = entries } },
+                        .oid = oid,
+                        .len = header.size,
+                    };
+                },
+                .commit => {
+                    // read the content kind
+                    const content_kind = try obj_rdr.reader.unbuffered_reader.readUntilDelimiterAlloc(allocator, ' ', MAX_READ_BYTES);
+                    defer allocator.free(content_kind);
+                    if (!std.mem.eql(u8, "tree", content_kind)) {
+                        return error.InvalidCommitContentKind;
+                    }
+
+                    // read the tree hash
+                    var tree_hash = [_]u8{0} ** (hash.SHA1_HEX_LEN + 1);
+                    const tree_hash_slice = try obj_rdr.reader.unbuffered_reader.readUntilDelimiter(&tree_hash, '\n');
+                    if (tree_hash_slice.len != hash.SHA1_HEX_LEN) {
+                        return error.InvalidCommitTreeHash;
+                    }
+
+                    // init the content
+                    var arena = std.heap.ArenaAllocator.init(allocator);
+                    errdefer arena.deinit();
+                    var content = ObjectContent{
+                        .commit = .{
+                            .tree = tree_hash_slice[0..hash.SHA1_HEX_LEN].*,
+                            .parents = std.ArrayList([hash.SHA1_HEX_LEN]u8).init(arena.allocator()),
+                            .author = null,
+                            .committer = null,
+                            .message = undefined,
+                        },
+                    };
+
+                    // read the metadata
+                    while (true) {
+                        const line = try obj_rdr.reader.unbuffered_reader.readUntilDelimiterAlloc(arena.allocator(), '\n', MAX_READ_BYTES);
+                        if (line.len == 0) {
                             break;
                         }
-                        const key = line[0..line_idx];
-                        const value = line[line_idx + 1 ..];
-
-                        if (std.mem.eql(u8, "parent", key)) {
-                            if (value.len != hash.SHA1_HEX_LEN) {
-                                return error.InvalidCommitParentHash;
+                        if (std.mem.indexOf(u8, line, " ")) |line_idx| {
+                            if (line_idx == line.len) {
+                                break;
                             }
-                            try content.commit.parents.append(value[0..hash.SHA1_HEX_LEN].*);
-                        } else if (std.mem.eql(u8, "author", key)) {
-                            content.commit.author = value;
-                        } else if (std.mem.eql(u8, "committer", key)) {
-                            content.commit.committer = value;
+                            const key = line[0..line_idx];
+                            const value = line[line_idx + 1 ..];
+
+                            if (std.mem.eql(u8, "parent", key)) {
+                                if (value.len != hash.SHA1_HEX_LEN) {
+                                    return error.InvalidCommitParentHash;
+                                }
+                                try content.commit.parents.append(value[0..hash.SHA1_HEX_LEN].*);
+                            } else if (std.mem.eql(u8, "author", key)) {
+                                content.commit.author = value;
+                            } else if (std.mem.eql(u8, "committer", key)) {
+                                content.commit.committer = value;
+                            }
                         }
                     }
-                }
 
-                // read the message
-                content.commit.message = try obj_rdr.reader.unbuffered_reader.readAllAlloc(arena.allocator(), MAX_READ_BYTES);
+                    // read the message
+                    content.commit.message = try obj_rdr.reader.unbuffered_reader.readAllAlloc(arena.allocator(), MAX_READ_BYTES);
 
-                return Object(repo_kind){
-                    .allocator = allocator,
-                    .arena = arena,
-                    .content = content,
-                    .oid = oid,
-                    .len = object_len,
-                };
-            } else {
-                return error.InvalidObjectKind;
+                    return Object(repo_kind){
+                        .allocator = allocator,
+                        .arena = arena,
+                        .content = content,
+                        .oid = oid,
+                        .len = header.size,
+                    };
+                },
             }
         }
 
