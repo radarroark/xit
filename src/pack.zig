@@ -302,14 +302,14 @@ pub const PackObjectReader = struct {
 pub const LooseOrPackObjectReader = union(enum) {
     loose: struct {
         file: std.fs.File,
-        skip_header: bool,
         stream: compress.ZlibStream,
+        header: obj.ObjectHeader,
     },
     pack: PackObjectReader,
 
-    pub const Error = compress.ZlibStream.Reader.Error || error{NotImplemented};
+    pub const Error = compress.ZlibStream.Reader.Error;
 
-    pub fn init(core: *rp.Repo(.git).Core, oid_hex: [hash.SHA1_HEX_LEN]u8, skip_header: bool) !LooseOrPackObjectReader {
+    pub fn init(core: *rp.Repo(.git).Core, oid_hex: [hash.SHA1_HEX_LEN]u8) !LooseOrPackObjectReader {
         // open the objects dir
         var objects_dir = try core.git_dir.openDir("objects", .{});
         defer objects_dir.close();
@@ -325,11 +325,14 @@ pub const LooseOrPackObjectReader = union(enum) {
         };
         errdefer object_file.close();
 
+        var stream = std.compress.zlib.decompressor(object_file.reader());
+        const header = try obj.readObjectHeader(stream.reader());
+
         return .{
             .loose = .{
                 .file = object_file,
-                .skip_header = skip_header,
-                .stream = try compress.decompressStream(object_file, skip_header),
+                .stream = stream,
+                .header = header,
             },
         };
     }
@@ -343,7 +346,11 @@ pub const LooseOrPackObjectReader = union(enum) {
 
     pub fn reset(self: *LooseOrPackObjectReader) !void {
         switch (self.*) {
-            .loose => self.loose.stream = try compress.decompressStream(self.loose.file, self.loose.skip_header),
+            .loose => {
+                try self.loose.file.seekTo(0);
+                self.loose.stream = std.compress.zlib.decompressor(self.loose.file.reader());
+                try self.loose.stream.reader().skipUntilDelimiterOrEof(0);
+            },
             .pack => try self.pack.reset(),
         }
     }

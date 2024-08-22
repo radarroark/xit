@@ -28,7 +28,7 @@ pub fn objectToFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_k
     switch (tree_entry.mode.object_type) {
         .regular_file => {
             // open the reader
-            var obj_rdr = try obj.ObjectReader(repo_kind).init(allocator, core_cursor, oid_hex, true);
+            var obj_rdr = try obj.ObjectReader(repo_kind).init(allocator, core_cursor, oid_hex);
             defer obj_rdr.deinit();
 
             // create parent dir(s)

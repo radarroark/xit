@@ -35,7 +35,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
 
         pub fn initFromIndex(core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, entry: idx.Index(repo_kind).Entry) !LineIterator(repo_kind) {
             const oid_hex = std.fmt.bytesToHex(&entry.oid, .lower);
-            var object_reader = try obj.ObjectReader(repo_kind).init(allocator, core_cursor, oid_hex, true);
+            var object_reader = try obj.ObjectReader(repo_kind).init(allocator, core_cursor, oid_hex);
             errdefer object_reader.deinit();
             var iter = LineIterator(repo_kind){
                 .allocator = allocator,
@@ -100,7 +100,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
 
         pub fn initFromHead(core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, path: []const u8, entry: obj.TreeEntry) !LineIterator(repo_kind) {
             const oid_hex = std.fmt.bytesToHex(&entry.oid, .lower);
-            var object_reader = try obj.ObjectReader(repo_kind).init(allocator, core_cursor, oid_hex, true);
+            var object_reader = try obj.ObjectReader(repo_kind).init(allocator, core_cursor, oid_hex);
             errdefer object_reader.deinit();
             var iter = LineIterator(repo_kind){
                 .allocator = allocator,
@@ -122,7 +122,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
 
         pub fn initFromOid(core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, path: []const u8, oid: [hash.SHA1_BYTES_LEN]u8, mode_maybe: ?io.Mode) !LineIterator(repo_kind) {
             const oid_hex = std.fmt.bytesToHex(&oid, .lower);
-            var object_reader = try obj.ObjectReader(repo_kind).init(allocator, core_cursor, oid_hex, true);
+            var object_reader = try obj.ObjectReader(repo_kind).init(allocator, core_cursor, oid_hex);
             errdefer object_reader.deinit();
             var iter = LineIterator(repo_kind){
                 .allocator = allocator,

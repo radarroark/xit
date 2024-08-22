@@ -520,11 +520,11 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
     const BUFFER_SIZE = 2048;
     return struct {
         allocator: std.mem.Allocator,
+        header: ObjectHeader,
         reader: std.io.BufferedReader(BUFFER_SIZE, Reader),
         internal: switch (repo_kind) {
             .git => void,
             .xit => struct {
-                skip_header: bool,
                 header_offset: u64,
                 cursor: *xitdb.Cursor(.file),
             },
@@ -535,12 +535,16 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
             .xit => xitdb.Cursor(.file).Reader,
         };
 
-        pub fn init(allocator: std.mem.Allocator, core_cursor: rp.Repo(repo_kind).CoreCursor, oid: [hash.SHA1_HEX_LEN]u8, skip_header: bool) !@This() {
+        pub fn init(allocator: std.mem.Allocator, core_cursor: rp.Repo(repo_kind).CoreCursor, oid: [hash.SHA1_HEX_LEN]u8) !@This() {
             switch (repo_kind) {
                 .git => {
-                    const reader = try pack.LooseOrPackObjectReader.init(core_cursor.core, oid, skip_header);
+                    const reader = try pack.LooseOrPackObjectReader.init(core_cursor.core, oid);
                     return .{
                         .allocator = allocator,
+                        .header = switch (reader) {
+                            .loose => reader.loose.header,
+                            .pack => reader.pack.header,
+                        },
                         .reader = std.io.bufferedReaderSize(BUFFER_SIZE, reader),
                         .internal = {},
                     };
@@ -556,26 +560,12 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
                         cursor_ptr.* = cursor;
                         var rdr = try cursor_ptr.reader();
 
-                        var header_offset: u64 = 0;
-                        if (skip_header) {
-                            var read_buffer = [_]u8{0} ** 1;
-                            while (true) {
-                                const size = try rdr.read(&read_buffer);
-                                header_offset += 1;
-                                if (size == 0) {
-                                    return error.ObjectInvalid;
-                                } else if (read_buffer[0] == 0) {
-                                    break;
-                                }
-                            }
-                        }
-
                         return .{
                             .allocator = allocator,
+                            .header = try readObjectHeader(&rdr),
                             .reader = std.io.bufferedReaderSize(BUFFER_SIZE, rdr),
                             .internal = .{
-                                .skip_header = skip_header,
-                                .header_offset = header_offset,
+                                .header_offset = rdr.relative_position,
                                 .cursor = cursor_ptr,
                             },
                         };
@@ -612,54 +602,24 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
                 .xit => try self.reader.unbuffered_reader.seekTo(self.internal.header_offset + position),
             }
         }
+    };
+}
 
-        pub fn readHeader(self: *ObjectReader(repo_kind)) !ObjectHeader {
-            switch (repo_kind) {
-                .git => {
-                    switch (self.reader.unbuffered_reader) {
-                        .loose => {
-                            if (self.reader.unbuffered_reader.loose.skip_header) {
-                                return error.HeaderWasSkipped;
-                            }
+pub fn readObjectHeader(reader: anytype) !ObjectHeader {
+    const MAX_SIZE: usize = 16;
 
-                            // read the object kind
-                            const object_kind = try self.reader.unbuffered_reader.readUntilDelimiterAlloc(self.allocator, ' ', MAX_READ_BYTES);
-                            defer self.allocator.free(object_kind);
+    // read the object kind
+    var object_kind_buf = [_]u8{0} ** MAX_SIZE;
+    const object_kind = try reader.readUntilDelimiter(&object_kind_buf, ' ');
 
-                            // read the length
-                            const object_len_str = try self.reader.unbuffered_reader.readUntilDelimiterAlloc(self.allocator, 0, MAX_READ_BYTES);
-                            defer self.allocator.free(object_len_str);
-                            const object_len = try std.fmt.parseInt(usize, object_len_str, 10);
+    // read the length
+    var object_len_buf = [_]u8{0} ** MAX_SIZE;
+    const object_len_str = try reader.readUntilDelimiter(&object_len_buf, 0);
+    const object_len = try std.fmt.parseInt(u64, object_len_str, 10);
 
-                            return .{
-                                .kind = try ObjectKind.init(object_kind),
-                                .size = object_len,
-                            };
-                        },
-                        .pack => return self.reader.unbuffered_reader.pack.header,
-                    }
-                },
-                .xit => {
-                    if (self.internal.skip_header) {
-                        return error.HeaderWasSkipped;
-                    }
-
-                    // read the object kind
-                    const object_kind = try self.reader.unbuffered_reader.readUntilDelimiterAlloc(self.allocator, ' ', MAX_READ_BYTES);
-                    defer self.allocator.free(object_kind);
-
-                    // read the length
-                    const object_len_str = try self.reader.unbuffered_reader.readUntilDelimiterAlloc(self.allocator, 0, MAX_READ_BYTES);
-                    defer self.allocator.free(object_len_str);
-                    const object_len = try std.fmt.parseInt(usize, object_len_str, 10);
-
-                    return .{
-                        .kind = try ObjectKind.init(object_kind),
-                        .size = object_len,
-                    };
-                },
-            }
-        }
+    return .{
+        .kind = try ObjectKind.init(object_kind),
+        .size = object_len,
     };
 }
 
@@ -691,18 +651,16 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
         len: u64,
 
         pub fn init(allocator: std.mem.Allocator, core_cursor: rp.Repo(repo_kind).CoreCursor, oid: [hash.SHA1_HEX_LEN]u8) !Object(repo_kind) {
-            var obj_rdr = try ObjectReader(repo_kind).init(allocator, core_cursor, oid, false);
+            var obj_rdr = try ObjectReader(repo_kind).init(allocator, core_cursor, oid);
             defer obj_rdr.deinit();
 
-            const header = try obj_rdr.readHeader();
-
-            switch (header.kind) {
+            switch (obj_rdr.header.kind) {
                 .blob => return Object(repo_kind){
                     .allocator = allocator,
                     .arena = std.heap.ArenaAllocator.init(allocator),
                     .content = ObjectContent{ .blob = {} },
                     .oid = oid,
-                    .len = header.size,
+                    .len = obj_rdr.header.size,
                 },
                 .tree => {
                     var arena = std.heap.ArenaAllocator.init(allocator);
@@ -729,7 +687,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                         .arena = arena,
                         .content = ObjectContent{ .tree = .{ .entries = entries } },
                         .oid = oid,
-                        .len = header.size,
+                        .len = obj_rdr.header.size,
                     };
                 },
                 .commit => {
@@ -794,7 +752,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                         .arena = arena,
                         .content = content,
                         .oid = oid,
-                        .len = header.size,
+                        .len = obj_rdr.header.size,
                     };
                 },
             }
