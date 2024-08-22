@@ -247,20 +247,16 @@ pub const PackObjectReader = struct {
     }
 
     pub fn read(self: *PackObjectReader, dest: []u8) !usize {
-        const size = @min(dest.len, self.size - self.relative_position);
-        if (size == 0) {
-            return 0;
-        }
-        const read_size = try self.stream.reader().read(dest[0..size]);
+        if (self.size < self.relative_position) return error.EndOfStream;
+        const size = try self.stream.reader().read(dest[0..@min(dest.len, self.size - self.relative_position)]);
         self.relative_position += size;
-        return read_size;
+        return size;
     }
 
     pub fn readNoEof(self: *PackObjectReader, dest: []u8) !void {
-        const new_position = self.relative_position + dest.len;
-        if (new_position > self.relative_position + self.size) return error.EndOfStream;
+        if (self.size < self.relative_position or self.size - self.relative_position < dest.len) return error.EndOfStream;
         try self.stream.reader().readNoEof(dest);
-        self.relative_position = new_position;
+        self.relative_position += dest.len;
     }
 
     pub fn readUntilDelimiter(self: *PackObjectReader, dest: []u8, delimiter: u8) ![]u8 {
