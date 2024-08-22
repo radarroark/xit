@@ -2,14 +2,12 @@
 //! could do any better.
 
 const std = @import("std");
-const deflate = std.compress.deflate;
-const zlib = std.compress.zlib;
 
 const MAX_FILE_READ_BYTES = 1024; // FIXME: this is arbitrary...
 
 pub fn compress(in: std.fs.File, out: std.fs.File) !void {
     // init stream from input file
-    var zlib_stream = try zlib.compressor(out.writer(), .{ .level = .default });
+    var zlib_stream = try std.compress.zlib.compressor(out.writer(), .{ .level = .default });
 
     // write the compressed data to the output file
     try in.seekTo(0);
@@ -28,7 +26,7 @@ pub fn compress(in: std.fs.File, out: std.fs.File) !void {
 pub fn decompress(in: std.fs.File, out: std.fs.File, skip_header: bool) !void {
     // init stream from input file
     try in.seekTo(0);
-    var zlib_stream = zlib.decompressor(in.reader());
+    var zlib_stream = std.compress.zlib.decompressor(in.reader());
     if (skip_header) {
         // skip section in beginning of file which is not compressed
         try zlib_stream.reader().skipUntilDelimiterOrEof(0);
@@ -50,7 +48,7 @@ pub const ZlibStream = std.compress.flate.inflate.Decompressor(.zlib, std.fs.Fil
 
 pub fn decompressStream(in: std.fs.File, skip_header: bool) !ZlibStream {
     try in.seekTo(0);
-    var zlib_stream = zlib.decompressor(in.reader());
+    var zlib_stream = std.compress.zlib.decompressor(in.reader());
     if (skip_header) {
         // skip section in beginning of file which is not compressed
         try zlib_stream.reader().skipUntilDelimiterOrEof(0);
