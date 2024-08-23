@@ -3,6 +3,7 @@
 const std = @import("std");
 const df = @import("./diff.zig");
 const mrg = @import("./merge.zig");
+const idx = @import("./index.zig");
 
 pub const SubCommandKind = enum {
     init,
@@ -27,6 +28,7 @@ pub const SubCommand = union(SubCommandKind) {
     },
     rm: struct {
         paths: std.ArrayList([]const u8),
+        opts: idx.IndexRemoveOptions,
     },
     commit: struct {
         message: ?[]const u8,
@@ -153,7 +155,12 @@ pub const Command = union(enum) {
             var paths = try std.ArrayList([]const u8).initCapacity(allocator, extra_args.len);
             errdefer paths.deinit();
             paths.appendSliceAssumeCapacity(extra_args);
-            return .{ .cli = .{ .rm = .{ .paths = paths } } };
+            return .{ .cli = .{ .rm = .{
+                .paths = paths,
+                .opts = .{
+                    .force = map_args.contains("-f"),
+                },
+            } } };
         } else if (std.mem.eql(u8, sub_command, "commit")) {
             // if a message is included, it must have a non-null value
             const message_maybe = map_args.get("-m");

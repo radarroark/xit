@@ -249,7 +249,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     try self.add(sub_command.add.paths.items);
                 },
                 .rm => {
-                    try self.rm(sub_command.rm.paths.items);
+                    try self.rm(sub_command.rm.paths.items, sub_command.rm.opts);
                 },
                 .commit => {
                     _ = try self.commit(null, sub_command.commit.message);
@@ -561,10 +561,9 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             }
         }
 
-        pub fn rm(self: *Repo(repo_kind), paths: []const []const u8) !void {
+        pub fn rm(self: *Repo(repo_kind), paths: []const []const u8, opts: idx.IndexRemoveOptions) !void {
             // TODO: add support for the following flags...
             // -r        remove dir
-            // -f        force remove
             // --cached  only remove from index
             switch (repo_kind) {
                 .git => {
@@ -581,10 +580,12 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         const meta = try io.getMetadata(self.core.repo_dir, path);
                         switch (meta.kind()) {
                             .file => {
-                                switch (try idx.indexDiffersFrom(repo_kind, &self.core, &index, &head_tree, path, meta)) {
-                                    .nothing => {},
-                                    .head => return error.CannotRemoveFileWithStagedChanges,
-                                    .workspace => return error.CannotRemoveFileWithUnstagedChanges,
+                                if (!opts.force) {
+                                    switch (try idx.indexDiffersFrom(repo_kind, &self.core, &index, &head_tree, path, meta)) {
+                                        .nothing => {},
+                                        .head => return error.CannotRemoveFileWithStagedChanges,
+                                        .workspace => return error.CannotRemoveFileWithUnstagedChanges,
+                                    }
                                 }
                                 try index.addOrRemovePath(.{ .core = &self.core, .lock_file_maybe = lock.lock_file }, path, .rm);
                             },
@@ -609,6 +610,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         core: *Repo(repo_kind).Core,
                         allocator: std.mem.Allocator,
                         paths: []const []const u8,
+                        opts: idx.IndexRemoveOptions,
 
                         pub fn run(ctx: @This(), cursor: *xitdb.Cursor(.file)) !void {
                             var index = try idx.Index(repo_kind).init(ctx.allocator, .{ .core = ctx.core, .cursor = cursor });
@@ -621,10 +623,12 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                                 const meta = try io.getMetadata(ctx.core.repo_dir, path);
                                 switch (meta.kind()) {
                                     .file => {
-                                        switch (try idx.indexDiffersFrom(repo_kind, ctx.core, &index, &head_tree, path, meta)) {
-                                            .nothing => {},
-                                            .head => return error.CannotRemoveFileWithStagedChanges,
-                                            .workspace => return error.CannotRemoveFileWithUnstagedChanges,
+                                        if (!ctx.opts.force) {
+                                            switch (try idx.indexDiffersFrom(repo_kind, ctx.core, &index, &head_tree, path, meta)) {
+                                                .nothing => {},
+                                                .head => return error.CannotRemoveFileWithStagedChanges,
+                                                .workspace => return error.CannotRemoveFileWithUnstagedChanges,
+                                            }
                                         }
                                         try index.addOrRemovePath(.{ .core = ctx.core, .cursor = cursor }, path, .rm);
                                     },
@@ -647,7 +651,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     _ = try self.core.db.rootCursor().writePath(Ctx, &[_]xitdb.PathPart(Ctx){
                         .{ .array_list_get = .append_copy },
                         .hash_map_init,
-                        .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .paths = paths } },
+                        .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .paths = paths, .opts = opts } },
                     });
                 },
             }

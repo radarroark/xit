@@ -846,9 +846,12 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         // can't remove a file with staged changes
         try std.testing.expectEqual(error.CannotRemoveFileWithStagedChanges, main.xitMain(repo_kind, allocator, &[_][]const u8{ "rm", "one/two/three.txt" }, repo_dir, writers));
 
+        // remove file by force
+        try main.xitMain(repo_kind, allocator, &[_][]const u8{ "rm", "one/two/three.txt", "-f" }, repo_dir, writers);
+
         // restore file's original content
         {
-            const three_txt = try repo_dir.openFile("one/two/three.txt", .{ .mode = .read_write });
+            const three_txt = try repo_dir.createFile("one/two/three.txt", .{});
             defer three_txt.close();
             try three_txt.seekTo(0);
             try three_txt.writeAll("one, two, three!");
