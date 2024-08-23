@@ -7,6 +7,7 @@ const mrg = @import("./merge.zig");
 pub const SubCommandKind = enum {
     init,
     add,
+    rm,
     commit,
     status,
     diff,
@@ -22,6 +23,9 @@ pub const SubCommand = union(SubCommandKind) {
         dir: []const u8,
     },
     add: struct {
+        paths: std.ArrayList([]const u8),
+    },
+    rm: struct {
         paths: std.ArrayList([]const u8),
     },
     commit: struct {
@@ -47,6 +51,9 @@ pub const SubCommand = union(SubCommandKind) {
         switch (self.*) {
             .add => {
                 self.add.paths.deinit();
+            },
+            .rm => {
+                self.rm.paths.deinit();
             },
             else => {},
         }
@@ -108,6 +115,8 @@ pub const Command = union(enum) {
         if (extra_args.len == 0 and map_args.count() == 0) {
             if (std.mem.eql(u8, sub_command, "add")) {
                 return .{ .tui = .add };
+            } else if (std.mem.eql(u8, sub_command, "rm")) {
+                return .{ .tui = .rm };
             } else if (std.mem.eql(u8, sub_command, "commit")) {
                 return .{ .tui = .commit };
             } else if (std.mem.eql(u8, sub_command, "status")) {
@@ -131,16 +140,24 @@ pub const Command = union(enum) {
             return .{ .cli = .{ .init = .{ .dir = if (extra_args.len > 0) extra_args[0] else "." } } };
         } else if (std.mem.eql(u8, sub_command, "add")) {
             if (extra_args.len == 0) {
-                return error.AddPathsMissing;
+                return error.AddPathsNotFound;
             }
             var paths = try std.ArrayList([]const u8).initCapacity(allocator, extra_args.len);
-            errdefer paths.deinit(); // pointless for now but for future sake
+            errdefer paths.deinit();
             paths.appendSliceAssumeCapacity(extra_args);
             return .{ .cli = .{ .add = .{ .paths = paths } } };
+        } else if (std.mem.eql(u8, sub_command, "rm")) {
+            if (extra_args.len == 0) {
+                return error.RmPathsNotFound;
+            }
+            var paths = try std.ArrayList([]const u8).initCapacity(allocator, extra_args.len);
+            errdefer paths.deinit();
+            paths.appendSliceAssumeCapacity(extra_args);
+            return .{ .cli = .{ .rm = .{ .paths = paths } } };
         } else if (std.mem.eql(u8, sub_command, "commit")) {
             // if a message is included, it must have a non-null value
             const message_maybe = map_args.get("-m");
-            const message = if (message_maybe == null) null else (message_maybe.? orelse return error.CommitMessageMissing);
+            const message = if (message_maybe == null) null else (message_maybe.? orelse return error.CommitMessageNotFound);
             return .{ .cli = .{ .commit = .{ .message = message } } };
         } else if (std.mem.eql(u8, sub_command, "status")) {
             return .{ .cli = .{ .status = {} } };
@@ -161,12 +178,12 @@ pub const Command = union(enum) {
             return .{ .cli = .{ .branch = .{ .name = if (extra_args.len == 0) null else extra_args[0] } } };
         } else if (std.mem.eql(u8, sub_command, "switch")) {
             if (extra_args.len == 0) {
-                return error.SwitchTargetMissing;
+                return error.SwitchTargetNotFound;
             }
             return .{ .cli = .{ .switch_head = .{ .target = extra_args[0] } } };
         } else if (std.mem.eql(u8, sub_command, "restore")) {
             if (extra_args.len == 0) {
-                return error.RestorePathMissing;
+                return error.RestorePathNotFound;
             }
             return .{ .cli = .{ .restore = .{ .path = extra_args[0] } } };
         } else if (std.mem.eql(u8, sub_command, "log")) {
@@ -215,7 +232,7 @@ test "command" {
             defer command.deinit();
             return error.ExpectedError;
         } else |err| {
-            try std.testing.expect(error.AddPathsMissing == err);
+            try std.testing.expect(error.AddPathsNotFound == err);
         }
     }
 
@@ -231,7 +248,7 @@ test "command" {
             defer command.deinit();
             return error.ExpectedError;
         } else |err| {
-            try std.testing.expect(error.CommitMessageMissing == err);
+            try std.testing.expect(error.CommitMessageNotFound == err);
         }
     }
 

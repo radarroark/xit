@@ -683,8 +683,8 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             defer nested2_txt.close();
         }
 
-        // add the new file
-        try main.xitMain(repo_kind, allocator, &[_][]const u8{ "add", "." }, repo_dir, writers);
+        // add the new dir
+        try main.xitMain(repo_kind, allocator, &[_][]const u8{ "add", "hello.txt" }, repo_dir, writers);
 
         // read index
         {
@@ -749,7 +749,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         defer hello_txt2.close();
 
         // add the new file
-        try main.xitMain(repo_kind, allocator, &[_][]const u8{ "add", "." }, repo_dir, writers);
+        try main.xitMain(repo_kind, allocator, &[_][]const u8{ "add", "hello.txt" }, repo_dir, writers);
 
         // read index
         {
@@ -768,6 +768,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             try std.testing.expect(index.entries.contains("tests/main_test.zig"));
             try std.testing.expect(index.entries.contains("hello.txt"));
             try std.testing.expect(index.entries.contains("run.sh"));
+            try std.testing.expect(index.entries.contains("one/two/three.txt"));
         }
 
         switch (repo_kind) {
@@ -800,13 +801,71 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             },
         }
 
-        // can't add a non-existent file
-        try std.testing.expectEqual(error.FileNotFound, main.xitMain(repo_kind, allocator, &[_][]const u8{ "add", "no-such-file" }, repo_dir, writers));
-
         // a stale index lock file isn't hanging around
         if (repo_kind == .git) {
             const lock_file_or_err = state.git_dir.openFile("index.lock", .{ .mode = .read_only });
             try std.testing.expectEqual(error.FileNotFound, lock_file_or_err);
+        }
+    }
+
+    // can't add a non-existent file
+    try std.testing.expectEqual(error.FileNotFound, main.xitMain(repo_kind, allocator, &[_][]const u8{ "add", "no-such-file" }, repo_dir, writers));
+
+    // removing files
+    {
+        // can't remove non-existent file
+        try std.testing.expectEqual(error.FileNotFound, main.xitMain(repo_kind, allocator, &[_][]const u8{ "rm", "no-such-file" }, repo_dir, writers));
+
+        // can't remove unindexed file
+        {
+            var not_indexed_txt = try repo_dir.createFile("not-indexed.txt", .{});
+            defer {
+                not_indexed_txt.close();
+                repo_dir.deleteFile("not-indexed.txt") catch {};
+            }
+            try not_indexed_txt.writeAll("this isn't indexed");
+
+            try std.testing.expectEqual(error.CannotRemoveUnindexedFile, main.xitMain(repo_kind, allocator, &[_][]const u8{ "rm", "not-indexed.txt" }, repo_dir, writers));
+        }
+
+        // modify a file
+        {
+            const three_txt = try repo_dir.openFile("one/two/three.txt", .{ .mode = .read_write });
+            defer three_txt.close();
+            try three_txt.seekTo(0);
+            try three_txt.writeAll("this is now modified");
+            try three_txt.setEndPos(try three_txt.getPos());
+        }
+
+        // can't remove a file with unstaged changes
+        try std.testing.expectEqual(error.CannotRemoveFileWithUnstagedChanges, main.xitMain(repo_kind, allocator, &[_][]const u8{ "rm", "one/two/three.txt" }, repo_dir, writers));
+
+        // stage the changes to the file
+        try main.xitMain(repo_kind, allocator, &[_][]const u8{ "add", "one/two/three.txt" }, repo_dir, writers);
+
+        // can't remove a file with staged changes
+        try std.testing.expectEqual(error.CannotRemoveFileWithStagedChanges, main.xitMain(repo_kind, allocator, &[_][]const u8{ "rm", "one/two/three.txt" }, repo_dir, writers));
+
+        // restore file's original content
+        {
+            const three_txt = try repo_dir.openFile("one/two/three.txt", .{ .mode = .read_write });
+            defer three_txt.close();
+            try three_txt.seekTo(0);
+            try three_txt.writeAll("one, two, three!");
+            try three_txt.setEndPos(try three_txt.getPos());
+
+            try main.xitMain(repo_kind, allocator, &[_][]const u8{ "add", "one/two/three.txt" }, repo_dir, writers);
+        }
+
+        // remove a file
+        {
+            try main.xitMain(repo_kind, allocator, &[_][]const u8{ "rm", "one/two/three.txt" }, repo_dir, writers);
+
+            var file_or_err = repo_dir.openFile("one/two/three.txt", .{ .mode = .read_only });
+            if (file_or_err) |*file| {
+                file.close();
+                return error.UnexpectedFile;
+            } else |_| {}
         }
     }
 
@@ -937,16 +996,18 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             // check the index_deleted entries
             var index_deleted_map = std.StringHashMap(void).init(allocator);
             defer index_deleted_map.deinit();
-            try std.testing.expectEqual(1, status.index_deleted.items.len);
+            try std.testing.expectEqual(2, status.index_deleted.items.len);
             for (status.index_deleted.items) |path| {
                 try index_deleted_map.put(path, {});
             }
+            try std.testing.expect(index_deleted_map.contains("src/zig/main.zig"));
+            try std.testing.expect(index_deleted_map.contains("one/two/three.txt"));
         }
     }
 
     // restore
     {
-        // there are two modified and one deleted files remaining
+        // there are two modified and two deleted files remaining
         {
             var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
@@ -959,7 +1020,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
 
             var index_deleted_map = std.StringHashMap(void).init(allocator);
             defer index_deleted_map.deinit();
-            try std.testing.expectEqual(1, status.index_deleted.items.len);
+            try std.testing.expectEqual(2, status.index_deleted.items.len);
         }
 
         try main.xitMain(repo_kind, allocator, &[_][]const u8{ "restore", "README" }, repo_dir, writers);
@@ -970,11 +1031,10 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         try main.xitMain(repo_kind, allocator, &[_][]const u8{ "restore", "src" }, repo_dir, writers);
 
         // nested paths can be restored
-        try repo_dir.deleteTree("src");
-        try main.xitMain(repo_kind, allocator, &[_][]const u8{ "restore", "src/zig/main.zig" }, repo_dir, writers);
+        try main.xitMain(repo_kind, allocator, &[_][]const u8{ "restore", "one/two/three.txt" }, repo_dir, writers);
 
         // remove changes to index
-        try main.xitMain(repo_kind, allocator, &[_][]const u8{ "add", "hello.txt", "src" }, repo_dir, writers);
+        try main.xitMain(repo_kind, allocator, &[_][]const u8{ "add", "hello.txt", "src", "one" }, repo_dir, writers);
 
         // there are no modified or deleted files remaining
         {

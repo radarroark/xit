@@ -248,6 +248,9 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 .add => {
                     try self.add(sub_command.add.paths.items);
                 },
+                .rm => {
+                    try self.rm(sub_command.rm.paths.items);
+                },
                 .commit => {
                     _ = try self.commit(null, sub_command.commit.message);
                 },
@@ -518,33 +521,14 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
         pub fn add(self: *Repo(repo_kind), paths: []const []const u8) !void {
             switch (repo_kind) {
                 .git => {
-                    // create lock file
                     var lock = try io.LockFile.init(self.allocator, self.core.git_dir, "index");
                     defer lock.deinit();
 
-                    // read index
-                    var index = try idx.Index(.git).init(self.allocator, .{ .core = &self.core });
+                    var index = try idx.Index(repo_kind).init(self.allocator, .{ .core = &self.core });
                     defer index.deinit();
 
-                    // read all the new entries
                     for (paths) |path| {
-                        if (self.core.repo_dir.openFile(path, .{ .mode = .read_only })) |file| {
-                            file.close();
-                        } else |err| {
-                            switch (err) {
-                                error.IsDir => {}, // only happens on windows
-                                error.FileNotFound => {
-                                    if (index.entries.contains(path)) {
-                                        index.removePath(path);
-                                        continue;
-                                    } else {
-                                        return err;
-                                    }
-                                },
-                                else => return err,
-                            }
-                        }
-                        try index.addPath(.{ .core = &self.core }, path);
+                        try index.addOrRemovePath(.{ .core = &self.core, .lock_file_maybe = lock.lock_file }, path, .add);
                     }
 
                     try index.write(self.allocator, .{ .core = &self.core, .lock_file_maybe = lock.lock_file });
@@ -558,32 +542,105 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         paths: []const []const u8,
 
                         pub fn run(ctx: @This(), cursor: *xitdb.Cursor(.file)) !void {
-                            // read index
-                            var index = try idx.Index(.xit).init(ctx.allocator, .{ .core = ctx.core, .cursor = cursor });
+                            var index = try idx.Index(repo_kind).init(ctx.allocator, .{ .core = ctx.core, .cursor = cursor });
                             defer index.deinit();
 
-                            // read all the new entries
                             for (ctx.paths) |path| {
-                                if (ctx.core.repo_dir.openFile(path, .{ .mode = .read_only })) |file| {
-                                    file.close();
-                                } else |err| {
-                                    switch (err) {
-                                        error.IsDir => {}, // only happens on windows
-                                        error.FileNotFound => {
-                                            if (index.entries.contains(path)) {
-                                                index.removePath(path);
-                                                continue;
-                                            } else {
-                                                return err;
-                                            }
-                                        },
-                                        else => return err,
-                                    }
-                                }
-                                try index.addPath(.{ .core = ctx.core, .cursor = cursor }, path);
+                                try index.addOrRemovePath(.{ .core = ctx.core, .cursor = cursor }, path, .add);
                             }
 
-                            // write index
+                            try index.write(ctx.allocator, .{ .core = ctx.core, .cursor = cursor });
+                        }
+                    };
+                    _ = try self.core.db.rootCursor().writePath(Ctx, &[_]xitdb.PathPart(Ctx){
+                        .{ .array_list_get = .append_copy },
+                        .hash_map_init,
+                        .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .paths = paths } },
+                    });
+                },
+            }
+        }
+
+        pub fn rm(self: *Repo(repo_kind), paths: []const []const u8) !void {
+            // TODO: add support for the following flags...
+            // -r        remove dir
+            // -f        force remove
+            // --cached  only remove from index
+            switch (repo_kind) {
+                .git => {
+                    var lock = try io.LockFile.init(self.allocator, self.core.git_dir, "index");
+                    defer lock.deinit();
+
+                    var index = try idx.Index(repo_kind).init(self.allocator, .{ .core = &self.core });
+                    defer index.deinit();
+
+                    var head_tree = try st.HeadTree(repo_kind).init(self.allocator, .{ .core = &self.core });
+                    defer head_tree.deinit();
+
+                    for (paths) |path| {
+                        const meta = try io.getMetadata(self.core.repo_dir, path);
+                        switch (meta.kind()) {
+                            .file => {
+                                switch (try idx.indexDiffersFrom(repo_kind, &self.core, &index, &head_tree, path, meta)) {
+                                    .nothing => {},
+                                    .head => return error.CannotRemoveFileWithStagedChanges,
+                                    .workspace => return error.CannotRemoveFileWithUnstagedChanges,
+                                }
+                                try index.addOrRemovePath(.{ .core = &self.core, .lock_file_maybe = lock.lock_file }, path, .rm);
+                            },
+                            else => return error.UnexpectedPathType,
+                        }
+                    }
+
+                    for (paths) |path| {
+                        const meta = try io.getMetadata(self.core.repo_dir, path);
+                        switch (meta.kind()) {
+                            .file => try self.core.repo_dir.deleteFile(path),
+                            else => return error.UnexpectedPathType,
+                        }
+                    }
+
+                    try index.write(self.allocator, .{ .core = &self.core, .lock_file_maybe = lock.lock_file });
+
+                    lock.success = true;
+                },
+                .xit => {
+                    const Ctx = struct {
+                        core: *Repo(repo_kind).Core,
+                        allocator: std.mem.Allocator,
+                        paths: []const []const u8,
+
+                        pub fn run(ctx: @This(), cursor: *xitdb.Cursor(.file)) !void {
+                            var index = try idx.Index(repo_kind).init(ctx.allocator, .{ .core = ctx.core, .cursor = cursor });
+                            defer index.deinit();
+
+                            var head_tree = try st.HeadTree(repo_kind).init(ctx.allocator, .{ .core = ctx.core, .cursor = cursor });
+                            defer head_tree.deinit();
+
+                            for (ctx.paths) |path| {
+                                const meta = try io.getMetadata(ctx.core.repo_dir, path);
+                                switch (meta.kind()) {
+                                    .file => {
+                                        switch (try idx.indexDiffersFrom(repo_kind, ctx.core, &index, &head_tree, path, meta)) {
+                                            .nothing => {},
+                                            .head => return error.CannotRemoveFileWithStagedChanges,
+                                            .workspace => return error.CannotRemoveFileWithUnstagedChanges,
+                                        }
+                                        try index.addOrRemovePath(.{ .core = ctx.core, .cursor = cursor }, path, .rm);
+                                    },
+                                    else => return error.UnexpectedPathType,
+                                }
+                            }
+
+                            for (ctx.paths) |path| {
+                                const meta = try io.getMetadata(ctx.core.repo_dir, path);
+                                switch (meta.kind()) {
+                                    .file => try ctx.core.repo_dir.deleteFile(path),
+                                    .directory => return error.CannotDeleteDir,
+                                    else => return error.UnexpectedPathType,
+                                }
+                            }
+
                             try index.write(ctx.allocator, .{ .core = ctx.core, .cursor = cursor });
                         }
                     };
