@@ -1304,8 +1304,8 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
                         next_index -= self.diff_opts.workspace.status.conflicts.count();
                     }
 
-                    if (next_index < self.diff_opts.workspace.status.workspace_modified.items.len) {
-                        const entry = self.diff_opts.workspace.status.workspace_modified.items[next_index];
+                    if (next_index < self.diff_opts.workspace.status.workspace_modified.count()) {
+                        const entry = self.diff_opts.workspace.status.workspace_modified.values()[next_index];
                         const index_entries_for_path = self.diff_opts.workspace.status.index.entries.get(entry.path) orelse return error.EntryNotFound;
                         var a = try LineIterator(repo_kind).initFromIndex(core_cursor, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
                         errdefer a.deinit();
@@ -1314,11 +1314,11 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
                         self.next_index += 1;
                         return .{ .path = entry.path, .a = a, .b = b };
                     } else {
-                        next_index -= self.diff_opts.workspace.status.workspace_modified.items.len;
+                        next_index -= self.diff_opts.workspace.status.workspace_modified.count();
                     }
 
-                    if (next_index < self.diff_opts.workspace.status.workspace_deleted.items.len) {
-                        const path = self.diff_opts.workspace.status.workspace_deleted.items[next_index];
+                    if (next_index < self.diff_opts.workspace.status.workspace_deleted.count()) {
+                        const path = self.diff_opts.workspace.status.workspace_deleted.keys()[next_index];
                         const index_entries_for_path = self.diff_opts.workspace.status.index.entries.get(path) orelse return error.EntryNotFound;
                         var a = try LineIterator(repo_kind).initFromIndex(core_cursor, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
                         errdefer a.deinit();
@@ -1329,8 +1329,8 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
                     }
                 },
                 .index => {
-                    if (next_index < self.diff_opts.index.status.index_added.items.len) {
-                        const path = self.diff_opts.index.status.index_added.items[next_index];
+                    if (next_index < self.diff_opts.index.status.index_added.count()) {
+                        const path = self.diff_opts.index.status.index_added.keys()[next_index];
                         var a = try LineIterator(repo_kind).initFromNothing(self.allocator, path);
                         errdefer a.deinit();
                         const index_entries_for_path = self.diff_opts.index.status.index.entries.get(path) orelse return error.EntryNotFound;
@@ -1339,11 +1339,11 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
                         self.next_index += 1;
                         return .{ .path = path, .a = a, .b = b };
                     } else {
-                        next_index -= self.diff_opts.index.status.index_added.items.len;
+                        next_index -= self.diff_opts.index.status.index_added.count();
                     }
 
-                    if (next_index < self.diff_opts.index.status.index_modified.items.len) {
-                        const path = self.diff_opts.index.status.index_modified.items[next_index];
+                    if (next_index < self.diff_opts.index.status.index_modified.count()) {
+                        const path = self.diff_opts.index.status.index_modified.keys()[next_index];
                         var a = try LineIterator(repo_kind).initFromHead(core_cursor, self.allocator, path, self.diff_opts.index.status.head_tree.entries.get(path) orelse return error.EntryNotFound);
                         errdefer a.deinit();
                         const index_entries_for_path = self.diff_opts.index.status.index.entries.get(path) orelse return error.EntryNotFound;
@@ -1352,11 +1352,11 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
                         self.next_index += 1;
                         return .{ .path = path, .a = a, .b = b };
                     } else {
-                        next_index -= self.diff_opts.index.status.index_modified.items.len;
+                        next_index -= self.diff_opts.index.status.index_modified.count();
                     }
 
-                    if (next_index < self.diff_opts.index.status.index_deleted.items.len) {
-                        const path = self.diff_opts.index.status.index_deleted.items[next_index];
+                    if (next_index < self.diff_opts.index.status.index_deleted.count()) {
+                        const path = self.diff_opts.index.status.index_deleted.keys()[next_index];
                         var a = try LineIterator(repo_kind).initFromHead(core_cursor, self.allocator, path, self.diff_opts.index.status.head_tree.entries.get(path) orelse return error.EntryNotFound);
                         errdefer a.deinit();
                         var b = try LineIterator(repo_kind).initFromNothing(self.allocator, path);

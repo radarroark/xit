@@ -41,12 +41,12 @@ pub const MergeConflictStatus = struct {
 
 pub fn Status(comptime repo_kind: rp.RepoKind) type {
     return struct {
-        untracked: std.ArrayList(Entry),
-        workspace_modified: std.ArrayList(Entry),
-        workspace_deleted: std.ArrayList([]const u8),
-        index_added: std.ArrayList([]const u8),
-        index_modified: std.ArrayList([]const u8),
-        index_deleted: std.ArrayList([]const u8),
+        untracked: std.StringArrayHashMap(Entry),
+        workspace_modified: std.StringArrayHashMap(Entry),
+        workspace_deleted: std.StringArrayHashMap(void),
+        index_added: std.StringArrayHashMap(void),
+        index_modified: std.StringArrayHashMap(void),
+        index_deleted: std.StringArrayHashMap(void),
         conflicts: std.StringArrayHashMap(MergeConflictStatus),
         index: idx.Index(repo_kind),
         head_tree: HeadTree(repo_kind),
@@ -58,22 +58,22 @@ pub fn Status(comptime repo_kind: rp.RepoKind) type {
         };
 
         pub fn init(allocator: std.mem.Allocator, core_cursor: rp.Repo(repo_kind).CoreCursor) !Status(repo_kind) {
-            var untracked = std.ArrayList(Entry).init(allocator);
+            var untracked = std.StringArrayHashMap(Entry).init(allocator);
             errdefer untracked.deinit();
 
-            var workspace_modified = std.ArrayList(Entry).init(allocator);
+            var workspace_modified = std.StringArrayHashMap(Entry).init(allocator);
             errdefer workspace_modified.deinit();
 
-            var workspace_deleted = std.ArrayList([]const u8).init(allocator);
+            var workspace_deleted = std.StringArrayHashMap(void).init(allocator);
             errdefer workspace_deleted.deinit();
 
-            var index_added = std.ArrayList([]const u8).init(allocator);
+            var index_added = std.StringArrayHashMap(void).init(allocator);
             errdefer index_added.deinit();
 
-            var index_modified = std.ArrayList([]const u8).init(allocator);
+            var index_modified = std.StringArrayHashMap(void).init(allocator);
             errdefer index_modified.deinit();
 
-            var index_deleted = std.ArrayList([]const u8).init(allocator);
+            var index_deleted = std.StringArrayHashMap(void).init(allocator);
             errdefer index_deleted.deinit();
 
             var conflicts = std.StringArrayHashMap(MergeConflictStatus).init(allocator);
@@ -98,14 +98,14 @@ pub fn Status(comptime repo_kind: rp.RepoKind) type {
                 // if it is a non-conflict entry
                 if (index_entries_for_path[0]) |index_entry| {
                     if (!index_bools[i]) {
-                        try workspace_deleted.append(path);
+                        try workspace_deleted.put(path, {});
                     }
                     if (head_tree.entries.get(index_entry.path)) |head_entry| {
                         if (!index_entry.mode.eql(head_entry.mode) or !std.mem.eql(u8, &index_entry.oid, &head_entry.oid)) {
-                            try index_modified.append(index_entry.path);
+                            try index_modified.put(index_entry.path, {});
                         }
                     } else {
-                        try index_added.append(index_entry.path);
+                        try index_added.put(index_entry.path, {});
                     }
                 }
                 // add to conflicts
@@ -121,7 +121,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind) type {
             var iter = head_tree.entries.keyIterator();
             while (iter.next()) |path| {
                 if (!index.entries.contains(path.*)) {
-                    try index_deleted.append(path.*);
+                    try index_deleted.put(path.*, {});
                 }
             }
 
@@ -157,8 +157,8 @@ pub fn Status(comptime repo_kind: rp.RepoKind) type {
 fn addEntries(
     comptime repo_kind: rp.RepoKind,
     allocator: std.mem.Allocator,
-    untracked: *std.ArrayList(Status(repo_kind).Entry),
-    modified: *std.ArrayList(Status(repo_kind).Entry),
+    untracked: *std.StringArrayHashMap(Status(repo_kind).Entry),
+    modified: *std.StringArrayHashMap(Status(repo_kind).Entry),
     index: idx.Index(repo_kind),
     index_bools: *[]bool,
     repo_dir: std.fs.Dir,
@@ -175,11 +175,11 @@ fn addEntries(
                 const entries_for_path = index.entries.values()[entry_index];
                 if (entries_for_path[0]) |entry| {
                     if (try idx.indexDiffersFromWorkspace(repo_kind, entry, file, meta)) {
-                        try modified.append(Status(repo_kind).Entry{ .path = path, .meta = meta });
+                        try modified.put(path, Status(repo_kind).Entry{ .path = path, .meta = meta });
                     }
                 }
             } else {
-                try untracked.append(Status(repo_kind).Entry{ .path = path, .meta = meta });
+                try untracked.put(path, Status(repo_kind).Entry{ .path = path, .meta = meta });
             }
             return true;
         },
@@ -209,25 +209,27 @@ fn addEntries(
                 else
                     try io.joinPath(allocator, &[_][]const u8{ path, entry.name });
 
-                var grandchild_untracked = std.ArrayList(Status(repo_kind).Entry).init(allocator);
+                var grandchild_untracked = std.StringArrayHashMap(Status(repo_kind).Entry).init(allocator);
                 defer grandchild_untracked.deinit();
 
                 const is_file = try addEntries(repo_kind, allocator, &grandchild_untracked, modified, index, index_bools, repo_dir, subpath);
                 contains_file = contains_file or is_file;
                 if (is_file and is_untracked) break; // no need to continue because child_untracked will be discarded anyway
 
-                try child_untracked.appendSlice(grandchild_untracked.items);
+                try child_untracked.appendSlice(grandchild_untracked.values());
             }
 
             // add the dir if it isn't tracked and contains a file
             if (is_untracked) {
                 if (contains_file) {
-                    try untracked.append(Status(repo_kind).Entry{ .path = path, .meta = meta });
+                    try untracked.put(path, Status(repo_kind).Entry{ .path = path, .meta = meta });
                 }
             }
             // add its children
             else {
-                try untracked.appendSlice(child_untracked.items);
+                for (child_untracked.items) |entry| {
+                    try untracked.put(entry.path, entry);
+                }
             }
         },
         else => {},

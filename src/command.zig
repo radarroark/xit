@@ -10,6 +10,7 @@ pub const SubCommandKind = enum {
     add,
     unadd,
     rm,
+    reset,
     commit,
     status,
     diff,
@@ -34,6 +35,9 @@ pub const SubCommand = union(SubCommandKind) {
     rm: struct {
         paths: std.ArrayList([]const u8),
         opts: idx.IndexRemoveOptions,
+    },
+    reset: struct {
+        path: []const u8,
     },
     commit: struct {
         message: ?[]const u8,
@@ -125,10 +129,12 @@ pub const Command = union(enum) {
         if (extra_args.len == 0 and map_args.count() == 0) {
             if (std.mem.eql(u8, sub_command, "add")) {
                 return .{ .tui = .add };
-            } else if (std.mem.eql(u8, sub_command, "rm")) {
-                return .{ .tui = .rm };
             } else if (std.mem.eql(u8, sub_command, "unadd")) {
                 return .{ .tui = .unadd };
+            } else if (std.mem.eql(u8, sub_command, "rm")) {
+                return .{ .tui = .rm };
+            } else if (std.mem.eql(u8, sub_command, "reset")) {
+                return .{ .tui = .reset };
             } else if (std.mem.eql(u8, sub_command, "commit")) {
                 return .{ .tui = .commit };
             } else if (std.mem.eql(u8, sub_command, "status")) {
@@ -158,6 +164,19 @@ pub const Command = union(enum) {
             errdefer paths.deinit();
             paths.appendSliceAssumeCapacity(extra_args);
             return .{ .cli = .{ .add = .{ .paths = paths } } };
+        } else if (std.mem.eql(u8, sub_command, "unadd")) {
+            if (extra_args.len == 0) {
+                return error.UnaddPathsNotFound;
+            }
+            var paths = try std.ArrayList([]const u8).initCapacity(allocator, extra_args.len);
+            errdefer paths.deinit();
+            paths.appendSliceAssumeCapacity(extra_args);
+            return .{ .cli = .{ .unadd = .{
+                .paths = paths,
+                .opts = .{
+                    .force = map_args.contains("-f"),
+                },
+            } } };
         } else if (std.mem.eql(u8, sub_command, "rm")) {
             if (extra_args.len == 0) {
                 return error.RmPathsNotFound;
@@ -172,19 +191,13 @@ pub const Command = union(enum) {
                     .remove_from_workspace = true,
                 },
             } } };
-        } else if (std.mem.eql(u8, sub_command, "unadd")) {
+        } else if (std.mem.eql(u8, sub_command, "reset")) {
             if (extra_args.len == 0) {
-                return error.UnaddPathsNotFound;
+                return error.ResetPathNotFound;
+            } else if (extra_args.len > 1) {
+                return error.TooManyArgs;
             }
-            var paths = try std.ArrayList([]const u8).initCapacity(allocator, extra_args.len);
-            errdefer paths.deinit();
-            paths.appendSliceAssumeCapacity(extra_args);
-            return .{ .cli = .{ .unadd = .{
-                .paths = paths,
-                .opts = .{
-                    .force = map_args.contains("-f"),
-                },
-            } } };
+            return .{ .cli = .{ .reset = .{ .path = extra_args[0] } } };
         } else if (std.mem.eql(u8, sub_command, "commit")) {
             // if a message is included, it must have a non-null value
             const message_maybe = map_args.get("-m");
@@ -215,6 +228,8 @@ pub const Command = union(enum) {
         } else if (std.mem.eql(u8, sub_command, "restore")) {
             if (extra_args.len == 0) {
                 return error.RestorePathNotFound;
+            } else if (extra_args.len > 1) {
+                return error.TooManyArgs;
             }
             return .{ .cli = .{ .restore = .{ .path = extra_args[0] } } };
         } else if (std.mem.eql(u8, sub_command, "log")) {

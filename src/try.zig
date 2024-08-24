@@ -67,7 +67,7 @@ pub fn main() !void {
         // (they are all missing because we only copied the .git dir)
         var status = try git_repo.status();
         defer status.deinit();
-        for (status.workspace_deleted.items) |path| {
+        for (status.workspace_deleted.keys()) |path| {
             git_repo.restore(path) catch |err| switch (err) {
                 error.FileNotFound, error.ObjectInvalid => try writers.err.print("Failed to restore: {s}\n", .{path}),
                 else => return err,

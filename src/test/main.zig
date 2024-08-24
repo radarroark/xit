@@ -808,25 +808,24 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         }
     }
 
-    // can't add a non-existent file
-    try std.testing.expectEqual(error.FileNotFound, main.xitMain(repo_kind, allocator, &[_][]const u8{ "add", "no-such-file" }, repo_dir, writers));
-
-    // removing files
+    // changing the index
     {
+        // can't add a non-existent file
+        try std.testing.expectEqual(error.FileNotFound, main.xitMain(repo_kind, allocator, &[_][]const u8{ "add", "no-such-file" }, repo_dir, writers));
+
         // can't remove non-existent file
         try std.testing.expectEqual(error.FileNotFound, main.xitMain(repo_kind, allocator, &[_][]const u8{ "rm", "no-such-file" }, repo_dir, writers));
 
-        // can't remove unindexed file
-        {
-            var not_indexed_txt = try repo_dir.createFile("not-indexed.txt", .{});
-            defer {
-                not_indexed_txt.close();
-                repo_dir.deleteFile("not-indexed.txt") catch {};
-            }
-            try not_indexed_txt.writeAll("this isn't indexed");
-
-            try std.testing.expectEqual(error.CannotRemoveUnindexedFile, main.xitMain(repo_kind, allocator, &[_][]const u8{ "rm", "not-indexed.txt" }, repo_dir, writers));
+        // create a new file
+        var new_file_txt = try repo_dir.createFile("new-file.txt", .{});
+        defer {
+            new_file_txt.close();
+            repo_dir.deleteFile("new-file.txt") catch {};
         }
+        try new_file_txt.writeAll("this is a new file");
+
+        // can't remove unindexed file
+        try std.testing.expectEqual(error.CannotRemoveUnindexedFile, main.xitMain(repo_kind, allocator, &[_][]const u8{ "rm", "new-file.txt" }, repo_dir, writers));
 
         // modify a file
         {
@@ -840,8 +839,30 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         // can't remove a file with unstaged changes
         try std.testing.expectEqual(error.CannotRemoveFileWithUnstagedChanges, main.xitMain(repo_kind, allocator, &[_][]const u8{ "rm", "one/two/three.txt" }, repo_dir, writers));
 
-        // can unadd file
+        // add file
+        try main.xitMain(repo_kind, allocator, &[_][]const u8{ "add", "new-file.txt" }, repo_dir, writers);
+
+        // unadd file
         try main.xitMain(repo_kind, allocator, &[_][]const u8{ "unadd", "one/two/three.txt" }, repo_dir, writers);
+
+        // reset will undo index changes
+        {
+            try main.xitMain(repo_kind, allocator, &[_][]const u8{ "reset", "new-file.txt" }, repo_dir, writers);
+            try main.xitMain(repo_kind, allocator, &[_][]const u8{ "reset", "one/two/three.txt" }, repo_dir, writers);
+
+            var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
+            defer repo.deinit();
+            var cursor = try repo.core.latestCursor();
+            const core_cursor = switch (repo_kind) {
+                .git => .{ .core = &repo.core },
+                .xit => .{ .core = &repo.core, .cursor = &cursor },
+            };
+            var index = try idx.Index(repo_kind).init(allocator, core_cursor);
+            defer index.deinit();
+
+            try std.testing.expect(!index.entries.contains("new-file.txt"));
+            try std.testing.expect(index.entries.contains("one/two/three.txt"));
+        }
 
         // stage the changes to the file
         try main.xitMain(repo_kind, allocator, &[_][]const u8{ "add", "one/two/three.txt" }, repo_dir, writers);
@@ -921,33 +942,18 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             defer status.deinit();
 
             // check the untracked entries
-            var untracked_map = std.StringHashMap(void).init(allocator);
-            defer untracked_map.deinit();
-            try std.testing.expectEqual(2, status.untracked.items.len);
-            for (status.untracked.items) |entry| {
-                try untracked_map.put(entry.path, {});
-            }
-            try std.testing.expect(untracked_map.contains("a"));
-            try std.testing.expect(untracked_map.contains("goodbye.txt"));
+            try std.testing.expectEqual(2, status.untracked.count());
+            try std.testing.expect(status.untracked.contains("a"));
+            try std.testing.expect(status.untracked.contains("goodbye.txt"));
 
             // check the workspace_modified entries
-            var workspace_modified_map = std.StringHashMap(void).init(allocator);
-            defer workspace_modified_map.deinit();
-            try std.testing.expectEqual(2, status.workspace_modified.items.len);
-            for (status.workspace_modified.items) |entry| {
-                try workspace_modified_map.put(entry.path, {});
-            }
-            try std.testing.expect(workspace_modified_map.contains("hello.txt"));
-            try std.testing.expect(workspace_modified_map.contains("README"));
+            try std.testing.expectEqual(2, status.workspace_modified.count());
+            try std.testing.expect(status.workspace_modified.contains("hello.txt"));
+            try std.testing.expect(status.workspace_modified.contains("README"));
 
             // check the workspace_deleted entries
-            var workspace_deleted_map = std.StringHashMap(void).init(allocator);
-            defer workspace_deleted_map.deinit();
-            try std.testing.expectEqual(1, status.workspace_deleted.items.len);
-            for (status.workspace_deleted.items) |path| {
-                try workspace_deleted_map.put(path, {});
-            }
-            try std.testing.expect(workspace_deleted_map.contains("src/zig/main.zig"));
+            try std.testing.expectEqual(1, status.workspace_deleted.count());
+            try std.testing.expect(status.workspace_deleted.contains("src/zig/main.zig"));
         }
 
         // get status with libgit
@@ -982,32 +988,17 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             defer status.deinit();
 
             // check the index_added entries
-            var index_added_map = std.StringHashMap(void).init(allocator);
-            defer index_added_map.deinit();
-            try std.testing.expectEqual(1, status.index_added.items.len);
-            for (status.index_added.items) |path| {
-                try index_added_map.put(path, {});
-            }
-            try std.testing.expect(index_added_map.contains("c/d.txt"));
+            try std.testing.expectEqual(1, status.index_added.count());
+            try std.testing.expect(status.index_added.contains("c/d.txt"));
 
             // check the index_modified entries
-            var index_modified_map = std.StringHashMap(void).init(allocator);
-            defer index_modified_map.deinit();
-            try std.testing.expectEqual(1, status.index_modified.items.len);
-            for (status.index_modified.items) |path| {
-                try index_modified_map.put(path, {});
-            }
-            try std.testing.expect(index_modified_map.contains("hello.txt"));
+            try std.testing.expectEqual(1, status.index_modified.count());
+            try std.testing.expect(status.index_modified.contains("hello.txt"));
 
             // check the index_deleted entries
-            var index_deleted_map = std.StringHashMap(void).init(allocator);
-            defer index_deleted_map.deinit();
-            try std.testing.expectEqual(2, status.index_deleted.items.len);
-            for (status.index_deleted.items) |path| {
-                try index_deleted_map.put(path, {});
-            }
-            try std.testing.expect(index_deleted_map.contains("src/zig/main.zig"));
-            try std.testing.expect(index_deleted_map.contains("one/two/three.txt"));
+            try std.testing.expectEqual(2, status.index_deleted.count());
+            try std.testing.expect(status.index_deleted.contains("src/zig/main.zig"));
+            try std.testing.expect(status.index_deleted.contains("one/two/three.txt"));
         }
     }
 
@@ -1020,13 +1011,8 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             var status = try repo.status();
             defer status.deinit();
 
-            var workspace_modified_map = std.StringHashMap(void).init(allocator);
-            defer workspace_modified_map.deinit();
-            try std.testing.expectEqual(2, status.workspace_modified.items.len);
-
-            var index_deleted_map = std.StringHashMap(void).init(allocator);
-            defer index_deleted_map.deinit();
-            try std.testing.expectEqual(2, status.index_deleted.items.len);
+            try std.testing.expectEqual(2, status.workspace_modified.count());
+            try std.testing.expectEqual(2, status.index_deleted.count());
         }
 
         try main.xitMain(repo_kind, allocator, &[_][]const u8{ "restore", "README" }, repo_dir, writers);
@@ -1049,13 +1035,8 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             var status = try repo.status();
             defer status.deinit();
 
-            var workspace_modified_map = std.StringHashMap(void).init(allocator);
-            defer workspace_modified_map.deinit();
-            try std.testing.expectEqual(0, status.workspace_modified.items.len);
-
-            var index_deleted_map = std.StringHashMap(void).init(allocator);
-            defer index_deleted_map.deinit();
-            try std.testing.expectEqual(0, status.index_deleted.items.len);
+            try std.testing.expectEqual(0, status.workspace_modified.count());
+            try std.testing.expectEqual(0, status.index_deleted.count());
         }
     }
 

@@ -254,6 +254,9 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 .rm => {
                     try self.rm(sub_command.rm.paths.items, sub_command.rm.opts);
                 },
+                .reset => {
+                    try self.reset(sub_command.reset.path);
+                },
                 .commit => {
                     _ = try self.commit(null, sub_command.commit.message);
                 },
@@ -261,27 +264,27 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     var stat = try self.status();
                     defer stat.deinit();
 
-                    for (stat.untracked.items) |entry| {
+                    for (stat.untracked.values()) |entry| {
                         try writers.out.print("?? {s}\n", .{entry.path});
                     }
 
-                    for (stat.workspace_modified.items) |entry| {
+                    for (stat.workspace_modified.values()) |entry| {
                         try writers.out.print(" M {s}\n", .{entry.path});
                     }
 
-                    for (stat.workspace_deleted.items) |path| {
+                    for (stat.workspace_deleted.keys()) |path| {
                         try writers.out.print(" D {s}\n", .{path});
                     }
 
-                    for (stat.index_added.items) |path| {
+                    for (stat.index_added.keys()) |path| {
                         try writers.out.print("A  {s}\n", .{path});
                     }
 
-                    for (stat.index_modified.items) |path| {
+                    for (stat.index_modified.keys()) |path| {
                         try writers.out.print("M  {s}\n", .{path});
                     }
 
-                    for (stat.index_deleted.items) |path| {
+                    for (stat.index_deleted.keys()) |path| {
                         try writers.out.print("D  {s}\n", .{path});
                     }
 
@@ -672,6 +675,17 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .paths = paths, .opts = opts } },
                     });
                 },
+            }
+        }
+
+        pub fn reset(self: *Repo(repo_kind), path: []const u8) !void {
+            var stat = try self.status();
+            defer stat.deinit();
+
+            if (stat.index_added.contains(path) or stat.index_modified.contains(path)) {
+                try self.unadd(&.{path}, .{});
+            } else if (stat.index_deleted.contains(path)) {
+                try self.add(&.{path});
             }
         }
 
