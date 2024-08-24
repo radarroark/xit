@@ -606,8 +606,8 @@ pub fn indexDiffersFromWorkspace(comptime repo_kind: rp.RepoKind, entry: Index(r
 pub fn indexDiffersFrom(
     comptime repo_kind: rp.RepoKind,
     core: *rp.Repo(repo_kind).Core,
-    index: *Index(repo_kind),
-    head_tree: *st.HeadTree(repo_kind),
+    index: Index(repo_kind),
+    head_tree: st.HeadTree(repo_kind),
     path: []const u8,
     meta: std.fs.File.Metadata,
 ) !enum { nothing, head, workspace } {

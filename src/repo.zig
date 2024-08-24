@@ -581,7 +581,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         switch (meta.kind()) {
                             .file => {
                                 if (!opts.force) {
-                                    switch (try idx.indexDiffersFrom(repo_kind, &self.core, &index, &head_tree, path, meta)) {
+                                    switch (try idx.indexDiffersFrom(repo_kind, &self.core, index, head_tree, path, meta)) {
                                         .nothing => {},
                                         .head => return error.CannotRemoveFileWithStagedChanges,
                                         .workspace => return error.CannotRemoveFileWithUnstagedChanges,
@@ -624,7 +624,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                                 switch (meta.kind()) {
                                     .file => {
                                         if (!ctx.opts.force) {
-                                            switch (try idx.indexDiffersFrom(repo_kind, ctx.core, &index, &head_tree, path, meta)) {
+                                            switch (try idx.indexDiffersFrom(repo_kind, ctx.core, index, head_tree, path, meta)) {
                                                 .nothing => {},
                                                 .head => return error.CannotRemoveFileWithStagedChanges,
                                                 .workspace => return error.CannotRemoveFileWithUnstagedChanges,
