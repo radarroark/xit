@@ -581,10 +581,13 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         switch (meta.kind()) {
                             .file => {
                                 if (!opts.force) {
-                                    switch (try idx.indexDiffersFrom(repo_kind, &self.core, index, head_tree, path, meta)) {
-                                        .nothing => {},
-                                        .head => return error.CannotRemoveFileWithStagedChanges,
-                                        .workspace => return error.CannotRemoveFileWithUnstagedChanges,
+                                    const differs_from = try idx.indexDiffersFrom(repo_kind, &self.core, index, head_tree, path, meta);
+                                    if (differs_from.head and differs_from.workspace) {
+                                        return error.CannotRemoveFileWithStagedAndUnstagedChanges;
+                                    } else if (differs_from.head) {
+                                        return error.CannotRemoveFileWithStagedChanges;
+                                    } else if (differs_from.workspace) {
+                                        return error.CannotRemoveFileWithUnstagedChanges;
                                     }
                                 }
                                 try index.addOrRemovePath(.{ .core = &self.core, .lock_file_maybe = lock.lock_file }, path, .rm);
@@ -624,10 +627,13 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                                 switch (meta.kind()) {
                                     .file => {
                                         if (!ctx.opts.force) {
-                                            switch (try idx.indexDiffersFrom(repo_kind, ctx.core, index, head_tree, path, meta)) {
-                                                .nothing => {},
-                                                .head => return error.CannotRemoveFileWithStagedChanges,
-                                                .workspace => return error.CannotRemoveFileWithUnstagedChanges,
+                                            const differs_from = try idx.indexDiffersFrom(repo_kind, ctx.core, index, head_tree, path, meta);
+                                            if (differs_from.head and differs_from.workspace) {
+                                                return error.CannotRemoveFileWithStagedAndUnstagedChanges;
+                                            } else if (differs_from.head) {
+                                                return error.CannotRemoveFileWithStagedChanges;
+                                            } else if (differs_from.workspace) {
+                                                return error.CannotRemoveFileWithUnstagedChanges;
                                             }
                                         }
                                         try index.addOrRemovePath(.{ .core = ctx.core, .cursor = cursor }, path, .rm);

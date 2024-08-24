@@ -603,6 +603,11 @@ pub fn indexDiffersFromWorkspace(comptime repo_kind: rp.RepoKind, entry: Index(r
     return false;
 }
 
+pub const DiffersFrom = struct {
+    head: bool,
+    workspace: bool,
+};
+
 pub fn indexDiffersFrom(
     comptime repo_kind: rp.RepoKind,
     core: *rp.Repo(repo_kind).Core,
@@ -610,22 +615,26 @@ pub fn indexDiffersFrom(
     head_tree: st.HeadTree(repo_kind),
     path: []const u8,
     meta: std.fs.File.Metadata,
-) !enum { nothing, head, workspace } {
+) !DiffersFrom {
+    var ret = DiffersFrom{
+        .head = false,
+        .workspace = false,
+    };
     if (index.entries.get(path)) |*index_entries_for_path| {
         if (index_entries_for_path[0]) |index_entry| {
             if (head_tree.entries.get(path)) |head_entry| {
                 if (!index_entry.mode.eql(head_entry.mode) or !std.mem.eql(u8, &index_entry.oid, &head_entry.oid)) {
-                    return .head;
+                    ret.head = true;
                 }
             }
 
             const file = try core.repo_dir.openFile(path, .{ .mode = .read_only });
             defer file.close();
             if (try indexDiffersFromWorkspace(repo_kind, index_entry, file, meta)) {
-                return .workspace;
+                ret.workspace = true;
             }
         }
     }
 
-    return .nothing;
+    return ret;
 }
