@@ -8,6 +8,7 @@ const idx = @import("./index.zig");
 pub const SubCommandKind = enum {
     init,
     add,
+    unadd,
     rm,
     commit,
     status,
@@ -25,6 +26,10 @@ pub const SubCommand = union(SubCommandKind) {
     },
     add: struct {
         paths: std.ArrayList([]const u8),
+    },
+    unadd: struct {
+        paths: std.ArrayList([]const u8),
+        opts: idx.IndexUnaddOptions,
     },
     rm: struct {
         paths: std.ArrayList([]const u8),
@@ -53,6 +58,9 @@ pub const SubCommand = union(SubCommandKind) {
         switch (self.*) {
             .add => {
                 self.add.paths.deinit();
+            },
+            .unadd => {
+                self.unadd.paths.deinit();
             },
             .rm => {
                 self.rm.paths.deinit();
@@ -119,6 +127,8 @@ pub const Command = union(enum) {
                 return .{ .tui = .add };
             } else if (std.mem.eql(u8, sub_command, "rm")) {
                 return .{ .tui = .rm };
+            } else if (std.mem.eql(u8, sub_command, "unadd")) {
+                return .{ .tui = .unadd };
             } else if (std.mem.eql(u8, sub_command, "commit")) {
                 return .{ .tui = .commit };
             } else if (std.mem.eql(u8, sub_command, "status")) {
@@ -156,6 +166,20 @@ pub const Command = union(enum) {
             errdefer paths.deinit();
             paths.appendSliceAssumeCapacity(extra_args);
             return .{ .cli = .{ .rm = .{
+                .paths = paths,
+                .opts = .{
+                    .force = map_args.contains("-f"),
+                    .remove_from_workspace = true,
+                },
+            } } };
+        } else if (std.mem.eql(u8, sub_command, "unadd")) {
+            if (extra_args.len == 0) {
+                return error.UnaddPathsNotFound;
+            }
+            var paths = try std.ArrayList([]const u8).initCapacity(allocator, extra_args.len);
+            errdefer paths.deinit();
+            paths.appendSliceAssumeCapacity(extra_args);
+            return .{ .cli = .{ .unadd = .{
                 .paths = paths,
                 .opts = .{
                     .force = map_args.contains("-f"),

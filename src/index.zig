@@ -11,8 +11,13 @@ const st = @import("./status.zig");
 
 const MAX_READ_BYTES = 1024; // FIXME: this is arbitrary...
 
+pub const IndexUnaddOptions = struct {
+    force: bool = false,
+};
+
 pub const IndexRemoveOptions = struct {
     force: bool = false,
+    remove_from_workspace: bool = true,
 };
 
 pub fn Index(comptime repo_kind: rp.RepoKind) type {

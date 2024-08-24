@@ -840,6 +840,9 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         // can't remove a file with unstaged changes
         try std.testing.expectEqual(error.CannotRemoveFileWithUnstagedChanges, main.xitMain(repo_kind, allocator, &[_][]const u8{ "rm", "one/two/three.txt" }, repo_dir, writers));
 
+        // can unadd file
+        try main.xitMain(repo_kind, allocator, &[_][]const u8{ "unadd", "one/two/three.txt" }, repo_dir, writers);
+
         // stage the changes to the file
         try main.xitMain(repo_kind, allocator, &[_][]const u8{ "add", "one/two/three.txt" }, repo_dir, writers);
 

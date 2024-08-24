@@ -248,6 +248,9 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 .add => {
                     try self.add(sub_command.add.paths.items);
                 },
+                .unadd => {
+                    try self.unadd(sub_command.unadd.paths.items, sub_command.unadd.opts);
+                },
                 .rm => {
                     try self.rm(sub_command.rm.paths.items, sub_command.rm.opts);
                 },
@@ -561,10 +564,15 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             }
         }
 
+        pub fn unadd(self: *Repo(repo_kind), paths: []const []const u8, opts: idx.IndexUnaddOptions) !void {
+            try self.rm(paths, .{
+                .force = opts.force,
+                .remove_from_workspace = false,
+            });
+        }
+
         pub fn rm(self: *Repo(repo_kind), paths: []const []const u8, opts: idx.IndexRemoveOptions) !void {
-            // TODO: add support for the following flags...
-            // -r        remove dir
-            // --cached  only remove from index
+            // TODO: add support for -r (removing dirs)
             switch (repo_kind) {
                 .git => {
                     var lock = try io.LockFile.init(self.allocator, self.core.git_dir, "index");
@@ -584,9 +592,9 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                                     const differs_from = try idx.indexDiffersFrom(repo_kind, &self.core, index, head_tree, path, meta);
                                     if (differs_from.head and differs_from.workspace) {
                                         return error.CannotRemoveFileWithStagedAndUnstagedChanges;
-                                    } else if (differs_from.head) {
+                                    } else if (differs_from.head and opts.remove_from_workspace) {
                                         return error.CannotRemoveFileWithStagedChanges;
-                                    } else if (differs_from.workspace) {
+                                    } else if (differs_from.workspace and opts.remove_from_workspace) {
                                         return error.CannotRemoveFileWithUnstagedChanges;
                                     }
                                 }
@@ -596,11 +604,13 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         }
                     }
 
-                    for (paths) |path| {
-                        const meta = try io.getMetadata(self.core.repo_dir, path);
-                        switch (meta.kind()) {
-                            .file => try self.core.repo_dir.deleteFile(path),
-                            else => return error.UnexpectedPathType,
+                    if (opts.remove_from_workspace) {
+                        for (paths) |path| {
+                            const meta = try io.getMetadata(self.core.repo_dir, path);
+                            switch (meta.kind()) {
+                                .file => try self.core.repo_dir.deleteFile(path),
+                                else => return error.UnexpectedPathType,
+                            }
                         }
                     }
 
@@ -630,9 +640,9 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                                             const differs_from = try idx.indexDiffersFrom(repo_kind, ctx.core, index, head_tree, path, meta);
                                             if (differs_from.head and differs_from.workspace) {
                                                 return error.CannotRemoveFileWithStagedAndUnstagedChanges;
-                                            } else if (differs_from.head) {
+                                            } else if (differs_from.head and ctx.opts.remove_from_workspace) {
                                                 return error.CannotRemoveFileWithStagedChanges;
-                                            } else if (differs_from.workspace) {
+                                            } else if (differs_from.workspace and ctx.opts.remove_from_workspace) {
                                                 return error.CannotRemoveFileWithUnstagedChanges;
                                             }
                                         }
@@ -642,12 +652,14 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                                 }
                             }
 
-                            for (ctx.paths) |path| {
-                                const meta = try io.getMetadata(ctx.core.repo_dir, path);
-                                switch (meta.kind()) {
-                                    .file => try ctx.core.repo_dir.deleteFile(path),
-                                    .directory => return error.CannotDeleteDir,
-                                    else => return error.UnexpectedPathType,
+                            if (ctx.opts.remove_from_workspace) {
+                                for (ctx.paths) |path| {
+                                    const meta = try io.getMetadata(ctx.core.repo_dir, path);
+                                    switch (meta.kind()) {
+                                        .file => try ctx.core.repo_dir.deleteFile(path),
+                                        .directory => return error.CannotDeleteDir,
+                                        else => return error.UnexpectedPathType,
+                                    }
                                 }
                             }
 
