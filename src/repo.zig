@@ -823,25 +823,12 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
         }
 
         pub fn restore(self: *Repo(repo_kind), path: []const u8) !void {
-            switch (repo_kind) {
-                .git => try chk.restore(repo_kind, .{ .core = &self.core }, self.allocator, path),
-                .xit => {
-                    const Ctx = struct {
-                        core: *Repo(repo_kind).Core,
-                        allocator: std.mem.Allocator,
-                        path: []const u8,
-
-                        pub fn run(ctx: @This(), cursor: *xitdb.Cursor(.file)) !void {
-                            try chk.restore(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, ctx.path);
-                        }
-                    };
-                    _ = try self.core.db.rootCursor().writePath(Ctx, &[_]xitdb.PathPart(Ctx){
-                        .{ .array_list_get = .append_copy },
-                        .hash_map_init,
-                        .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .path = path } },
-                    });
-                },
-            }
+            var cursor = try self.core.latestCursor();
+            const core_cursor = switch (repo_kind) {
+                .git => .{ .core = &self.core },
+                .xit => .{ .core = &self.core, .cursor = &cursor },
+            };
+            try chk.restore(repo_kind, core_cursor, self.allocator, path);
         }
 
         pub fn log(self: *Repo(repo_kind), oid_maybe: ?[hash.SHA1_HEX_LEN]u8) !obj.ObjectIterator(repo_kind) {
