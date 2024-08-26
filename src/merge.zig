@@ -463,6 +463,10 @@ fn fileDirConflict(
     }
 }
 
+pub const MergeKind = enum {
+    merge,
+};
+
 pub const MergeInput = union(enum) {
     new: struct {
         source_name: []const u8,
@@ -491,7 +495,8 @@ pub const Merge = struct {
         comptime repo_kind: rp.RepoKind,
         core_cursor: rp.Repo(repo_kind).CoreCursor,
         allocator: std.mem.Allocator,
-        input: MergeInput,
+        merge_kind: MergeKind,
+        merge_input: MergeInput,
     ) !Merge {
         // TODO: exit early if working tree is dirty
 
@@ -508,7 +513,7 @@ pub const Merge = struct {
         var auto_resolved_conflicts = std.StringArrayHashMap(void).init(arena.allocator());
         var conflicts = std.StringArrayHashMap(MergeConflict).init(arena.allocator());
 
-        switch (input) {
+        switch (merge_input) {
             .new => {
                 // make sure there is no stored merge state
                 switch (repo_kind) {
@@ -532,12 +537,14 @@ pub const Merge = struct {
 
                 // we need to return the source name so copy it into a new buffer
                 // so we an ensure it lives as long as the rest of the return struct
-                const source_name = try arena.allocator().alloc(u8, input.new.source_name.len);
-                @memcpy(source_name, input.new.source_name);
+                const source_name = try arena.allocator().alloc(u8, merge_input.new.source_name.len);
+                @memcpy(source_name, merge_input.new.source_name);
 
                 // get the oids for the three-way merge
                 const source_oid = try ref.resolve(repo_kind, core_cursor, source_name) orelse return error.InvalidTarget;
-                const common_oid = try obj.commonAncestor(repo_kind, allocator, core_cursor, &current_oid, &source_oid);
+                const common_oid = switch (merge_kind) {
+                    .merge => try obj.commonAncestor(repo_kind, allocator, core_cursor, &current_oid, &source_oid),
+                };
 
                 // if the common ancestor is the source oid, do nothing
                 if (std.mem.eql(u8, &source_oid, &common_oid)) {
@@ -699,7 +706,9 @@ pub const Merge = struct {
                 }
 
                 // commit the change
-                const parent_oids = &.{ current_oid, source_oid };
+                const parent_oids = switch (merge_kind) {
+                    .merge => &.{ current_oid, source_oid },
+                };
                 const commit_oid = try obj.writeCommit(repo_kind, core_cursor, allocator, parent_oids, commit_message);
 
                 return .{
@@ -769,7 +778,9 @@ pub const Merge = struct {
                 @memcpy(source_name, &source_oid);
 
                 // commit the change
-                const parent_oids = &.{ current_oid, source_oid };
+                const parent_oids = switch (merge_kind) {
+                    .merge => &.{ current_oid, source_oid },
+                };
                 const commit_oid = try obj.writeCommit(repo_kind, core_cursor, allocator, parent_oids, commit_message);
 
                 // clean up the stored merge state

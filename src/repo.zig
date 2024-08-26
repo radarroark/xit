@@ -896,7 +896,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
         pub fn merge(self: *Repo(repo_kind), input: mrg.MergeInput) !mrg.Merge {
             switch (repo_kind) {
-                .git => return try mrg.Merge.init(repo_kind, .{ .core = &self.core }, self.allocator, input),
+                .git => return try mrg.Merge.init(repo_kind, .{ .core = &self.core }, self.allocator, .merge, input),
                 .xit => {
                     const xitdb = @import("xitdb");
 
@@ -908,7 +908,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         result: *mrg.Merge,
 
                         pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor) !void {
-                            ctx.result.* = try mrg.Merge.init(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, ctx.input);
+                            ctx.result.* = try mrg.Merge.init(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, .merge, ctx.input);
                             // no need to make a new transaction if nothing was done
                             if (.nothing == ctx.result.data) {
                                 return error.CancelTransaction;
