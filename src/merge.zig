@@ -465,6 +465,7 @@ fn fileDirConflict(
 
 pub const MergeKind = enum {
     merge,
+    cherry_pick,
 };
 
 pub const MergeInput = union(enum) {
@@ -513,12 +514,17 @@ pub const Merge = struct {
         var auto_resolved_conflicts = std.StringArrayHashMap(void).init(arena.allocator());
         var conflicts = std.StringArrayHashMap(MergeConflict).init(arena.allocator());
 
+        const merge_head_name = switch (merge_kind) {
+            .merge => "MERGE_HEAD",
+            .cherry_pick => "CHERRY_PICK_HEAD",
+        };
+
         switch (merge_input) {
             .new => {
                 // make sure there is no stored merge state
                 switch (repo_kind) {
                     .git => {
-                        if (core_cursor.core.git_dir.openFile("MERGE_HEAD", .{ .mode = .read_only })) |merge_head| {
+                        if (core_cursor.core.git_dir.openFile(merge_head_name, .{ .mode = .read_only })) |merge_head| {
                             defer merge_head.close();
                             return error.UnfinishedMergeAlreadyInProgress;
                         } else |err| switch (err) {
@@ -528,7 +534,7 @@ pub const Merge = struct {
                     },
                     .xit => {
                         if (try core_cursor.cursor.readPath(void, &.{
-                            .{ .hash_map_get = .{ .value = hash.hashBuffer("MERGE_HEAD") } },
+                            .{ .hash_map_get = .{ .value = hash.hashBuffer(merge_head_name) } },
                         })) |_| {
                             return error.UnfinishedMergeAlreadyInProgress;
                         }
@@ -544,6 +550,15 @@ pub const Merge = struct {
                 const source_oid = try ref.resolve(repo_kind, core_cursor, source_name) orelse return error.InvalidTarget;
                 const common_oid = switch (merge_kind) {
                     .merge => try obj.commonAncestor(repo_kind, allocator, core_cursor, &current_oid, &source_oid),
+                    .cherry_pick => blk: {
+                        var object = try obj.Object(repo_kind).init(allocator, core_cursor, source_oid);
+                        defer object.deinit();
+                        const parent_oid = if (object.content.commit.parents.items.len == 1) object.content.commit.parents.items[0] else return error.CommitMustHaveOneParent;
+                        switch (object.content) {
+                            .commit => break :blk parent_oid,
+                            else => return error.NotACommitObject,
+                        }
+                    },
                 };
 
                 // if the common ancestor is the source oid, do nothing
@@ -592,8 +607,18 @@ pub const Merge = struct {
                 }
 
                 // create commit message
-                const commit_message = try std.fmt.allocPrint(allocator, "merge from {s}", .{source_name});
-                defer allocator.free(commit_message);
+                const commit_metadata: obj.CommitMetadata = switch (merge_kind) {
+                    .merge => .{
+                        .message = try std.fmt.allocPrint(arena.allocator(), "merge from {s}", .{source_name}),
+                    },
+                    .cherry_pick => blk: {
+                        const object = try obj.Object(repo_kind).init(arena.allocator(), core_cursor, source_oid);
+                        switch (object.content) {
+                            .commit => break :blk object.content.commit.metadata,
+                            else => return error.NotACommitObject,
+                        }
+                    },
+                };
 
                 switch (repo_kind) {
                     .git => {
@@ -625,13 +650,13 @@ pub const Merge = struct {
 
                         // exit early if there were conflicts
                         if (conflicts.count() > 0) {
-                            const merge_head = try core_cursor.core.git_dir.createFile("MERGE_HEAD", .{ .truncate = true, .lock = .exclusive });
+                            const merge_head = try core_cursor.core.git_dir.createFile(merge_head_name, .{ .truncate = true, .lock = .exclusive });
                             defer merge_head.close();
                             try merge_head.writeAll(&source_oid);
 
                             const merge_msg = try core_cursor.core.git_dir.createFile("MERGE_MSG", .{ .truncate = true, .lock = .exclusive });
                             defer merge_msg.close();
-                            try merge_msg.writeAll(commit_message);
+                            try merge_msg.writeAll(commit_metadata.message);
 
                             return .{
                                 .arena = arena,
@@ -671,14 +696,14 @@ pub const Merge = struct {
                         // exit early if there were conflicts
                         if (conflicts.count() > 0) {
                             var merge_head_cursor = try core_cursor.cursor.writePath(void, &.{
-                                .{ .hash_map_get = .{ .value = hash.hashBuffer("MERGE_HEAD") } },
+                                .{ .hash_map_get = .{ .value = hash.hashBuffer(merge_head_name) } },
                             });
                             try merge_head_cursor.writeBytes(&source_oid, .replace);
 
                             var merge_msg_cursor = try core_cursor.cursor.writePath(void, &.{
                                 .{ .hash_map_get = .{ .value = hash.hashBuffer("MERGE_MSG") } },
                             });
-                            try merge_msg_cursor.writeBytes(commit_message, .replace);
+                            try merge_msg_cursor.writeBytes(commit_metadata.message, .replace);
 
                             return .{
                                 .arena = arena,
@@ -708,8 +733,9 @@ pub const Merge = struct {
                 // commit the change
                 const parent_oids = switch (merge_kind) {
                     .merge => &.{ current_oid, source_oid },
+                    .cherry_pick => &.{common_oid},
                 };
-                const commit_oid = try obj.writeCommit(repo_kind, core_cursor, allocator, parent_oids, commit_message);
+                const commit_oid = try obj.writeCommit(repo_kind, core_cursor, allocator, parent_oids, commit_metadata);
 
                 return .{
                     .arena = arena,
@@ -734,12 +760,12 @@ pub const Merge = struct {
                 }
 
                 var source_oid: [hash.SHA1_HEX_LEN]u8 = undefined;
-                var commit_message: []const u8 = undefined;
+                var commit_metadata = obj.CommitMetadata{};
 
                 // read the stored merge state
                 switch (repo_kind) {
                     .git => {
-                        const merge_head = core_cursor.core.git_dir.openFile("MERGE_HEAD", .{ .mode = .read_only }) catch |err| switch (err) {
+                        const merge_head = core_cursor.core.git_dir.openFile(merge_head_name, .{ .mode = .read_only }) catch |err| switch (err) {
                             error.FileNotFound => return error.MergeHeadNotFound,
                             else => return err,
                         };
@@ -754,11 +780,11 @@ pub const Merge = struct {
                             else => return err,
                         };
                         defer merge_msg.close();
-                        commit_message = try merge_msg.readToEndAlloc(arena.allocator(), MAX_READ_BYTES);
+                        commit_metadata.message = try merge_msg.readToEndAlloc(arena.allocator(), MAX_READ_BYTES);
                     },
                     .xit => {
                         const source_oid_cursor = (try core_cursor.cursor.readPath(void, &.{
-                            .{ .hash_map_get = .{ .value = hash.hashBuffer("MERGE_HEAD") } },
+                            .{ .hash_map_get = .{ .value = hash.hashBuffer(merge_head_name) } },
                         })) orelse return error.MergeHeadNotFound;
                         const source_oid_slice = try source_oid_cursor.readBytes(&source_oid);
                         if (source_oid_slice.len != source_oid.len) {
@@ -768,7 +794,7 @@ pub const Merge = struct {
                         const merge_msg_cursor = (try core_cursor.cursor.readPath(void, &.{
                             .{ .hash_map_get = .{ .value = hash.hashBuffer("MERGE_MSG") } },
                         })) orelse return error.MergeMessageNotFound;
-                        commit_message = try merge_msg_cursor.readBytesAlloc(arena.allocator(), MAX_READ_BYTES);
+                        commit_metadata.message = try merge_msg_cursor.readBytesAlloc(arena.allocator(), MAX_READ_BYTES);
                     },
                 }
 
@@ -780,18 +806,27 @@ pub const Merge = struct {
                 // commit the change
                 const parent_oids = switch (merge_kind) {
                     .merge => &.{ current_oid, source_oid },
+                    .cherry_pick => blk: {
+                        var object = try obj.Object(repo_kind).init(allocator, core_cursor, source_oid);
+                        defer object.deinit();
+                        const parent_oid = if (object.content.commit.parents.items.len == 1) object.content.commit.parents.items[0] else return error.CommitMustHaveOneParent;
+                        switch (object.content) {
+                            .commit => break :blk &.{parent_oid},
+                            else => return error.NotACommitObject,
+                        }
+                    },
                 };
-                const commit_oid = try obj.writeCommit(repo_kind, core_cursor, allocator, parent_oids, commit_message);
+                const commit_oid = try obj.writeCommit(repo_kind, core_cursor, allocator, parent_oids, commit_metadata);
 
                 // clean up the stored merge state
                 switch (repo_kind) {
                     .git => {
-                        try core_cursor.core.git_dir.deleteFile("MERGE_HEAD");
+                        try core_cursor.core.git_dir.deleteFile(merge_head_name);
                         try core_cursor.core.git_dir.deleteFile("MERGE_MSG");
                     },
                     .xit => {
                         _ = try core_cursor.cursor.writePath(void, &.{
-                            .{ .hash_map_remove = hash.hashBuffer("MERGE_HEAD") },
+                            .{ .hash_map_remove = hash.hashBuffer(merge_head_name) },
                         });
                         _ = try core_cursor.cursor.writePath(void, &.{
                             .{ .hash_map_remove = hash.hashBuffer("MERGE_MSG") },

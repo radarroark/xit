@@ -345,7 +345,13 @@ fn addIndexEntries(
     }
 }
 
-fn createCommitContents(allocator: std.mem.Allocator, tree_sha1_hex: [hash.SHA1_HEX_LEN]u8, parent_oids: []const [hash.SHA1_HEX_LEN]u8, message_maybe: ?[]const u8) ![]const u8 {
+pub const CommitMetadata = struct {
+    author: ?[]const u8 = null,
+    committer: ?[]const u8 = null,
+    message: []const u8 = "",
+};
+
+fn createCommitContents(allocator: std.mem.Allocator, tree_sha1_hex: [hash.SHA1_HEX_LEN]u8, parent_oids: []const [hash.SHA1_HEX_LEN]u8, metadata: CommitMetadata) ![]const u8 {
     var metadata_lines = std.ArrayList([]const u8).init(allocator);
     defer {
         for (metadata_lines.items) |line| {
@@ -360,11 +366,12 @@ fn createCommitContents(allocator: std.mem.Allocator, tree_sha1_hex: [hash.SHA1_
         try metadata_lines.append(try std.fmt.allocPrint(allocator, "parent {s}", .{parent_oid}));
     }
 
-    const author = "radar <radar@foo.com> 1512325222 +0000";
+    // TODO: read author and committer from config
+    const author = metadata.author orelse "radar <radar@foo.com> 1512325222 +0000";
+    const committer = metadata.committer orelse author;
     try metadata_lines.append(try std.fmt.allocPrint(allocator, "author {s}", .{author}));
-    try metadata_lines.append(try std.fmt.allocPrint(allocator, "committer {s}", .{author}));
-
-    try metadata_lines.append(try std.fmt.allocPrint(allocator, "\n{s}", .{message_maybe orelse ""}));
+    try metadata_lines.append(try std.fmt.allocPrint(allocator, "committer {s}", .{committer}));
+    try metadata_lines.append(try std.fmt.allocPrint(allocator, "\n{s}", .{metadata.message}));
 
     return try std.mem.join(allocator, "\n", metadata_lines.items);
 }
@@ -374,7 +381,7 @@ pub fn writeCommit(
     core_cursor: rp.Repo(repo_kind).CoreCursor,
     allocator: std.mem.Allocator,
     parent_oids_maybe: ?[]const [hash.SHA1_HEX_LEN]u8,
-    message_maybe: ?[]const u8,
+    metadata: CommitMetadata,
 ) ![hash.SHA1_HEX_LEN]u8 {
     var commit_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
     const parent_oids = if (parent_oids_maybe) |oids| oids else blk: {
@@ -403,7 +410,7 @@ pub fn writeCommit(
             const tree_sha1_hex = std.fmt.bytesToHex(tree_sha1_bytes_buffer, .lower);
 
             // create commit contents
-            const commit_contents = try createCommitContents(allocator, tree_sha1_hex, parent_oids, message_maybe);
+            const commit_contents = try createCommitContents(allocator, tree_sha1_hex, parent_oids, metadata);
             defer allocator.free(commit_contents);
 
             // create commit
@@ -460,7 +467,7 @@ pub fn writeCommit(
             const tree_sha1_hex = std.fmt.bytesToHex(tree_sha1_bytes_buffer, .lower);
 
             // create commit contents
-            const commit_contents = try createCommitContents(allocator, tree_sha1_hex, parent_oids, message_maybe);
+            const commit_contents = try createCommitContents(allocator, tree_sha1_hex, parent_oids, metadata);
             defer allocator.free(commit_contents);
 
             // create commit
@@ -641,9 +648,7 @@ pub const ObjectContent = union(ObjectKind) {
     commit: struct {
         tree: [hash.SHA1_HEX_LEN]u8,
         parents: std.ArrayList([hash.SHA1_HEX_LEN]u8),
-        author: ?[]const u8,
-        committer: ?[]const u8,
-        message: []const u8,
+        metadata: CommitMetadata,
     },
 };
 
@@ -717,9 +722,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                         .commit = .{
                             .tree = tree_hash_slice[0..hash.SHA1_HEX_LEN].*,
                             .parents = std.ArrayList([hash.SHA1_HEX_LEN]u8).init(arena.allocator()),
-                            .author = null,
-                            .committer = null,
-                            .message = undefined,
+                            .metadata = .{},
                         },
                     };
 
@@ -742,15 +745,15 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                                 }
                                 try content.commit.parents.append(value[0..hash.SHA1_HEX_LEN].*);
                             } else if (std.mem.eql(u8, "author", key)) {
-                                content.commit.author = value;
+                                content.commit.metadata.author = value;
                             } else if (std.mem.eql(u8, "committer", key)) {
-                                content.commit.committer = value;
+                                content.commit.metadata.committer = value;
                             }
                         }
                     }
 
                     // read the message
-                    content.commit.message = try obj_rdr.reader.unbuffered_reader.readAllAlloc(arena.allocator(), MAX_READ_BYTES);
+                    content.commit.metadata.message = try obj_rdr.reader.unbuffered_reader.readAllAlloc(arena.allocator(), MAX_READ_BYTES);
 
                     return Object(repo_kind){
                         .allocator = allocator,

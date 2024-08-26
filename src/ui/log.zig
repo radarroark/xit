@@ -45,7 +45,7 @@ pub fn LogCommitList(comptime Widget: type, comptime repo_kind: rp.RepoKind) typ
             var inner_box = try wgt.Box(Widget).init(allocator, null, .vert);
             errdefer inner_box.deinit();
             for (commits.items) |commit_object| {
-                const line = std.mem.sliceTo(commit_object.content.commit.message, '\n');
+                const line = std.mem.sliceTo(commit_object.content.commit.metadata.message, '\n');
                 var text_box = try wgt.TextBox(Widget).init(allocator, line, .hidden);
                 errdefer text_box.deinit();
                 text_box.getFocus().focusable = true;

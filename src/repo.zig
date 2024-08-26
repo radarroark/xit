@@ -264,7 +264,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     try self.reset(sub_command.reset.path);
                 },
                 .commit => {
-                    _ = try self.commit(null, sub_command.commit.message);
+                    _ = try self.commit(null, sub_command.commit);
                 },
                 .status => {
                     var stat = try self.status();
@@ -435,11 +435,11 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     while (try commit_iter.next()) |commit_object| {
                         defer commit_object.deinit();
                         try writers.out.print("commit {s}\n", .{commit_object.oid});
-                        if (commit_object.content.commit.author) |author| {
+                        if (commit_object.content.commit.metadata.author) |author| {
                             try writers.out.print("Author {s}\n", .{author});
                         }
                         try writers.out.print("\n", .{});
-                        var split_iter = std.mem.split(u8, commit_object.content.commit.message, "\n");
+                        var split_iter = std.mem.split(u8, commit_object.content.commit.metadata.message, "\n");
                         while (split_iter.next()) |line| {
                             try writers.out.print("    {s}\n", .{line});
                         }
@@ -503,9 +503,9 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             }
         }
 
-        pub fn commit(self: *Repo(repo_kind), parent_oids_maybe: ?[]const [hash.SHA1_HEX_LEN]u8, message_maybe: ?[]const u8) ![hash.SHA1_HEX_LEN]u8 {
+        pub fn commit(self: *Repo(repo_kind), parent_oids_maybe: ?[]const [hash.SHA1_HEX_LEN]u8, metadata: obj.CommitMetadata) ![hash.SHA1_HEX_LEN]u8 {
             switch (repo_kind) {
-                .git => return try obj.writeCommit(repo_kind, .{ .core = &self.core }, self.allocator, parent_oids_maybe, message_maybe),
+                .git => return try obj.writeCommit(repo_kind, .{ .core = &self.core }, self.allocator, parent_oids_maybe, metadata),
                 .xit => {
                     const xitdb = @import("xitdb");
                     const pch = @import("./patch.zig");
@@ -515,18 +515,18 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         core: *Repo(repo_kind).Core,
                         allocator: std.mem.Allocator,
                         parent_oids_maybe: ?[]const [hash.SHA1_HEX_LEN]u8,
-                        message_maybe: ?[]const u8,
+                        metadata: obj.CommitMetadata,
                         result: *[hash.SHA1_HEX_LEN]u8,
 
                         pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor) !void {
                             try pch.writePatch(.{ .core = ctx.core, .cursor = cursor }, ctx.allocator);
-                            ctx.result.* = try obj.writeCommit(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, ctx.parent_oids_maybe, ctx.message_maybe);
+                            ctx.result.* = try obj.writeCommit(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, ctx.parent_oids_maybe, ctx.metadata);
                         }
                     };
                     _ = try self.core.db.rootCursor().writePath(Ctx, &.{
                         .{ .array_list_get = .append_copy },
                         .hash_map_init,
-                        .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .parent_oids_maybe = parent_oids_maybe, .message_maybe = message_maybe, .result = &result } },
+                        .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .parent_oids_maybe = parent_oids_maybe, .metadata = metadata, .result = &result } },
                     });
                     return result;
                 },

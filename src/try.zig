@@ -101,7 +101,7 @@ pub fn main() !void {
 
         for (0..commits.items.len) |i| {
             const commit_object = commits.items[commits.items.len - i - 1];
-            try writers.out.print("Creating commit: {s}", .{commit_object.content.commit.message});
+            try writers.out.print("Creating commit: {s}", .{commit_object.content.commit.metadata.message});
 
             var switch_result = try git_repo.switch_head(&commit_object.oid, .{ .force = true });
             defer switch_result.deinit();
@@ -110,7 +110,7 @@ pub fn main() !void {
             }
 
             try xit_repo.add(&.{ "build.zig", "build.zig.zon", "src" });
-            _ = try xit_repo.commit(null, commit_object.content.commit.message);
+            _ = try xit_repo.commit(null, commit_object.content.commit.metadata);
         }
 
         // make changes so we see things in the status UI

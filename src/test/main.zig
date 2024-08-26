@@ -1053,7 +1053,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         // read commit
         var commit_object = try obj.Object(repo_kind).init(allocator, core_cursor, commit2);
         defer commit_object.deinit();
-        try std.testing.expectEqualStrings("second commit", commit_object.content.commit.message);
+        try std.testing.expectEqualStrings("second commit", commit_object.content.commit.metadata.message);
 
         // read tree
         var tree_object = try obj.Object(repo_kind).init(allocator, core_cursor, commit_object.content.commit.tree);

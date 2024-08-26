@@ -4,6 +4,7 @@ const std = @import("std");
 const df = @import("./diff.zig");
 const mrg = @import("./merge.zig");
 const idx = @import("./index.zig");
+const obj = @import("./object.zig");
 
 pub const SubCommandKind = enum {
     init,
@@ -39,9 +40,7 @@ pub const SubCommand = union(SubCommandKind) {
     reset: struct {
         path: []const u8,
     },
-    commit: struct {
-        message: ?[]const u8,
-    },
+    commit: obj.CommitMetadata,
     status,
     diff: struct {
         diff_opts: df.BasicDiffOptions,
@@ -200,8 +199,7 @@ pub const Command = union(enum) {
             return .{ .cli = .{ .reset = .{ .path = extra_args[0] } } };
         } else if (std.mem.eql(u8, sub_command, "commit")) {
             // if a message is included, it must have a non-null value
-            const message_maybe = map_args.get("-m");
-            const message = if (message_maybe == null) null else (message_maybe.? orelse return error.CommitMessageNotFound);
+            const message = if (map_args.get("-m")) |msg| (msg orelse return error.CommitMessageNotFound) else "";
             return .{ .cli = .{ .commit = .{ .message = message } } };
         } else if (std.mem.eql(u8, sub_command, "status")) {
             return .{ .cli = .{ .status = {} } };
@@ -308,6 +306,6 @@ test "command" {
         var command = try Command.init(allocator, &.{ "commit", "-m", "let there be light" });
         defer command.deinit();
         try std.testing.expect(command == .cli and command.cli.? == .commit);
-        try std.testing.expect(std.mem.eql(u8, "let there be light", command.cli.?.commit.message.?));
+        try std.testing.expect(std.mem.eql(u8, "let there be light", command.cli.?.commit.message));
     }
 }
