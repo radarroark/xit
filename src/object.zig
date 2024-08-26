@@ -167,7 +167,7 @@ pub fn writeBlob(
                         }
                         try writer.finish();
 
-                        _ = try ctx.core_cursor.cursor.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+                        _ = try ctx.core_cursor.cursor.writePath(void, &.{
                             .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
                             .hash_map_init,
                             .{ .hash_map_get = .{ .value = try hash.hexToHash(&ctx.sha1_hex) } },
@@ -176,7 +176,7 @@ pub fn writeBlob(
                     }
                 }
             };
-            _ = try core_cursor.cursor.writePath(Ctx, &[_]xitdb.Database(.file, hash.Hash).PathPart(Ctx){
+            _ = try core_cursor.cursor.writePath(Ctx, &.{
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("file-values") } },
                 .hash_map_init,
                 .{ .hash_map_get = .{ .value = file_hash } },
@@ -272,18 +272,18 @@ fn writeTree(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).Co
                     if (cursor.pointer() != null) {
                         return;
                     }
-                    var tree_cursor = try ctx.cursor.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+                    var tree_cursor = try ctx.cursor.writePath(void, &.{
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("object-values") } },
                         .hash_map_init,
                         .{ .hash_map_get = .{ .value = hash.bytesToHash(ctx.tree_sha1_bytes) } },
                     });
                     try tree_cursor.writeBytes(ctx.tree_bytes, .once);
-                    _ = try cursor.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+                    _ = try cursor.writePath(void, &.{
                         .{ .write = .{ .slot = tree_cursor.slot_ptr.slot } },
                     });
                 }
             };
-            _ = try core_cursor.cursor.writePath(Ctx, &[_]xitdb.Database(.file, hash.Hash).PathPart(Ctx){
+            _ = try core_cursor.cursor.writePath(Ctx, &.{
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
                 .hash_map_init,
                 .{ .hash_map_get = .{ .value = hash.bytesToHash(sha1_bytes_buffer) } },
@@ -310,7 +310,7 @@ fn addIndexEntries(
     entries: [][]const u8,
 ) !void {
     for (entries) |name| {
-        const path = try io.joinPath(allocator, &[_][]const u8{ prefix, name });
+        const path = try io.joinPath(allocator, &.{ prefix, name });
         defer allocator.free(path);
         if (index.entries.get(path)) |*entries_for_path| {
             const entry = entries_for_path[0] orelse return error.NullEntry;
@@ -379,7 +379,7 @@ pub fn writeCommit(
     var commit_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
     const parent_oids = if (parent_oids_maybe) |oids| oids else blk: {
         const head_oid_maybe = try ref.readHeadMaybe(repo_kind, core_cursor);
-        break :blk if (head_oid_maybe) |head_oid| &[_][hash.SHA1_HEX_LEN]u8{head_oid} else &[_][hash.SHA1_HEX_LEN]u8{};
+        break :blk if (head_oid_maybe) |head_oid| &.{head_oid} else &.{};
     };
 
     // read index
@@ -446,11 +446,9 @@ pub fn writeCommit(
             try std.fs.rename(commit_hash_prefix_dir, commit_comp_tmp_file_name, commit_hash_prefix_dir, commit_hash_suffix);
 
             // write commit id to HEAD
-            try ref.updateRecur(repo_kind, core_cursor, allocator, &[_][]const u8{"HEAD"}, &commit_sha1_hex);
+            try ref.updateRecur(repo_kind, core_cursor, allocator, &.{"HEAD"}, &commit_sha1_hex);
         },
         .xit => {
-            const xitdb = @import("xitdb");
-
             // create tree and add index entries
             var tree = Tree.init(allocator);
             defer tree.deinit();
@@ -474,7 +472,7 @@ pub fn writeCommit(
             const commit_sha1_hex = std.fmt.bytesToHex(commit_sha1_bytes_buffer, .lower);
 
             // write commit content
-            var content_cursor = try core_cursor.cursor.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+            var content_cursor = try core_cursor.cursor.writePath(void, &.{
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("object-values") } },
                 .hash_map_init,
                 .{ .hash_map_get = .{ .value = hash.bytesToHash(&commit_sha1_bytes_buffer) } },
@@ -482,7 +480,7 @@ pub fn writeCommit(
             try content_cursor.writeBytes(commit, .once);
 
             // write commit
-            _ = try core_cursor.cursor.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+            _ = try core_cursor.cursor.writePath(void, &.{
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
                 .hash_map_init,
                 .{ .hash_map_get = .{ .value = hash.bytesToHash(&commit_sha1_bytes_buffer) } },
@@ -490,7 +488,7 @@ pub fn writeCommit(
             });
 
             // write commit id to HEAD
-            try ref.updateRecur(repo_kind, core_cursor, allocator, &[_][]const u8{"HEAD"}, &commit_sha1_hex);
+            try ref.updateRecur(repo_kind, core_cursor, allocator, &.{"HEAD"}, &commit_sha1_hex);
         },
     }
 
@@ -557,7 +555,7 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
                 },
                 .xit => {
                     const xitdb = @import("xitdb");
-                    if (try core_cursor.cursor.readPath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+                    if (try core_cursor.cursor.readPath(void, &.{
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
                         .{ .hash_map_get = .{ .value = try hash.hexToHash(&oid) } },
                     })) |cursor| {

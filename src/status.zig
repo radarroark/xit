@@ -206,7 +206,7 @@ fn addEntries(
                 const subpath = if (std.mem.eql(u8, path, "."))
                     try std.fmt.allocPrint(allocator, "{s}", .{entry.name})
                 else
-                    try io.joinPath(allocator, &[_][]const u8{ path, entry.name });
+                    try io.joinPath(allocator, &.{ path, entry.name });
 
                 var grandchild_untracked = std.StringArrayHashMap(Status(repo_kind).Entry).init(allocator);
                 defer grandchild_untracked.deinit();
@@ -272,7 +272,7 @@ pub fn HeadTree(comptime repo_kind: rp.RepoKind) type {
                     var iter = object.content.tree.entries.iterator();
                     while (iter.next()) |entry| {
                         const name = entry.key_ptr.*;
-                        const path = try io.joinPath(self.arena.allocator(), &[_][]const u8{ prefix, name });
+                        const path = try io.joinPath(self.arena.allocator(), &.{ prefix, name });
                         if (obj.isTree(entry.value_ptr.*)) {
                             const oid_hex = std.fmt.bytesToHex(entry.value_ptr.*.oid[0..hash.SHA1_BYTES_LEN], .lower);
                             try self.read(core_cursor, path, oid_hex);

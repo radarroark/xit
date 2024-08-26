@@ -61,7 +61,7 @@ pub fn objectToFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_k
 
             // update each entry recursively
             for (tree_object.content.tree.entries.keys(), tree_object.content.tree.entries.values()) |sub_path, entry| {
-                const new_path = try io.joinPath(allocator, &[_][]const u8{ path, sub_path });
+                const new_path = try io.joinPath(allocator, &.{ path, sub_path });
                 defer allocator.free(new_path);
                 try objectToFile(repo_kind, core_cursor, allocator, new_path, entry);
             }
@@ -168,7 +168,7 @@ fn untrackedFile(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
             defer dir.close();
             var iter = dir.iterate();
             while (try iter.next()) |dir_entry| {
-                const subpath = try io.joinPath(allocator, &[_][]const u8{ path, dir_entry.name });
+                const subpath = try io.joinPath(allocator, &.{ path, dir_entry.name });
                 defer allocator.free(subpath);
                 if (try untrackedFile(repo_kind, allocator, repo_dir, subpath, index)) {
                     return true;

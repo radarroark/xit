@@ -38,7 +38,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 db: xitdb.Database(.file, hash.Hash),
 
                 pub fn latestCursor(self: *@This()) !xitdb.Database(.file, hash.Hash).Cursor {
-                    return (try self.db.rootCursor().readPath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+                    return (try self.db.rootCursor().readPath(void, &.{
                         .{ .array_list_get = .{ .index = -1 } },
                     })) orelse return error.DatabaseEmpty;
                 }
@@ -213,7 +213,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                             try ref.writeHead(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, "master", null);
                         }
                     };
-                    _ = try self.core.db.rootCursor().writePath(Ctx, &[_]xitdb.Database(.file, hash.Hash).PathPart(Ctx){
+                    _ = try self.core.db.rootCursor().writePath(Ctx, &.{
                         .{ .array_list_get = .append_copy },
                         .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator } },
@@ -523,7 +523,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                             ctx.result.* = try obj.writeCommit(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, ctx.parent_oids_maybe, ctx.message_maybe);
                         }
                     };
-                    _ = try self.core.db.rootCursor().writePath(Ctx, &[_]xitdb.Database(.file, hash.Hash).PathPart(Ctx){
+                    _ = try self.core.db.rootCursor().writePath(Ctx, &.{
                         .{ .array_list_get = .append_copy },
                         .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .parent_oids_maybe = parent_oids_maybe, .message_maybe = message_maybe, .result = &result } },
@@ -569,7 +569,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                             try index.write(ctx.allocator, .{ .core = ctx.core, .cursor = cursor });
                         }
                     };
-                    _ = try self.core.db.rootCursor().writePath(Ctx, &[_]xitdb.Database(.file, hash.Hash).PathPart(Ctx){
+                    _ = try self.core.db.rootCursor().writePath(Ctx, &.{
                         .{ .array_list_get = .append_copy },
                         .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .paths = paths } },
@@ -682,7 +682,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                             try index.write(ctx.allocator, .{ .core = ctx.core, .cursor = cursor });
                         }
                     };
-                    _ = try self.core.db.rootCursor().writePath(Ctx, &[_]xitdb.Database(.file, hash.Hash).PathPart(Ctx){
+                    _ = try self.core.db.rootCursor().writePath(Ctx, &.{
                         .{ .array_list_get = .append_copy },
                         .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .paths = paths, .opts = opts } },
@@ -812,7 +812,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                             try bch.create(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, ctx.name);
                         }
                     };
-                    _ = try self.core.db.rootCursor().writePath(Ctx, &[_]xitdb.Database(.file, hash.Hash).PathPart(Ctx){
+                    _ = try self.core.db.rootCursor().writePath(Ctx, &.{
                         .{ .array_list_get = .append_copy },
                         .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .name = name } },
@@ -836,7 +836,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                             try bch.delete(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, ctx.name);
                         }
                     };
-                    _ = try self.core.db.rootCursor().writePath(Ctx, &[_]xitdb.Database(.file, hash.Hash).PathPart(Ctx){
+                    _ = try self.core.db.rootCursor().writePath(Ctx, &.{
                         .{ .array_list_get = .append_copy },
                         .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .name = name } },
@@ -863,7 +863,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                             ctx.result.* = try chk.Switch.init(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, ctx.target, ctx.options);
                         }
                     };
-                    _ = try self.core.db.rootCursor().writePath(Ctx, &[_]xitdb.Database(.file, hash.Hash).PathPart(Ctx){
+                    _ = try self.core.db.rootCursor().writePath(Ctx, &.{
                         .{ .array_list_get = .append_copy },
                         .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .target = target, .options = options, .result = &result } },
@@ -915,7 +915,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                             }
                         }
                     };
-                    _ = self.core.db.rootCursor().writePath(Ctx, &[_]xitdb.Database(.file, hash.Hash).PathPart(Ctx){
+                    _ = self.core.db.rootCursor().writePath(Ctx, &.{
                         .{ .array_list_get = .append_copy },
                         .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .input = input, .result = &result } },

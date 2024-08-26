@@ -142,9 +142,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     _ = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
                 },
                 .xit => {
-                    const xitdb = @import("xitdb");
-
-                    if (try core_cursor.cursor.readPath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+                    if (try core_cursor.cursor.readPath(void, &.{
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("index") } },
                     })) |index_cursor| {
                         var iter = try index_cursor.iter();
@@ -273,7 +271,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                         const subpath = if (std.mem.eql(u8, path, "."))
                             try std.fmt.allocPrint(self.arena.allocator(), "{s}", .{entry.name})
                         else
-                            try io.joinPath(self.arena.allocator(), &[_][]const u8{ path, entry.name });
+                            try io.joinPath(self.arena.allocator(), &.{ path, entry.name });
                         try self.addPath(core_cursor, subpath);
                     }
                 },
@@ -512,7 +510,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                 defer ctx.allocator.free(path);
 
                                 if (!ctx.index.entries.contains(path)) {
-                                    _ = try cursor.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+                                    _ = try cursor.writePath(void, &.{
                                         .{ .hash_map_remove = hash.hashBuffer(path) },
                                     });
                                 }
@@ -541,7 +539,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                 }
 
                                 const path_hash = hash.hashBuffer(path);
-                                if (try cursor.readPath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+                                if (try cursor.readPath(void, &.{
                                     .{ .hash_map_get = .{ .value = path_hash } },
                                 })) |existing_entry_cursor| {
                                     const existing_entry = try existing_entry_cursor.readBytesAlloc(ctx.allocator, MAX_READ_BYTES);
@@ -551,31 +549,31 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                     }
                                 }
 
-                                var path_cursor = try ctx.core_cursor.cursor.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+                                var path_cursor = try ctx.core_cursor.cursor.writePath(void, &.{
                                     .{ .hash_map_get = .{ .value = hash.hashBuffer("path-set") } },
                                     .hash_map_init,
                                     .{ .hash_map_get = .{ .key = path_hash } },
                                 });
                                 try path_cursor.writeBytes(path, .once);
-                                _ = try cursor.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+                                _ = try cursor.writePath(void, &.{
                                     .{ .hash_map_get = .{ .key = path_hash } },
                                     .{ .write = .{ .slot = path_cursor.slot_ptr.slot } },
                                 });
 
-                                var entry_buffer_cursor = try ctx.core_cursor.cursor.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+                                var entry_buffer_cursor = try ctx.core_cursor.cursor.writePath(void, &.{
                                     .{ .hash_map_get = .{ .value = hash.hashBuffer("entry-buffer-set") } },
                                     .hash_map_init,
                                     .{ .hash_map_get = .{ .key = hash.hashBuffer(entry_buffer.items) } },
                                 });
                                 try entry_buffer_cursor.writeBytes(entry_buffer.items, .once);
-                                _ = try cursor.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+                                _ = try cursor.writePath(void, &.{
                                     .{ .hash_map_get = .{ .value = path_hash } },
                                     .{ .write = .{ .slot = entry_buffer_cursor.slot_ptr.slot } },
                                 });
                             }
                         }
                     };
-                    _ = try core_cursor.cursor.writePath(Ctx, &[_]xitdb.Database(.file, hash.Hash).PathPart(Ctx){
+                    _ = try core_cursor.cursor.writePath(Ctx, &.{
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("index") } },
                         .hash_map_init,
                         .{ .ctx = Ctx{ .core_cursor = core_cursor, .allocator = allocator, .index = self } },

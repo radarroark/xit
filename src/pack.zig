@@ -75,7 +75,7 @@ fn searchPackIndex(idx_file: std.fs.File, oid_bytes: [hash.SHA1_BYTES_LEN]u8) !?
     const reader = idx_file.reader();
 
     const header = try reader.readBytesNoEof(4);
-    const version = if (!std.mem.eql(u8, &[_]u8{ 255, 116, 79, 99 }, &header)) 1 else try reader.readInt(u32, .big);
+    const version = if (!std.mem.eql(u8, &.{ 255, 116, 79, 99 }, &header)) 1 else try reader.readInt(u32, .big);
     if (version != 2) {
         return error.NotImplemented;
     }

@@ -38,7 +38,7 @@ fn createPatchEntries(
 
     // get path slot
     const path_hash = hash.hashBuffer(line_iter_pair.path);
-    var path_cursor = try root_cursor.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+    var path_cursor = try root_cursor.writePath(void, &.{
         .{ .hash_map_get = .{ .value = hash.hashBuffer("path-set") } },
         .hash_map_init,
         .{ .hash_map_get = .{ .key = path_hash } },
@@ -47,13 +47,13 @@ fn createPatchEntries(
     const path_slot = path_cursor.slot_ptr.slot;
 
     // init node list
-    _ = try branch_cursor.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+    _ = try branch_cursor.writePath(void, &.{
         .{ .hash_map_get = .{ .value = hash.hashBuffer("path->node-id-list") } },
         .hash_map_init,
         .{ .hash_map_get = .{ .key = path_hash } },
         .{ .write = .{ .slot = path_slot } },
     });
-    const node_list_maybe = try branch_cursor.readPath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+    const node_list_maybe = try branch_cursor.readPath(void, &.{
         .{ .hash_map_get = .{ .value = hash.hashBuffer("path->node-id-list") } },
         .{ .hash_map_get = .{ .value = path_hash } },
     });
@@ -71,7 +71,7 @@ fn createPatchEntries(
         switch (edit) {
             .eql => {
                 const node_list = node_list_maybe orelse return error.NodeListNotFound;
-                const node_id_cursor = (try node_list.readPath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+                const node_id_cursor = (try node_list.readPath(void, &.{
                     .{ .array_list_get = .{ .index = edit.eql.old_line.num - 1 } },
                 })) orelse return error.ExpectedNode;
 
@@ -116,7 +116,7 @@ fn createPatchEntries(
                 try buffer.writer().writeInt(u8, @intFromEnum(ChangeKind.delete_node), .big);
 
                 const node_list = node_list_maybe orelse return error.NodeListNotFound;
-                const node_id_cursor = (try node_list.readPath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+                const node_id_cursor = (try node_list.readPath(void, &.{
                     .{ .array_list_get = .{ .index = edit.del.old_line.num - 1 } },
                 })) orelse return error.ExpectedNode;
 
@@ -178,7 +178,7 @@ fn writePatchForFile(
     const patch_hash = try patchHash(root_cursor, branch_cursor, allocator, line_iter_pair);
 
     // exit early if patch already exists
-    if (try root_cursor.readPath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+    if (try root_cursor.readPath(void, &.{
         .{ .hash_map_get = .{ .value = hash.hashBuffer("patch-id->change-list") } },
         .{ .hash_map_get = .{ .key = patch_hash } },
     })) |_| {
@@ -186,13 +186,13 @@ fn writePatchForFile(
     }
 
     // init change list
-    var change_list = try root_cursor.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+    var change_list = try root_cursor.writePath(void, &.{
         .{ .hash_map_get = .{ .value = hash.hashBuffer("patch-id->change-list") } },
         .hash_map_init,
         .{ .hash_map_get = .{ .key = patch_hash } },
         .array_list_init,
     });
-    var change_content_list = try root_cursor.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+    var change_content_list = try root_cursor.writePath(void, &.{
         .{ .hash_map_get = .{ .value = hash.hashBuffer("patch-id->change-list") } },
         .hash_map_init,
         .{ .hash_map_get = .{ .value = patch_hash } },
@@ -211,14 +211,14 @@ fn writePatchForFile(
     try createPatchEntries(root_cursor, branch_cursor, allocator, &arena, line_iter_pair, &patch_entries, &patch_content_entries, patch_hash);
 
     for (patch_entries.items) |patch_entry| {
-        _ = try change_list.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+        _ = try change_list.writePath(void, &.{
             .{ .array_list_get = .append },
             .{ .write = .{ .bytes = patch_entry } },
         });
     }
 
     for (patch_content_entries.items) |patch_content_entry| {
-        _ = try change_content_list.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+        _ = try change_content_list.writePath(void, &.{
             .{ .array_list_get = .append },
             .{ .write = .{ .bytes = patch_content_entry } },
         });
@@ -234,14 +234,14 @@ fn applyPatchForFile(
     patch_hash: hash.Hash,
     path: []const u8,
 ) !void {
-    var change_list = (try root_cursor.readPath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+    var change_list = (try root_cursor.readPath(void, &.{
         .{ .hash_map_get = .{ .value = hash.hashBuffer("patch-id->change-list") } },
         .{ .hash_map_get = .{ .key = patch_hash } },
     })) orelse return error.PatchNotFound;
 
     // get path slot
     const path_hash = hash.hashBuffer(path);
-    var path_cursor = try root_cursor.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+    var path_cursor = try root_cursor.writePath(void, &.{
         .{ .hash_map_get = .{ .value = hash.hashBuffer("path-set") } },
         .hash_map_init,
         .{ .hash_map_get = .{ .key = path_hash } },
@@ -250,13 +250,13 @@ fn applyPatchForFile(
     const path_slot = path_cursor.slot_ptr.slot;
 
     // init parent->children node map
-    _ = try branch_cursor.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+    _ = try branch_cursor.writePath(void, &.{
         .{ .hash_map_get = .{ .value = hash.hashBuffer("path->parent->children") } },
         .hash_map_init,
         .{ .hash_map_get = .{ .key = path_hash } },
         .{ .write = .{ .slot = path_slot } },
     });
-    var parent_to_children = try branch_cursor.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+    var parent_to_children = try branch_cursor.writePath(void, &.{
         .{ .hash_map_get = .{ .value = hash.hashBuffer("path->parent->children") } },
         .hash_map_init,
         .{ .hash_map_get = .{ .value = path_hash } },
@@ -264,13 +264,13 @@ fn applyPatchForFile(
     });
 
     // init child->parent node map
-    _ = try branch_cursor.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+    _ = try branch_cursor.writePath(void, &.{
         .{ .hash_map_get = .{ .value = hash.hashBuffer("path->child->parent") } },
         .hash_map_init,
         .{ .hash_map_get = .{ .key = path_hash } },
         .{ .write = .{ .slot = path_slot } },
     });
-    var child_to_parent = try branch_cursor.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+    var child_to_parent = try branch_cursor.writePath(void, &.{
         .{ .hash_map_get = .{ .value = hash.hashBuffer("path->child->parent") } },
         .hash_map_init,
         .{ .hash_map_get = .{ .value = path_hash } },
@@ -298,27 +298,27 @@ fn applyPatchForFile(
                 const parent_node_id_hash = hash.hashBuffer(&parent_node_id_bytes);
 
                 // if child has an existing parent, remove it
-                if (try child_to_parent.readPath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+                if (try child_to_parent.readPath(void, &.{
                     .{ .hash_map_get = .{ .value = node_id_hash } },
                 })) |*existing_parent_cursor| {
                     const existing_parent_node_id_bytes = try existing_parent_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
                     defer allocator.free(existing_parent_node_id_bytes);
                     const existing_parent_node_id_hash = hash.hashBuffer(existing_parent_node_id_bytes);
-                    _ = try parent_to_children.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+                    _ = try parent_to_children.writePath(void, &.{
                         .{ .hash_map_get = .{ .value = existing_parent_node_id_hash } },
                         .hash_map_init,
                         .{ .hash_map_remove = node_id_hash },
                     });
                 }
 
-                _ = try parent_to_children.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+                _ = try parent_to_children.writePath(void, &.{
                     .{ .hash_map_get = .{ .value = parent_node_id_hash } },
                     .hash_map_init,
                     .{ .hash_map_get = .{ .key = node_id_hash } },
                     .{ .write = .{ .bytes = &node_id_bytes } },
                 });
 
-                _ = try child_to_parent.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+                _ = try child_to_parent.writePath(void, &.{
                     .{ .hash_map_get = .{ .value = node_id_hash } },
                     .{ .write = .{ .bytes = &parent_node_id_bytes } },
                 });
@@ -328,7 +328,7 @@ fn applyPatchForFile(
                 const node_id_bytes = try hash.numToBytes(NodeIdInt, node_id_int);
                 const node_id_hash = hash.hashBuffer(&node_id_bytes);
 
-                var parent_cursor = (try child_to_parent.readPath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+                var parent_cursor = (try child_to_parent.readPath(void, &.{
                     .{ .hash_map_get = .{ .value = node_id_hash } },
                 })) orelse return error.ExpectedParentNode;
 
@@ -336,12 +336,12 @@ fn applyPatchForFile(
                 defer allocator.free(parent_node_id_bytes);
                 const parent_node_id_hash = hash.hashBuffer(parent_node_id_bytes);
 
-                _ = try parent_to_children.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+                _ = try parent_to_children.writePath(void, &.{
                     .{ .hash_map_get = .{ .value = parent_node_id_hash } },
                     .{ .hash_map_remove = node_id_hash },
                 });
 
-                _ = try child_to_parent.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+                _ = try child_to_parent.writePath(void, &.{
                     .{ .hash_map_remove = node_id_hash },
                 });
             },
@@ -349,13 +349,13 @@ fn applyPatchForFile(
     }
 
     // init node list
-    _ = try branch_cursor.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+    _ = try branch_cursor.writePath(void, &.{
         .{ .hash_map_get = .{ .value = hash.hashBuffer("path->node-id-list") } },
         .hash_map_init,
         .{ .hash_map_get = .{ .key = path_hash } },
         .{ .write = .{ .slot = path_slot } },
     });
-    var node_list = try branch_cursor.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+    var node_list = try branch_cursor.writePath(void, &.{
         .{ .hash_map_get = .{ .value = hash.hashBuffer("path->node-id-list") } },
         .hash_map_init,
         .{ .hash_map_get = .{ .value = path_hash } },
@@ -370,7 +370,7 @@ fn applyPatchForFile(
         const current_node_id_bytes = try hash.numToBytes(NodeIdInt, current_node_id_int);
         const current_node_id_hash = hash.hashBuffer(&current_node_id_bytes);
 
-        if (try parent_to_children.readPath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+        if (try parent_to_children.readPath(void, &.{
             .{ .hash_map_get = .{ .value = current_node_id_hash } },
         })) |child_node_id_set| {
             var child_node_id_iter = try child_node_id_set.iter();
@@ -381,7 +381,7 @@ fn applyPatchForFile(
                 // because there is a conflict, and thus the node map
                 // cannot be "flattened" into a list
                 if (try child_node_id_iter.next() != null) {
-                    _ = try branch_cursor.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+                    _ = try branch_cursor.writePath(void, &.{
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("path->node-id-list") } },
                         .hash_map_init,
                         .{ .hash_map_get = .{ .value = path_hash } },
@@ -395,7 +395,7 @@ fn applyPatchForFile(
                     const child_node_id_bytes = try kv_pair.key_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
                     defer allocator.free(child_node_id_bytes);
 
-                    _ = try node_list.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+                    _ = try node_list.writePath(void, &.{
                         .{ .array_list_get = .append },
                         .{ .write = .{ .bytes = child_node_id_bytes } },
                     });
@@ -420,7 +420,7 @@ pub fn writePatch(core_cursor: rp.Repo(.xit).CoreCursor, allocator: std.mem.Allo
 
     // get current branch name slot
     const branch_name_hash = hash.hashBuffer(current_branch_name);
-    var branch_name_cursor = try core_cursor.cursor.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+    var branch_name_cursor = try core_cursor.cursor.writePath(void, &.{
         .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-name-set") } },
         .hash_map_init,
         .{ .hash_map_get = .{ .key = branch_name_hash } },
@@ -429,13 +429,13 @@ pub fn writePatch(core_cursor: rp.Repo(.xit).CoreCursor, allocator: std.mem.Allo
     const branch_name_slot = branch_name_cursor.slot_ptr.slot;
 
     // init branch map
-    _ = try core_cursor.cursor.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+    _ = try core_cursor.cursor.writePath(void, &.{
         .{ .hash_map_get = .{ .value = hash.hashBuffer("branches") } },
         .hash_map_init,
         .{ .hash_map_get = .{ .key = branch_name_hash } },
         .{ .write = .{ .slot = branch_name_slot } },
     });
-    var branch_cursor = try core_cursor.cursor.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+    var branch_cursor = try core_cursor.cursor.writePath(void, &.{
         .{ .hash_map_get = .{ .value = hash.hashBuffer("branches") } },
         .hash_map_init,
         .{ .hash_map_get = .{ .value = branch_name_hash } },

@@ -273,7 +273,7 @@ test "command" {
     defer args.deinit();
 
     {
-        var command_or_err = Command.init(allocator, &[_][]const u8{ "add", "--cli" });
+        var command_or_err = Command.init(allocator, &.{ "add", "--cli" });
         if (command_or_err) |*command| {
             defer command.deinit();
             return error.ExpectedError;
@@ -283,13 +283,13 @@ test "command" {
     }
 
     {
-        var command = try Command.init(allocator, &[_][]const u8{ "add", "file.txt" });
+        var command = try Command.init(allocator, &.{ "add", "file.txt" });
         defer command.deinit();
         try std.testing.expect(command == .cli and command.cli.? == .add);
     }
 
     {
-        var command_or_err = Command.init(allocator, &[_][]const u8{ "commit", "-m" });
+        var command_or_err = Command.init(allocator, &.{ "commit", "-m" });
         if (command_or_err) |*command| {
             defer command.deinit();
             return error.ExpectedError;
@@ -299,13 +299,13 @@ test "command" {
     }
 
     {
-        var command = try Command.init(allocator, &[_][]const u8{"commit"});
+        var command = try Command.init(allocator, &.{"commit"});
         defer command.deinit();
         try std.testing.expect(command == .tui and command.tui.? == .commit);
     }
 
     {
-        var command = try Command.init(allocator, &[_][]const u8{ "commit", "-m", "let there be light" });
+        var command = try Command.init(allocator, &.{ "commit", "-m", "let there be light" });
         defer command.deinit();
         try std.testing.expect(command == .cli and command.cli.? == .commit);
         try std.testing.expect(std.mem.eql(u8, "let there be light", command.cli.?.commit.message.?));

@@ -17,12 +17,12 @@ fn addFile(comptime repo_kind: rp.RepoKind, repo: *rp.Repo(repo_kind), path: []c
     const file = try repo.core.repo_dir.createFile(path, .{ .truncate = true });
     defer file.close();
     try file.writeAll(content);
-    try repo.add(&[_][]const u8{path});
+    try repo.add(&.{path});
 }
 
 fn removeFile(comptime repo_kind: rp.RepoKind, repo: *rp.Repo(repo_kind), path: []const u8) !void {
     try repo.core.repo_dir.deleteFile(path);
-    try repo.add(&[_][]const u8{path});
+    try repo.add(&.{path});
 }
 
 fn testSimple(comptime repo_kind: rp.RepoKind) !void {
@@ -469,7 +469,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         try checkMergeAbort(&repo);
 
         // resolve conflict
-        try repo.add(&[_][]const u8{"f.txt"});
+        try repo.add(&.{"f.txt"});
         {
             var result = try repo.merge(.cont);
             defer result.deinit();
@@ -527,7 +527,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         try checkMergeAbort(&repo);
 
         // resolve conflict
-        try repo.add(&[_][]const u8{"f.txt"});
+        try repo.add(&.{"f.txt"});
         {
             var result = try repo.merge(.cont);
             defer result.deinit();
@@ -591,7 +591,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         defer renamed_file.close();
 
         // resolve conflict
-        try repo.add(&[_][]const u8{"f.txt"});
+        try repo.add(&.{"f.txt"});
         {
             var result = try repo.merge(.cont);
             defer result.deinit();
@@ -653,7 +653,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         try checkMergeAbort(&repo);
 
         // resolve conflict
-        try repo.add(&[_][]const u8{"f.txt"});
+        try repo.add(&.{"f.txt"});
         {
             var result = try repo.merge(.cont);
             defer result.deinit();

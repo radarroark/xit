@@ -522,8 +522,7 @@ pub const Merge = struct {
                         }
                     },
                     .xit => {
-                        const xitdb = @import("xitdb");
-                        if (try core_cursor.cursor.readPath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+                        if (try core_cursor.cursor.readPath(void, &.{
                             .{ .hash_map_get = .{ .value = hash.hashBuffer("MERGE_HEAD") } },
                         })) |_| {
                             return error.UnfinishedMergeAlreadyInProgress;
@@ -638,8 +637,6 @@ pub const Merge = struct {
                         }
                     },
                     .xit => {
-                        const xitdb = @import("xitdb");
-
                         // read index
                         var index = try idx.Index(repo_kind).init(allocator, core_cursor);
                         defer index.deinit();
@@ -666,12 +663,12 @@ pub const Merge = struct {
 
                         // exit early if there were conflicts
                         if (conflicts.count() > 0) {
-                            var merge_head_cursor = try core_cursor.cursor.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+                            var merge_head_cursor = try core_cursor.cursor.writePath(void, &.{
                                 .{ .hash_map_get = .{ .value = hash.hashBuffer("MERGE_HEAD") } },
                             });
                             try merge_head_cursor.writeBytes(&source_oid, .replace);
 
-                            var merge_msg_cursor = try core_cursor.cursor.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+                            var merge_msg_cursor = try core_cursor.cursor.writePath(void, &.{
                                 .{ .hash_map_get = .{ .value = hash.hashBuffer("MERGE_MSG") } },
                             });
                             try merge_msg_cursor.writeBytes(commit_message, .replace);
@@ -690,7 +687,7 @@ pub const Merge = struct {
 
                 if (std.mem.eql(u8, &current_oid, &common_oid)) {
                     // the common ancestor is the current oid, so just update HEAD
-                    try ref.updateRecur(repo_kind, core_cursor, allocator, &[_][]const u8{"HEAD"}, &source_oid);
+                    try ref.updateRecur(repo_kind, core_cursor, allocator, &.{"HEAD"}, &source_oid);
                     return .{
                         .arena = arena,
                         .changes = clean_diff.changes,
@@ -702,7 +699,7 @@ pub const Merge = struct {
                 }
 
                 // commit the change
-                const parent_oids = &[_][hash.SHA1_HEX_LEN]u8{ current_oid, source_oid };
+                const parent_oids = &.{ current_oid, source_oid };
                 const commit_oid = try obj.writeCommit(repo_kind, core_cursor, allocator, parent_oids, commit_message);
 
                 return .{
@@ -751,9 +748,7 @@ pub const Merge = struct {
                         commit_message = try merge_msg.readToEndAlloc(arena.allocator(), MAX_READ_BYTES);
                     },
                     .xit => {
-                        const xitdb = @import("xitdb");
-
-                        const source_oid_cursor = (try core_cursor.cursor.readPath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+                        const source_oid_cursor = (try core_cursor.cursor.readPath(void, &.{
                             .{ .hash_map_get = .{ .value = hash.hashBuffer("MERGE_HEAD") } },
                         })) orelse return error.MergeHeadNotFound;
                         const source_oid_slice = try source_oid_cursor.readBytes(&source_oid);
@@ -761,7 +756,7 @@ pub const Merge = struct {
                             return error.InvalidMergeHead;
                         }
 
-                        const merge_msg_cursor = (try core_cursor.cursor.readPath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+                        const merge_msg_cursor = (try core_cursor.cursor.readPath(void, &.{
                             .{ .hash_map_get = .{ .value = hash.hashBuffer("MERGE_MSG") } },
                         })) orelse return error.MergeMessageNotFound;
                         commit_message = try merge_msg_cursor.readBytesAlloc(arena.allocator(), MAX_READ_BYTES);
@@ -774,7 +769,7 @@ pub const Merge = struct {
                 @memcpy(source_name, &source_oid);
 
                 // commit the change
-                const parent_oids = &[_][hash.SHA1_HEX_LEN]u8{ current_oid, source_oid };
+                const parent_oids = &.{ current_oid, source_oid };
                 const commit_oid = try obj.writeCommit(repo_kind, core_cursor, allocator, parent_oids, commit_message);
 
                 // clean up the stored merge state
@@ -784,11 +779,10 @@ pub const Merge = struct {
                         try core_cursor.core.git_dir.deleteFile("MERGE_MSG");
                     },
                     .xit => {
-                        const xitdb = @import("xitdb");
-                        _ = try core_cursor.cursor.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+                        _ = try core_cursor.cursor.writePath(void, &.{
                             .{ .hash_map_remove = hash.hashBuffer("MERGE_HEAD") },
                         });
-                        _ = try core_cursor.cursor.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
+                        _ = try core_cursor.cursor.writePath(void, &.{
                             .{ .hash_map_remove = hash.hashBuffer("MERGE_MSG") },
                         });
                     },
