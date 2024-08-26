@@ -20,6 +20,7 @@ pub const SubCommandKind = enum {
     restore,
     log,
     merge,
+    cherry_pick,
 };
 
 pub const SubCommand = union(SubCommandKind) {
@@ -56,6 +57,7 @@ pub const SubCommand = union(SubCommandKind) {
     },
     log,
     merge: mrg.MergeInput,
+    cherry_pick: mrg.MergeInput,
 
     pub fn deinit(self: *SubCommand) void {
         switch (self.*) {
@@ -150,6 +152,8 @@ pub const Command = union(enum) {
                 return .{ .tui = .log };
             } else if (std.mem.eql(u8, sub_command, "merge")) {
                 return .{ .tui = .merge };
+            } else if (std.mem.eql(u8, sub_command, "cherry-pick")) {
+                return .{ .tui = .cherry_pick };
             }
         }
 
@@ -247,6 +251,22 @@ pub const Command = union(enum) {
                 return .{ .cli = .{ .merge = merge_input } };
             } else {
                 return error.InsufficientMergeArgs;
+            }
+        } else if (std.mem.eql(u8, sub_command, "cherry-pick")) {
+            var merge_input_maybe: ?mrg.MergeInput = null;
+            if (extra_args.len > 0) {
+                merge_input_maybe = .{ .new = .{ .source_name = extra_args[0] } };
+            }
+            if (map_args.contains("--continue")) {
+                if (merge_input_maybe != null) {
+                    return error.ConflictingCherryPickArgs;
+                }
+                merge_input_maybe = .cont;
+            }
+            if (merge_input_maybe) |merge_input| {
+                return .{ .cli = .{ .cherry_pick = merge_input } };
+            } else {
+                return error.InsufficientCherryPickArgs;
             }
         }
 
