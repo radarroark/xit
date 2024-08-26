@@ -148,8 +148,6 @@ fn testMerge(comptime repo_kind: rp.RepoKind) !void {
         var result = try repo.switch_head("master", .{ .force = false });
         defer result.deinit();
     }
-    try addFile(repo_kind, &repo, "master.md", "c");
-    _ = try repo.commit(null, .{ .message = "c" });
     const commit_j = blk: {
         var result = try repo.merge(.{ .new = .{ .source_name = "foo" } });
         defer result.deinit();
@@ -292,26 +290,26 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             var result = try repo.merge(.{ .new = .{ .source_name = "foo" } });
             defer result.deinit();
             try std.testing.expect(.conflict == result.data);
-        }
 
-        // verify f.txt has conflict markers
-        const f_txt = try repo.core.repo_dir.openFile("f.txt", .{ .mode = .read_only });
-        defer f_txt.close();
-        const f_txt_content = try f_txt.readToEndAlloc(allocator, 1024);
-        defer allocator.free(f_txt_content);
-        try std.testing.expectEqualStrings(
-            \\a
-            \\<<<<<<< master
-            \\x
-            \\||||||| original (1c943a98887754f364fafaa1da3ac56e0e0875a9)
-            \\b
-            \\=======
-            \\y
-            \\>>>>>>> foo
-            \\c
-        ,
-            f_txt_content,
-        );
+            // verify f.txt has conflict markers
+            const f_txt = try repo.core.repo_dir.openFile("f.txt", .{ .mode = .read_only });
+            defer f_txt.close();
+            const f_txt_content = try f_txt.readToEndAlloc(allocator, 1024);
+            defer allocator.free(f_txt_content);
+            const expected_f_txt_content = try std.fmt.allocPrint(allocator,
+                \\a
+                \\<<<<<<< master
+                \\x
+                \\||||||| original ({s})
+                \\b
+                \\=======
+                \\y
+                \\>>>>>>> foo
+                \\c
+            , .{result.common_oid});
+            defer allocator.free(expected_f_txt_content);
+            try std.testing.expectEqualStrings(expected_f_txt_content, f_txt_content);
+        }
 
         // generate diff
         var status = try repo.status();
@@ -386,20 +384,20 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             var result = try repo.merge(.{ .new = .{ .source_name = "foo" } });
             defer result.deinit();
             try std.testing.expect(.success == result.data);
-        }
 
-        // verify f.txt has been autoresolved
-        const f_txt = try repo.core.repo_dir.openFile("f.txt", .{ .mode = .read_only });
-        defer f_txt.close();
-        const f_txt_content = try f_txt.readToEndAlloc(allocator, 1024);
-        defer allocator.free(f_txt_content);
-        try std.testing.expectEqualStrings(
-            \\x
-            \\b
-            \\y
-        ,
-            f_txt_content,
-        );
+            // verify f.txt has been autoresolved
+            const f_txt = try repo.core.repo_dir.openFile("f.txt", .{ .mode = .read_only });
+            defer f_txt.close();
+            const f_txt_content = try f_txt.readToEndAlloc(allocator, 1024);
+            defer allocator.free(f_txt_content);
+            try std.testing.expectEqualStrings(
+                \\x
+                \\b
+                \\y
+            ,
+                f_txt_content,
+            );
+        }
 
         // generate diff
         var status = try repo.status();
@@ -732,23 +730,23 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind) !void {
         var result = try repo.merge(.{ .new = .{ .source_name = "foo" } });
         defer result.deinit();
         try std.testing.expect(.success == result.data);
-    }
 
-    // verify f.txt has been autoresolved
-    const f_txt = try repo.core.repo_dir.openFile("f.txt", .{ .mode = .read_only });
-    defer f_txt.close();
-    const f_txt_content = try f_txt.readToEndAlloc(allocator, 1024);
-    defer allocator.free(f_txt_content);
-    try std.testing.expectEqualStrings(
-        \\a
-        \\x
-        \\b
-        \\g
-        \\a
-        \\b
-    ,
-        f_txt_content,
-    );
+        // verify f.txt has been autoresolved
+        const f_txt = try repo.core.repo_dir.openFile("f.txt", .{ .mode = .read_only });
+        defer f_txt.close();
+        const f_txt_content = try f_txt.readToEndAlloc(allocator, 1024);
+        defer allocator.free(f_txt_content);
+        try std.testing.expectEqualStrings(
+            \\a
+            \\x
+            \\b
+            \\g
+            \\a
+            \\b
+        ,
+            f_txt_content,
+        );
+    }
 
     // generate diff
     var status = try repo.status();
@@ -769,4 +767,207 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind) !void {
 test "merge conflict shuffle" {
     try testMergeConflictShuffle(.git);
     try testMergeConflictShuffle(.xit);
+}
+
+fn testCherryPick(comptime repo_kind: rp.RepoKind) !void {
+    const allocator = std.testing.allocator;
+    const temp_dir_name = "temp-test-repo-cherry-pick";
+
+    // create the temp dir
+    const cwd = std.fs.cwd();
+    var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
+    if (temp_dir_or_err) |*temp_dir| {
+        temp_dir.close();
+        try cwd.deleteTree(temp_dir_name);
+    } else |_| {}
+    var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
+    defer cwd.deleteTree(temp_dir_name) catch {};
+    defer temp_dir.close();
+
+    const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
+
+    var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, writers);
+    defer repo.deinit();
+
+    // A --- B ------------ D' [master]
+    //        \
+    //         \
+    //          C --- D --- E [foo]
+
+    try addFile(repo_kind, &repo, "readme.md", "a");
+    _ = try repo.commit(null, .{ .message = "a" });
+    try addFile(repo_kind, &repo, "readme.md", "b");
+    _ = try repo.commit(null, .{ .message = "b" });
+    try repo.create_branch("foo");
+    {
+        var result = try repo.switch_head("foo", .{ .force = false });
+        defer result.deinit();
+    }
+    // commit d will be the parent of the cherry-picked commit,
+    // and it is modifying a different file, so it shouldn't
+    // cause a conflict.
+    try addFile(repo_kind, &repo, "stuff.md", "c");
+    _ = try repo.commit(null, .{ .message = "c" });
+    try addFile(repo_kind, &repo, "readme.md", "d");
+    const commit_d = try repo.commit(null, .{ .message = "d" });
+    try addFile(repo_kind, &repo, "readme.md", "e");
+    _ = try repo.commit(null, .{ .message = "e" });
+    {
+        var result = try repo.switch_head("master", .{ .force = false });
+        defer result.deinit();
+    }
+
+    {
+        var result = try repo.cherry_pick(.{ .new = .{ .source_name = &commit_d } });
+        defer result.deinit();
+        try std.testing.expect(.success == result.data);
+    }
+
+    // make sure stuff.md does not exist
+    if (repo.core.repo_dir.openFile("stuff.md", .{})) |*file| {
+        file.close();
+        return error.UnexpectedFile;
+    } else |_| {}
+
+    // if we try cherry-picking the same commit again, it does succeeds again
+    {
+        var merge_result = try repo.cherry_pick(.{ .new = .{ .source_name = &commit_d } });
+        defer merge_result.deinit();
+        try std.testing.expect(.success == merge_result.data);
+    }
+}
+
+test "cherry-pick" {
+    try testCherryPick(.git);
+    try testCherryPick(.xit);
+}
+
+fn testCherryPickConflict(comptime repo_kind: rp.RepoKind) !void {
+    const allocator = std.testing.allocator;
+    const temp_dir_name = "temp-test-repo-cherry-pick-conflict";
+
+    // create the temp dir
+    const cwd = std.fs.cwd();
+    var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
+    if (temp_dir_or_err) |*temp_dir| {
+        temp_dir.close();
+        try cwd.deleteTree(temp_dir_name);
+    } else |_| {}
+    var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
+    defer cwd.deleteTree(temp_dir_name) catch {};
+    defer temp_dir.close();
+
+    const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
+
+    const checkCherryPickAbort = struct {
+        fn run(repo: *rp.Repo(repo_kind)) !void {
+            // can't cherry-pick again with an unresolved cherry-pick
+            {
+                var result_or_err = repo.cherry_pick(.{ .new = .{ .source_name = "foo" } });
+                if (result_or_err) |*result| {
+                    defer result.deinit();
+                    return error.ExpectedMergeToAbort;
+                } else |err| switch (err) {
+                    error.UnfinishedMergeAlreadyInProgress => {},
+                    else => return err,
+                }
+            }
+
+            // can't continue cherry-pick with unresolved conflicts
+            {
+                var result_or_err = repo.cherry_pick(.cont);
+                if (result_or_err) |*result| {
+                    defer result.deinit();
+                    return error.ExpectedMergeToAbort;
+                } else |err| switch (err) {
+                    error.CannotContinueMergeWithUnresolvedConflicts => {},
+                    else => return err,
+                }
+            }
+        }
+    }.run;
+
+    var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, writers);
+    defer repo.deinit();
+
+    // A --- B ------------ D' [master]
+    //        \
+    //         \
+    //          D --- D --- E [foo]
+
+    try addFile(repo_kind, &repo, "readme.md", "a");
+    _ = try repo.commit(null, .{ .message = "a" });
+    try addFile(repo_kind, &repo, "readme.md", "b");
+    _ = try repo.commit(null, .{ .message = "b" });
+    try repo.create_branch("foo");
+    {
+        var result = try repo.switch_head("foo", .{ .force = false });
+        defer result.deinit();
+    }
+    try addFile(repo_kind, &repo, "readme.md", "c");
+    _ = try repo.commit(null, .{ .message = "c" });
+    try addFile(repo_kind, &repo, "readme.md", "d");
+    const commit_d = try repo.commit(null, .{ .message = "d" });
+    try addFile(repo_kind, &repo, "readme.md", "e");
+    _ = try repo.commit(null, .{ .message = "e" });
+    {
+        var result = try repo.switch_head("master", .{ .force = false });
+        defer result.deinit();
+    }
+    {
+        var result = try repo.cherry_pick(.{ .new = .{ .source_name = &commit_d } });
+        defer result.deinit();
+        try std.testing.expect(.conflict == result.data);
+
+        // verify readme.md has conflict markers
+        const readme_md = try repo.core.repo_dir.openFile("readme.md", .{ .mode = .read_only });
+        defer readme_md.close();
+        const readme_md_content = try readme_md.readToEndAlloc(allocator, 1024);
+        defer allocator.free(readme_md_content);
+        const expected_readme_md_content = try std.fmt.allocPrint(allocator,
+            \\<<<<<<< master
+            \\b
+            \\||||||| original ({s})
+            \\c
+            \\=======
+            \\d
+            \\>>>>>>> {s}
+        , .{ result.common_oid, commit_d });
+        defer allocator.free(expected_readme_md_content);
+        try std.testing.expectEqualStrings(expected_readme_md_content, readme_md_content);
+    }
+
+    // generate diff
+    var status = try repo.status();
+    defer status.deinit();
+    var file_iter = try repo.filePairs(.{
+        .workspace = .{
+            .conflict_diff_kind = .current,
+            .status = &status,
+        },
+    });
+    if (try file_iter.next()) |*line_iter_pair_ptr| {
+        var line_iter_pair = line_iter_pair_ptr.*;
+        defer line_iter_pair.deinit();
+    } else {
+        return error.DiffResultExpected;
+    }
+
+    // ensure cherry-pick cannot be run again while there are unresolved conflicts
+    try checkCherryPickAbort(&repo);
+
+    // resolve conflict
+    try addFile(repo_kind, &repo, "readme.md",
+        \\e
+    );
+    {
+        var result = try repo.cherry_pick(.cont);
+        defer result.deinit();
+        try std.testing.expect(.success == result.data);
+    }
+}
+
+test "cherry-pick conflict" {
+    try testCherryPickConflict(.git);
+    try testCherryPickConflict(.xit);
 }

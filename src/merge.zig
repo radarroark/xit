@@ -28,6 +28,7 @@ fn writeBlobWithConflict(
     common_oid_maybe: ?[hash.SHA1_BYTES_LEN]u8,
     current_oid: [hash.SHA1_BYTES_LEN]u8,
     source_oid: [hash.SHA1_BYTES_LEN]u8,
+    common_name: []const u8,
     current_name: []const u8,
     source_name: []const u8,
     has_conflict: *bool,
@@ -267,9 +268,7 @@ fn writeBlobWithConflict(
 
     const current_marker = try std.fmt.allocPrint(allocator, "<<<<<<< {s}", .{current_name});
     defer allocator.free(current_marker);
-    const common_marker = try std.fmt.allocPrint(allocator, "||||||| original ({s})", .{
-        if (common_oid_maybe) |common_oid| &std.fmt.bytesToHex(&common_oid, .lower) else "does not exist",
-    });
+    const common_marker = try std.fmt.allocPrint(allocator, "||||||| original ({s})", .{common_name});
     defer allocator.free(common_marker);
     const separate_marker = try std.fmt.allocPrint(allocator, "=======", .{});
     defer allocator.free(separate_marker);
@@ -305,6 +304,7 @@ fn samePathConflict(
     comptime repo_kind: rp.RepoKind,
     core_cursor: rp.Repo(repo_kind).CoreCursor,
     allocator: std.mem.Allocator,
+    common_name: []const u8,
     current_name: []const u8,
     source_name: []const u8,
     current_change_maybe: ?obj.Change,
@@ -352,7 +352,7 @@ fn samePathConflict(
                 var has_conflict = oid_maybe == null or mode_maybe == null;
 
                 const common_oid_maybe = if (common_entry_maybe) |common_entry| common_entry.oid else null;
-                const oid = oid_maybe orelse try writeBlobWithConflict(repo_kind, core_cursor, allocator, common_oid_maybe, current_entry.oid, source_entry.oid, current_name, source_name, &has_conflict);
+                const oid = oid_maybe orelse try writeBlobWithConflict(repo_kind, core_cursor, allocator, common_oid_maybe, current_entry.oid, source_entry.oid, common_name, current_name, source_name, &has_conflict);
                 const mode = mode_maybe orelse current_entry.mode;
 
                 return .{
@@ -479,6 +479,7 @@ pub const Merge = struct {
     arena: std.heap.ArenaAllocator,
     changes: std.StringArrayHashMap(obj.Change),
     auto_resolved_conflicts: std.StringArrayHashMap(void),
+    common_oid: [hash.SHA1_HEX_LEN]u8,
     current_name: []const u8,
     source_name: []const u8,
     data: union(enum) {
@@ -548,18 +549,19 @@ pub const Merge = struct {
 
                 // get the oids for the three-way merge
                 const source_oid = try ref.resolve(repo_kind, core_cursor, source_name) orelse return error.InvalidTarget;
-                const common_oid = switch (merge_kind) {
-                    .merge => try obj.commonAncestor(repo_kind, allocator, core_cursor, &current_oid, &source_oid),
-                    .cherry_pick => blk: {
+                var common_oid: [hash.SHA1_HEX_LEN]u8 = undefined;
+                switch (merge_kind) {
+                    .merge => common_oid = try obj.commonAncestor(repo_kind, allocator, core_cursor, &current_oid, &source_oid),
+                    .cherry_pick => {
                         var object = try obj.Object(repo_kind).init(allocator, core_cursor, source_oid);
                         defer object.deinit();
                         const parent_oid = if (object.content.commit.parents.items.len == 1) object.content.commit.parents.items[0] else return error.CommitMustHaveOneParent;
                         switch (object.content) {
-                            .commit => break :blk parent_oid,
+                            .commit => common_oid = parent_oid,
                             else => return error.NotACommitObject,
                         }
                     },
-                };
+                }
 
                 // if the common ancestor is the source oid, do nothing
                 if (std.mem.eql(u8, &source_oid, &common_oid)) {
@@ -567,6 +569,7 @@ pub const Merge = struct {
                         .arena = arena,
                         .changes = clean_diff.changes,
                         .auto_resolved_conflicts = auto_resolved_conflicts,
+                        .common_oid = common_oid,
                         .current_name = current_name,
                         .source_name = source_name,
                         .data = .nothing,
@@ -583,7 +586,7 @@ pub const Merge = struct {
 
                 // look for same path conflicts while populating the clean diff
                 for (source_diff.changes.keys(), source_diff.changes.values()) |path, source_change| {
-                    const same_path_result = try samePathConflict(repo_kind, core_cursor, allocator, current_name, source_name, current_diff.changes.get(path), source_change);
+                    const same_path_result = try samePathConflict(repo_kind, core_cursor, allocator, &common_oid, current_name, source_name, current_diff.changes.get(path), source_change);
                     if (same_path_result.change) |change| {
                         try clean_diff.changes.put(path, change);
                     }
@@ -662,6 +665,7 @@ pub const Merge = struct {
                                 .arena = arena,
                                 .changes = clean_diff.changes,
                                 .auto_resolved_conflicts = auto_resolved_conflicts,
+                                .common_oid = common_oid,
                                 .current_name = current_name,
                                 .source_name = source_name,
                                 .data = .{ .conflict = .{ .conflicts = conflicts } },
@@ -709,6 +713,7 @@ pub const Merge = struct {
                                 .arena = arena,
                                 .changes = clean_diff.changes,
                                 .auto_resolved_conflicts = auto_resolved_conflicts,
+                                .common_oid = common_oid,
                                 .current_name = current_name,
                                 .source_name = source_name,
                                 .data = .{ .conflict = .{ .conflicts = conflicts } },
@@ -724,6 +729,7 @@ pub const Merge = struct {
                         .arena = arena,
                         .changes = clean_diff.changes,
                         .auto_resolved_conflicts = auto_resolved_conflicts,
+                        .common_oid = common_oid,
                         .current_name = current_name,
                         .source_name = source_name,
                         .data = .fast_forward,
@@ -741,6 +747,7 @@ pub const Merge = struct {
                     .arena = arena,
                     .changes = clean_diff.changes,
                     .auto_resolved_conflicts = auto_resolved_conflicts,
+                    .common_oid = common_oid,
                     .current_name = current_name,
                     .source_name = source_name,
                     .data = .{ .success = .{ .oid = commit_oid } },
@@ -803,18 +810,25 @@ pub const Merge = struct {
                 const source_name = try arena.allocator().alloc(u8, source_oid.len);
                 @memcpy(source_name, &source_oid);
 
-                // commit the change
-                const parent_oids = switch (merge_kind) {
-                    .merge => &.{ current_oid, source_oid },
-                    .cherry_pick => blk: {
+                // get the common oid
+                var common_oid: [hash.SHA1_HEX_LEN]u8 = undefined;
+                switch (merge_kind) {
+                    .merge => common_oid = try obj.commonAncestor(repo_kind, allocator, core_cursor, &current_oid, &source_oid),
+                    .cherry_pick => {
                         var object = try obj.Object(repo_kind).init(allocator, core_cursor, source_oid);
                         defer object.deinit();
                         const parent_oid = if (object.content.commit.parents.items.len == 1) object.content.commit.parents.items[0] else return error.CommitMustHaveOneParent;
                         switch (object.content) {
-                            .commit => break :blk &.{parent_oid},
+                            .commit => common_oid = parent_oid,
                             else => return error.NotACommitObject,
                         }
                     },
+                }
+
+                // commit the change
+                const parent_oids = switch (merge_kind) {
+                    .merge => &.{ current_oid, source_oid },
+                    .cherry_pick => &.{common_oid},
                 };
                 const commit_oid = try obj.writeCommit(repo_kind, core_cursor, allocator, parent_oids, commit_metadata);
 
@@ -838,6 +852,7 @@ pub const Merge = struct {
                     .arena = arena,
                     .changes = clean_diff.changes,
                     .auto_resolved_conflicts = auto_resolved_conflicts,
+                    .common_oid = common_oid,
                     .current_name = current_name,
                     .source_name = source_name,
                     .data = .{ .success = .{ .oid = commit_oid } },
