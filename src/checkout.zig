@@ -11,7 +11,6 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const xitdb = @import("xitdb");
 const hash = @import("./hash.zig");
 const compress = @import("./compress.zig");
 const obj = @import("./object.zig");

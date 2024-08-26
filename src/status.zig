@@ -6,7 +6,6 @@
 //! organizes the data so you can display it how you want.
 
 const std = @import("std");
-const xitdb = @import("xitdb");
 const idx = @import("./index.zig");
 const hash = @import("./hash.zig");
 const obj = @import("./object.zig");

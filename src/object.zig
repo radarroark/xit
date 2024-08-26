@@ -3,7 +3,6 @@
 //! pretty generic name. may as well call it thing.
 
 const std = @import("std");
-const xitdb = @import("xitdb");
 const builtin = @import("builtin");
 const hash = @import("./hash.zig");
 const compress = @import("./compress.zig");
@@ -142,6 +141,8 @@ pub fn writeBlob(
             try std.fs.rename(hash_prefix_dir, compressed_tmp_file_name, hash_prefix_dir, hash_suffix);
         },
         .xit => {
+            const xitdb = @import("xitdb");
+
             const file_hash = hash.bytesToHash(sha1_bytes_buffer);
             const FileReaderType = @TypeOf(reader);
 
@@ -151,7 +152,7 @@ pub fn writeBlob(
                 sha1_hex: [hash.SHA1_HEX_LEN]u8,
                 header: []const u8,
 
-                pub fn run(ctx: @This(), cursor: *xitdb.Cursor(.file)) !void {
+                pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor) !void {
                     if (cursor.pointer() == null) {
                         var writer = try cursor.writer();
                         try writer.writeAll(ctx.header);
@@ -166,7 +167,7 @@ pub fn writeBlob(
                         }
                         try writer.finish();
 
-                        _ = try ctx.core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
+                        _ = try ctx.core_cursor.cursor.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
                             .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
                             .hash_map_init,
                             .{ .hash_map_get = .{ .value = try hash.hexToHash(&ctx.sha1_hex) } },
@@ -175,7 +176,7 @@ pub fn writeBlob(
                     }
                 }
             };
-            _ = try core_cursor.cursor.writePath(Ctx, &[_]xitdb.PathPart(Ctx){
+            _ = try core_cursor.cursor.writePath(Ctx, &[_]xitdb.Database(.file, hash.Hash).PathPart(Ctx){
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("file-values") } },
                 .hash_map_init,
                 .{ .hash_map_get = .{ .value = file_hash } },
@@ -260,28 +261,29 @@ fn writeTree(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).Co
             try std.fs.rename(tree_hash_prefix_dir, tree_comp_tmp_file_name, tree_hash_prefix_dir, tree_hash_suffix);
         },
         .xit => {
+            const xitdb = @import("xitdb");
             const Ctx = struct {
-                cursor: *xitdb.Cursor(.file),
+                cursor: *xitdb.Database(.file, hash.Hash).Cursor,
                 tree_sha1_bytes: *const [hash.SHA1_BYTES_LEN]u8,
                 tree_bytes: []const u8,
 
-                pub fn run(ctx: @This(), cursor: *xitdb.Cursor(.file)) !void {
+                pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor) !void {
                     // exit early if there is nothing to commit
                     if (cursor.pointer() != null) {
                         return;
                     }
-                    var tree_cursor = try ctx.cursor.writePath(void, &[_]xitdb.PathPart(void){
+                    var tree_cursor = try ctx.cursor.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("object-values") } },
                         .hash_map_init,
                         .{ .hash_map_get = .{ .value = hash.bytesToHash(ctx.tree_sha1_bytes) } },
                     });
                     try tree_cursor.writeBytes(ctx.tree_bytes, .once);
-                    _ = try cursor.writePath(void, &[_]xitdb.PathPart(void){
+                    _ = try cursor.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
                         .{ .write = .{ .slot = tree_cursor.slot_ptr.slot } },
                     });
                 }
             };
-            _ = try core_cursor.cursor.writePath(Ctx, &[_]xitdb.PathPart(Ctx){
+            _ = try core_cursor.cursor.writePath(Ctx, &[_]xitdb.Database(.file, hash.Hash).PathPart(Ctx){
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
                 .hash_map_init,
                 .{ .hash_map_get = .{ .value = hash.bytesToHash(sha1_bytes_buffer) } },
@@ -447,6 +449,8 @@ pub fn writeCommit(
             try ref.updateRecur(repo_kind, core_cursor, allocator, &[_][]const u8{"HEAD"}, &commit_sha1_hex);
         },
         .xit => {
+            const xitdb = @import("xitdb");
+
             // create tree and add index entries
             var tree = Tree.init(allocator);
             defer tree.deinit();
@@ -470,7 +474,7 @@ pub fn writeCommit(
             const commit_sha1_hex = std.fmt.bytesToHex(commit_sha1_bytes_buffer, .lower);
 
             // write commit content
-            var content_cursor = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
+            var content_cursor = try core_cursor.cursor.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("object-values") } },
                 .hash_map_init,
                 .{ .hash_map_get = .{ .value = hash.bytesToHash(&commit_sha1_bytes_buffer) } },
@@ -478,7 +482,7 @@ pub fn writeCommit(
             try content_cursor.writeBytes(commit, .once);
 
             // write commit
-            _ = try core_cursor.cursor.writePath(void, &[_]xitdb.PathPart(void){
+            _ = try core_cursor.cursor.writePath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
                 .hash_map_init,
                 .{ .hash_map_get = .{ .value = hash.bytesToHash(&commit_sha1_bytes_buffer) } },
@@ -525,14 +529,16 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
         internal: switch (repo_kind) {
             .git => void,
             .xit => struct {
+                const xitdb = @import("xitdb");
+
                 header_offset: u64,
-                cursor: *xitdb.Cursor(.file),
+                cursor: *xitdb.Database(.file, hash.Hash).Cursor,
             },
         },
 
         pub const Reader = switch (repo_kind) {
             .git => pack.LooseOrPackObjectReader,
-            .xit => xitdb.Cursor(.file).Reader,
+            .xit => @import("xitdb").Database(.file, hash.Hash).Cursor.Reader,
         };
 
         pub fn init(allocator: std.mem.Allocator, core_cursor: rp.Repo(repo_kind).CoreCursor, oid: [hash.SHA1_HEX_LEN]u8) !@This() {
@@ -550,12 +556,13 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
                     };
                 },
                 .xit => {
-                    if (try core_cursor.cursor.readPath(void, &[_]xitdb.PathPart(void){
+                    const xitdb = @import("xitdb");
+                    if (try core_cursor.cursor.readPath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
                         .{ .hash_map_get = .{ .value = try hash.hexToHash(&oid) } },
                     })) |cursor| {
                         // put cursor on the heap so the pointer is stable (the reader uses it internally)
-                        const cursor_ptr = try allocator.create(xitdb.Cursor(.file));
+                        const cursor_ptr = try allocator.create(xitdb.Database(.file, hash.Hash).Cursor);
                         errdefer allocator.destroy(cursor_ptr);
                         cursor_ptr.* = cursor;
                         var rdr = try cursor_ptr.reader();
@@ -860,7 +867,7 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind) type {
         core: *rp.Repo(repo_kind).Core,
         cursor: switch (repo_kind) {
             .git => void,
-            .xit => xitdb.Cursor(.file),
+            .xit => @import("xitdb").Database(.file, hash.Hash).Cursor,
         },
         oid_queue: std.DoublyLinkedList([hash.SHA1_HEX_LEN]u8),
         object: Object(repo_kind),

@@ -1,5 +1,4 @@
 const std = @import("std");
-const xitdb = @import("xitdb");
 const hash = @import("./hash.zig");
 const obj = @import("./object.zig");
 const cmd = @import("./command.zig");
@@ -11,7 +10,6 @@ const ref = @import("./ref.zig");
 const io = @import("./io.zig");
 const df = @import("./diff.zig");
 const mrg = @import("./merge.zig");
-const pch = @import("./patch.zig");
 
 pub const RepoKind = enum {
     git,
@@ -32,13 +30,15 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 pub fn latestCursor(_: *@This()) !void {}
             },
             .xit => struct {
+                const xitdb = @import("xitdb");
+
                 repo_dir: std.fs.Dir,
                 xit_dir: std.fs.Dir,
                 db_file: std.fs.File,
-                db: xitdb.Database(.file),
+                db: xitdb.Database(.file, hash.Hash),
 
-                pub fn latestCursor(self: *@This()) !xitdb.Cursor(.file) {
-                    return (try self.db.rootCursor().readPath(void, &[_]xitdb.PathPart(void){
+                pub fn latestCursor(self: *@This()) !xitdb.Database(.file, hash.Hash).Cursor {
+                    return (try self.db.rootCursor().readPath(void, &[_]xitdb.Database(.file, hash.Hash).PathPart(void){
                         .{ .array_list_get = .{ .index = -1 } },
                     })) orelse return error.DatabaseEmpty;
                 }
@@ -51,8 +51,10 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 lock_file_maybe: ?std.fs.File = null,
             },
             .xit => struct {
+                const xitdb = @import("xitdb");
+
                 core: *Core,
-                cursor: *xitdb.Cursor(.file),
+                cursor: *xitdb.Database(.file, hash.Hash).Cursor,
             },
         };
 
@@ -79,6 +81,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     };
                 },
                 .xit => {
+                    const xitdb = @import("xitdb");
+
                     var repo_dir = try opts.cwd.openDir(".", .{});
                     errdefer repo_dir.close();
 
@@ -94,7 +98,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                             .repo_dir = repo_dir,
                             .xit_dir = xit_dir,
                             .db_file = db_file,
-                            .db = try xitdb.Database(.file).init(allocator, .{ .file = db_file }),
+                            .db = try xitdb.Database(.file, hash.Hash).init(allocator, .{ .file = db_file }),
                         },
                         .init_opts = opts,
                     };
@@ -169,6 +173,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     return self;
                 },
                 .xit => {
+                    const xitdb = @import("xitdb");
+
                     // return if dir already exists
                     {
                         var xit_dir_or_err = repo_dir.openDir(".xit", .{});
@@ -193,7 +199,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                             .repo_dir = repo_dir,
                             .xit_dir = xit_dir,
                             .db_file = db_file,
-                            .db = try xitdb.Database(.file).init(allocator, .{ .file = db_file }),
+                            .db = try xitdb.Database(.file, hash.Hash).init(allocator, .{ .file = db_file }),
                         },
                         .init_opts = .{ .cwd = dir },
                     };
@@ -203,11 +209,11 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         core: *Repo(repo_kind).Core,
                         allocator: std.mem.Allocator,
 
-                        pub fn run(ctx: @This(), cursor: *xitdb.Cursor(.file)) !void {
+                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor) !void {
                             try ref.writeHead(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, "master", null);
                         }
                     };
-                    _ = try self.core.db.rootCursor().writePath(Ctx, &[_]xitdb.PathPart(Ctx){
+                    _ = try self.core.db.rootCursor().writePath(Ctx, &[_]xitdb.Database(.file, hash.Hash).PathPart(Ctx){
                         .{ .array_list_get = .append_copy },
                         .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator } },
@@ -501,6 +507,9 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             switch (repo_kind) {
                 .git => return try obj.writeCommit(repo_kind, .{ .core = &self.core }, self.allocator, parent_oids_maybe, message_maybe),
                 .xit => {
+                    const xitdb = @import("xitdb");
+                    const pch = @import("./patch.zig");
+
                     var result: [hash.SHA1_HEX_LEN]u8 = undefined;
                     const Ctx = struct {
                         core: *Repo(repo_kind).Core,
@@ -509,12 +518,12 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         message_maybe: ?[]const u8,
                         result: *[hash.SHA1_HEX_LEN]u8,
 
-                        pub fn run(ctx: @This(), cursor: *xitdb.Cursor(.file)) !void {
+                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor) !void {
                             try pch.writePatch(.{ .core = ctx.core, .cursor = cursor }, ctx.allocator);
                             ctx.result.* = try obj.writeCommit(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, ctx.parent_oids_maybe, ctx.message_maybe);
                         }
                     };
-                    _ = try self.core.db.rootCursor().writePath(Ctx, &[_]xitdb.PathPart(Ctx){
+                    _ = try self.core.db.rootCursor().writePath(Ctx, &[_]xitdb.Database(.file, hash.Hash).PathPart(Ctx){
                         .{ .array_list_get = .append_copy },
                         .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .parent_oids_maybe = parent_oids_maybe, .message_maybe = message_maybe, .result = &result } },
@@ -542,12 +551,14 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     lock.success = true;
                 },
                 .xit => {
+                    const xitdb = @import("xitdb");
+
                     const Ctx = struct {
                         core: *Repo(repo_kind).Core,
                         allocator: std.mem.Allocator,
                         paths: []const []const u8,
 
-                        pub fn run(ctx: @This(), cursor: *xitdb.Cursor(.file)) !void {
+                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor) !void {
                             var index = try idx.Index(repo_kind).init(ctx.allocator, .{ .core = ctx.core, .cursor = cursor });
                             defer index.deinit();
 
@@ -558,7 +569,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                             try index.write(ctx.allocator, .{ .core = ctx.core, .cursor = cursor });
                         }
                     };
-                    _ = try self.core.db.rootCursor().writePath(Ctx, &[_]xitdb.PathPart(Ctx){
+                    _ = try self.core.db.rootCursor().writePath(Ctx, &[_]xitdb.Database(.file, hash.Hash).PathPart(Ctx){
                         .{ .array_list_get = .append_copy },
                         .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .paths = paths } },
@@ -622,13 +633,15 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     lock.success = true;
                 },
                 .xit => {
+                    const xitdb = @import("xitdb");
+
                     const Ctx = struct {
                         core: *Repo(repo_kind).Core,
                         allocator: std.mem.Allocator,
                         paths: []const []const u8,
                         opts: idx.IndexRemoveOptions,
 
-                        pub fn run(ctx: @This(), cursor: *xitdb.Cursor(.file)) !void {
+                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor) !void {
                             var index = try idx.Index(repo_kind).init(ctx.allocator, .{ .core = ctx.core, .cursor = cursor });
                             defer index.deinit();
 
@@ -669,7 +682,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                             try index.write(ctx.allocator, .{ .core = ctx.core, .cursor = cursor });
                         }
                     };
-                    _ = try self.core.db.rootCursor().writePath(Ctx, &[_]xitdb.PathPart(Ctx){
+                    _ = try self.core.db.rootCursor().writePath(Ctx, &[_]xitdb.Database(.file, hash.Hash).PathPart(Ctx){
                         .{ .array_list_get = .append_copy },
                         .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .paths = paths, .opts = opts } },
@@ -788,16 +801,18 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             switch (repo_kind) {
                 .git => try bch.create(repo_kind, .{ .core = &self.core }, self.allocator, name),
                 .xit => {
+                    const xitdb = @import("xitdb");
+
                     const Ctx = struct {
                         core: *Repo(repo_kind).Core,
                         allocator: std.mem.Allocator,
                         name: []const u8,
 
-                        pub fn run(ctx: @This(), cursor: *xitdb.Cursor(.file)) !void {
+                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor) !void {
                             try bch.create(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, ctx.name);
                         }
                     };
-                    _ = try self.core.db.rootCursor().writePath(Ctx, &[_]xitdb.PathPart(Ctx){
+                    _ = try self.core.db.rootCursor().writePath(Ctx, &[_]xitdb.Database(.file, hash.Hash).PathPart(Ctx){
                         .{ .array_list_get = .append_copy },
                         .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .name = name } },
@@ -810,16 +825,18 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             switch (repo_kind) {
                 .git => try bch.delete(repo_kind, .{ .core = &self.core }, self.allocator, name),
                 .xit => {
+                    const xitdb = @import("xitdb");
+
                     const Ctx = struct {
                         core: *Repo(repo_kind).Core,
                         allocator: std.mem.Allocator,
                         name: []const u8,
 
-                        pub fn run(ctx: @This(), cursor: *xitdb.Cursor(.file)) !void {
+                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor) !void {
                             try bch.delete(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, ctx.name);
                         }
                     };
-                    _ = try self.core.db.rootCursor().writePath(Ctx, &[_]xitdb.PathPart(Ctx){
+                    _ = try self.core.db.rootCursor().writePath(Ctx, &[_]xitdb.Database(.file, hash.Hash).PathPart(Ctx){
                         .{ .array_list_get = .append_copy },
                         .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .name = name } },
@@ -832,6 +849,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             switch (repo_kind) {
                 .git => return try chk.Switch.init(repo_kind, .{ .core = &self.core }, self.allocator, target, options),
                 .xit => {
+                    const xitdb = @import("xitdb");
+
                     var result: chk.Switch = undefined;
                     const Ctx = struct {
                         core: *Repo(repo_kind).Core,
@@ -840,11 +859,11 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         options: chk.Switch.Options,
                         result: *chk.Switch,
 
-                        pub fn run(ctx: @This(), cursor: *xitdb.Cursor(.file)) !void {
+                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor) !void {
                             ctx.result.* = try chk.Switch.init(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, ctx.target, ctx.options);
                         }
                     };
-                    _ = try self.core.db.rootCursor().writePath(Ctx, &[_]xitdb.PathPart(Ctx){
+                    _ = try self.core.db.rootCursor().writePath(Ctx, &[_]xitdb.Database(.file, hash.Hash).PathPart(Ctx){
                         .{ .array_list_get = .append_copy },
                         .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .target = target, .options = options, .result = &result } },
@@ -879,6 +898,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             switch (repo_kind) {
                 .git => return try mrg.Merge.init(repo_kind, .{ .core = &self.core }, self.allocator, input),
                 .xit => {
+                    const xitdb = @import("xitdb");
+
                     var result: mrg.Merge = undefined;
                     const Ctx = struct {
                         core: *Repo(repo_kind).Core,
@@ -886,7 +907,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         input: mrg.MergeInput,
                         result: *mrg.Merge,
 
-                        pub fn run(ctx: @This(), cursor: *xitdb.Cursor(.file)) !void {
+                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor) !void {
                             ctx.result.* = try mrg.Merge.init(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, ctx.input);
                             // no need to make a new transaction if nothing was done
                             if (.nothing == ctx.result.data) {
@@ -894,7 +915,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                             }
                         }
                     };
-                    _ = self.core.db.rootCursor().writePath(Ctx, &[_]xitdb.PathPart(Ctx){
+                    _ = self.core.db.rootCursor().writePath(Ctx, &[_]xitdb.Database(.file, hash.Hash).PathPart(Ctx){
                         .{ .array_list_get = .append_copy },
                         .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .input = input, .result = &result } },

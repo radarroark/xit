@@ -10,11 +10,12 @@
 //! the course of writing this comment.
 
 const std = @import("std");
-const xitdb = @import("xitdb");
 
 const MAX_READ_BYTES = 1024;
 pub const SHA1_BYTES_LEN = std.crypto.hash.Sha1.digest_length;
 pub const SHA1_HEX_LEN = SHA1_BYTES_LEN * 2;
+pub const Hash = u160;
+const HASH_SIZE = @bitSizeOf(Hash) / 8;
 
 pub fn sha1Reader(reader: anytype, header_maybe: ?[]const u8, out: *[SHA1_BYTES_LEN]u8) !void {
     var h = std.crypto.hash.Sha1.init(.{});
@@ -39,24 +40,24 @@ pub fn sha1Buffer(buffer: []const u8, out: *[SHA1_BYTES_LEN]u8) !void {
     h.final(out);
 }
 
-pub fn hashBuffer(buffer: []const u8) xitdb.Hash {
-    var hash = [_]u8{0} ** (@bitSizeOf(xitdb.Hash) / 8);
+pub fn hashBuffer(buffer: []const u8) Hash {
+    var hash = [_]u8{0} ** HASH_SIZE;
     var h = std.crypto.hash.Sha1.init(.{});
     h.update(buffer);
-    h.final(hash[0..xitdb.HASH_SIZE]);
-    return std.mem.bytesToValue(xitdb.Hash, &hash);
+    h.final(&hash);
+    return std.mem.bytesToValue(Hash, &hash);
 }
 
-pub fn hexToHash(hex_buffer: *const [SHA1_HEX_LEN]u8) !xitdb.Hash {
-    var hash = [_]u8{0} ** (@bitSizeOf(xitdb.Hash) / 8);
-    _ = try std.fmt.hexToBytes(hash[0..xitdb.HASH_SIZE], hex_buffer);
-    return std.mem.bytesToValue(xitdb.Hash, &hash);
+pub fn hexToHash(hex_buffer: *const [SHA1_HEX_LEN]u8) !Hash {
+    var hash = [_]u8{0} ** HASH_SIZE;
+    _ = try std.fmt.hexToBytes(&hash, hex_buffer);
+    return std.mem.bytesToValue(Hash, &hash);
 }
 
-pub fn bytesToHash(bytes_buffer: *const [SHA1_BYTES_LEN]u8) xitdb.Hash {
-    var hash = [_]u8{0} ** (@bitSizeOf(xitdb.Hash) / 8);
-    @memcpy(hash[0..xitdb.HASH_SIZE], bytes_buffer);
-    return std.mem.bytesToValue(xitdb.Hash, &hash);
+pub fn bytesToHash(bytes_buffer: *const [SHA1_BYTES_LEN]u8) Hash {
+    var hash = [_]u8{0} ** HASH_SIZE;
+    @memcpy(&hash, bytes_buffer);
+    return std.mem.bytesToValue(Hash, &hash);
 }
 
 pub fn hexToBytes(hex_buffer: [SHA1_HEX_LEN]u8) ![SHA1_BYTES_LEN]u8 {

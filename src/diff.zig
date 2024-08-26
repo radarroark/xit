@@ -1,5 +1,4 @@
 const std = @import("std");
-const xitdb = @import("xitdb");
 const rp = @import("./repo.zig");
 const st = @import("./status.zig");
 const hash = @import("./hash.zig");
@@ -668,7 +667,7 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
 }
 
 test "myers diff" {
-    const repo_kind = rp.RepoKind.xit;
+    const repo_kind = rp.RepoKind.git;
     const allocator = std.testing.allocator;
     {
         const lines1 = "A\nB\nC\nA\nB\nB\nA";
@@ -904,7 +903,7 @@ pub fn Diff3Iterator(comptime repo_kind: rp.RepoKind) type {
 }
 
 test "diff3" {
-    const repo_kind = rp.RepoKind.xit;
+    const repo_kind = rp.RepoKind.git;
     const allocator = std.testing.allocator;
 
     const orig_lines =
@@ -1246,7 +1245,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
         core: *rp.Repo(repo_kind).Core,
         cursor: switch (repo_kind) {
             .git => void,
-            .xit => xitdb.Cursor(.file),
+            .xit => @import("xitdb").Database(.file, hash.Hash).Cursor,
         },
         diff_opts: DiffOptions(repo_kind),
         next_index: usize,
