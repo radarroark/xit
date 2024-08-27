@@ -10,6 +10,7 @@ const ref = @import("./ref.zig");
 const io = @import("./io.zig");
 const df = @import("./diff.zig");
 const mrg = @import("./merge.zig");
+const cfg = @import("./config.zig");
 
 pub const RepoKind = enum {
     git,
@@ -504,6 +505,13 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         },
                     }
                 },
+                .config => {
+                    switch (sub_command.config) {
+                        .list => {},
+                        .add => try self.addConfig(sub_command.config.add),
+                        .remove => try self.removeConfig(sub_command.config.remove),
+                    }
+                },
                 .remote => {
                     switch (sub_command.remote) {
                         .list => {},
@@ -970,6 +978,37 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     };
                     return result;
                 },
+            }
+        }
+
+        pub fn config(self: *Repo(repo_kind)) !cfg.Config(repo_kind) {
+            switch (repo_kind) {
+                .git => return try cfg.Config(repo_kind).init(.{ .core = &self.core }, self.allocator),
+                .xit => return error.NotImplemented,
+            }
+        }
+
+        pub fn addConfig(self: *Repo(repo_kind), input: cfg.AddConfigInput) !void {
+            switch (repo_kind) {
+                .git => {
+                    var conf = try self.config();
+                    defer conf.deinit();
+                    try conf.add(input);
+                    try conf.write(.{ .core = &self.core });
+                },
+                .xit => return error.NotImplemented,
+            }
+        }
+
+        pub fn removeConfig(self: *Repo(repo_kind), input: cfg.RemoveConfigInput) !void {
+            switch (repo_kind) {
+                .git => {
+                    var conf = try self.config();
+                    defer conf.deinit();
+                    try conf.remove(input);
+                    try conf.write(.{ .core = &self.core });
+                },
+                .xit => return error.NotImplemented,
             }
         }
     };

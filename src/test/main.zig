@@ -1320,6 +1320,36 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         break :blk try ref.readHead(repo_kind, core_cursor);
     };
 
+    // config
+    if (repo_kind == .git) {
+        try main.xitMain(repo_kind, allocator, &.{ "config", "add", "core.editor", "vim" }, repo_dir, writers);
+        try main.xitMain(repo_kind, allocator, &.{ "config", "add", "core.filemode", "true" }, repo_dir, writers);
+
+        {
+            var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
+            defer repo.deinit();
+
+            var config = try repo.config();
+            defer config.deinit();
+
+            const core_section = config.sections.get("core").?;
+            try std.testing.expectEqual(2, core_section.count());
+        }
+
+        try main.xitMain(repo_kind, allocator, &.{ "config", "remove", "core.filemode" }, repo_dir, writers);
+
+        {
+            var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
+            defer repo.deinit();
+
+            var config = try repo.config();
+            defer config.deinit();
+
+            const core_section = config.sections.get("core").?;
+            try std.testing.expectEqual(1, core_section.count());
+        }
+    }
+
     // remote
     {
         try main.xitMain(repo_kind, allocator, &.{ "remote", "add", "origin", "http://localhost:3000" }, repo_dir, writers);
