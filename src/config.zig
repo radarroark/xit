@@ -200,7 +200,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
             self.allocator.destroy(self.arena);
         }
 
-        pub fn add(self: *Config(repo_kind), input: AddConfigInput) !void {
+        pub fn add(self: *Config(repo_kind), core_cursor: rp.Repo(repo_kind).CoreCursor, input: AddConfigInput) !void {
             if (std.mem.lastIndexOfScalar(u8, input.name, '.')) |index| {
                 const section_name = try self.arena.allocator().dupe(u8, input.name[0..index]);
                 const var_name = try self.arena.allocator().dupe(u8, input.name[index + 1 ..]);
@@ -212,12 +212,17 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                     try variables.put(var_name, var_value);
                     try self.sections.put(section_name, variables);
                 }
+
+                switch (repo_kind) {
+                    .git => try self.write(core_cursor.core),
+                    .xit => return error.NotImplemented,
+                }
             } else {
                 return error.KeyDoesNotContainASection;
             }
         }
 
-        pub fn remove(self: *Config(repo_kind), input: RemoveConfigInput) !void {
+        pub fn remove(self: *Config(repo_kind), core_cursor: rp.Repo(repo_kind).CoreCursor, input: RemoveConfigInput) !void {
             if (std.mem.lastIndexOfScalar(u8, input.name, '.')) |index| {
                 const section_name = try self.arena.allocator().dupe(u8, input.name[0..index]);
                 const var_name = try self.arena.allocator().dupe(u8, input.name[index + 1 ..]);
@@ -226,33 +231,33 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                 } else {
                     return error.SectionDoesNotExist;
                 }
+
+                switch (repo_kind) {
+                    .git => try self.write(core_cursor.core),
+                    .xit => return error.NotImplemented,
+                }
             } else {
                 return error.KeyDoesNotContainASection;
             }
         }
 
-        pub fn write(self: *Config(repo_kind), core_cursor: rp.Repo(repo_kind).CoreCursor) !void {
-            switch (repo_kind) {
-                .git => {
-                    var lock = try io.LockFile.init(self.allocator, core_cursor.core.git_dir, "config");
-                    defer lock.deinit();
+        fn write(self: *Config(repo_kind), core: *rp.Repo(.git).Core) !void {
+            var lock = try io.LockFile.init(self.allocator, core.git_dir, "config");
+            defer lock.deinit();
 
-                    for (self.sections.keys(), self.sections.values()) |section_name, variables| {
-                        const section_line = try std.fmt.allocPrint(self.allocator, "[{s}]\n", .{section_name});
-                        defer self.allocator.free(section_line);
-                        try lock.lock_file.writeAll(section_line);
+            for (self.sections.keys(), self.sections.values()) |section_name, variables| {
+                const section_line = try std.fmt.allocPrint(self.allocator, "[{s}]\n", .{section_name});
+                defer self.allocator.free(section_line);
+                try lock.lock_file.writeAll(section_line);
 
-                        for (variables.keys(), variables.values()) |name, value| {
-                            const var_line = try std.fmt.allocPrint(self.allocator, "\t{s} = {s}\n", .{ name, value });
-                            defer self.allocator.free(var_line);
-                            try lock.lock_file.writeAll(var_line);
-                        }
-                    }
-
-                    lock.success = true;
-                },
-                .xit => return error.NotImplemented,
+                for (variables.keys(), variables.values()) |name, value| {
+                    const var_line = try std.fmt.allocPrint(self.allocator, "\t{s} = {s}\n", .{ name, value });
+                    defer self.allocator.free(var_line);
+                    try lock.lock_file.writeAll(var_line);
+                }
             }
+
+            lock.success = true;
         }
     };
 }

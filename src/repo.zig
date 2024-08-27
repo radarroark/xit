@@ -993,8 +993,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 .git => {
                     var conf = try self.config();
                     defer conf.deinit();
-                    try conf.add(input);
-                    try conf.write(.{ .core = &self.core });
+                    try conf.add(.{ .core = &self.core }, input);
                 },
                 .xit => return error.NotImplemented,
             }
@@ -1005,8 +1004,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 .git => {
                     var conf = try self.config();
                     defer conf.deinit();
-                    try conf.remove(input);
-                    try conf.write(.{ .core = &self.core });
+                    try conf.remove(.{ .core = &self.core }, input);
                 },
                 .xit => return error.NotImplemented,
             }
