@@ -504,6 +504,13 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         },
                     }
                 },
+                .remote => {
+                    switch (sub_command.remote) {
+                        .list => {},
+                        .add => {},
+                        .remove => {},
+                    }
+                },
             }
         }
 

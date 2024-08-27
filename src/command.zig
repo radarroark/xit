@@ -5,6 +5,7 @@ const df = @import("./diff.zig");
 const mrg = @import("./merge.zig");
 const idx = @import("./index.zig");
 const obj = @import("./object.zig");
+const cfg = @import("./config.zig");
 
 pub const SubCommandKind = enum {
     init,
@@ -21,6 +22,7 @@ pub const SubCommandKind = enum {
     log,
     merge,
     cherry_pick,
+    remote,
 };
 
 pub const SubCommand = union(SubCommandKind) {
@@ -58,6 +60,7 @@ pub const SubCommand = union(SubCommandKind) {
     log,
     merge: mrg.MergeInput,
     cherry_pick: mrg.MergeInput,
+    remote: cfg.RemoteCommand,
 
     pub fn deinit(self: *SubCommand) void {
         switch (self.*) {
@@ -154,6 +157,8 @@ pub const Command = union(enum) {
                 return .{ .tui = .merge };
             } else if (std.mem.eql(u8, sub_command, "cherry-pick")) {
                 return .{ .tui = .cherry_pick };
+            } else if (std.mem.eql(u8, sub_command, "remote")) {
+                return .{ .tui = .remote };
             }
         }
 
@@ -268,6 +273,34 @@ pub const Command = union(enum) {
             } else {
                 return error.InsufficientCherryPickArgs;
             }
+        } else if (std.mem.eql(u8, sub_command, "remote")) {
+            if (extra_args.len < 1) {
+                return error.InsufficientRemoteArgs;
+            }
+            const cmd_name = extra_args[0];
+
+            var remote_cmd: cfg.RemoteCommand = undefined;
+            if (std.mem.eql(u8, "list", cmd_name)) {
+                remote_cmd = .list;
+            } else if (std.mem.eql(u8, "add", cmd_name)) {
+                if (extra_args.len < 3) {
+                    return error.InsufficientRemoteArgs;
+                }
+                remote_cmd = .{ .add = .{
+                    .name = extra_args[1],
+                    .url = extra_args[2],
+                } };
+            } else if (std.mem.eql(u8, "remove", cmd_name)) {
+                if (extra_args.len < 2) {
+                    return error.InsufficientRemoteArgs;
+                }
+                remote_cmd = .{ .remove = .{
+                    .name = extra_args[1],
+                } };
+            } else {
+                return error.InvalidRemoteCommand;
+            }
+            return .{ .cli = .{ .remote = remote_cmd } };
         }
 
         return .{ .invalid = .{ .name = sub_command } };

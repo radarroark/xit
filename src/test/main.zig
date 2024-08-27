@@ -1320,6 +1320,13 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         break :blk try ref.readHead(repo_kind, core_cursor);
     };
 
+    // remote
+    {
+        try main.xitMain(repo_kind, allocator, &.{ "remote", "add", "origin", "http://localhost:3000" }, repo_dir, writers);
+        try main.xitMain(repo_kind, allocator, &.{ "remote", "list" }, repo_dir, writers);
+        try main.xitMain(repo_kind, allocator, &.{ "remote", "remove", "http://localhost:3000" }, repo_dir, writers);
+    }
+
     return commit4;
 }
 
