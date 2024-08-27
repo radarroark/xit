@@ -449,7 +449,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 .merge, .cherry_pick => {
                     var result = switch (sub_command) {
                         .merge => try self.merge(sub_command.merge),
-                        .cherry_pick => try self.cherry_pick(sub_command.cherry_pick),
+                        .cherry_pick => try self.cherryPick(sub_command.cherry_pick),
                         else => unreachable,
                     };
                     defer result.deinit();
@@ -932,7 +932,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             }
         }
 
-        pub fn cherry_pick(self: *Repo(repo_kind), input: mrg.MergeInput) !mrg.Merge {
+        pub fn cherryPick(self: *Repo(repo_kind), input: mrg.MergeInput) !mrg.Merge {
             switch (repo_kind) {
                 .git => return try mrg.Merge.init(repo_kind, .{ .core = &self.core }, self.allocator, .cherry_pick, input),
                 .xit => {

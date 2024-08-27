@@ -818,7 +818,7 @@ fn testCherryPick(comptime repo_kind: rp.RepoKind) !void {
     }
 
     {
-        var result = try repo.cherry_pick(.{ .new = .{ .source_name = &commit_d } });
+        var result = try repo.cherryPick(.{ .new = .{ .source_name = &commit_d } });
         defer result.deinit();
         try std.testing.expect(.success == result.data);
     }
@@ -831,7 +831,7 @@ fn testCherryPick(comptime repo_kind: rp.RepoKind) !void {
 
     // if we try cherry-picking the same commit again, it does succeeds again
     {
-        var merge_result = try repo.cherry_pick(.{ .new = .{ .source_name = &commit_d } });
+        var merge_result = try repo.cherryPick(.{ .new = .{ .source_name = &commit_d } });
         defer merge_result.deinit();
         try std.testing.expect(.success == merge_result.data);
     }
@@ -863,7 +863,7 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind) !void {
         fn run(repo: *rp.Repo(repo_kind)) !void {
             // can't cherry-pick again with an unresolved cherry-pick
             {
-                var result_or_err = repo.cherry_pick(.{ .new = .{ .source_name = "foo" } });
+                var result_or_err = repo.cherryPick(.{ .new = .{ .source_name = "foo" } });
                 if (result_or_err) |*result| {
                     defer result.deinit();
                     return error.ExpectedMergeToAbort;
@@ -875,7 +875,7 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind) !void {
 
             // can't continue cherry-pick with unresolved conflicts
             {
-                var result_or_err = repo.cherry_pick(.cont);
+                var result_or_err = repo.cherryPick(.cont);
                 if (result_or_err) |*result| {
                     defer result.deinit();
                     return error.ExpectedMergeToAbort;
@@ -915,7 +915,7 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind) !void {
         defer result.deinit();
     }
     {
-        var result = try repo.cherry_pick(.{ .new = .{ .source_name = &commit_d } });
+        var result = try repo.cherryPick(.{ .new = .{ .source_name = &commit_d } });
         defer result.deinit();
         try std.testing.expect(.conflict == result.data);
 
@@ -961,7 +961,7 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind) !void {
         \\e
     );
     {
-        var result = try repo.cherry_pick(.cont);
+        var result = try repo.cherryPick(.cont);
         defer result.deinit();
         try std.testing.expect(.success == result.data);
     }
