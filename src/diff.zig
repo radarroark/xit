@@ -1023,7 +1023,7 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind) type {
         myers_diff: MyersDiffIterator(repo_kind),
         eof: bool,
         allocator: std.mem.Allocator,
-        arena: std.heap.ArenaAllocator,
+        arena: *std.heap.ArenaAllocator,
         line_iter_a: *LineIterator(repo_kind),
         line_iter_b: *LineIterator(repo_kind),
         found_edit: bool,
@@ -1031,8 +1031,12 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind) type {
         next_hunk: Hunk(repo_kind),
 
         pub fn init(allocator: std.mem.Allocator, line_iter_a: *LineIterator(repo_kind), line_iter_b: *LineIterator(repo_kind)) !HunkIterator(repo_kind) {
-            var arena = std.heap.ArenaAllocator.init(allocator);
-            errdefer arena.deinit();
+            const arena = try allocator.create(std.heap.ArenaAllocator);
+            arena.* = std.heap.ArenaAllocator.init(allocator);
+            errdefer {
+                arena.deinit();
+                allocator.destroy(arena);
+            }
 
             var header_lines = std.ArrayList([]const u8).init(arena.allocator());
 
@@ -1169,6 +1173,7 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind) type {
         pub fn deinit(self: *HunkIterator(repo_kind)) void {
             self.myers_diff.deinit();
             self.arena.deinit();
+            self.allocator.destroy(self.arena);
             self.next_hunk.deinit();
         }
 

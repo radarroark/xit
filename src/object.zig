@@ -655,7 +655,7 @@ pub const ObjectContent = union(ObjectKind) {
 pub fn Object(comptime repo_kind: rp.RepoKind) type {
     return struct {
         allocator: std.mem.Allocator,
-        arena: std.heap.ArenaAllocator,
+        arena: *std.heap.ArenaAllocator,
         content: ObjectContent,
         oid: [hash.SHA1_HEX_LEN]u8,
         len: u64,
@@ -664,18 +664,22 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
             var obj_rdr = try ObjectReader(repo_kind).init(allocator, core_cursor, oid);
             defer obj_rdr.deinit();
 
+            const arena = try allocator.create(std.heap.ArenaAllocator);
+            arena.* = std.heap.ArenaAllocator.init(allocator);
+            errdefer {
+                arena.deinit();
+                allocator.destroy(arena);
+            }
+
             switch (obj_rdr.header.kind) {
                 .blob => return Object(repo_kind){
                     .allocator = allocator,
-                    .arena = std.heap.ArenaAllocator.init(allocator),
+                    .arena = arena,
                     .content = ObjectContent{ .blob = {} },
                     .oid = oid,
                     .len = obj_rdr.header.size,
                 },
                 .tree => {
-                    var arena = std.heap.ArenaAllocator.init(allocator);
-                    errdefer arena.deinit();
-
                     var entries = std.StringArrayHashMap(TreeEntry).init(arena.allocator());
 
                     while (true) {
@@ -716,8 +720,6 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                     }
 
                     // init the content
-                    var arena = std.heap.ArenaAllocator.init(allocator);
-                    errdefer arena.deinit();
                     var content = ObjectContent{
                         .commit = .{
                             .tree = tree_hash_slice[0..hash.SHA1_HEX_LEN].*,
@@ -768,6 +770,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
 
         pub fn deinit(self: *Object(repo_kind)) void {
             self.arena.deinit();
+            self.allocator.destroy(self.arena);
         }
     };
 }
@@ -783,15 +786,15 @@ pub fn TreeDiff(comptime repo_kind: rp.RepoKind) type {
         arena: std.heap.ArenaAllocator,
 
         pub fn init(allocator: std.mem.Allocator) TreeDiff(repo_kind) {
-            return TreeDiff(repo_kind){
+            return .{
                 .changes = std.StringArrayHashMap(Change).init(allocator),
                 .arena = std.heap.ArenaAllocator.init(allocator),
             };
         }
 
         pub fn deinit(self: *TreeDiff(repo_kind)) void {
-            self.arena.deinit();
             self.changes.deinit();
+            self.arena.deinit();
         }
 
         pub fn compare(self: *TreeDiff(repo_kind), core_cursor: rp.Repo(repo_kind).CoreCursor, old_oid_maybe: ?[hash.SHA1_HEX_LEN]u8, new_oid_maybe: ?[hash.SHA1_HEX_LEN]u8, path_list_maybe: ?std.ArrayList([]const u8)) !void {

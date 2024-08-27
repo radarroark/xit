@@ -29,7 +29,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
         dir_to_children: std.StringArrayHashMap(std.StringArrayHashMap(void)),
         root_children: std.StringArrayHashMap(void),
         allocator: std.mem.Allocator,
-        arena: std.heap.ArenaAllocator,
+        arena: *std.heap.ArenaAllocator,
 
         pub const Entry = struct {
             pub const Flags = packed struct(u16) {
@@ -63,6 +63,8 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
         };
 
         pub fn init(allocator: std.mem.Allocator, core_cursor: rp.Repo(repo_kind).CoreCursor) !Index(repo_kind) {
+            const arena = try allocator.create(std.heap.ArenaAllocator);
+            arena.* = std.heap.ArenaAllocator.init(allocator);
             var index = Index(repo_kind){
                 .version = 2,
                 .entries = std.StringArrayHashMap([4]?Entry).init(allocator),
@@ -70,7 +72,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                 .dir_to_children = std.StringArrayHashMap(std.StringArrayHashMap(void)).init(allocator),
                 .root_children = std.StringArrayHashMap(void).init(allocator),
                 .allocator = allocator,
-                .arena = std.heap.ArenaAllocator.init(allocator),
+                .arena = arena,
             };
             errdefer index.deinit();
 
@@ -190,6 +192,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
 
         pub fn deinit(self: *Index(repo_kind)) void {
             self.arena.deinit();
+            self.allocator.destroy(self.arena);
             self.entries.deinit();
             for (self.dir_to_paths.values()) |*paths| {
                 paths.deinit();

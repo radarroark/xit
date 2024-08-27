@@ -51,12 +51,16 @@ pub const Ref = struct {
 
 pub const RefList = struct {
     refs: std.ArrayList(Ref),
-    arena: std.heap.ArenaAllocator,
+    arena: *std.heap.ArenaAllocator,
+    allocator: std.mem.Allocator,
 
     pub fn init(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, dir_name: []const u8) !RefList {
+        const arena = try allocator.create(std.heap.ArenaAllocator);
+        arena.* = std.heap.ArenaAllocator.init(allocator);
         var ref_list = RefList{
             .refs = std.ArrayList(Ref).init(allocator),
-            .arena = std.heap.ArenaAllocator.init(allocator),
+            .arena = arena,
+            .allocator = allocator,
         };
         errdefer ref_list.deinit();
 
@@ -94,6 +98,7 @@ pub const RefList = struct {
     pub fn deinit(self: *RefList) void {
         self.refs.deinit();
         self.arena.deinit();
+        self.allocator.destroy(self.arena);
     }
 
     fn addRefs(self: *RefList, comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, dir_name: []const u8, dir: std.fs.Dir, path: *std.ArrayList([]const u8)) !void {

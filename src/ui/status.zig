@@ -210,7 +210,8 @@ pub fn StatusList(comptime Widget: type) type {
 pub fn StatusTabs(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
     return struct {
         box: wgt.Box(Widget),
-        arena: std.heap.ArenaAllocator,
+        arena: *std.heap.ArenaAllocator,
+        allocator: std.mem.Allocator,
 
         const tab_count = @typeInfo(st.IndexKind).Enum.fields.len;
 
@@ -218,8 +219,12 @@ pub fn StatusTabs(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
             var box = try wgt.Box(Widget).init(allocator, null, .horiz);
             errdefer box.deinit();
 
-            var arena = std.heap.ArenaAllocator.init(allocator);
-            errdefer arena.deinit();
+            const arena = try allocator.create(std.heap.ArenaAllocator);
+            arena.* = std.heap.ArenaAllocator.init(allocator);
+            errdefer {
+                arena.deinit();
+                allocator.destroy(arena);
+            }
 
             const counts = [_]usize{
                 status.index_added.count() + status.index_modified.count() + status.index_deleted.count(),
@@ -249,6 +254,7 @@ pub fn StatusTabs(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
             var ui_status_tabs = StatusTabs(Widget, repo_kind){
                 .box = box,
                 .arena = arena,
+                .allocator = allocator,
             };
             ui_status_tabs.getFocus().child_id = box.children.keys()[@intFromEnum(selected_maybe orelse .added)];
             return ui_status_tabs;
@@ -257,6 +263,7 @@ pub fn StatusTabs(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
         pub fn deinit(self: *StatusTabs(Widget, repo_kind)) void {
             self.box.deinit();
             self.arena.deinit();
+            self.allocator.destroy(self.arena);
         }
 
         pub fn build(self: *StatusTabs(Widget, repo_kind), constraint: layout.Constraint, root_focus: *Focus) !void {

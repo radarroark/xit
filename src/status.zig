@@ -49,7 +49,8 @@ pub fn Status(comptime repo_kind: rp.RepoKind) type {
         conflicts: std.StringArrayHashMap(MergeConflictStatus),
         index: idx.Index(repo_kind),
         head_tree: HeadTree(repo_kind),
-        arena: std.heap.ArenaAllocator,
+        arena: *std.heap.ArenaAllocator,
+        allocator: std.mem.Allocator,
 
         pub const Entry = struct {
             path: []const u8,
@@ -78,8 +79,12 @@ pub fn Status(comptime repo_kind: rp.RepoKind) type {
             var conflicts = std.StringArrayHashMap(MergeConflictStatus).init(allocator);
             errdefer conflicts.deinit();
 
-            var arena = std.heap.ArenaAllocator.init(allocator);
-            errdefer arena.deinit();
+            const arena = try allocator.create(std.heap.ArenaAllocator);
+            arena.* = std.heap.ArenaAllocator.init(allocator);
+            errdefer {
+                arena.deinit();
+                allocator.destroy(arena);
+            }
 
             var index = try idx.Index(repo_kind).init(allocator, core_cursor);
             errdefer index.deinit();
@@ -135,6 +140,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind) type {
                 .index = index,
                 .head_tree = head_tree,
                 .arena = arena,
+                .allocator = allocator,
             };
         }
 
@@ -149,6 +155,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind) type {
             self.index.deinit();
             self.head_tree.deinit();
             self.arena.deinit();
+            self.allocator.destroy(self.arena);
         }
     };
 }
@@ -239,12 +246,16 @@ fn addEntries(
 pub fn HeadTree(comptime repo_kind: rp.RepoKind) type {
     return struct {
         entries: std.StringHashMap(obj.TreeEntry),
-        arena: std.heap.ArenaAllocator,
+        arena: *std.heap.ArenaAllocator,
+        allocator: std.mem.Allocator,
 
         pub fn init(allocator: std.mem.Allocator, core_cursor: rp.Repo(repo_kind).CoreCursor) !HeadTree(repo_kind) {
+            const arena = try allocator.create(std.heap.ArenaAllocator);
+            arena.* = std.heap.ArenaAllocator.init(allocator);
             var tree = HeadTree(repo_kind){
                 .entries = std.StringHashMap(obj.TreeEntry).init(allocator),
-                .arena = std.heap.ArenaAllocator.init(allocator),
+                .arena = arena,
+                .allocator = allocator,
             };
             errdefer tree.deinit();
 
@@ -261,6 +272,7 @@ pub fn HeadTree(comptime repo_kind: rp.RepoKind) type {
         pub fn deinit(self: *HeadTree(repo_kind)) void {
             self.entries.deinit();
             self.arena.deinit();
+            self.allocator.destroy(self.arena);
         }
 
         fn read(self: *HeadTree(repo_kind), core_cursor: rp.Repo(repo_kind).CoreCursor, prefix: []const u8, oid: [hash.SHA1_HEX_LEN]u8) !void {

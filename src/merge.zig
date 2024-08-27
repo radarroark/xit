@@ -476,7 +476,8 @@ pub const MergeInput = union(enum) {
 };
 
 pub const Merge = struct {
-    arena: std.heap.ArenaAllocator,
+    arena: *std.heap.ArenaAllocator,
+    allocator: std.mem.Allocator,
     changes: std.StringArrayHashMap(obj.Change),
     auto_resolved_conflicts: std.StringArrayHashMap(void),
     common_oid: [hash.SHA1_HEX_LEN]u8,
@@ -502,8 +503,12 @@ pub const Merge = struct {
     ) !Merge {
         // TODO: exit early if working tree is dirty
 
-        var arena = std.heap.ArenaAllocator.init(allocator);
-        errdefer arena.deinit();
+        const arena = try allocator.create(std.heap.ArenaAllocator);
+        arena.* = std.heap.ArenaAllocator.init(allocator);
+        errdefer {
+            arena.deinit();
+            allocator.destroy(arena);
+        }
 
         // get the current branch name and oid
         const current_name = try ref.readHeadName(repo_kind, core_cursor, arena.allocator());
@@ -567,6 +572,7 @@ pub const Merge = struct {
                 if (std.mem.eql(u8, &source_oid, &common_oid)) {
                     return .{
                         .arena = arena,
+                        .allocator = allocator,
                         .changes = clean_diff.changes,
                         .auto_resolved_conflicts = auto_resolved_conflicts,
                         .common_oid = common_oid,
@@ -600,12 +606,12 @@ pub const Merge = struct {
                 // look for file/dir conflicts
                 for (source_diff.changes.keys(), source_diff.changes.values()) |path, source_change| {
                     if (source_change.new) |_| {
-                        try fileDirConflict(&arena, repo_kind, path, &current_diff, .current, current_name, &conflicts, &clean_diff);
+                        try fileDirConflict(arena, repo_kind, path, &current_diff, .current, current_name, &conflicts, &clean_diff);
                     }
                 }
                 for (current_diff.changes.keys(), current_diff.changes.values()) |path, current_change| {
                     if (current_change.new) |_| {
-                        try fileDirConflict(&arena, repo_kind, path, &source_diff, .source, source_name, &conflicts, &clean_diff);
+                        try fileDirConflict(arena, repo_kind, path, &source_diff, .source, source_name, &conflicts, &clean_diff);
                     }
                 }
 
@@ -663,6 +669,7 @@ pub const Merge = struct {
 
                             return .{
                                 .arena = arena,
+                                .allocator = allocator,
                                 .changes = clean_diff.changes,
                                 .auto_resolved_conflicts = auto_resolved_conflicts,
                                 .common_oid = common_oid,
@@ -711,6 +718,7 @@ pub const Merge = struct {
 
                             return .{
                                 .arena = arena,
+                                .allocator = allocator,
                                 .changes = clean_diff.changes,
                                 .auto_resolved_conflicts = auto_resolved_conflicts,
                                 .common_oid = common_oid,
@@ -727,6 +735,7 @@ pub const Merge = struct {
                     try ref.updateRecur(repo_kind, core_cursor, allocator, &.{"HEAD"}, &source_oid);
                     return .{
                         .arena = arena,
+                        .allocator = allocator,
                         .changes = clean_diff.changes,
                         .auto_resolved_conflicts = auto_resolved_conflicts,
                         .common_oid = common_oid,
@@ -745,6 +754,7 @@ pub const Merge = struct {
 
                 return .{
                     .arena = arena,
+                    .allocator = allocator,
                     .changes = clean_diff.changes,
                     .auto_resolved_conflicts = auto_resolved_conflicts,
                     .common_oid = common_oid,
@@ -850,6 +860,7 @@ pub const Merge = struct {
 
                 return .{
                     .arena = arena,
+                    .allocator = allocator,
                     .changes = clean_diff.changes,
                     .auto_resolved_conflicts = auto_resolved_conflicts,
                     .common_oid = common_oid,
@@ -863,5 +874,6 @@ pub const Merge = struct {
 
     pub fn deinit(self: *Merge) void {
         self.arena.deinit();
+        self.allocator.destroy(self.arena);
     }
 };
