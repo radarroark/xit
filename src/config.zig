@@ -17,60 +17,6 @@ pub const ConfigCommand = union(enum) {
     remove: RemoveConfigInput,
 };
 
-const CharKind = enum {
-    whitespace,
-    comment,
-    open_bracket,
-    close_bracket,
-    equals,
-    other,
-
-    fn init(rune: []const u8) CharKind {
-        return if (rune.len == 1)
-            switch (rune[0]) {
-                ' ', '\t' => .whitespace,
-                '#' => .comment,
-                '[' => .open_bracket,
-                ']' => .close_bracket,
-                '=' => .equals,
-                else => .other,
-            }
-        else
-            .other;
-    }
-};
-
-const ParsedLine = union(enum) {
-    section_header: []const u8,
-    variable: struct {
-        name: []const u8,
-        value: []const u8,
-    },
-    ignore,
-
-    const SectionHeaderPattern = [_]CharKind{
-        .open_bracket,
-        .other,
-        .close_bracket,
-    };
-
-    const VariablePattern = [_]CharKind{
-        .other,
-        .equals,
-        .other,
-    };
-
-    fn init(char_kinds: []CharKind, tokens: []const []const u8) ParsedLine {
-        if (std.mem.eql(CharKind, &SectionHeaderPattern, char_kinds)) {
-            return .{ .section_header = tokens[1] };
-        } else if (std.mem.eql(CharKind, &VariablePattern, char_kinds)) {
-            return .{ .variable = .{ .name = tokens[0], .value = tokens[2] } };
-        } else {
-            return .ignore;
-        }
-    }
-};
-
 pub fn Config(comptime repo_kind: rp.RepoKind) type {
     return struct {
         allocator: std.mem.Allocator,
@@ -94,12 +40,69 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
 
             switch (repo_kind) {
                 .git => {
+                    // categories of characters parsed in the config file
+                    const CharKind = enum {
+                        whitespace,
+                        comment,
+                        open_bracket,
+                        close_bracket,
+                        equals,
+                        other,
+
+                        fn init(rune: []const u8) @This() {
+                            return if (rune.len == 1)
+                                switch (rune[0]) {
+                                    ' ', '\t' => .whitespace,
+                                    '#' => .comment,
+                                    '[' => .open_bracket,
+                                    ']' => .close_bracket,
+                                    '=' => .equals,
+                                    else => .other,
+                                }
+                            else
+                                .other;
+                        }
+                    };
+
+                    // represents a line fully parsed from the config file
+                    const ParsedLine = union(enum) {
+                        section_header: []const u8,
+                        variable: struct {
+                            name: []const u8,
+                            value: []const u8,
+                        },
+                        ignore,
+
+                        const SectionHeaderPattern = [_]CharKind{
+                            .open_bracket,
+                            .other,
+                            .close_bracket,
+                        };
+
+                        const VariablePattern = [_]CharKind{
+                            .other,
+                            .equals,
+                            .other,
+                        };
+
+                        fn init(char_kinds: []CharKind, tokens: []const []const u8) @This() {
+                            if (std.mem.eql(CharKind, &SectionHeaderPattern, char_kinds)) {
+                                return .{ .section_header = tokens[1] };
+                            } else if (std.mem.eql(CharKind, &VariablePattern, char_kinds)) {
+                                return .{ .variable = .{ .name = tokens[0], .value = tokens[2] } };
+                            } else {
+                                return .ignore;
+                            }
+                        }
+                    };
+
                     var config_file = try core_cursor.core.git_dir.createFile("config", .{ .read = true, .truncate = false });
                     defer config_file.close();
 
                     const reader = config_file.reader();
                     var buf = [_]u8{0} ** 1024;
 
+                    // for each line...
                     while (try reader.readUntilDelimiterOrEof(&buf, '\n')) |line| {
                         const text = try std.unicode.Utf8View.init(line);
                         var iter = text.iterator();
@@ -113,6 +116,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
 
                         var current_token_maybe: ?struct { kind: CharKind, start: usize } = null;
 
+                        // for each codepoint...
                         while (iter.nextCodepointSlice()) |rune| {
                             const char_kind = CharKind.init(rune);
 
@@ -120,24 +124,29 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                             next_cursor += rune.len;
 
                             if (current_token_maybe) |*current_token| {
-                                if (current_token.kind == .comment) {
+                                if (current_token.kind == char_kind or current_token.kind == .comment) {
+                                    // this rune goes in the current token because either
+                                    // its char kind is the same, or it's a comment
+                                    // (comments go until the end of the line)
                                     continue;
-                                } else if (current_token.kind != char_kind) {
+                                } else {
                                     switch (current_token.kind) {
                                         .whitespace, .comment => {},
                                         else => {
+                                            // the char kind changed, so save the current token
                                             try token_kinds.append(current_token.kind);
                                             try token_ranges.append(.{ .start = current_token.start, .end = cursor });
                                         },
                                     }
-                                } else {
-                                    continue;
                                 }
                             }
 
+                            // change the current token. this happens if the char kind changed,
+                            // or if current token is null (the very beginning of the line)
                             current_token_maybe = .{ .kind = char_kind, .start = cursor };
                         }
 
+                        // add the last token if necessary
                         if (current_token_maybe) |current_token| {
                             switch (current_token.kind) {
                                 .whitespace, .comment => {},
@@ -148,11 +157,13 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                             }
                         }
 
+                        // get all the tokens from the line using the ranges
                         var tokens = std.ArrayList([]const u8).init(arena.allocator());
                         for (token_ranges.items) |range| {
                             try tokens.append(try arena.allocator().dupe(u8, line[range.start..range.end]));
                         }
 
+                        // parse the lines and update the sections/variables
                         const parsed_line = ParsedLine.init(token_kinds.items, tokens.items);
                         switch (parsed_line) {
                             .section_header => {
@@ -169,6 +180,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                         }
                     }
 
+                    // add the last section if necessary
                     if (current_section_name_maybe) |current_section_name| {
                         try sections.put(current_section_name, current_variables);
                     }
