@@ -562,7 +562,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     defer index.deinit();
 
                     for (paths) |path| {
-                        try index.addOrRemovePath(.{ .core = &self.core, .lock_file_maybe = lock.lock_file }, path, .add);
+                        try index.addOrRemovePath(.{ .core = &self.core }, path, .add);
                     }
 
                     try index.write(self.allocator, .{ .core = &self.core, .lock_file_maybe = lock.lock_file });
@@ -631,7 +631,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                                         return error.CannotRemoveFileWithUnstagedChanges;
                                     }
                                 }
-                                try index.addOrRemovePath(.{ .core = &self.core, .lock_file_maybe = lock.lock_file }, path, .rm);
+                                try index.addOrRemovePath(.{ .core = &self.core }, path, .rm);
                             },
                             else => return error.UnexpectedPathType,
                         }
