@@ -989,23 +989,19 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
         }
 
         pub fn addConfig(self: *Repo(repo_kind), input: cfg.AddConfigInput) !void {
+            var conf = try self.config();
+            defer conf.deinit();
             switch (repo_kind) {
-                .git => {
-                    var conf = try self.config();
-                    defer conf.deinit();
-                    try conf.add(.{ .core = &self.core }, input);
-                },
+                .git => try conf.add(.{ .core = &self.core }, input),
                 .xit => return error.NotImplemented,
             }
         }
 
         pub fn removeConfig(self: *Repo(repo_kind), input: cfg.RemoveConfigInput) !void {
+            var conf = try self.config();
+            defer conf.deinit();
             switch (repo_kind) {
-                .git => {
-                    var conf = try self.config();
-                    defer conf.deinit();
-                    try conf.remove(.{ .core = &self.core }, input);
-                },
+                .git => try conf.remove(.{ .core = &self.core }, input),
                 .xit => return error.NotImplemented,
             }
         }
