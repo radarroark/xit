@@ -66,12 +66,13 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
 
                     // represents a line fully parsed from the config file
                     const ParsedLine = union(enum) {
+                        empty,
                         section_header: []const u8,
                         variable: struct {
                             name: []const u8,
                             value: []const u8,
                         },
-                        ignore,
+                        invalid,
 
                         const SectionHeaderPattern = [_]CharKind{
                             .open_bracket,
@@ -86,12 +87,14 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                         };
 
                         fn init(char_kinds: []CharKind, tokens: []const []const u8) @This() {
-                            if (std.mem.eql(CharKind, &SectionHeaderPattern, char_kinds)) {
+                            if (char_kinds.len == 0) {
+                                return .empty;
+                            } else if (std.mem.eql(CharKind, &SectionHeaderPattern, char_kinds)) {
                                 return .{ .section_header = tokens[1] };
                             } else if (std.mem.eql(CharKind, &VariablePattern, char_kinds)) {
                                 return .{ .variable = .{ .name = tokens[0], .value = tokens[2] } };
                             } else {
-                                return .ignore;
+                                return .invalid;
                             }
                         }
                     };
@@ -166,6 +169,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                         // parse the lines and update the sections/variables
                         const parsed_line = ParsedLine.init(token_kinds.items, tokens.items);
                         switch (parsed_line) {
+                            .empty => {},
                             .section_header => {
                                 if (current_section_name_maybe) |current_section_name| {
                                     try sections.put(current_section_name, current_variables);
@@ -176,7 +180,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                             .variable => {
                                 try current_variables.put(parsed_line.variable.name, parsed_line.variable.value);
                             },
-                            .ignore => {},
+                            .invalid => return error.InvalidLine,
                         }
                     }
 
