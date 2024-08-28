@@ -507,7 +507,16 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 },
                 .config => {
                     switch (sub_command.config) {
-                        .list => {},
+                        .list => {
+                            var conf = try self.config();
+                            defer conf.deinit();
+
+                            for (conf.sections.keys(), conf.sections.values()) |section_name, variables| {
+                                for (variables.keys(), variables.values()) |name, value| {
+                                    try writers.out.print("{s}.{s}={s}\n", .{ section_name, name, value });
+                                }
+                            }
+                        },
                         .add => try self.addConfig(sub_command.config.add),
                         .remove => try self.removeConfig(sub_command.config.remove),
                     }
