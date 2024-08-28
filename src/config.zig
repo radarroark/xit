@@ -1,6 +1,9 @@
 const std = @import("std");
 const rp = @import("./repo.zig");
 const io = @import("./io.zig");
+const hash = @import("./hash.zig");
+
+const MAX_READ_BYTES = 1024; // FIXME: this is arbitrary...
 
 pub const AddConfigInput = struct {
     name: []const u8,
@@ -103,7 +106,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                     defer config_file.close();
 
                     const reader = config_file.reader();
-                    var buf = [_]u8{0} ** 1024;
+                    var buf = [_]u8{0} ** MAX_READ_BYTES;
 
                     // for each line...
                     while (try reader.readUntilDelimiterOrEof(&buf, '\n')) |line| {
@@ -189,7 +192,31 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                         try sections.put(current_section_name, current_variables);
                     }
                 },
-                .xit => return error.NotImplemented,
+                .xit => {
+                    if (try core_cursor.cursor.readPath(void, &.{
+                        .{ .hash_map_get = .{ .value = hash.hashBuffer("config") } },
+                    })) |config_cursor| {
+                        var config_iter = try config_cursor.iter();
+                        defer config_iter.deinit();
+                        while (try config_iter.next()) |*section_cursor| {
+                            const section_kv_pair = try section_cursor.readKeyValuePair();
+                            const section_name = try section_kv_pair.key_cursor.readBytesAlloc(arena.allocator(), MAX_READ_BYTES);
+
+                            var variables = Variables.init(arena.allocator());
+
+                            var var_iter = try section_kv_pair.value_cursor.iter();
+                            defer var_iter.deinit();
+                            while (try var_iter.next()) |*var_cursor| {
+                                const var_kv_pair = try var_cursor.readKeyValuePair();
+                                const var_name = try var_kv_pair.key_cursor.readBytesAlloc(arena.allocator(), MAX_READ_BYTES);
+                                const var_value = try var_kv_pair.value_cursor.readBytesAlloc(arena.allocator(), MAX_READ_BYTES);
+                                try variables.put(var_name, var_value);
+                            }
+
+                            try sections.put(section_name, variables);
+                        }
+                    }
+                },
             }
 
             return .{
@@ -219,7 +246,51 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
 
                 switch (repo_kind) {
                     .git => try self.write(core_cursor.core),
-                    .xit => return error.NotImplemented,
+                    .xit => {
+                        // ensure section name is saved
+                        const section_name_hash = hash.hashBuffer(section_name);
+                        var section_name_cursor = try core_cursor.cursor.writePath(void, &.{
+                            .{ .hash_map_get = .{ .value = hash.hashBuffer("config-name-set") } },
+                            .hash_map_init,
+                            .{ .hash_map_get = .{ .key = section_name_hash } },
+                        });
+                        try section_name_cursor.writeBytes(section_name, .once);
+                        const section_name_slot = section_name_cursor.slot_ptr.slot;
+                        _ = try core_cursor.cursor.writePath(void, &.{
+                            .{ .hash_map_get = .{ .value = hash.hashBuffer("config") } },
+                            .hash_map_init,
+                            .{ .hash_map_get = .{ .key = section_name_hash } },
+                            .{ .write = .{ .slot = section_name_slot } },
+                        });
+
+                        // ensure variable name is saved
+                        const var_name_hash = hash.hashBuffer(var_name);
+                        var var_name_cursor = try core_cursor.cursor.writePath(void, &.{
+                            .{ .hash_map_get = .{ .value = hash.hashBuffer("config-name-set") } },
+                            .hash_map_init,
+                            .{ .hash_map_get = .{ .key = var_name_hash } },
+                        });
+                        try var_name_cursor.writeBytes(var_name, .once);
+                        const var_name_slot = var_name_cursor.slot_ptr.slot;
+                        _ = try core_cursor.cursor.writePath(void, &.{
+                            .{ .hash_map_get = .{ .value = hash.hashBuffer("config") } },
+                            .hash_map_init,
+                            .{ .hash_map_get = .{ .value = section_name_hash } },
+                            .hash_map_init,
+                            .{ .hash_map_get = .{ .key = var_name_hash } },
+                            .{ .write = .{ .slot = var_name_slot } },
+                        });
+
+                        // save the variable
+                        _ = try core_cursor.cursor.writePath(void, &.{
+                            .{ .hash_map_get = .{ .value = hash.hashBuffer("config") } },
+                            .hash_map_init,
+                            .{ .hash_map_get = .{ .value = section_name_hash } },
+                            .hash_map_init,
+                            .{ .hash_map_get = .{ .value = var_name_hash } },
+                            .{ .write = .{ .bytes = var_value } },
+                        });
+                    },
                 }
             } else {
                 return error.KeyDoesNotContainASection;
@@ -238,7 +309,15 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
 
                 switch (repo_kind) {
                     .git => try self.write(core_cursor.core),
-                    .xit => return error.NotImplemented,
+                    .xit => {
+                        _ = try core_cursor.cursor.writePath(void, &.{
+                            .{ .hash_map_get = .{ .value = hash.hashBuffer("config") } },
+                            .hash_map_init,
+                            .{ .hash_map_get = .{ .value = hash.hashBuffer(section_name) } },
+                            .hash_map_init,
+                            .{ .hash_map_remove = hash.hashBuffer(var_name) },
+                        });
+                    },
                 }
             } else {
                 return error.KeyDoesNotContainASection;

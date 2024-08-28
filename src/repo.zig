@@ -982,10 +982,12 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
         }
 
         pub fn config(self: *Repo(repo_kind)) !cfg.Config(repo_kind) {
-            switch (repo_kind) {
-                .git => return try cfg.Config(repo_kind).init(.{ .core = &self.core }, self.allocator),
-                .xit => return error.NotImplemented,
-            }
+            var cursor = try self.core.latestCursor();
+            const core_cursor = switch (repo_kind) {
+                .git => .{ .core = &self.core },
+                .xit => .{ .core = &self.core, .cursor = &cursor },
+            };
+            return try cfg.Config(repo_kind).init(core_cursor, self.allocator);
         }
 
         pub fn addConfig(self: *Repo(repo_kind), input: cfg.AddConfigInput) !void {
@@ -993,7 +995,24 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             defer conf.deinit();
             switch (repo_kind) {
                 .git => try conf.add(.{ .core = &self.core }, input),
-                .xit => return error.NotImplemented,
+                .xit => {
+                    const xitdb = @import("xitdb");
+
+                    const Ctx = struct {
+                        core: *Repo(repo_kind).Core,
+                        conf: *cfg.Config(repo_kind),
+                        input: cfg.AddConfigInput,
+
+                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor) !void {
+                            try ctx.conf.add(.{ .core = ctx.core, .cursor = cursor }, ctx.input);
+                        }
+                    };
+                    _ = try self.core.db.rootCursor().writePath(Ctx, &.{
+                        .{ .array_list_get = .append_copy },
+                        .hash_map_init,
+                        .{ .ctx = Ctx{ .core = &self.core, .conf = &conf, .input = input } },
+                    });
+                },
             }
         }
 
@@ -1002,7 +1021,24 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             defer conf.deinit();
             switch (repo_kind) {
                 .git => try conf.remove(.{ .core = &self.core }, input),
-                .xit => return error.NotImplemented,
+                .xit => {
+                    const xitdb = @import("xitdb");
+
+                    const Ctx = struct {
+                        core: *Repo(repo_kind).Core,
+                        conf: *cfg.Config(repo_kind),
+                        input: cfg.RemoveConfigInput,
+
+                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor) !void {
+                            try ctx.conf.remove(.{ .core = ctx.core, .cursor = cursor }, ctx.input);
+                        }
+                    };
+                    _ = try self.core.db.rootCursor().writePath(Ctx, &.{
+                        .{ .array_list_get = .append_copy },
+                        .hash_map_init,
+                        .{ .ctx = Ctx{ .core = &self.core, .conf = &conf, .input = input } },
+                    });
+                },
             }
         }
     };

@@ -1321,7 +1321,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     };
 
     // config
-    if (repo_kind == .git) {
+    {
         try main.xitMain(repo_kind, allocator, &.{ "config", "add", "core.editor", "vim" }, repo_dir, writers);
         try main.xitMain(repo_kind, allocator, &.{ "config", "add", "core.filemode", "true" }, repo_dir, writers);
 
