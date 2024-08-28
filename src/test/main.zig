@@ -1323,20 +1323,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     // config
     {
         try main.xitMain(repo_kind, allocator, &.{ "config", "add", "core.editor", "vim" }, repo_dir, writers);
-        try main.xitMain(repo_kind, allocator, &.{ "config", "add", "core.filemode", "true" }, repo_dir, writers);
-
-        {
-            var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
-            defer repo.deinit();
-
-            var config = try repo.config();
-            defer config.deinit();
-
-            const core_section = config.sections.get("core").?;
-            try std.testing.expectEqual(2, core_section.count());
-        }
-
-        try main.xitMain(repo_kind, allocator, &.{ "config", "remove", "core.filemode" }, repo_dir, writers);
+        try main.xitMain(repo_kind, allocator, &.{ "config", "add", "branch.master.remote", "origin" }, repo_dir, writers);
 
         {
             var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
@@ -1347,6 +1334,21 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
 
             const core_section = config.sections.get("core").?;
             try std.testing.expectEqual(1, core_section.count());
+
+            const branch_master_section = config.sections.get("branch.master").?;
+            try std.testing.expectEqual(1, branch_master_section.count());
+        }
+
+        try main.xitMain(repo_kind, allocator, &.{ "config", "remove", "branch.master.remote" }, repo_dir, writers);
+
+        {
+            var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
+            defer repo.deinit();
+
+            var config = try repo.config();
+            defer config.deinit();
+
+            try std.testing.expectEqual(null, config.sections.get("branch.master"));
         }
     }
 

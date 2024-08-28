@@ -49,7 +49,8 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                         open_bracket,
                         close_bracket,
                         equals,
-                        other,
+                        quote,
+                        symbol,
 
                         fn init(rune: []const u8) @This() {
                             return if (rune.len == 1)
@@ -59,10 +60,11 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                                     '[' => .open_bracket,
                                     ']' => .close_bracket,
                                     '=' => .equals,
-                                    else => .other,
+                                    '"' => .quote,
+                                    else => .symbol,
                                 }
                             else
-                                .other;
+                                .symbol;
                         }
                     };
 
@@ -78,21 +80,30 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
 
                         const SectionHeaderPattern = [_]CharKind{
                             .open_bracket,
-                            .other,
+                            .symbol,
+                            .close_bracket,
+                        };
+
+                        const ExtendedSectionHeaderPattern = [_]CharKind{
+                            .open_bracket,
+                            .symbol,
+                            .quote,
                             .close_bracket,
                         };
 
                         const VariablePattern = [_]CharKind{
-                            .other,
+                            .symbol,
                             .equals,
-                            .other,
+                            .symbol,
                         };
 
-                        fn init(char_kinds: []CharKind, tokens: []const []const u8) @This() {
+                        fn init(arena_ptr: *std.heap.ArenaAllocator, char_kinds: []CharKind, tokens: []const []const u8) !@This() {
                             if (char_kinds.len == 0) {
                                 return .empty;
                             } else if (std.mem.eql(CharKind, &SectionHeaderPattern, char_kinds)) {
                                 return .{ .section_header = tokens[1] };
+                            } else if (std.mem.eql(CharKind, &ExtendedSectionHeaderPattern, char_kinds)) {
+                                return .{ .section_header = try std.fmt.allocPrint(arena_ptr.allocator(), "{s}.{s}", .{ tokens[1], tokens[2][1 .. tokens[2].len - 1] }) };
                             } else if (std.mem.eql(CharKind, &VariablePattern, char_kinds)) {
                                 return .{ .variable = .{ .name = tokens[0], .value = tokens[2] } };
                             } else {
@@ -129,10 +140,16 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                             next_cursor += rune.len;
 
                             if (current_token_maybe) |*current_token| {
-                                if (current_token.kind == char_kind or current_token.kind == .comment) {
+                                if (current_token.kind == .quote and char_kind == .quote) {
+                                    // the quote terminated, so save the current token
+                                    try token_kinds.append(current_token.kind);
+                                    try token_ranges.append(.{ .start = current_token.start, .end = next_cursor });
+                                    current_token_maybe = null;
+                                    continue;
+                                } else if (current_token.kind == char_kind or current_token.kind == .comment or current_token.kind == .quote) {
                                     // this rune goes in the current token because either
-                                    // its char kind is the same, or it's a comment
-                                    // (comments go until the end of the line)
+                                    // its char kind is the same, or it's a comment/quote
+                                    // (comments/quotes consume subsequent chars)
                                     continue;
                                 } else {
                                     switch (current_token.kind) {
@@ -169,7 +186,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                         }
 
                         // parse the lines and update the sections/variables
-                        const parsed_line = ParsedLine.init(token_kinds.items, tokens.items);
+                        const parsed_line = try ParsedLine.init(arena, token_kinds.items, tokens.items);
                         switch (parsed_line) {
                             .empty => {},
                             .section_header => {
@@ -302,6 +319,9 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                 const var_name = try self.arena.allocator().dupe(u8, input.name[index + 1 ..]);
                 if (self.sections.getPtr(section_name)) |variables| {
                     _ = variables.orderedRemove(var_name);
+                    if (variables.count() == 0) {
+                        _ = self.sections.orderedRemove(section_name);
+                    }
                 } else {
                     return error.SectionDoesNotExist;
                 }
@@ -309,13 +329,21 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                 switch (repo_kind) {
                     .git => try self.write(core_cursor),
                     .xit => {
-                        _ = try core_cursor.cursor.writePath(void, &.{
-                            .{ .hash_map_get = .{ .value = hash.hashBuffer("config") } },
-                            .hash_map_init,
-                            .{ .hash_map_get = .{ .value = hash.hashBuffer(section_name) } },
-                            .hash_map_init,
-                            .{ .hash_map_remove = hash.hashBuffer(var_name) },
-                        });
+                        if (!self.sections.contains(section_name)) {
+                            _ = try core_cursor.cursor.writePath(void, &.{
+                                .{ .hash_map_get = .{ .value = hash.hashBuffer("config") } },
+                                .hash_map_init,
+                                .{ .hash_map_remove = hash.hashBuffer(section_name) },
+                            });
+                        } else {
+                            _ = try core_cursor.cursor.writePath(void, &.{
+                                .{ .hash_map_get = .{ .value = hash.hashBuffer("config") } },
+                                .hash_map_init,
+                                .{ .hash_map_get = .{ .value = hash.hashBuffer(section_name) } },
+                                .hash_map_init,
+                                .{ .hash_map_remove = hash.hashBuffer(var_name) },
+                            });
+                        }
                     },
                 }
             } else {
@@ -328,7 +356,14 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
             try lock_file.setEndPos(0); // truncate file in case this method is called multiple times
 
             for (self.sections.keys(), self.sections.values()) |section_name, variables| {
-                const section_line = try std.fmt.allocPrint(self.allocator, "[{s}]\n", .{section_name});
+                // if the section name has periods, put everything after the first period in quotes
+                const modified_section_name = if (std.mem.indexOfScalar(u8, section_name, '.')) |index|
+                    try std.fmt.allocPrint(self.allocator, "{s} \"{s}\"", .{ section_name[0..index], section_name[index + 1 ..] })
+                else
+                    try self.allocator.dupe(u8, section_name);
+                defer self.allocator.free(modified_section_name);
+
+                const section_line = try std.fmt.allocPrint(self.allocator, "[{s}]\n", .{modified_section_name});
                 defer self.allocator.free(section_line);
                 try lock_file.writeAll(section_line);
 
