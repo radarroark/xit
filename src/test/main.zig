@@ -1351,7 +1351,23 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             try std.testing.expectEqual(null, config.sections.get("branch.master"));
         }
 
+        // don't allow invalid names
         try std.testing.expectEqual(error.InvalidConfigName, main.xitMain(repo_kind, allocator, &.{ "config", "add", "core#editor", "vim" }, repo_dir, writers));
+
+        // do allow values with spaces
+        try main.xitMain(repo_kind, allocator, &.{ "config", "add", "user.name", "radar roark" }, repo_dir, writers);
+
+        {
+            var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
+            defer repo.deinit();
+
+            var config = try repo.config();
+            defer config.deinit();
+
+            const user_section = config.sections.get("user").?;
+            try std.testing.expectEqual(1, user_section.count());
+            try std.testing.expectEqualStrings("radar roark", user_section.get("name").?);
+        }
     }
 
     // remote

@@ -103,9 +103,19 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                             } else if (std.mem.eql(CharKind, &SectionHeaderPattern, char_kinds)) {
                                 return .{ .section_header = tokens[1] };
                             } else if (std.mem.eql(CharKind, &ExtendedSectionHeaderPattern, char_kinds)) {
+                                // extended section headers look like this:
+                                // [branch "master"]
+                                // ...and they must be represented in memory like this:
+                                // branch.master
                                 return .{ .section_header = try std.fmt.allocPrint(arena_ptr.allocator(), "{s}.{s}", .{ tokens[1], tokens[2][1 .. tokens[2].len - 1] }) };
-                            } else if (std.mem.eql(CharKind, &VariablePattern, char_kinds)) {
-                                return .{ .variable = .{ .name = tokens[0], .value = tokens[2] } };
+                            } else if (std.mem.startsWith(CharKind, char_kinds, &VariablePattern)) {
+                                // variables can have multiple symbols after the equals,
+                                // so we check with startsWith and join the tokens
+                                if (tokens[2..].len > 1) {
+                                    return .{ .variable = .{ .name = tokens[0], .value = try std.mem.join(arena_ptr.allocator(), " ", tokens[2..]) } };
+                                } else {
+                                    return .{ .variable = .{ .name = tokens[0], .value = tokens[2] } };
+                                }
                             } else {
                                 return .invalid;
                             }
