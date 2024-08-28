@@ -248,6 +248,16 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
         }
 
         pub fn add(self: *Config(repo_kind), core_cursor: rp.Repo(repo_kind).CoreCursor, input: AddConfigInput) !void {
+            // don't allow forbidden characters in config name
+            const text = try std.unicode.Utf8View.init(input.name);
+            var iter = text.iterator();
+            while (iter.nextCodepointSlice()) |rune| {
+                switch (rune[0]) {
+                    ' ', '\t', '#', '[', ']', '=', '"' => return error.InvalidConfigName,
+                    else => {},
+                }
+            }
+
             if (std.mem.lastIndexOfScalar(u8, input.name, '.')) |index| {
                 const section_name = try self.arena.allocator().dupe(u8, input.name[0..index]);
                 const var_name = try self.arena.allocator().dupe(u8, input.name[index + 1 ..]);

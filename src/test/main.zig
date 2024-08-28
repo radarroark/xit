@@ -1350,6 +1350,8 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
 
             try std.testing.expectEqual(null, config.sections.get("branch.master"));
         }
+
+        try std.testing.expectEqual(error.InvalidConfigName, main.xitMain(repo_kind, allocator, &.{ "config", "add", "core#editor", "vim" }, repo_dir, writers));
     }
 
     // remote
