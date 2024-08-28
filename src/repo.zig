@@ -523,9 +523,18 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 },
                 .remote => {
                     switch (sub_command.remote) {
-                        .list => {},
-                        .add => {},
-                        .remove => {},
+                        .list => {
+                            var rem = try self.remote();
+                            defer rem.deinit();
+
+                            for (rem.sections.keys(), rem.sections.values()) |section_name, variables| {
+                                for (variables.keys(), variables.values()) |name, value| {
+                                    try writers.out.print("{s}.{s}={s}\n", .{ section_name, name, value });
+                                }
+                            }
+                        },
+                        .add => try self.addRemote(sub_command.remote.add),
+                        .remove => try self.removeRemote(sub_command.remote.remove),
                     }
                 },
             }
@@ -1060,6 +1069,91 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         .{ .array_list_get = .append_copy },
                         .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .conf = &conf, .input = input } },
+                    });
+                },
+            }
+        }
+
+        pub fn remote(self: *Repo(repo_kind)) !cfg.Remote {
+            var conf = try self.config();
+            defer conf.deinit();
+            return try cfg.Remote.init(repo_kind, &conf, self.allocator);
+        }
+
+        pub fn addRemote(self: *Repo(repo_kind), input: cfg.AddConfigInput) !void {
+            const new_name = try std.fmt.allocPrint(self.allocator, "remote.{s}.url", .{input.name});
+            defer self.allocator.free(new_name);
+            const new_input = cfg.AddConfigInput{
+                .name = new_name,
+                .value = input.value,
+            };
+
+            var conf = try self.config();
+            defer conf.deinit();
+            switch (repo_kind) {
+                .git => {
+                    var lock = try io.LockFile.init(self.allocator, self.core.git_dir, "config");
+                    defer lock.deinit();
+
+                    try conf.add(.{ .core = &self.core, .lock_file_maybe = lock.lock_file }, new_input);
+
+                    lock.success = true;
+                },
+                .xit => {
+                    const xitdb = @import("xitdb");
+
+                    const Ctx = struct {
+                        core: *Repo(repo_kind).Core,
+                        conf: *cfg.Config(repo_kind),
+                        input: cfg.AddConfigInput,
+
+                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor) !void {
+                            try ctx.conf.add(.{ .core = ctx.core, .cursor = cursor }, ctx.input);
+                        }
+                    };
+                    _ = try self.core.db.rootCursor().writePath(Ctx, &.{
+                        .{ .array_list_get = .append_copy },
+                        .hash_map_init,
+                        .{ .ctx = Ctx{ .core = &self.core, .conf = &conf, .input = new_input } },
+                    });
+                },
+            }
+        }
+
+        pub fn removeRemote(self: *Repo(repo_kind), input: cfg.RemoveConfigInput) !void {
+            const new_name = try std.fmt.allocPrint(self.allocator, "remote.{s}.url", .{input.name});
+            defer self.allocator.free(new_name);
+            const new_input = cfg.RemoveConfigInput{
+                .name = new_name,
+            };
+
+            var conf = try self.config();
+            defer conf.deinit();
+            switch (repo_kind) {
+                .git => {
+                    var lock = try io.LockFile.init(self.allocator, self.core.git_dir, "config");
+                    defer lock.deinit();
+
+                    try conf.remove(.{ .core = &self.core, .lock_file_maybe = lock.lock_file }, new_input);
+
+                    lock.success = true;
+                },
+                .xit => {
+                    const xitdb = @import("xitdb");
+
+                    const Ctx = struct {
+                        core: *Repo(repo_kind).Core,
+                        conf: *cfg.Config(repo_kind),
+                        input: cfg.RemoveConfigInput,
+
+                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor) !void {
+                            try ctx.conf.remove(.{ .core = ctx.core, .cursor = cursor }, ctx.input);
+                        }
+                    };
+                    _ = try self.core.db.rootCursor().writePath(Ctx, &.{
+                        .{ .array_list_get = .append_copy },
+                        .hash_map_init,
+                        .{ .ctx = Ctx{ .core = &self.core, .conf = &conf, .input = new_input } },
                     });
                 },
             }

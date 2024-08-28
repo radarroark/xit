@@ -62,7 +62,7 @@ pub const SubCommand = union(SubCommandKind) {
     merge: mrg.MergeInput,
     cherry_pick: mrg.MergeInput,
     config: cfg.ConfigCommand,
-    remote: cfg.RemoteCommand,
+    remote: cfg.ConfigCommand,
 
     pub fn deinit(self: *SubCommand) void {
         switch (self.*) {
@@ -284,16 +284,16 @@ pub const Command = union(enum) {
             if (std.mem.eql(u8, "list", cmd_name)) {
                 config_cmd = .list;
             } else if (std.mem.eql(u8, "add", cmd_name)) {
-                if (extra_args.len < 3) {
-                    return error.InsufficientConfigArgs;
+                if (extra_args.len != 3) {
+                    return error.WrongNumberOfConfigArgs;
                 }
                 config_cmd = .{ .add = .{
                     .name = extra_args[1],
                     .value = extra_args[2],
                 } };
             } else if (std.mem.eql(u8, "remove", cmd_name)) {
-                if (extra_args.len < 2) {
-                    return error.InsufficientConfigArgs;
+                if (extra_args.len != 2) {
+                    return error.WrongNumberOfConfigArgs;
                 }
                 config_cmd = .{ .remove = .{
                     .name = extra_args[1],
@@ -306,28 +306,28 @@ pub const Command = union(enum) {
         } else if (std.mem.eql(u8, sub_command, "remote")) {
             const cmd_name = extra_args[0];
 
-            var remote_cmd: cfg.RemoteCommand = undefined;
+            var config_cmd: cfg.ConfigCommand = undefined;
             if (std.mem.eql(u8, "list", cmd_name)) {
-                remote_cmd = .list;
+                config_cmd = .list;
             } else if (std.mem.eql(u8, "add", cmd_name)) {
-                if (extra_args.len < 3) {
-                    return error.InsufficientRemoteArgs;
+                if (extra_args.len != 3) {
+                    return error.WrongNumberOfRemoteArgs;
                 }
-                remote_cmd = .{ .add = .{
+                config_cmd = .{ .add = .{
                     .name = extra_args[1],
-                    .url = extra_args[2],
+                    .value = extra_args[2],
                 } };
             } else if (std.mem.eql(u8, "remove", cmd_name)) {
-                if (extra_args.len < 2) {
-                    return error.InsufficientRemoteArgs;
+                if (extra_args.len != 2) {
+                    return error.WrongNumberofRemoteArgs;
                 }
-                remote_cmd = .{ .remove = .{
+                config_cmd = .{ .remove = .{
                     .name = extra_args[1],
                 } };
             } else {
                 return error.InvalidRemoteCommand;
             }
-            return .{ .cli = .{ .remote = remote_cmd } };
+            return .{ .cli = .{ .remote = config_cmd } };
         }
 
         return .{ .invalid = .{ .name = sub_command } };

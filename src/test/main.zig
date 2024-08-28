@@ -1368,13 +1368,38 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             try std.testing.expectEqual(1, user_section.count());
             try std.testing.expectEqualStrings("radar roark", user_section.get("name").?);
         }
+
+        try main.xitMain(repo_kind, allocator, &.{ "config", "list" }, repo_dir, writers);
     }
 
     // remote
     {
         try main.xitMain(repo_kind, allocator, &.{ "remote", "add", "origin", "http://localhost:3000" }, repo_dir, writers);
+
+        {
+            var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
+            defer repo.deinit();
+
+            var remote = try repo.remote();
+            defer remote.deinit();
+
+            const origin_section = remote.sections.get("origin").?;
+            try std.testing.expectEqual(1, origin_section.count());
+        }
+
+        try main.xitMain(repo_kind, allocator, &.{ "remote", "remove", "origin" }, repo_dir, writers);
+
+        {
+            var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
+            defer repo.deinit();
+
+            var remote = try repo.remote();
+            defer remote.deinit();
+
+            try std.testing.expectEqual(null, remote.sections.get("origin"));
+        }
+
         try main.xitMain(repo_kind, allocator, &.{ "remote", "list" }, repo_dir, writers);
-        try main.xitMain(repo_kind, allocator, &.{ "remote", "remove", "http://localhost:3000" }, repo_dir, writers);
     }
 
     return commit4;

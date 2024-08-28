@@ -397,17 +397,49 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
     };
 }
 
-pub const AddRemoteInput = struct {
-    name: []const u8,
-    url: []const u8,
-};
+pub const Remote = struct {
+    allocator: std.mem.Allocator,
+    arena: *std.heap.ArenaAllocator,
+    sections: std.StringArrayHashMap(Variables),
 
-pub const RemoveRemoteInput = struct {
-    name: []const u8,
-};
+    const Variables = std.StringArrayHashMap([]const u8);
 
-pub const RemoteCommand = union(enum) {
-    list,
-    add: AddRemoteInput,
-    remove: RemoveRemoteInput,
+    pub fn init(comptime repo_kind: rp.RepoKind, config: *Config(repo_kind), allocator: std.mem.Allocator) !Remote {
+        var arena = try allocator.create(std.heap.ArenaAllocator);
+        arena.* = std.heap.ArenaAllocator.init(allocator);
+        errdefer {
+            arena.deinit();
+            allocator.destroy(arena);
+        }
+
+        var sections = std.StringArrayHashMap(Variables).init(arena.allocator());
+
+        const prefix = "remote.";
+
+        for (config.sections.keys(), config.sections.values()) |section_name, variables| {
+            if (std.mem.startsWith(u8, section_name, prefix)) {
+                const remote_name = try arena.allocator().dupe(u8, section_name[prefix.len..]);
+
+                var remote_variables = Variables.init(arena.allocator());
+                for (variables.keys(), variables.values()) |key, val| {
+                    const remote_key = try arena.allocator().dupe(u8, key);
+                    const remote_val = try arena.allocator().dupe(u8, val);
+                    try remote_variables.put(remote_key, remote_val);
+                }
+
+                try sections.put(remote_name, remote_variables);
+            }
+        }
+
+        return .{
+            .allocator = allocator,
+            .arena = arena,
+            .sections = sections,
+        };
+    }
+
+    pub fn deinit(self: *Remote) void {
+        self.arena.deinit();
+        self.allocator.destroy(self.arena);
+    }
 };
