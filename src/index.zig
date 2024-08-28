@@ -447,6 +447,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     }
 
                     const lock_file = core_cursor.lock_file_maybe orelse return error.NoLockFile;
+                    try lock_file.setEndPos(0); // truncate file in case this method is called multiple times
 
                     // write the header
                     const version: u32 = 2;

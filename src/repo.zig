@@ -994,7 +994,14 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             var conf = try self.config();
             defer conf.deinit();
             switch (repo_kind) {
-                .git => try conf.add(.{ .core = &self.core }, input),
+                .git => {
+                    var lock = try io.LockFile.init(self.allocator, self.core.git_dir, "config");
+                    defer lock.deinit();
+
+                    try conf.add(.{ .core = &self.core, .lock_file_maybe = lock.lock_file }, input);
+
+                    lock.success = true;
+                },
                 .xit => {
                     const xitdb = @import("xitdb");
 
@@ -1020,7 +1027,14 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             var conf = try self.config();
             defer conf.deinit();
             switch (repo_kind) {
-                .git => try conf.remove(.{ .core = &self.core }, input),
+                .git => {
+                    var lock = try io.LockFile.init(self.allocator, self.core.git_dir, "config");
+                    defer lock.deinit();
+
+                    try conf.remove(.{ .core = &self.core, .lock_file_maybe = lock.lock_file }, input);
+
+                    lock.success = true;
+                },
                 .xit => {
                     const xitdb = @import("xitdb");
 

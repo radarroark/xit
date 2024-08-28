@@ -1,6 +1,5 @@
 const std = @import("std");
 const rp = @import("./repo.zig");
-const io = @import("./io.zig");
 const hash = @import("./hash.zig");
 
 const MAX_READ_BYTES = 1024; // FIXME: this is arbitrary...
@@ -245,7 +244,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                 }
 
                 switch (repo_kind) {
-                    .git => try self.write(core_cursor.core),
+                    .git => try self.write(core_cursor),
                     .xit => {
                         // ensure section name is saved
                         const section_name_hash = hash.hashBuffer(section_name);
@@ -308,7 +307,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                 }
 
                 switch (repo_kind) {
-                    .git => try self.write(core_cursor.core),
+                    .git => try self.write(core_cursor),
                     .xit => {
                         _ = try core_cursor.cursor.writePath(void, &.{
                             .{ .hash_map_get = .{ .value = hash.hashBuffer("config") } },
@@ -324,23 +323,21 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
             }
         }
 
-        fn write(self: *Config(repo_kind), core: *rp.Repo(.git).Core) !void {
-            var lock = try io.LockFile.init(self.allocator, core.git_dir, "config");
-            defer lock.deinit();
+        fn write(self: *Config(repo_kind), core_cursor: rp.Repo(.git).CoreCursor) !void {
+            const lock_file = core_cursor.lock_file_maybe orelse return error.NoLockFile;
+            try lock_file.setEndPos(0); // truncate file in case this method is called multiple times
 
             for (self.sections.keys(), self.sections.values()) |section_name, variables| {
                 const section_line = try std.fmt.allocPrint(self.allocator, "[{s}]\n", .{section_name});
                 defer self.allocator.free(section_line);
-                try lock.lock_file.writeAll(section_line);
+                try lock_file.writeAll(section_line);
 
                 for (variables.keys(), variables.values()) |name, value| {
                     const var_line = try std.fmt.allocPrint(self.allocator, "\t{s} = {s}\n", .{ name, value });
                     defer self.allocator.free(var_line);
-                    try lock.lock_file.writeAll(var_line);
+                    try lock_file.writeAll(var_line);
                 }
             }
-
-            lock.success = true;
         }
     };
 }
