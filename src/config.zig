@@ -258,13 +258,17 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
         }
 
         pub fn add(self: *Config(repo_kind), core_cursor: rp.Repo(repo_kind).CoreCursor, input: AddConfigInput) !void {
-            // don't allow forbidden characters in config name
-            const text = try std.unicode.Utf8View.init(input.name);
-            var iter = text.iterator();
-            while (iter.nextCodepointSlice()) |rune| {
-                switch (rune[0]) {
-                    ' ', '\t', '#', '[', ']', '=', '"' => return error.InvalidConfigName,
-                    else => {},
+            // validate the config name
+            for (input.name, 0..) |char, i| {
+                switch (char) {
+                    'a'...'z' => {},
+                    '.' => {
+                        // can't start with, end with, or contain repeat periods
+                        if (i == 0 or i == input.name.len - 1 or input.name[i - 1] == char) {
+                            return error.InvalidConfigName;
+                        }
+                    },
+                    else => return error.InvalidConfigName,
                 }
             }
 
