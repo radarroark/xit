@@ -78,20 +78,20 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                         },
                         invalid,
 
-                        const SectionHeaderPattern = [_]CharKind{
+                        const section_header_pattern = [_]CharKind{
                             .open_bracket,
                             .symbol,
                             .close_bracket,
                         };
 
-                        const ExtendedSectionHeaderPattern = [_]CharKind{
+                        const extended_section_header_pattern = [_]CharKind{
                             .open_bracket,
                             .symbol,
                             .quote,
                             .close_bracket,
                         };
 
-                        const VariablePattern = [_]CharKind{
+                        const variable_pattern = [_]CharKind{
                             .symbol,
                             .equals,
                             .symbol,
@@ -100,15 +100,15 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                         fn init(arena_ptr: *std.heap.ArenaAllocator, char_kinds: []CharKind, tokens: []const []const u8) !@This() {
                             if (char_kinds.len == 0) {
                                 return .empty;
-                            } else if (std.mem.eql(CharKind, &SectionHeaderPattern, char_kinds)) {
+                            } else if (std.mem.eql(CharKind, &section_header_pattern, char_kinds)) {
                                 return .{ .section_header = tokens[1] };
-                            } else if (std.mem.eql(CharKind, &ExtendedSectionHeaderPattern, char_kinds)) {
+                            } else if (std.mem.eql(CharKind, &extended_section_header_pattern, char_kinds)) {
                                 // extended section headers look like this:
                                 // [branch "master"]
                                 // ...and they must be represented in memory like this:
                                 // branch.master
                                 return .{ .section_header = try std.fmt.allocPrint(arena_ptr.allocator(), "{s}.{s}", .{ tokens[1], tokens[2][1 .. tokens[2].len - 1] }) };
-                            } else if (std.mem.startsWith(CharKind, char_kinds, &VariablePattern)) {
+                            } else if (std.mem.startsWith(CharKind, char_kinds, &variable_pattern)) {
                                 // variables can have multiple symbols after the equals,
                                 // so we check with startsWith and join the tokens
                                 if (tokens[2..].len > 1) {
