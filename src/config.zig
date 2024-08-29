@@ -381,13 +381,10 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
 
             for (self.sections.keys(), self.sections.values()) |section_name, variables| {
                 // if the section name has periods, put everything after the first period in quotes
-                const modified_section_name = if (std.mem.indexOfScalar(u8, section_name, '.')) |index|
-                    try std.fmt.allocPrint(self.allocator, "{s} \"{s}\"", .{ section_name[0..index], section_name[index + 1 ..] })
+                const section_line = if (std.mem.indexOfScalar(u8, section_name, '.')) |index|
+                    try std.fmt.allocPrint(self.allocator, "[{s} \"{s}\"]\n", .{ section_name[0..index], section_name[index + 1 ..] })
                 else
-                    try self.allocator.dupe(u8, section_name);
-                defer self.allocator.free(modified_section_name);
-
-                const section_line = try std.fmt.allocPrint(self.allocator, "[{s}]\n", .{modified_section_name});
+                    try std.fmt.allocPrint(self.allocator, "[{s}]\n", .{section_name});
                 defer self.allocator.free(section_line);
                 try lock_file.writeAll(section_line);
 
