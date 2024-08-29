@@ -239,7 +239,7 @@ pub const Command = union(enum) {
                     return error.WrongNumberOfBranchArgs;
                 }
                 cmd = .{ .add = .{ .name = extra_args[1] } };
-            } else if (std.mem.eql(u8, "remove", cmd_name)) {
+            } else if (std.mem.eql(u8, "rm", cmd_name)) {
                 if (extra_args.len != 2) {
                     return error.WrongNumberOfBranchArgs;
                 }
@@ -309,7 +309,7 @@ pub const Command = union(enum) {
                     .name = extra_args[1],
                     .value = extra_args[2],
                 } };
-            } else if (std.mem.eql(u8, "remove", cmd_name)) {
+            } else if (std.mem.eql(u8, "rm", cmd_name)) {
                 if (extra_args.len != 2) {
                     return error.WrongNumberOfConfigArgs;
                 }
@@ -335,7 +335,7 @@ pub const Command = union(enum) {
                     .name = extra_args[1],
                     .value = extra_args[2],
                 } };
-            } else if (std.mem.eql(u8, "remove", cmd_name)) {
+            } else if (std.mem.eql(u8, "rm", cmd_name)) {
                 if (extra_args.len != 2) {
                     return error.WrongNumberofRemoteArgs;
                 }

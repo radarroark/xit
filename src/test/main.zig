@@ -1197,7 +1197,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     }
 
     // remove the branch
-    try main.xitMain(repo_kind, allocator, &.{ "branch", "remove", "a/b/c" }, repo_dir, writers);
+    try main.xitMain(repo_kind, allocator, &.{ "branch", "rm", "a/b/c" }, repo_dir, writers);
 
     // make sure the subdirs are deleted
     if (repo_kind == .git) {
@@ -1335,7 +1335,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             try std.testing.expectEqual(1, branch_master_section.count());
         }
 
-        try main.xitMain(repo_kind, allocator, &.{ "config", "remove", "branch.master.remote" }, repo_dir, writers);
+        try main.xitMain(repo_kind, allocator, &.{ "config", "rm", "branch.master.remote" }, repo_dir, writers);
 
         {
             var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
@@ -1383,7 +1383,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             try std.testing.expectEqual(1, origin_section.count());
         }
 
-        try main.xitMain(repo_kind, allocator, &.{ "remote", "remove", "origin" }, repo_dir, writers);
+        try main.xitMain(repo_kind, allocator, &.{ "remote", "rm", "origin" }, repo_dir, writers);
 
         {
             var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
