@@ -399,32 +399,34 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     }
                 },
                 .branch => {
-                    if (sub_command.branch.name) |name| {
-                        try self.create_branch(name);
-                    } else {
-                        var cursor = try self.core.latestCursor();
-                        const core_cursor = switch (repo_kind) {
-                            .git => .{ .core = &self.core },
-                            .xit => .{ .core = &self.core, .cursor = &cursor },
-                        };
+                    switch (sub_command.branch) {
+                        .list => {
+                            var cursor = try self.core.latestCursor();
+                            const core_cursor = switch (repo_kind) {
+                                .git => .{ .core = &self.core },
+                                .xit => .{ .core = &self.core, .cursor = &cursor },
+                            };
 
-                        var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, core_cursor, self.allocator, "HEAD");
-                        defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
+                            var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, core_cursor, self.allocator, "HEAD");
+                            defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
 
-                        var ref_list = try ref.RefList.init(repo_kind, core_cursor, self.allocator, "heads");
-                        defer ref_list.deinit();
+                            var ref_list = try ref.RefList.init(repo_kind, core_cursor, self.allocator, "heads");
+                            defer ref_list.deinit();
 
-                        for (ref_list.refs.items) |r| {
-                            const is_current_branch = if (current_branch_maybe) |current_branch|
-                                std.mem.eql(u8, current_branch.name, r.name)
-                            else
-                                false;
-                            try writers.out.print("{s} {s}\n", .{ if (is_current_branch) "*" else " ", r.name });
-                        }
+                            for (ref_list.refs.items) |r| {
+                                const is_current_branch = if (current_branch_maybe) |current_branch|
+                                    std.mem.eql(u8, current_branch.name, r.name)
+                                else
+                                    false;
+                                try writers.out.print("{s} {s}\n", .{ if (is_current_branch) "*" else " ", r.name });
+                            }
+                        },
+                        .add => try self.addBranch(sub_command.branch.add),
+                        .remove => try self.removeBranch(sub_command.branch.remove),
                     }
                 },
                 .switch_head => {
-                    var result = try self.switch_head(sub_command.switch_head.target, .{ .force = false });
+                    var result = try self.switchHead(sub_command.switch_head.target, .{ .force = false });
                     defer result.deinit();
                 },
                 .restore => {
@@ -834,55 +836,55 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             return tree_diff;
         }
 
-        pub fn create_branch(self: *Repo(repo_kind), name: []const u8) !void {
+        pub fn addBranch(self: *Repo(repo_kind), input: bch.AddBranchInput) !void {
             switch (repo_kind) {
-                .git => try bch.create(repo_kind, .{ .core = &self.core }, self.allocator, name),
+                .git => try bch.add(repo_kind, .{ .core = &self.core }, self.allocator, input),
                 .xit => {
                     const xitdb = @import("xitdb");
 
                     const Ctx = struct {
                         core: *Repo(repo_kind).Core,
                         allocator: std.mem.Allocator,
-                        name: []const u8,
+                        input: bch.AddBranchInput,
 
                         pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor) !void {
-                            try bch.create(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, ctx.name);
+                            try bch.add(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, ctx.input);
                         }
                     };
                     _ = try self.core.db.rootCursor().writePath(Ctx, &.{
                         .{ .array_list_get = .append_copy },
                         .hash_map_init,
-                        .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .name = name } },
+                        .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .input = input } },
                     });
                 },
             }
         }
 
-        pub fn delete_branch(self: *Repo(repo_kind), name: []const u8) !void {
+        pub fn removeBranch(self: *Repo(repo_kind), input: bch.RemoveBranchInput) !void {
             switch (repo_kind) {
-                .git => try bch.delete(repo_kind, .{ .core = &self.core }, self.allocator, name),
+                .git => try bch.remove(repo_kind, .{ .core = &self.core }, self.allocator, input),
                 .xit => {
                     const xitdb = @import("xitdb");
 
                     const Ctx = struct {
                         core: *Repo(repo_kind).Core,
                         allocator: std.mem.Allocator,
-                        name: []const u8,
+                        input: bch.RemoveBranchInput,
 
                         pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor) !void {
-                            try bch.delete(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, ctx.name);
+                            try bch.remove(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, ctx.input);
                         }
                     };
                     _ = try self.core.db.rootCursor().writePath(Ctx, &.{
                         .{ .array_list_get = .append_copy },
                         .hash_map_init,
-                        .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .name = name } },
+                        .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .input = input } },
                     });
                 },
             }
         }
 
-        pub fn switch_head(self: *Repo(repo_kind), target: []const u8, options: chk.Switch.Options) !chk.Switch {
+        pub fn switchHead(self: *Repo(repo_kind), target: []const u8, options: chk.Switch.Options) !chk.Switch {
             switch (repo_kind) {
                 .git => return try chk.Switch.init(repo_kind, .{ .core = &self.core }, self.allocator, target, options),
                 .xit => {

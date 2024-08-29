@@ -540,7 +540,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             {
                 var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
-                var result = try repo.switch_head(&commit1, .{ .force = false });
+                var result = try repo.switchHead(&commit1, .{ .force = false });
                 defer result.deinit();
                 try std.testing.expect(result.data == .conflict);
                 try std.testing.expectEqual(1, result.data.conflict.stale_files.count());
@@ -565,7 +565,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             {
                 var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
-                var result = try repo.switch_head(&commit1, .{ .force = false });
+                var result = try repo.switchHead(&commit1, .{ .force = false });
                 defer result.deinit();
                 try std.testing.expect(result.data == .conflict);
             }
@@ -588,7 +588,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             {
                 var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
-                var result = try repo.switch_head(&commit1, .{ .force = false });
+                var result = try repo.switchHead(&commit1, .{ .force = false });
                 defer result.deinit();
                 try std.testing.expect(result.data == .conflict);
                 try std.testing.expectEqual(1, result.data.conflict.stale_files.count());
@@ -617,7 +617,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             {
                 var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
-                var result = try repo.switch_head(&commit1, .{ .force = false });
+                var result = try repo.switchHead(&commit1, .{ .force = false });
                 defer result.deinit();
                 try std.testing.expect(result.data == .conflict);
                 try std.testing.expectEqual(1, result.data.conflict.stale_dirs.count());
@@ -1062,7 +1062,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     }
 
     // create a branch
-    try main.xitMain(repo_kind, allocator, &.{ "branch", "stuff" }, repo_dir, writers);
+    try main.xitMain(repo_kind, allocator, &.{ "branch", "add", "stuff" }, repo_dir, writers);
 
     // switch to the branch
     try main.xitMain(repo_kind, allocator, &.{ "switch", "stuff" }, repo_dir, writers);
@@ -1124,7 +1124,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
-        try std.testing.expectEqual(error.CannotDeleteCurrentBranch, repo.delete_branch("stuff"));
+        try std.testing.expectEqual(error.CannotDeleteCurrentBranch, repo.removeBranch(.{ .name = "stuff" }));
     }
 
     // make a few commits on the stuff branch
@@ -1166,7 +1166,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     };
 
     // create a branch with slashes
-    try main.xitMain(repo_kind, allocator, &.{ "branch", "a/b/c" }, repo_dir, writers);
+    try main.xitMain(repo_kind, allocator, &.{ "branch", "add", "a/b/c" }, repo_dir, writers);
 
     // make sure the ref is created with subdirs
     if (repo_kind == .git) {
@@ -1196,12 +1196,8 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         try std.testing.expect(ref_map.contains("master"));
     }
 
-    // delete the branch
-    {
-        var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
-        defer repo.deinit();
-        try repo.delete_branch("a/b/c");
-    }
+    // remove the branch
+    try main.xitMain(repo_kind, allocator, &.{ "branch", "remove", "a/b/c" }, repo_dir, writers);
 
     // make sure the subdirs are deleted
     if (repo_kind == .git) {

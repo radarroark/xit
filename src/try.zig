@@ -103,7 +103,7 @@ pub fn main() !void {
             const commit_object = commits.items[commits.items.len - i - 1];
             try writers.out.print("Creating commit: {s}", .{commit_object.content.commit.metadata.message});
 
-            var switch_result = try git_repo.switch_head(&commit_object.oid, .{ .force = true });
+            var switch_result = try git_repo.switchHead(&commit_object.oid, .{ .force = true });
             defer switch_result.deinit();
             if (switch_result.data != .success) {
                 return error.CheckoutFailed;

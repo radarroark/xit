@@ -6,6 +6,7 @@ const mrg = @import("./merge.zig");
 const idx = @import("./index.zig");
 const obj = @import("./object.zig");
 const cfg = @import("./config.zig");
+const bch = @import("./branch.zig");
 
 pub const SubCommandKind = enum {
     init,
@@ -49,9 +50,7 @@ pub const SubCommand = union(SubCommandKind) {
     diff: struct {
         diff_opts: df.BasicDiffOptions,
     },
-    branch: struct {
-        name: ?[]const u8,
-    },
+    branch: bch.BranchCommand,
     switch_head: struct {
         target: []const u8,
     },
@@ -230,7 +229,26 @@ pub const Command = union(enum) {
                     .{ .workspace = .{ .conflict_diff_kind = .current } });
             return .{ .cli = .{ .diff = .{ .diff_opts = diff_opts } } };
         } else if (std.mem.eql(u8, sub_command, "branch")) {
-            return .{ .cli = .{ .branch = .{ .name = if (extra_args.len == 0) null else extra_args[0] } } };
+            const cmd_name = extra_args[0];
+
+            var cmd: bch.BranchCommand = undefined;
+            if (std.mem.eql(u8, "list", cmd_name)) {
+                cmd = .list;
+            } else if (std.mem.eql(u8, "add", cmd_name)) {
+                if (extra_args.len != 2) {
+                    return error.WrongNumberOfBranchArgs;
+                }
+                cmd = .{ .add = .{ .name = extra_args[1] } };
+            } else if (std.mem.eql(u8, "remove", cmd_name)) {
+                if (extra_args.len != 2) {
+                    return error.WrongNumberOfBranchArgs;
+                }
+                cmd = .{ .remove = .{ .name = extra_args[1] } };
+            } else {
+                return error.InvalidBranchCommand;
+            }
+
+            return .{ .cli = .{ .branch = cmd } };
         } else if (std.mem.eql(u8, sub_command, "switch")) {
             if (extra_args.len == 0) {
                 return error.SwitchTargetNotFound;
@@ -280,14 +298,14 @@ pub const Command = union(enum) {
         } else if (std.mem.eql(u8, sub_command, "config")) {
             const cmd_name = extra_args[0];
 
-            var config_cmd: cfg.ConfigCommand = undefined;
+            var cmd: cfg.ConfigCommand = undefined;
             if (std.mem.eql(u8, "list", cmd_name)) {
-                config_cmd = .list;
+                cmd = .list;
             } else if (std.mem.eql(u8, "add", cmd_name)) {
                 if (extra_args.len != 3) {
                     return error.WrongNumberOfConfigArgs;
                 }
-                config_cmd = .{ .add = .{
+                cmd = .{ .add = .{
                     .name = extra_args[1],
                     .value = extra_args[2],
                 } };
@@ -295,25 +313,25 @@ pub const Command = union(enum) {
                 if (extra_args.len != 2) {
                     return error.WrongNumberOfConfigArgs;
                 }
-                config_cmd = .{ .remove = .{
+                cmd = .{ .remove = .{
                     .name = extra_args[1],
                 } };
             } else {
                 return error.InvalidConfigCommand;
             }
 
-            return .{ .cli = .{ .config = config_cmd } };
+            return .{ .cli = .{ .config = cmd } };
         } else if (std.mem.eql(u8, sub_command, "remote")) {
             const cmd_name = extra_args[0];
 
-            var config_cmd: cfg.ConfigCommand = undefined;
+            var cmd: cfg.ConfigCommand = undefined;
             if (std.mem.eql(u8, "list", cmd_name)) {
-                config_cmd = .list;
+                cmd = .list;
             } else if (std.mem.eql(u8, "add", cmd_name)) {
                 if (extra_args.len != 3) {
                     return error.WrongNumberOfRemoteArgs;
                 }
-                config_cmd = .{ .add = .{
+                cmd = .{ .add = .{
                     .name = extra_args[1],
                     .value = extra_args[2],
                 } };
@@ -321,13 +339,13 @@ pub const Command = union(enum) {
                 if (extra_args.len != 2) {
                     return error.WrongNumberofRemoteArgs;
                 }
-                config_cmd = .{ .remove = .{
+                cmd = .{ .remove = .{
                     .name = extra_args[1],
                 } };
             } else {
                 return error.InvalidRemoteCommand;
             }
-            return .{ .cli = .{ .remote = config_cmd } };
+            return .{ .cli = .{ .remote = cmd } };
         }
 
         return .{ .invalid = .{ .name = sub_command } };

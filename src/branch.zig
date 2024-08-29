@@ -4,7 +4,22 @@ const ref = @import("./ref.zig");
 const io = @import("./io.zig");
 const rp = @import("./repo.zig");
 
-pub fn create(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, name: []const u8) !void {
+pub const BranchCommand = union(enum) {
+    list,
+    add: AddBranchInput,
+    remove: RemoveBranchInput,
+};
+
+pub const AddBranchInput = struct {
+    name: []const u8,
+};
+
+pub const RemoveBranchInput = struct {
+    name: []const u8,
+};
+
+pub fn add(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, input: AddBranchInput) !void {
+    const name = input.name;
     if (name.len == 0 or
         name[0] == '.' or
         name[0] == '/' or
@@ -122,7 +137,7 @@ pub fn create(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).C
     }
 }
 
-pub fn delete(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, name: []const u8) !void {
+pub fn remove(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, input: RemoveBranchInput) !void {
     switch (repo_kind) {
         .git => {
             var refs_dir = try core_cursor.core.git_dir.openDir("refs", .{});
@@ -134,7 +149,7 @@ pub fn delete(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).C
             var heads_dir_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
             const heads_dir_path = try heads_dir.realpath(".", &heads_dir_buffer);
             var ref_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
-            const ref_path = try heads_dir.realpath(name, &ref_buffer);
+            const ref_path = try heads_dir.realpath(input.name, &ref_buffer);
 
             // create lock file for HEAD
             var head_lock = try io.LockFile.init(allocator, core_cursor.core.git_dir, "HEAD");
@@ -144,13 +159,13 @@ pub fn delete(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).C
             var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, core_cursor, allocator, "HEAD");
             defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
             if (current_branch_maybe) |current_branch| {
-                if (std.mem.eql(u8, current_branch.name, name)) {
+                if (std.mem.eql(u8, current_branch.name, input.name)) {
                     return error.CannotDeleteCurrentBranch;
                 }
             }
 
             // delete file
-            try heads_dir.deleteFile(name);
+            try heads_dir.deleteFile(input.name);
 
             // delete parent dirs
             // this is only necessary because branches with a slash
@@ -175,12 +190,12 @@ pub fn delete(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).C
             var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, core_cursor, allocator, "HEAD");
             defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
             if (current_branch_maybe) |current_branch| {
-                if (std.mem.eql(u8, current_branch.name, name)) {
+                if (std.mem.eql(u8, current_branch.name, input.name)) {
                     return error.CannotDeleteCurrentBranch;
                 }
             }
 
-            const name_hash = hash.hashBuffer(name);
+            const name_hash = hash.hashBuffer(input.name);
 
             // remove from refs/heads/{name}
             _ = try core_cursor.cursor.writePath(void, &.{
