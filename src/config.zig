@@ -398,14 +398,14 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
     };
 }
 
-pub const Remote = struct {
+pub const RemoteConfig = struct {
     allocator: std.mem.Allocator,
     arena: *std.heap.ArenaAllocator,
     sections: std.StringArrayHashMap(Variables),
 
     const Variables = std.StringArrayHashMap([]const u8);
 
-    pub fn init(comptime repo_kind: rp.RepoKind, config: *Config(repo_kind), allocator: std.mem.Allocator) !Remote {
+    pub fn init(comptime repo_kind: rp.RepoKind, config: *Config(repo_kind), allocator: std.mem.Allocator) !RemoteConfig {
         var arena = try allocator.create(std.heap.ArenaAllocator);
         arena.* = std.heap.ArenaAllocator.init(allocator);
         errdefer {
@@ -439,7 +439,7 @@ pub const Remote = struct {
         };
     }
 
-    pub fn deinit(self: *Remote) void {
+    pub fn deinit(self: *RemoteConfig) void {
         self.arena.deinit();
         self.allocator.destroy(self.arena);
     }

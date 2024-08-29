@@ -1076,10 +1076,10 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             }
         }
 
-        pub fn remote(self: *Repo(repo_kind)) !cfg.Remote {
+        pub fn remote(self: *Repo(repo_kind)) !cfg.RemoteConfig {
             var conf = try self.config();
             defer conf.deinit();
-            return try cfg.Remote.init(repo_kind, &conf, self.allocator);
+            return try cfg.RemoteConfig.init(repo_kind, &conf, self.allocator);
         }
 
         pub fn addRemote(self: *Repo(repo_kind), input: cfg.AddConfigInput) !void {
