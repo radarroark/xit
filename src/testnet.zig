@@ -1,14 +1,12 @@
 const std = @import("std");
-const hash = @import("../hash.zig");
-const rp = @import("../repo.zig");
-const obj = @import("../object.zig");
+const rp = @import("repo.zig");
 
 const c = @cImport({
     @cInclude("git2.h");
 });
 
 test "push" {
-    //const allocator = std.testing.allocator;
+    const allocator = std.testing.allocator;
     const temp_dir_name = "temp-testnet";
 
     // start libgit
@@ -26,33 +24,56 @@ test "push" {
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
-    // create the repo dir
-    var repo_dir = try temp_dir.makeOpenPath("repo", .{});
-    defer repo_dir.close();
+    // init server process
+    var process = std.process.Child.init(
+        &.{ "git", "daemon", "--reuseaddr", "--base-path=.", "--export-all", "--enable=receive-pack" },
+        allocator,
+    );
+    process.cwd = temp_dir_name;
+    defer _ = process.kill() catch {};
+
+    // init server repo
+    {
+        const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
+
+        var repo = try rp.Repo(.git).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "server" } }, writers);
+        defer repo.deinit();
+
+        try repo.addConfig(.{ .name = "core.bare", .value = "false" });
+        try repo.addConfig(.{ .name = "receive.denycurrentbranch", .value = "updateinstead" });
+    }
+
+    // start server
+    try process.spawn();
+    std.time.sleep(1000000);
+
+    // create the client dir
+    var client_dir = try temp_dir.makeOpenPath("client", .{});
+    defer client_dir.close();
 
     // get repo path for libgit
     var repo_path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
-    const repo_path: [*c]const u8 = @ptrCast(try repo_dir.realpath(".", &repo_path_buffer));
+    const repo_path: [*c]const u8 = @ptrCast(try client_dir.realpath(".", &repo_path_buffer));
 
-    // init repo
+    // init client repo
     var repo: ?*c.git_repository = null;
     try std.testing.expectEqual(0, c.git_repository_init(&repo, repo_path, 0));
     defer c.git_repository_free(repo);
 
     // make sure the git dir was created
-    var git_dir = try repo_dir.openDir(".git", .{});
+    var git_dir = try client_dir.openDir(".git", .{});
     defer git_dir.close();
 
     // add and commit
     var commit_oid1: c.git_oid = undefined;
     {
         // make file
-        var hello_txt = try repo_dir.createFile("hello.txt", .{});
+        var hello_txt = try client_dir.createFile("hello.txt", .{});
         defer hello_txt.close();
         try hello_txt.writeAll("hello, world!");
 
         // make file
-        var readme = try repo_dir.createFile("README", .{});
+        var readme = try client_dir.createFile("README", .{});
         defer readme.close();
         try readme.writeAll("My cool project");
 
@@ -89,7 +110,7 @@ test "push" {
 
     {
         var remote: ?*c.git_remote = null;
-        try std.testing.expectEqual(0, c.git_remote_create(&remote, repo, "origin", "git://localhost:9418/repo"));
+        try std.testing.expectEqual(0, c.git_remote_create(&remote, repo, "origin", "git://localhost:9418/server"));
         defer c.git_remote_free(remote);
     }
 
@@ -111,8 +132,9 @@ test "push" {
     try std.testing.expectEqual(0, c.git_push_options_init(&options, c.GIT_PUSH_OPTIONS_VERSION));
     options.callbacks = callbacks;
 
-    std.testing.expectEqual(0, c.git_remote_push(remote, &refspecs, &options)) catch {
-        const err = c.giterr_last();
-        std.debug.print("{s}\n", .{err.*.message});
+    std.testing.expectEqual(0, c.git_remote_push(remote, &refspecs, &options)) catch |err| {
+        const last_err = c.giterr_last();
+        std.debug.print("{s}\n", .{last_err.*.message});
+        return err;
     };
 }
