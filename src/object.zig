@@ -672,7 +672,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
             }
 
             switch (obj_rdr.header.kind) {
-                .blob => return Object(repo_kind){
+                .blob => return .{
                     .allocator = allocator,
                     .arena = arena,
                     .content = ObjectContent{ .blob = {} },
@@ -683,20 +683,18 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                     var entries = std.StringArrayHashMap(TreeEntry).init(arena.allocator());
 
                     while (true) {
-                        const entry_mode_str = obj_rdr.reader.unbuffered_reader.readUntilDelimiterAlloc(arena.allocator(), ' ', MAX_READ_BYTES) catch |err| {
-                            switch (err) {
-                                error.EndOfStream => break,
-                                else => return err,
-                            }
+                        const entry_mode_str = obj_rdr.reader.unbuffered_reader.readUntilDelimiterAlloc(arena.allocator(), ' ', MAX_READ_BYTES) catch |err| switch (err) {
+                            error.EndOfStream => break,
+                            else => return err,
                         };
                         const entry_mode: io.Mode = @bitCast(try std.fmt.parseInt(u32, entry_mode_str, 8));
                         const entry_name = try obj_rdr.reader.unbuffered_reader.readUntilDelimiterAlloc(arena.allocator(), 0, MAX_READ_BYTES);
                         var entry_oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
                         try obj_rdr.reader.unbuffered_reader.readNoEof(&entry_oid);
-                        try entries.put(entry_name, TreeEntry{ .oid = entry_oid, .mode = entry_mode });
+                        try entries.put(entry_name, .{ .oid = entry_oid, .mode = entry_mode });
                     }
 
-                    return Object(repo_kind){
+                    return .{
                         .allocator = allocator,
                         .arena = arena,
                         .content = ObjectContent{ .tree = .{ .entries = entries } },
@@ -757,7 +755,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
                     // read the message
                     content.commit.metadata.message = try obj_rdr.reader.unbuffered_reader.readAllAlloc(arena.allocator(), MAX_READ_BYTES);
 
-                    return Object(repo_kind){
+                    return .{
                         .allocator = allocator,
                         .arena = arena,
                         .content = content,
