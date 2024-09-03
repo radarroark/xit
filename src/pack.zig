@@ -166,7 +166,12 @@ pub const PackObjectReader = struct {
         }
         _ = try reader.readInt(u32, .big); // number of objects
 
-        try pack_file.seekTo(pack_offset.value);
+        return try PackObjectReader.initAtPosition(core, pack_file, pack_offset.value);
+    }
+
+    pub fn initAtPosition(core: *rp.Repo(.git).Core, pack_file: std.fs.File, position: u64) anyerror!PackObjectReader {
+        try pack_file.seekTo(position);
+        const reader = pack_file.reader();
 
         // parse object header
         const PackObjectKind = enum(u3) {
@@ -185,17 +190,19 @@ pub const PackObjectReader = struct {
 
         // get size of object (variable length format)
         var size: u64 = obj_header.size;
-        var size_shift: u6 = @bitSizeOf(@TypeOf(obj_header.size));
-        var cont = obj_header.high_bit == 1;
-        while (cont) {
-            const next_byte: packed struct {
-                value: u7,
-                high_bit: u1,
-            } = @bitCast(try reader.readByte());
-            cont = next_byte.high_bit == 1;
-            const value: u64 = next_byte.value;
-            size += (value << size_shift);
-            size_shift += @bitSizeOf(@TypeOf(next_byte.value));
+        {
+            var size_shift: u6 = @bitSizeOf(@TypeOf(obj_header.size));
+            var cont = obj_header.high_bit == 1;
+            while (cont) {
+                const next_byte: packed struct {
+                    value: u7,
+                    high_bit: u1,
+                } = @bitCast(try reader.readByte());
+                cont = next_byte.high_bit == 1;
+                const value: u64 = next_byte.value;
+                size += (value << size_shift);
+                size_shift += @bitSizeOf(@TypeOf(next_byte.value));
+            }
         }
 
         switch (obj_header.kind) {
@@ -217,10 +224,24 @@ pub const PackObjectReader = struct {
                     },
                 };
             },
-            // TODO: actually implement deltas.
-            // right now we're just returning the base object for REF_DELTA
-            // and returning an error for OFS_DELTA
-            .ofs_delta => return error.UnsupportedPackObjectKind,
+            .ofs_delta => {
+                // get offset (variable length format)
+                var offset: u64 = 0;
+                {
+                    while (true) {
+                        const next_byte: packed struct {
+                            value: u7,
+                            high_bit: u1,
+                        } = @bitCast(try reader.readByte());
+                        offset = (offset << 7) | next_byte.value;
+                        if (next_byte.high_bit == 0) {
+                            break;
+                        }
+                        offset += 1; // "offset encoding" https://git-scm.com/docs/pack-format
+                    }
+                }
+                return try PackObjectReader.initAtPosition(core, pack_file, position - offset);
+            },
             .ref_delta => {
                 const base_oid = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
                 const new_pack_reader = try PackObjectReader.init(core, std.fmt.bytesToHex(base_oid, .lower));
