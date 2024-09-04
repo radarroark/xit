@@ -188,10 +188,10 @@ pub const PackObjectReader = struct {
             high_bit: u1,
         } = @bitCast(try reader.readByte());
 
-        // get size of object (variable length format)
+        // get size of object (little endian variable length format)
         var size: u64 = obj_header.size;
         {
-            var size_shift: u6 = @bitSizeOf(@TypeOf(obj_header.size));
+            var shift: u6 = @bitSizeOf(@TypeOf(obj_header.size));
             var cont = obj_header.high_bit == 1;
             while (cont) {
                 const next_byte: packed struct {
@@ -200,8 +200,8 @@ pub const PackObjectReader = struct {
                 } = @bitCast(try reader.readByte());
                 cont = next_byte.high_bit == 1;
                 const value: u64 = next_byte.value;
-                size += (value << size_shift);
-                size_shift += @bitSizeOf(@TypeOf(next_byte.value));
+                size |= (value << shift);
+                shift += 7;
             }
         }
 
@@ -225,7 +225,7 @@ pub const PackObjectReader = struct {
                 };
             },
             .ofs_delta => {
-                // get offset (variable length format)
+                // get offset (big endian variable length format)
                 var offset: u64 = 0;
                 {
                     while (true) {
@@ -240,6 +240,44 @@ pub const PackObjectReader = struct {
                         offset += 1; // "offset encoding" https://git-scm.com/docs/pack-format
                     }
                 }
+
+                var stream = std.compress.zlib.decompressor(reader);
+                const zlib_reader = stream.reader();
+
+                // get size of base object (little endian variable length format)
+                var base_size: u64 = 0;
+                {
+                    var shift: u6 = 0;
+                    var cont = true;
+                    while (cont) {
+                        const next_byte: packed struct {
+                            value: u7,
+                            high_bit: u1,
+                        } = @bitCast(try zlib_reader.readByte());
+                        cont = next_byte.high_bit == 1;
+                        const value: u64 = next_byte.value;
+                        base_size |= (value << shift);
+                        shift += 7;
+                    }
+                }
+
+                // get size of reconstructed object (little endian variable length format)
+                var recon_size: u64 = 0;
+                {
+                    var shift: u6 = 0;
+                    var cont = true;
+                    while (cont) {
+                        const next_byte: packed struct {
+                            value: u7,
+                            high_bit: u1,
+                        } = @bitCast(try zlib_reader.readByte());
+                        cont = next_byte.high_bit == 1;
+                        const value: u64 = next_byte.value;
+                        recon_size |= (value << shift);
+                        shift += 7;
+                    }
+                }
+
                 return try PackObjectReader.initAtPosition(core, pack_file, position - offset);
             },
             .ref_delta => {
