@@ -549,13 +549,10 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
         pub fn init(allocator: std.mem.Allocator, core_cursor: rp.Repo(repo_kind).CoreCursor, oid: [hash.SHA1_HEX_LEN]u8) !@This() {
             switch (repo_kind) {
                 .git => {
-                    const reader = try pack.LooseOrPackObjectReader.init(core_cursor.core, oid);
+                    const reader = try pack.LooseOrPackObjectReader.init(allocator, core_cursor.core, oid);
                     return .{
                         .allocator = allocator,
-                        .header = switch (reader) {
-                            .loose => reader.loose.header,
-                            .pack => reader.pack.header,
-                        },
+                        .header = reader.header(),
                         .reader = std.io.bufferedReaderSize(BUFFER_SIZE, reader),
                         .internal = {},
                     };
