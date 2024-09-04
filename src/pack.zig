@@ -339,12 +339,6 @@ pub const PackObjectReader = struct {
         self.relative_position = 0;
     }
 
-    pub fn skipBytes(self: *PackObjectReader, num_bytes: u64) !void {
-        if (num_bytes > self.size - self.relative_position) return error.EndOfStream;
-        try self.stream.reader().skipBytes(num_bytes, .{});
-        self.relative_position += num_bytes;
-    }
-
     pub fn read(self: *PackObjectReader, dest: []u8) !usize {
         if (self.size < self.relative_position) return error.EndOfStream;
         const size = try self.stream.reader().read(dest[0..@min(dest.len, self.size - self.relative_position)]);
@@ -354,43 +348,55 @@ pub const PackObjectReader = struct {
 
     pub fn readNoEof(self: *PackObjectReader, dest: []u8) !void {
         if (self.size < self.relative_position or self.size - self.relative_position < dest.len) return error.EndOfStream;
-        try self.stream.reader().readNoEof(dest);
-        self.relative_position += dest.len;
+        var reader = std.io.GenericReader(*PackObjectReader, compress.ZlibStream.Reader.Error, PackObjectReader.read){
+            .context = self,
+        };
+        try reader.readNoEof(dest);
     }
 
     pub fn readUntilDelimiter(self: *PackObjectReader, dest: []u8, delimiter: u8) ![]u8 {
         if (self.size < self.relative_position) return error.EndOfStream;
-        const buf_slice = self.stream.reader().readUntilDelimiter(dest[0..@min(dest.len, self.size - self.relative_position)], delimiter) catch |err| switch (err) {
+        var reader = std.io.GenericReader(*PackObjectReader, compress.ZlibStream.Reader.Error, PackObjectReader.read){
+            .context = self,
+        };
+        return reader.readUntilDelimiter(dest[0..@min(dest.len, self.size - self.relative_position)], delimiter) catch |err| switch (err) {
             error.StreamTooLong => return error.EndOfStream,
             else => return err,
         };
-        self.relative_position += buf_slice.len;
-        self.relative_position += 1; // for the delimiter
-        return buf_slice;
     }
 
     pub fn readUntilDelimiterAlloc(self: *PackObjectReader, allocator: std.mem.Allocator, delimiter: u8, max_size: usize) ![]u8 {
         if (self.size < self.relative_position) return error.EndOfStream;
-        const buf_slice = self.stream.reader().readUntilDelimiterAlloc(allocator, delimiter, @min(max_size, self.size - self.relative_position)) catch |err| switch (err) {
+        var reader = std.io.GenericReader(*PackObjectReader, compress.ZlibStream.Reader.Error, PackObjectReader.read){
+            .context = self,
+        };
+        return reader.readUntilDelimiterAlloc(allocator, delimiter, @min(max_size, self.size - self.relative_position)) catch |err| switch (err) {
             error.StreamTooLong => return error.EndOfStream,
             else => return err,
         };
-        self.relative_position += buf_slice.len;
-        self.relative_position += 1; // for the delimiter
-        return buf_slice;
     }
 
     pub fn readAllAlloc(self: *PackObjectReader, allocator: std.mem.Allocator, max_size: usize) ![]u8 {
         if (self.size < self.relative_position) return error.EndOfStream;
         if (self.size - self.relative_position > max_size) return error.StreamTooLong;
+        var reader = std.io.GenericReader(*PackObjectReader, compress.ZlibStream.Reader.Error, PackObjectReader.read){
+            .context = self,
+        };
         const buffer = try allocator.alloc(u8, self.size - self.relative_position);
         errdefer allocator.free(buffer);
-        const size = try self.stream.reader().read(buffer);
+        const size = try reader.read(buffer);
         if (size != buffer.len) {
             return error.UnexpectedReadSize;
         }
-        self.relative_position += size;
         return buffer;
+    }
+
+    pub fn skipBytes(self: *PackObjectReader, num_bytes: u64) !void {
+        if (num_bytes > self.size - self.relative_position) return error.EndOfStream;
+        var reader = std.io.GenericReader(*PackObjectReader, compress.ZlibStream.Reader.Error, PackObjectReader.read){
+            .context = self,
+        };
+        try reader.skipBytes(num_bytes, .{});
     }
 };
 
@@ -450,13 +456,6 @@ pub const LooseOrPackObjectReader = union(enum) {
         }
     }
 
-    pub fn skipBytes(self: *LooseOrPackObjectReader, num_bytes: u64) !void {
-        switch (self.*) {
-            .loose => try self.loose.stream.reader().skipBytes(num_bytes, .{}),
-            .pack => try self.pack.skipBytes(num_bytes),
-        }
-    }
-
     pub fn read(self: *LooseOrPackObjectReader, dest: []u8) !usize {
         switch (self.*) {
             .loose => return try self.loose.stream.reader().read(dest),
@@ -489,6 +488,13 @@ pub const LooseOrPackObjectReader = union(enum) {
         switch (self.*) {
             .loose => return try self.loose.stream.reader().readAllAlloc(allocator, max_size),
             .pack => return try self.pack.readAllAlloc(allocator, max_size),
+        }
+    }
+
+    pub fn skipBytes(self: *LooseOrPackObjectReader, num_bytes: u64) !void {
+        switch (self.*) {
+            .loose => try self.loose.stream.reader().skipBytes(num_bytes, .{}),
+            .pack => try self.pack.skipBytes(num_bytes),
         }
     }
 };
