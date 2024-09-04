@@ -241,6 +241,8 @@ pub const PackObjectReader = struct {
                     }
                 }
 
+                var bytes_read: usize = 0;
+
                 var stream = std.compress.zlib.decompressor(reader);
                 const zlib_reader = stream.reader();
 
@@ -254,6 +256,7 @@ pub const PackObjectReader = struct {
                             value: u7,
                             high_bit: u1,
                         } = @bitCast(try zlib_reader.readByte());
+                        bytes_read += 1;
                         cont = next_byte.high_bit == 1;
                         const value: u64 = next_byte.value;
                         base_size |= (value << shift);
@@ -271,10 +274,47 @@ pub const PackObjectReader = struct {
                             value: u7,
                             high_bit: u1,
                         } = @bitCast(try zlib_reader.readByte());
+                        bytes_read += 1;
                         cont = next_byte.high_bit == 1;
                         const value: u64 = next_byte.value;
                         recon_size |= (value << shift);
                         shift += 7;
+                    }
+                }
+
+                while (bytes_read < size) {
+                    const next_byte: packed struct {
+                        value: u7,
+                        high_bit: u1,
+                    } = @bitCast(try zlib_reader.readByte());
+                    bytes_read += 1;
+
+                    switch (next_byte.high_bit) {
+                        // add new data
+                        0 => {
+                            if (next_byte.value == 0) { // reserved instruction
+                                continue;
+                            }
+                            try zlib_reader.skipBytes(next_byte.value, .{});
+                            bytes_read += next_byte.value;
+                        },
+                        // copy data
+                        1 => {
+                            var vals = [_]u8{0} ** 7;
+                            var i: u3 = 0;
+                            for (&vals) |*val| {
+                                const mask: u7 = @as(u7, 1) << i;
+                                i += 1;
+                                if (next_byte.value & mask != 0) {
+                                    val.* = try zlib_reader.readByte();
+                                    bytes_read += 1;
+                                }
+                            }
+                            const copy_offset = std.mem.readInt(u32, vals[0..4], .little);
+                            const copy_size = std.mem.readInt(u24, vals[4..], .little);
+                            _ = copy_offset;
+                            _ = copy_size;
+                        },
                     }
                 }
 
