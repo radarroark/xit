@@ -188,7 +188,10 @@ test "pack" {
     }
 
     // read the pack objects
-    for (&[_]*c.git_oid{ &commit_oid1, &commit_oid2 }) |commit_oid| {
+    for (
+        &[_]*c.git_oid{ &commit_oid1, &commit_oid2 },
+        &[_][]const u8{ "let there be light", "add license" },
+    ) |commit_oid, message| {
         var commit_oid_hex = [_]u8{0} ** hash.SHA1_HEX_LEN;
         try std.testing.expectEqual(0, c.git_oid_fmt(@ptrCast(&commit_oid_hex), commit_oid));
 
@@ -197,5 +200,6 @@ test "pack" {
 
         var object = try obj.Object(.git).init(allocator, .{ .core = &r.core }, commit_oid_hex);
         defer object.deinit();
+        try std.testing.expectEqualStrings(message, object.content.commit.metadata.message);
     }
 }
