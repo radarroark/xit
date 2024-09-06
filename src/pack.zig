@@ -148,12 +148,17 @@ pub const PackObjectReader = struct {
             chunk_position: u64,
             real_position: u64,
             chunks: std.ArrayList(Chunk),
+            cache: std.AutoArrayHashMap(Location, ?[]const u8),
         },
     },
 
-    const Chunk = struct {
+    const Location = struct {
         offset: usize,
         size: usize,
+    };
+
+    const Chunk = struct {
+        location: Location,
         kind: enum {
             add_new,
             copy_from_base,
@@ -332,6 +337,16 @@ pub const PackObjectReader = struct {
                 var chunks = std.ArrayList(Chunk).init(allocator);
                 errdefer chunks.deinit();
 
+                var cache = std.AutoArrayHashMap(Location, ?[]const u8).init(allocator);
+                errdefer {
+                    for (cache.values()) |buffer_maybe| {
+                        if (buffer_maybe) |buffer| {
+                            allocator.free(buffer);
+                        }
+                    }
+                    cache.deinit();
+                }
+
                 while (bytes_read < size) {
                     const next_byte: packed struct {
                         value: u7,
@@ -346,8 +361,10 @@ pub const PackObjectReader = struct {
                                 continue;
                             }
                             try chunks.append(.{
-                                .offset = bytes_read,
-                                .size = next_byte.value,
+                                .location = .{
+                                    .offset = bytes_read,
+                                    .size = next_byte.value,
+                                },
                                 .kind = .add_new,
                             });
                             try zlib_reader.skipBytes(next_byte.value, .{});
@@ -367,13 +384,50 @@ pub const PackObjectReader = struct {
                             }
                             const copy_offset = std.mem.readInt(u32, vals[0..4], .little);
                             const copy_size = std.mem.readInt(u24, vals[4..], .little);
-                            try chunks.append(.{
+                            const loc = Location{
                                 .offset = copy_offset,
                                 .size = if (copy_size == 0) 0x10000 else copy_size,
+                            };
+                            try chunks.append(.{
+                                .location = loc,
                                 .kind = .copy_from_base,
                             });
+                            try cache.put(loc, null);
                         },
                     }
+                }
+
+                const SortCtx = struct {
+                    keys: []Location,
+                    pub fn lessThan(ctx: @This(), a_index: usize, b_index: usize) bool {
+                        const a_loc = ctx.keys[a_index];
+                        const b_loc = ctx.keys[b_index];
+                        return a_loc.offset < b_loc.offset;
+                    }
+                };
+                cache.sort(SortCtx{ .keys = cache.keys() });
+
+                for (cache.keys(), cache.values()) |location, *value| {
+                    if (base_reader.realPosition() > location.offset) {
+                        try base_reader.reset();
+                    }
+                    if (base_reader.realPosition() < location.offset) {
+                        const bytes_to_skip = location.offset - base_reader.realPosition();
+                        try base_reader.skipBytes(bytes_to_skip);
+                    }
+                    const buffer = try allocator.alloc(u8, location.size);
+                    errdefer allocator.free(buffer);
+                    var read_so_far: usize = 0;
+                    while (read_so_far < buffer.len) {
+                        const amt = @min(buffer.len - read_so_far, 2048);
+                        const read_size = try base_reader.read(buffer[read_so_far .. read_so_far + amt]);
+                        if (read_size == 0) break;
+                        read_so_far += read_size;
+                    }
+                    if (read_so_far != buffer.len) {
+                        return error.UnexpectedEndOfStream;
+                    }
+                    value.* = buffer;
                 }
 
                 return .{
@@ -389,6 +443,7 @@ pub const PackObjectReader = struct {
                             .chunk_position = 0,
                             .real_position = bytes_read,
                             .chunks = chunks,
+                            .cache = cache,
                         },
                     },
                 };
@@ -404,6 +459,12 @@ pub const PackObjectReader = struct {
                 self.internal.delta.base_reader.deinit();
                 self.internal.delta.allocator.destroy(self.internal.delta.base_reader);
                 self.internal.delta.chunks.deinit();
+                for (self.internal.delta.cache.values()) |buffer_maybe| {
+                    if (buffer_maybe) |buffer| {
+                        self.internal.delta.allocator.free(buffer);
+                    }
+                }
+                self.internal.delta.cache.deinit();
             },
         }
     }
@@ -454,10 +515,10 @@ pub const PackObjectReader = struct {
                     }
                     const chunk = self.internal.delta.chunks.items[self.internal.delta.chunk_index];
                     var dest_slice = dest[bytes_read..];
-                    const bytes_to_read = @min(chunk.size - self.internal.delta.chunk_position, dest_slice.len);
-                    const offset = chunk.offset + self.internal.delta.chunk_position;
+                    const bytes_to_read = @min(chunk.location.size - self.internal.delta.chunk_position, dest_slice.len);
                     switch (chunk.kind) {
                         .add_new => {
+                            const offset = chunk.location.offset + self.internal.delta.chunk_position;
                             if (self.relative_position > offset) {
                                 try self.pack_file.seekTo(self.start_position);
                                 self.stream = std.compress.zlib.decompressor(self.pack_file.reader());
@@ -478,23 +539,15 @@ pub const PackObjectReader = struct {
                             self.internal.delta.real_position += size;
                         },
                         .copy_from_base => {
-                            if (self.internal.delta.base_reader.realPosition() > offset) {
-                                try self.internal.delta.base_reader.reset();
-                            }
-                            if (self.internal.delta.base_reader.realPosition() < offset) {
-                                const bytes_to_skip = offset - self.internal.delta.base_reader.realPosition();
-                                try self.internal.delta.base_reader.skipBytes(bytes_to_skip);
-                            }
-                            const size = try self.internal.delta.base_reader.read(dest_slice[0..bytes_to_read]);
-                            if (size != bytes_to_read) {
-                                return error.UnexpectedEndOfStream;
-                            }
-                            bytes_read += size;
-                            self.internal.delta.chunk_position += size;
-                            self.internal.delta.real_position += size;
+                            const buffer_maybe = self.internal.delta.cache.get(chunk.location) orelse return error.ChunkNotFound;
+                            const buffer = buffer_maybe orelse return error.ChunkNotInitialized;
+                            @memcpy(dest_slice[0..bytes_to_read], buffer[self.internal.delta.chunk_position .. self.internal.delta.chunk_position + bytes_to_read]);
+                            bytes_read += bytes_to_read;
+                            self.internal.delta.chunk_position += bytes_to_read;
+                            self.internal.delta.real_position += bytes_to_read;
                         },
                     }
-                    if (self.internal.delta.chunk_position == chunk.size) {
+                    if (self.internal.delta.chunk_position == chunk.location.size) {
                         self.internal.delta.chunk_index += 1;
                         self.internal.delta.chunk_position = 0;
                     }
