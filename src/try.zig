@@ -68,6 +68,7 @@ pub fn main() !void {
         var status = try git_repo.status();
         defer status.deinit();
         for (status.workspace_deleted.keys()) |path| {
+            try writers.out.print("Restoring: {s}\n", .{path});
             git_repo.restore(path) catch |err| switch (err) {
                 error.FileNotFound, error.ObjectInvalid => try writers.err.print("Failed to restore: {s}\n", .{path}),
                 else => return err,
