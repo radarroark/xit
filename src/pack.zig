@@ -148,7 +148,8 @@ pub const PackObjectReader = struct {
             chunk_position: u64,
             real_position: u64,
             chunks: std.ArrayList(Chunk),
-            cache: std.AutoArrayHashMap(Location, ?[]const u8),
+            cache: std.AutoArrayHashMap(Location, []const u8),
+            cache_arena: *std.heap.ArenaAllocator,
         },
     },
 
@@ -337,14 +338,14 @@ pub const PackObjectReader = struct {
                 var chunks = std.ArrayList(Chunk).init(allocator);
                 errdefer chunks.deinit();
 
-                var cache = std.AutoArrayHashMap(Location, ?[]const u8).init(allocator);
+                var cache = std.AutoArrayHashMap(Location, []const u8).init(allocator);
+                errdefer cache.deinit();
+
+                const cache_arena = try allocator.create(std.heap.ArenaAllocator);
+                cache_arena.* = std.heap.ArenaAllocator.init(allocator);
                 errdefer {
-                    for (cache.values()) |buffer_maybe| {
-                        if (buffer_maybe) |buffer| {
-                            allocator.free(buffer);
-                        }
-                    }
-                    cache.deinit();
+                    cache_arena.deinit();
+                    allocator.destroy(cache_arena);
                 }
 
                 while (bytes_read < size) {
@@ -392,7 +393,7 @@ pub const PackObjectReader = struct {
                                 .location = loc,
                                 .kind = .copy_from_base,
                             });
-                            try cache.put(loc, null);
+                            try cache.put(loc, "");
                         },
                     }
                 }
@@ -402,6 +403,9 @@ pub const PackObjectReader = struct {
                     pub fn lessThan(ctx: @This(), a_index: usize, b_index: usize) bool {
                         const a_loc = ctx.keys[a_index];
                         const b_loc = ctx.keys[b_index];
+                        if (a_loc.offset == b_loc.offset) {
+                            return a_loc.size > b_loc.size;
+                        }
                         return a_loc.offset < b_loc.offset;
                     }
                 };
@@ -421,6 +425,7 @@ pub const PackObjectReader = struct {
                             .real_position = bytes_read,
                             .chunks = chunks,
                             .cache = cache,
+                            .cache_arena = cache_arena,
                         },
                     },
                 };
@@ -436,18 +441,24 @@ pub const PackObjectReader = struct {
                 self.internal.delta.base_reader.deinit();
                 self.internal.delta.allocator.destroy(self.internal.delta.base_reader);
                 self.internal.delta.chunks.deinit();
-                for (self.internal.delta.cache.values()) |buffer_maybe| {
-                    if (buffer_maybe) |buffer| {
-                        self.internal.delta.allocator.free(buffer);
-                    }
-                }
                 self.internal.delta.cache.deinit();
+                self.internal.delta.cache_arena.deinit();
+                self.internal.delta.allocator.destroy(self.internal.delta.cache_arena);
             },
         }
     }
 
     pub fn initCache(self: *PackObjectReader) !void {
-        for (self.internal.delta.cache.keys(), self.internal.delta.cache.values()) |location, *value| {
+        const keys = self.internal.delta.cache.keys();
+        const values = self.internal.delta.cache.values();
+        for (keys, values, 0..) |location, *value, i| {
+            // if the value is a subset of the previous value, just get a slice of it
+            if (i > 0 and location.offset == keys[i - 1].offset and location.size < keys[i - 1].size) {
+                const last_buffer = values[i - 1];
+                value.* = last_buffer[0..location.size];
+                continue;
+            }
+
             if (self.internal.delta.base_reader.realPosition() > location.offset) {
                 try self.internal.delta.base_reader.reset();
             }
@@ -455,8 +466,7 @@ pub const PackObjectReader = struct {
                 const bytes_to_skip = location.offset - self.internal.delta.base_reader.realPosition();
                 try self.internal.delta.base_reader.skipBytes(bytes_to_skip);
             }
-            const buffer = try self.internal.delta.allocator.alloc(u8, location.size);
-            errdefer self.internal.delta.allocator.free(buffer);
+            const buffer = try self.internal.delta.cache_arena.allocator().alloc(u8, location.size);
             var read_so_far: usize = 0;
             while (read_so_far < buffer.len) {
                 const amt = @min(buffer.len - read_so_far, 2048);
@@ -541,8 +551,7 @@ pub const PackObjectReader = struct {
                             self.internal.delta.real_position += size;
                         },
                         .copy_from_base => {
-                            const buffer_maybe = self.internal.delta.cache.get(chunk.location) orelse return error.ChunkNotFound;
-                            const buffer = buffer_maybe orelse return error.ChunkNotInitialized;
+                            const buffer = self.internal.delta.cache.get(chunk.location) orelse return error.ChunkNotFound;
                             @memcpy(dest_slice[0..bytes_to_read], buffer[self.internal.delta.chunk_position .. self.internal.delta.chunk_position + bytes_to_read]);
                             bytes_read += bytes_to_read;
                             self.internal.delta.chunk_position += bytes_to_read;
