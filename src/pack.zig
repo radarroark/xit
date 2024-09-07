@@ -169,6 +169,22 @@ pub const PackObjectReader = struct {
     pub const Error = anyerror;
 
     pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(.git).Core, oid_hex: [hash.SHA1_HEX_LEN]u8) !PackObjectReader {
+        var pack_reader = try PackObjectReader.initWithOid(allocator, core, oid_hex);
+        var delta_objects = std.ArrayList(*PackObjectReader).init(allocator);
+        defer delta_objects.deinit();
+        var last_object = &pack_reader;
+        while (last_object.internal == .delta) {
+            try delta_objects.append(last_object);
+            last_object = last_object.internal.delta.base_reader;
+        }
+        for (0..delta_objects.items.len) |i| {
+            const delta_object = delta_objects.items[delta_objects.items.len - i - 1];
+            try delta_object.initCache();
+        }
+        return pack_reader;
+    }
+
+    pub fn initWithOid(allocator: std.mem.Allocator, core: *rp.Repo(.git).Core, oid_hex: [hash.SHA1_HEX_LEN]u8) !PackObjectReader {
         var pack_dir = try core.git_dir.openDir("objects/pack", .{ .iterate = true });
         defer pack_dir.close();
 
@@ -286,7 +302,7 @@ pub const PackObjectReader = struct {
                     },
                     .ref_delta => {
                         const base_oid = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
-                        base_reader.* = try PackObjectReader.init(allocator, core, std.fmt.bytesToHex(base_oid, .lower));
+                        base_reader.* = try PackObjectReader.initWithOid(allocator, core, std.fmt.bytesToHex(base_oid, .lower));
                     },
                     else => unreachable,
                 }
@@ -610,27 +626,6 @@ pub const PackObjectReader = struct {
     }
 };
 
-/// previously the cache was initialized in PackObjectReader.init,
-/// but this caused a stack overflow when initializing pack objects
-/// with really long delta chains. instead, we first initialize the
-/// object with any empty cache, and initialize each cache in the
-/// chain starting with the object at the end of the chain.
-pub fn initPackObjectReader(allocator: std.mem.Allocator, core: *rp.Repo(.git).Core, oid_hex: [hash.SHA1_HEX_LEN]u8) !PackObjectReader {
-    var pack_reader = PackObjectReader.init(allocator, core, oid_hex) catch return error.ObjectNotFound;
-    var delta_objects = std.ArrayList(*PackObjectReader).init(allocator);
-    defer delta_objects.deinit();
-    var last_object = &pack_reader;
-    while (last_object.internal == .delta) {
-        try delta_objects.append(last_object);
-        last_object = last_object.internal.delta.base_reader;
-    }
-    for (0..delta_objects.items.len) |i| {
-        const delta_object = delta_objects.items[delta_objects.items.len - i - 1];
-        try delta_object.initCache();
-    }
-    return pack_reader;
-}
-
 pub const LooseOrPackObjectReader = union(enum) {
     loose: struct {
         file: std.fs.File,
@@ -651,7 +646,7 @@ pub const LooseOrPackObjectReader = union(enum) {
         const path = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ oid_hex[0..2], oid_hex[2..] });
         var object_file = objects_dir.openFile(path, .{ .mode = .read_only }) catch |err| switch (err) {
             error.FileNotFound => return .{
-                .pack = try initPackObjectReader(allocator, core, oid_hex),
+                .pack = PackObjectReader.init(allocator, core, oid_hex) catch return error.ObjectNotFound,
             },
             else => return err,
         };
