@@ -184,7 +184,51 @@ pub const PackObjectReader = struct {
         return pack_reader;
     }
 
-    pub fn initWithOid(allocator: std.mem.Allocator, core: *rp.Repo(.git).Core, oid_hex: [hash.SHA1_HEX_LEN]u8) !PackObjectReader {
+    fn initCache(self: *PackObjectReader) !void {
+        const keys = self.internal.delta.cache.keys();
+        const values = self.internal.delta.cache.values();
+        for (keys, values, 0..) |location, *value, i| {
+            // if the value is a subset of the previous value, just get a slice of it
+            if (i > 0 and location.offset == keys[i - 1].offset and location.size < keys[i - 1].size) {
+                const last_buffer = values[i - 1];
+                value.* = last_buffer[0..location.size];
+                continue;
+            }
+
+            // seek the base reader to the correct position
+            var position = switch (self.internal.delta.base_reader.internal) {
+                .basic => self.internal.delta.base_reader.relative_position,
+                .delta => self.internal.delta.base_reader.internal.delta.real_position,
+            };
+            if (position > location.offset) {
+                try self.internal.delta.base_reader.reset();
+                position = switch (self.internal.delta.base_reader.internal) {
+                    .basic => self.internal.delta.base_reader.relative_position,
+                    .delta => self.internal.delta.base_reader.internal.delta.real_position,
+                };
+            }
+            if (position < location.offset) {
+                const bytes_to_skip = location.offset - position;
+                try self.internal.delta.base_reader.skipBytes(bytes_to_skip);
+            }
+
+            // read into the buffer and put it in the cache
+            const buffer = try self.internal.delta.cache_arena.allocator().alloc(u8, location.size);
+            var read_so_far: usize = 0;
+            while (read_so_far < buffer.len) {
+                const amt = @min(buffer.len - read_so_far, 2048);
+                const read_size = try self.internal.delta.base_reader.read(buffer[read_so_far .. read_so_far + amt]);
+                if (read_size == 0) break;
+                read_so_far += read_size;
+            }
+            if (read_so_far != buffer.len) {
+                return error.UnexpectedEndOfStream;
+            }
+            value.* = buffer;
+        }
+    }
+
+    fn initWithOid(allocator: std.mem.Allocator, core: *rp.Repo(.git).Core, oid_hex: [hash.SHA1_HEX_LEN]u8) !PackObjectReader {
         var pack_dir = try core.git_dir.openDir("objects/pack", .{ .iterate = true });
         defer pack_dir.close();
 
@@ -214,7 +258,7 @@ pub const PackObjectReader = struct {
         return try PackObjectReader.initAtPosition(allocator, core, pack_dir, file_name, pack_offset.value);
     }
 
-    pub fn initAtPosition(allocator: std.mem.Allocator, core: *rp.Repo(.git).Core, pack_dir: std.fs.Dir, file_name: []const u8, position: u64) anyerror!PackObjectReader {
+    fn initAtPosition(allocator: std.mem.Allocator, core: *rp.Repo(.git).Core, pack_dir: std.fs.Dir, file_name: []const u8, position: u64) anyerror!PackObjectReader {
         var pack_file = try pack_dir.openFile(file_name, .{ .mode = .read_only });
         errdefer pack_file.close();
         try pack_file.seekTo(position);
@@ -464,50 +508,10 @@ pub const PackObjectReader = struct {
         }
     }
 
-    pub fn initCache(self: *PackObjectReader) !void {
-        const keys = self.internal.delta.cache.keys();
-        const values = self.internal.delta.cache.values();
-        for (keys, values, 0..) |location, *value, i| {
-            // if the value is a subset of the previous value, just get a slice of it
-            if (i > 0 and location.offset == keys[i - 1].offset and location.size < keys[i - 1].size) {
-                const last_buffer = values[i - 1];
-                value.* = last_buffer[0..location.size];
-                continue;
-            }
-
-            if (self.internal.delta.base_reader.realPosition() > location.offset) {
-                try self.internal.delta.base_reader.reset();
-            }
-            if (self.internal.delta.base_reader.realPosition() < location.offset) {
-                const bytes_to_skip = location.offset - self.internal.delta.base_reader.realPosition();
-                try self.internal.delta.base_reader.skipBytes(bytes_to_skip);
-            }
-            const buffer = try self.internal.delta.cache_arena.allocator().alloc(u8, location.size);
-            var read_so_far: usize = 0;
-            while (read_so_far < buffer.len) {
-                const amt = @min(buffer.len - read_so_far, 2048);
-                const read_size = try self.internal.delta.base_reader.read(buffer[read_so_far .. read_so_far + amt]);
-                if (read_size == 0) break;
-                read_so_far += read_size;
-            }
-            if (read_so_far != buffer.len) {
-                return error.UnexpectedEndOfStream;
-            }
-            value.* = buffer;
-        }
-    }
-
     pub fn header(self: PackObjectReader) obj.ObjectHeader {
         return switch (self.internal) {
             .basic => self.internal.basic.header,
             .delta => self.internal.delta.base_reader.header(),
-        };
-    }
-
-    pub fn realPosition(self: PackObjectReader) u64 {
-        return switch (self.internal) {
-            .basic => self.relative_position,
-            .delta => self.internal.delta.real_position,
         };
     }
 
