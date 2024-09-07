@@ -407,29 +407,6 @@ pub const PackObjectReader = struct {
                 };
                 cache.sort(SortCtx{ .keys = cache.keys() });
 
-                for (cache.keys(), cache.values()) |location, *value| {
-                    if (base_reader.realPosition() > location.offset) {
-                        try base_reader.reset();
-                    }
-                    if (base_reader.realPosition() < location.offset) {
-                        const bytes_to_skip = location.offset - base_reader.realPosition();
-                        try base_reader.skipBytes(bytes_to_skip);
-                    }
-                    const buffer = try allocator.alloc(u8, location.size);
-                    errdefer allocator.free(buffer);
-                    var read_so_far: usize = 0;
-                    while (read_so_far < buffer.len) {
-                        const amt = @min(buffer.len - read_so_far, 2048);
-                        const read_size = try base_reader.read(buffer[read_so_far .. read_so_far + amt]);
-                        if (read_size == 0) break;
-                        read_so_far += read_size;
-                    }
-                    if (read_so_far != buffer.len) {
-                        return error.UnexpectedEndOfStream;
-                    }
-                    value.* = buffer;
-                }
-
                 return .{
                     .pack_file = pack_file,
                     .stream = stream,
@@ -466,6 +443,31 @@ pub const PackObjectReader = struct {
                 }
                 self.internal.delta.cache.deinit();
             },
+        }
+    }
+
+    pub fn initCache(self: *PackObjectReader) !void {
+        for (self.internal.delta.cache.keys(), self.internal.delta.cache.values()) |location, *value| {
+            if (self.internal.delta.base_reader.realPosition() > location.offset) {
+                try self.internal.delta.base_reader.reset();
+            }
+            if (self.internal.delta.base_reader.realPosition() < location.offset) {
+                const bytes_to_skip = location.offset - self.internal.delta.base_reader.realPosition();
+                try self.internal.delta.base_reader.skipBytes(bytes_to_skip);
+            }
+            const buffer = try self.internal.delta.allocator.alloc(u8, location.size);
+            errdefer self.internal.delta.allocator.free(buffer);
+            var read_so_far: usize = 0;
+            while (read_so_far < buffer.len) {
+                const amt = @min(buffer.len - read_so_far, 2048);
+                const read_size = try self.internal.delta.base_reader.read(buffer[read_so_far .. read_so_far + amt]);
+                if (read_size == 0) break;
+                read_so_far += read_size;
+            }
+            if (read_so_far != buffer.len) {
+                return error.UnexpectedEndOfStream;
+            }
+            value.* = buffer;
         }
     }
 
@@ -599,6 +601,27 @@ pub const PackObjectReader = struct {
     }
 };
 
+/// previously the cache was initialized in PackObjectReader.init,
+/// but this caused a stack overflow when initializing pack objects
+/// with really long delta chains. instead, we first initialize the
+/// object with any empty cache, and initialize each cache in the
+/// chain starting with the object at the end of the chain.
+pub fn initPackObjectReader(allocator: std.mem.Allocator, core: *rp.Repo(.git).Core, oid_hex: [hash.SHA1_HEX_LEN]u8) !PackObjectReader {
+    var pack_reader = PackObjectReader.init(allocator, core, oid_hex) catch return error.ObjectNotFound;
+    var delta_objects = std.ArrayList(*PackObjectReader).init(allocator);
+    defer delta_objects.deinit();
+    var last_object = &pack_reader;
+    while (last_object.internal == .delta) {
+        try delta_objects.append(last_object);
+        last_object = last_object.internal.delta.base_reader;
+    }
+    for (0..delta_objects.items.len) |i| {
+        const delta_object = delta_objects.items[delta_objects.items.len - i - 1];
+        try delta_object.initCache();
+    }
+    return pack_reader;
+}
+
 pub const LooseOrPackObjectReader = union(enum) {
     loose: struct {
         file: std.fs.File,
@@ -619,7 +642,7 @@ pub const LooseOrPackObjectReader = union(enum) {
         const path = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ oid_hex[0..2], oid_hex[2..] });
         var object_file = objects_dir.openFile(path, .{ .mode = .read_only }) catch |err| switch (err) {
             error.FileNotFound => return .{
-                .pack = PackObjectReader.init(allocator, core, oid_hex) catch return error.ObjectNotFound,
+                .pack = try initPackObjectReader(allocator, core, oid_hex),
             },
             else => return err,
         };
