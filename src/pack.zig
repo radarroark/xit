@@ -128,7 +128,7 @@ fn searchPackIndexes(pack_dir: std.fs.Dir, oid_hex: [hash.SHA1_HEX_LEN]u8) !Pack
         }
     }
 
-    return error.PackObjectNotFound;
+    return error.ObjectNotFound;
 }
 
 pub const PackObjectReader = struct {
@@ -744,7 +744,7 @@ pub const LooseOrPackObjectReader = union(enum) {
         const path = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ oid_hex[0..2], oid_hex[2..] });
         var object_file = objects_dir.openFile(path, .{ .mode = .read_only }) catch |err| switch (err) {
             error.FileNotFound => return .{
-                .pack = PackObjectReader.init(allocator, core, oid_hex) catch return error.ObjectNotFound,
+                .pack = try PackObjectReader.init(allocator, core, oid_hex),
             },
             else => return err,
         };
