@@ -166,7 +166,7 @@ pub const PackObjectReader = struct {
         },
     };
 
-    pub const Error = anyerror;
+    pub const Error = compress.ZlibStream.Reader.Error || error{ Unseekable, UnexpectedEndOfStream };
 
     pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(.git).Core, oid_hex: [hash.SHA1_HEX_LEN]u8) !PackObjectReader {
         var pack_reader = try PackObjectReader.initWithOid(allocator, core, oid_hex);
@@ -531,7 +531,7 @@ pub const PackObjectReader = struct {
         }
     }
 
-    pub fn read(self: *PackObjectReader, dest: []u8) anyerror!usize {
+    pub fn read(self: *PackObjectReader, dest: []u8) !usize {
         switch (self.internal) {
             .basic => {
                 if (self.internal.basic.size < self.relative_position) return error.EndOfStream;
@@ -571,7 +571,7 @@ pub const PackObjectReader = struct {
                             self.internal.delta.real_position += size;
                         },
                         .copy_from_base => {
-                            const buffer = self.internal.delta.cache.get(chunk.location) orelse return error.ChunkNotFound;
+                            const buffer = self.internal.delta.cache.get(chunk.location) orelse return error.UnexpectedEndOfStream;
                             @memcpy(dest_slice[0..bytes_to_read], buffer[self.internal.delta.chunk_position .. self.internal.delta.chunk_position + bytes_to_read]);
                             bytes_read += bytes_to_read;
                             self.internal.delta.chunk_position += bytes_to_read;
