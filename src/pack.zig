@@ -136,12 +136,21 @@ pub const PackObjectReader = struct {
     stream: compress.ZlibStream,
     start_position: u64,
     relative_position: u64,
+    size: u64,
     internal: union(enum) {
         basic: struct {
-            size: u64,
             header: obj.ObjectHeader,
         },
         delta: struct {
+            init: union(enum) {
+                ofs: struct {
+                    pack_file_name: [pack_file_name_len]u8,
+                    position: u64,
+                },
+                ref: struct {
+                    oid_hex: [hash.SHA1_HEX_LEN]u8,
+                },
+            },
             allocator: std.mem.Allocator,
             base_reader: *PackObjectReader,
             chunk_index: usize,
@@ -152,6 +161,10 @@ pub const PackObjectReader = struct {
             cache_arena: *std.heap.ArenaAllocator,
         },
     },
+
+    const pack_prefix = "pack-";
+    const pack_suffix = ".pack";
+    const pack_file_name_len = pack_prefix.len + hash.SHA1_HEX_LEN + pack_suffix.len;
 
     const Location = struct {
         offset: usize,
@@ -169,19 +182,355 @@ pub const PackObjectReader = struct {
     pub const Error = compress.ZlibStream.Reader.Error || error{ Unseekable, UnexpectedEndOfStream };
 
     pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(.git).Core, oid_hex: [hash.SHA1_HEX_LEN]u8) !PackObjectReader {
-        var pack_reader = try PackObjectReader.initWithOid(allocator, core, oid_hex);
+        var pack_reader = try PackObjectReader.initWithOid(core, oid_hex);
+
+        // make a list of the chain of deltified objects,
+        // and initialize each one. we can't do this during the initial
+        // creation of the PackObjectReader because it would cause them
+        // to be initialized recursively. since delta chains can get
+        // really long, that can lead to a stack overflow.
         var delta_objects = std.ArrayList(*PackObjectReader).init(allocator);
         defer delta_objects.deinit();
         var last_object = &pack_reader;
         while (last_object.internal == .delta) {
+            try last_object.initDelta(allocator, core);
             try delta_objects.append(last_object);
             last_object = last_object.internal.delta.base_reader;
         }
+
+        // initialize the cache for each deltified object, starting
+        // with the one at the end of the chain. we need to cache
+        // "copy_from_base" delta transformations for performance.
+        // the base object could itself be a deltified object, so
+        // trying to read the data on the fly could lead to a very
+        // slow recursive descent into madness.
         for (0..delta_objects.items.len) |i| {
             const delta_object = delta_objects.items[delta_objects.items.len - i - 1];
             try delta_object.initCache();
         }
+
         return pack_reader;
+    }
+
+    fn initWithOid(core: *rp.Repo(.git).Core, oid_hex: [hash.SHA1_HEX_LEN]u8) !PackObjectReader {
+        var pack_dir = try core.git_dir.openDir("objects/pack", .{ .iterate = true });
+        defer pack_dir.close();
+
+        const pack_offset = try searchPackIndexes(pack_dir, oid_hex);
+
+        var file_name_buf = [_]u8{0} ** pack_file_name_len;
+        const file_name = try std.fmt.bufPrint(&file_name_buf, "{s}{s}{s}", .{ pack_prefix, pack_offset.pack_id, pack_suffix });
+
+        var pack_file = try pack_dir.openFile(file_name, .{ .mode = .read_only });
+        defer pack_file.close();
+        const reader = pack_file.reader();
+
+        // parse header
+        const sig = try reader.readBytesNoEof(4);
+        if (!std.mem.eql(u8, "PACK", &sig)) {
+            return error.InvalidPackFileSig;
+        }
+        const version = try reader.readInt(u32, .big);
+        if (version != 2) {
+            return error.InvalidPackFileVersion;
+        }
+        _ = try reader.readInt(u32, .big); // number of objects
+
+        return try PackObjectReader.initAtPosition(core, file_name_buf, pack_offset.value);
+    }
+
+    fn initAtPosition(core: *rp.Repo(.git).Core, pack_file_name: [pack_file_name_len]u8, position: u64) !PackObjectReader {
+        var pack_dir = try core.git_dir.openDir("objects/pack", .{});
+        defer pack_dir.close();
+
+        var pack_file = try pack_dir.openFile(&pack_file_name, .{ .mode = .read_only });
+        errdefer pack_file.close();
+        try pack_file.seekTo(position);
+        const reader = pack_file.reader();
+
+        // parse object header
+        const PackObjectKind = enum(u3) {
+            commit = 1,
+            tree = 2,
+            blob = 3,
+            tag = 4,
+            ofs_delta = 6,
+            ref_delta = 7,
+        };
+        const obj_header: packed struct {
+            size: u4,
+            kind: PackObjectKind,
+            high_bit: u1,
+        } = @bitCast(try reader.readByte());
+
+        // get size of object (little endian variable length format)
+        var size: u64 = obj_header.size;
+        {
+            var shift: u6 = @bitSizeOf(@TypeOf(obj_header.size));
+            var cont = obj_header.high_bit == 1;
+            while (cont) {
+                const next_byte: packed struct {
+                    value: u7,
+                    high_bit: u1,
+                } = @bitCast(try reader.readByte());
+                cont = next_byte.high_bit == 1;
+                const value: u64 = next_byte.value;
+                size |= (value << shift);
+                shift += 7;
+            }
+        }
+
+        switch (obj_header.kind) {
+            .commit, .tree, .blob, .tag => {
+                const start_position = try pack_file.getPos();
+                return .{
+                    .pack_file = pack_file,
+                    .stream = std.compress.zlib.decompressor(reader),
+                    .start_position = start_position,
+                    .relative_position = 0,
+                    .size = size,
+                    .internal = .{
+                        .basic = .{
+                            .header = .{
+                                .kind = switch (obj_header.kind) {
+                                    .commit => .commit,
+                                    .tree => .tree,
+                                    .blob => .blob,
+                                    .tag => return error.UnsupportedObjectKind,
+                                    else => unreachable,
+                                },
+                                .size = size,
+                            },
+                        },
+                    },
+                };
+            },
+            .ofs_delta => {
+                // get offset (big endian variable length format)
+                var offset: u64 = 0;
+                {
+                    while (true) {
+                        const next_byte: packed struct {
+                            value: u7,
+                            high_bit: u1,
+                        } = @bitCast(try reader.readByte());
+                        offset = (offset << 7) | next_byte.value;
+                        if (next_byte.high_bit == 0) {
+                            break;
+                        }
+                        offset += 1; // "offset encoding" https://git-scm.com/docs/pack-format
+                    }
+                }
+
+                const start_position = try pack_file.getPos();
+
+                return .{
+                    .pack_file = pack_file,
+                    .stream = undefined,
+                    .start_position = start_position,
+                    .relative_position = 0,
+                    .size = size,
+                    .internal = .{
+                        .delta = .{
+                            .init = .{
+                                .ofs = .{
+                                    .pack_file_name = pack_file_name,
+                                    .position = position - offset,
+                                },
+                            },
+                            .allocator = undefined,
+                            .base_reader = undefined,
+                            .chunk_index = 0,
+                            .chunk_position = 0,
+                            .real_position = 0,
+                            .chunks = undefined,
+                            .cache = undefined,
+                            .cache_arena = undefined,
+                        },
+                    },
+                };
+            },
+            .ref_delta => {
+                const base_oid = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
+
+                const start_position = try pack_file.getPos();
+
+                return .{
+                    .pack_file = pack_file,
+                    .stream = undefined,
+                    .start_position = start_position,
+                    .relative_position = 0,
+                    .size = size,
+                    .internal = .{
+                        .delta = .{
+                            .init = .{
+                                .ref = .{
+                                    .oid_hex = std.fmt.bytesToHex(base_oid, .lower),
+                                },
+                            },
+                            .allocator = undefined,
+                            .base_reader = undefined,
+                            .chunk_index = 0,
+                            .chunk_position = 0,
+                            .real_position = 0,
+                            .chunks = undefined,
+                            .cache = undefined,
+                            .cache_arena = undefined,
+                        },
+                    },
+                };
+            },
+        }
+    }
+
+    fn initDelta(self: *PackObjectReader, allocator: std.mem.Allocator, core: *rp.Repo(.git).Core) !void {
+        const reader = self.pack_file.reader();
+
+        const base_reader = try allocator.create(PackObjectReader);
+        errdefer allocator.destroy(base_reader);
+        base_reader.* = switch (self.internal.delta.init) {
+            .ofs => try PackObjectReader.initAtPosition(core, self.internal.delta.init.ofs.pack_file_name, self.internal.delta.init.ofs.position),
+            .ref => try PackObjectReader.initWithOid(core, self.internal.delta.init.ref.oid_hex),
+        };
+        errdefer base_reader.deinit();
+
+        var bytes_read: u64 = 0;
+
+        var stream = std.compress.zlib.decompressor(reader);
+        const zlib_reader = stream.reader();
+
+        // get size of base object (little endian variable length format)
+        var base_size: u64 = 0;
+        {
+            var shift: u6 = 0;
+            var cont = true;
+            while (cont) {
+                const next_byte: packed struct {
+                    value: u7,
+                    high_bit: u1,
+                } = @bitCast(try zlib_reader.readByte());
+                bytes_read += 1;
+                cont = next_byte.high_bit == 1;
+                const value: u64 = next_byte.value;
+                base_size |= (value << shift);
+                shift += 7;
+            }
+        }
+
+        // get size of reconstructed object (little endian variable length format)
+        var recon_size: u64 = 0;
+        {
+            var shift: u6 = 0;
+            var cont = true;
+            while (cont) {
+                const next_byte: packed struct {
+                    value: u7,
+                    high_bit: u1,
+                } = @bitCast(try zlib_reader.readByte());
+                bytes_read += 1;
+                cont = next_byte.high_bit == 1;
+                const value: u64 = next_byte.value;
+                recon_size |= (value << shift);
+                shift += 7;
+            }
+        }
+
+        var chunks = std.ArrayList(Chunk).init(allocator);
+        errdefer chunks.deinit();
+
+        var cache = std.AutoArrayHashMap(Location, []const u8).init(allocator);
+        errdefer cache.deinit();
+
+        const cache_arena = try allocator.create(std.heap.ArenaAllocator);
+        cache_arena.* = std.heap.ArenaAllocator.init(allocator);
+        errdefer {
+            cache_arena.deinit();
+            allocator.destroy(cache_arena);
+        }
+
+        while (bytes_read < self.size) {
+            const next_byte: packed struct {
+                value: u7,
+                high_bit: u1,
+            } = @bitCast(try zlib_reader.readByte());
+            bytes_read += 1;
+
+            switch (next_byte.high_bit) {
+                // add new data
+                0 => {
+                    if (next_byte.value == 0) { // reserved instruction
+                        continue;
+                    }
+                    try chunks.append(.{
+                        .location = .{
+                            .offset = bytes_read,
+                            .size = next_byte.value,
+                        },
+                        .kind = .add_new,
+                    });
+                    try zlib_reader.skipBytes(next_byte.value, .{});
+                    bytes_read += next_byte.value;
+                },
+                // copy data
+                1 => {
+                    var vals = [_]u8{0} ** 7;
+                    var i: u3 = 0;
+                    for (&vals) |*val| {
+                        const mask: u7 = @as(u7, 1) << i;
+                        i += 1;
+                        if (next_byte.value & mask != 0) {
+                            val.* = try zlib_reader.readByte();
+                            bytes_read += 1;
+                        }
+                    }
+                    const copy_offset = std.mem.readInt(u32, vals[0..4], .little);
+                    const copy_size = std.mem.readInt(u24, vals[4..], .little);
+                    const loc = Location{
+                        .offset = copy_offset,
+                        .size = if (copy_size == 0) 0x10000 else copy_size,
+                    };
+                    try chunks.append(.{
+                        .location = loc,
+                        .kind = .copy_from_base,
+                    });
+                    try cache.put(loc, "");
+                },
+            }
+        }
+
+        const SortCtx = struct {
+            keys: []Location,
+            pub fn lessThan(ctx: @This(), a_index: usize, b_index: usize) bool {
+                const a_loc = ctx.keys[a_index];
+                const b_loc = ctx.keys[b_index];
+                if (a_loc.offset == b_loc.offset) {
+                    return a_loc.size > b_loc.size;
+                }
+                return a_loc.offset < b_loc.offset;
+            }
+        };
+        cache.sort(SortCtx{ .keys = cache.keys() });
+
+        self.* = .{
+            .pack_file = self.pack_file,
+            .stream = stream,
+            .start_position = self.start_position,
+            .relative_position = bytes_read,
+            .size = self.size,
+            .internal = .{
+                .delta = .{
+                    .init = self.internal.delta.init,
+                    .allocator = allocator,
+                    .base_reader = base_reader,
+                    .chunk_index = 0,
+                    .chunk_position = 0,
+                    .real_position = bytes_read,
+                    .chunks = chunks,
+                    .cache = cache,
+                    .cache_arena = cache_arena,
+                },
+            },
+        };
     }
 
     fn initCache(self: *PackObjectReader) !void {
@@ -228,271 +577,6 @@ pub const PackObjectReader = struct {
         }
     }
 
-    fn initWithOid(allocator: std.mem.Allocator, core: *rp.Repo(.git).Core, oid_hex: [hash.SHA1_HEX_LEN]u8) !PackObjectReader {
-        var pack_dir = try core.git_dir.openDir("objects/pack", .{ .iterate = true });
-        defer pack_dir.close();
-
-        const pack_offset = try searchPackIndexes(pack_dir, oid_hex);
-
-        const prefix = "pack-";
-        const suffix = ".pack";
-
-        var file_name_buf = [_]u8{0} ** (prefix.len + hash.SHA1_HEX_LEN + suffix.len);
-        const file_name = try std.fmt.bufPrint(&file_name_buf, "{s}{s}{s}", .{ prefix, pack_offset.pack_id, suffix });
-
-        var pack_file = try pack_dir.openFile(file_name, .{ .mode = .read_only });
-        defer pack_file.close();
-        const reader = pack_file.reader();
-
-        // parse header
-        const sig = try reader.readBytesNoEof(4);
-        if (!std.mem.eql(u8, "PACK", &sig)) {
-            return error.InvalidPackFileSig;
-        }
-        const version = try reader.readInt(u32, .big);
-        if (version != 2) {
-            return error.InvalidPackFileVersion;
-        }
-        _ = try reader.readInt(u32, .big); // number of objects
-
-        return try PackObjectReader.initAtPosition(allocator, core, pack_dir, file_name, pack_offset.value);
-    }
-
-    fn initAtPosition(allocator: std.mem.Allocator, core: *rp.Repo(.git).Core, pack_dir: std.fs.Dir, file_name: []const u8, position: u64) anyerror!PackObjectReader {
-        var pack_file = try pack_dir.openFile(file_name, .{ .mode = .read_only });
-        errdefer pack_file.close();
-        try pack_file.seekTo(position);
-        const reader = pack_file.reader();
-
-        // parse object header
-        const PackObjectKind = enum(u3) {
-            commit = 1,
-            tree = 2,
-            blob = 3,
-            tag = 4,
-            ofs_delta = 6,
-            ref_delta = 7,
-        };
-        const obj_header: packed struct {
-            size: u4,
-            kind: PackObjectKind,
-            high_bit: u1,
-        } = @bitCast(try reader.readByte());
-
-        // get size of object (little endian variable length format)
-        var size: u64 = obj_header.size;
-        {
-            var shift: u6 = @bitSizeOf(@TypeOf(obj_header.size));
-            var cont = obj_header.high_bit == 1;
-            while (cont) {
-                const next_byte: packed struct {
-                    value: u7,
-                    high_bit: u1,
-                } = @bitCast(try reader.readByte());
-                cont = next_byte.high_bit == 1;
-                const value: u64 = next_byte.value;
-                size |= (value << shift);
-                shift += 7;
-            }
-        }
-
-        switch (obj_header.kind) {
-            .commit, .tree, .blob, .tag => {
-                const start_position = try pack_file.getPos();
-                return .{
-                    .pack_file = pack_file,
-                    .stream = std.compress.zlib.decompressor(reader),
-                    .start_position = start_position,
-                    .relative_position = 0,
-                    .internal = .{
-                        .basic = .{
-                            .size = size,
-                            .header = .{
-                                .kind = switch (obj_header.kind) {
-                                    .commit => .commit,
-                                    .tree => .tree,
-                                    .blob => .blob,
-                                    .tag => return error.UnsupportedObjectKind,
-                                    else => unreachable,
-                                },
-                                .size = size,
-                            },
-                        },
-                    },
-                };
-            },
-            .ofs_delta, .ref_delta => {
-                const base_reader = try allocator.create(PackObjectReader);
-                errdefer allocator.destroy(base_reader);
-
-                switch (obj_header.kind) {
-                    .ofs_delta => {
-                        // get offset (big endian variable length format)
-                        var offset: u64 = 0;
-                        {
-                            while (true) {
-                                const next_byte: packed struct {
-                                    value: u7,
-                                    high_bit: u1,
-                                } = @bitCast(try reader.readByte());
-                                offset = (offset << 7) | next_byte.value;
-                                if (next_byte.high_bit == 0) {
-                                    break;
-                                }
-                                offset += 1; // "offset encoding" https://git-scm.com/docs/pack-format
-                            }
-                        }
-                        base_reader.* = try PackObjectReader.initAtPosition(allocator, core, pack_dir, file_name, position - offset);
-                    },
-                    .ref_delta => {
-                        const base_oid = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
-                        base_reader.* = try PackObjectReader.initWithOid(allocator, core, std.fmt.bytesToHex(base_oid, .lower));
-                    },
-                    else => unreachable,
-                }
-                errdefer base_reader.deinit();
-
-                const start_position = try pack_file.getPos();
-
-                var bytes_read: u64 = 0;
-
-                var stream = std.compress.zlib.decompressor(reader);
-                const zlib_reader = stream.reader();
-
-                // get size of base object (little endian variable length format)
-                var base_size: u64 = 0;
-                {
-                    var shift: u6 = 0;
-                    var cont = true;
-                    while (cont) {
-                        const next_byte: packed struct {
-                            value: u7,
-                            high_bit: u1,
-                        } = @bitCast(try zlib_reader.readByte());
-                        bytes_read += 1;
-                        cont = next_byte.high_bit == 1;
-                        const value: u64 = next_byte.value;
-                        base_size |= (value << shift);
-                        shift += 7;
-                    }
-                }
-
-                // get size of reconstructed object (little endian variable length format)
-                var recon_size: u64 = 0;
-                {
-                    var shift: u6 = 0;
-                    var cont = true;
-                    while (cont) {
-                        const next_byte: packed struct {
-                            value: u7,
-                            high_bit: u1,
-                        } = @bitCast(try zlib_reader.readByte());
-                        bytes_read += 1;
-                        cont = next_byte.high_bit == 1;
-                        const value: u64 = next_byte.value;
-                        recon_size |= (value << shift);
-                        shift += 7;
-                    }
-                }
-
-                var chunks = std.ArrayList(Chunk).init(allocator);
-                errdefer chunks.deinit();
-
-                var cache = std.AutoArrayHashMap(Location, []const u8).init(allocator);
-                errdefer cache.deinit();
-
-                const cache_arena = try allocator.create(std.heap.ArenaAllocator);
-                cache_arena.* = std.heap.ArenaAllocator.init(allocator);
-                errdefer {
-                    cache_arena.deinit();
-                    allocator.destroy(cache_arena);
-                }
-
-                while (bytes_read < size) {
-                    const next_byte: packed struct {
-                        value: u7,
-                        high_bit: u1,
-                    } = @bitCast(try zlib_reader.readByte());
-                    bytes_read += 1;
-
-                    switch (next_byte.high_bit) {
-                        // add new data
-                        0 => {
-                            if (next_byte.value == 0) { // reserved instruction
-                                continue;
-                            }
-                            try chunks.append(.{
-                                .location = .{
-                                    .offset = bytes_read,
-                                    .size = next_byte.value,
-                                },
-                                .kind = .add_new,
-                            });
-                            try zlib_reader.skipBytes(next_byte.value, .{});
-                            bytes_read += next_byte.value;
-                        },
-                        // copy data
-                        1 => {
-                            var vals = [_]u8{0} ** 7;
-                            var i: u3 = 0;
-                            for (&vals) |*val| {
-                                const mask: u7 = @as(u7, 1) << i;
-                                i += 1;
-                                if (next_byte.value & mask != 0) {
-                                    val.* = try zlib_reader.readByte();
-                                    bytes_read += 1;
-                                }
-                            }
-                            const copy_offset = std.mem.readInt(u32, vals[0..4], .little);
-                            const copy_size = std.mem.readInt(u24, vals[4..], .little);
-                            const loc = Location{
-                                .offset = copy_offset,
-                                .size = if (copy_size == 0) 0x10000 else copy_size,
-                            };
-                            try chunks.append(.{
-                                .location = loc,
-                                .kind = .copy_from_base,
-                            });
-                            try cache.put(loc, "");
-                        },
-                    }
-                }
-
-                const SortCtx = struct {
-                    keys: []Location,
-                    pub fn lessThan(ctx: @This(), a_index: usize, b_index: usize) bool {
-                        const a_loc = ctx.keys[a_index];
-                        const b_loc = ctx.keys[b_index];
-                        if (a_loc.offset == b_loc.offset) {
-                            return a_loc.size > b_loc.size;
-                        }
-                        return a_loc.offset < b_loc.offset;
-                    }
-                };
-                cache.sort(SortCtx{ .keys = cache.keys() });
-
-                return .{
-                    .pack_file = pack_file,
-                    .stream = stream,
-                    .start_position = start_position,
-                    .relative_position = bytes_read,
-                    .internal = .{
-                        .delta = .{
-                            .allocator = allocator,
-                            .base_reader = base_reader,
-                            .chunk_index = 0,
-                            .chunk_position = 0,
-                            .real_position = bytes_read,
-                            .chunks = chunks,
-                            .cache = cache,
-                            .cache_arena = cache_arena,
-                        },
-                    },
-                };
-            },
-        }
-    }
-
     pub fn deinit(self: *PackObjectReader) void {
         self.pack_file.close();
         switch (self.internal) {
@@ -534,8 +618,8 @@ pub const PackObjectReader = struct {
     pub fn read(self: *PackObjectReader, dest: []u8) !usize {
         switch (self.internal) {
             .basic => {
-                if (self.internal.basic.size < self.relative_position) return error.EndOfStream;
-                const size = try self.stream.reader().read(dest[0..@min(dest.len, self.internal.basic.size - self.relative_position)]);
+                if (self.size < self.relative_position) return error.EndOfStream;
+                const size = try self.stream.reader().read(dest[0..@min(dest.len, self.size - self.relative_position)]);
                 self.relative_position += size;
                 return size;
             },
