@@ -179,7 +179,7 @@ pub const PackObjectReader = struct {
         },
     };
 
-    pub const Error = compress.ZlibStream.Reader.Error || error{ Unseekable, UnexpectedEndOfStream };
+    pub const Error = compress.ZlibStream.Reader.Error || error{ Unseekable, UnexpectedEndOfStream, InvalidDeltaCache };
 
     pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(.git).Core, oid_hex: [hash.SHA1_HEX_LEN]u8) !PackObjectReader {
         var pack_reader = try PackObjectReader.initWithOid(core, oid_hex);
@@ -575,6 +575,16 @@ pub const PackObjectReader = struct {
             }
             value.* = buffer;
         }
+
+        // now that the cache has been initialized, clear the cache in
+        // the base object if necessary, because it won't be used anymore.
+        switch (self.internal.delta.base_reader.internal) {
+            .basic => {},
+            .delta => {
+                _ = self.internal.delta.base_reader.internal.delta.cache_arena.reset(.free_all);
+                self.internal.delta.base_reader.internal.delta.cache.clearAndFree();
+            },
+        }
     }
 
     pub fn deinit(self: *PackObjectReader) void {
@@ -655,7 +665,7 @@ pub const PackObjectReader = struct {
                             self.internal.delta.real_position += size;
                         },
                         .copy_from_base => {
-                            const buffer = self.internal.delta.cache.get(chunk.location) orelse return error.UnexpectedEndOfStream;
+                            const buffer = self.internal.delta.cache.get(chunk.location) orelse return error.InvalidDeltaCache;
                             @memcpy(dest_slice[0..bytes_to_read], buffer[self.internal.delta.chunk_position .. self.internal.delta.chunk_position + bytes_to_read]);
                             bytes_read += bytes_to_read;
                             self.internal.delta.chunk_position += bytes_to_read;
