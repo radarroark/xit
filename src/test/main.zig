@@ -12,6 +12,7 @@ const obj = @import("../object.zig");
 const ref = @import("../ref.zig");
 const rp = @import("../repo.zig");
 const df = @import("../diff.zig");
+const mrg = @import("../merge.zig");
 
 const c = @cImport({
     @cInclude("git2.h");
@@ -1277,7 +1278,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             .git => .{ .core = &repo.core },
             .xit => .{ .core = &repo.core, .cursor = &cursor },
         };
-        const ancestor_commit = try obj.commonAncestor(repo_kind, allocator, core_cursor, &commit3, &commit4_stuff);
+        const ancestor_commit = try mrg.commonAncestor(repo_kind, allocator, core_cursor, &commit3, &commit4_stuff);
         try std.testing.expectEqualStrings(&commit2, &ancestor_commit);
     }
 
