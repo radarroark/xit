@@ -165,11 +165,11 @@ fn testMerge(comptime repo_kind: rp.RepoKind) !void {
 
     // there are multiple common ancestors, b and d,
     // but d is the best one because it is a descendent of b
-    const ancestor_k_h = try obj.commonAncestor(repo_kind, allocator, core_cursor, &commit_k, &commit_h);
+    const ancestor_k_h = try mrg.commonAncestor(repo_kind, allocator, core_cursor, &commit_k, &commit_h);
     try std.testing.expectEqualStrings(&commit_d, &ancestor_k_h);
 
     // if one commit is an ancestor of the other, it is the best common ancestor
-    const ancestor_k_j = try obj.commonAncestor(repo_kind, allocator, core_cursor, &commit_k, &commit_j);
+    const ancestor_k_j = try mrg.commonAncestor(repo_kind, allocator, core_cursor, &commit_k, &commit_j);
     try std.testing.expectEqualStrings(&commit_j, &ancestor_k_j);
 
     // if we try merging foo again, it does nothing
