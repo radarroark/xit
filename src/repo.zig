@@ -215,6 +215,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         }
                     };
                     _ = try self.core.db.rootCursor().writePath(Ctx, &.{
+                        .array_list_init,
                         .{ .array_list_get = .append_copy },
                         .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator } },
@@ -563,6 +564,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         }
                     };
                     _ = try self.core.db.rootCursor().writePath(Ctx, &.{
+                        .array_list_init,
                         .{ .array_list_get = .append_copy },
                         .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .parent_oids_maybe = parent_oids_maybe, .metadata = metadata, .result = &result } },
@@ -609,6 +611,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         }
                     };
                     _ = try self.core.db.rootCursor().writePath(Ctx, &.{
+                        .array_list_init,
                         .{ .array_list_get = .append_copy },
                         .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .paths = paths } },
@@ -722,6 +725,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         }
                     };
                     _ = try self.core.db.rootCursor().writePath(Ctx, &.{
+                        .array_list_init,
                         .{ .array_list_get = .append_copy },
                         .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .paths = paths, .opts = opts } },
@@ -852,6 +856,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         }
                     };
                     _ = try self.core.db.rootCursor().writePath(Ctx, &.{
+                        .array_list_init,
                         .{ .array_list_get = .append_copy },
                         .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .input = input } },
@@ -876,6 +881,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         }
                     };
                     _ = try self.core.db.rootCursor().writePath(Ctx, &.{
+                        .array_list_init,
                         .{ .array_list_get = .append_copy },
                         .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .input = input } },
@@ -903,6 +909,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         }
                     };
                     _ = try self.core.db.rootCursor().writePath(Ctx, &.{
+                        .array_list_init,
                         .{ .array_list_get = .append_copy },
                         .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .target = target, .options = options, .result = &result } },
@@ -955,6 +962,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         }
                     };
                     _ = self.core.db.rootCursor().writePath(Ctx, &.{
+                        .array_list_init,
                         .{ .array_list_get = .append_copy },
                         .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .input = input, .result = &result } },
@@ -989,6 +997,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         }
                     };
                     _ = self.core.db.rootCursor().writePath(Ctx, &.{
+                        .array_list_init,
                         .{ .array_list_get = .append_copy },
                         .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .input = input, .result = &result } },
@@ -1035,6 +1044,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         }
                     };
                     _ = try self.core.db.rootCursor().writePath(Ctx, &.{
+                        .array_list_init,
                         .{ .array_list_get = .append_copy },
                         .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .conf = &conf, .input = input } },
@@ -1068,6 +1078,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         }
                     };
                     _ = try self.core.db.rootCursor().writePath(Ctx, &.{
+                        .array_list_init,
                         .{ .array_list_get = .append_copy },
                         .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .conf = &conf, .input = input } },
@@ -1114,6 +1125,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         }
                     };
                     _ = try self.core.db.rootCursor().writePath(Ctx, &.{
+                        .array_list_init,
                         .{ .array_list_get = .append_copy },
                         .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .conf = &conf, .input = new_input } },
@@ -1153,6 +1165,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         }
                     };
                     _ = try self.core.db.rootCursor().writePath(Ctx, &.{
+                        .array_list_init,
                         .{ .array_list_get = .append_copy },
                         .hash_map_init,
                         .{ .ctx = Ctx{ .core = &self.core, .conf = &conf, .input = new_input } },
