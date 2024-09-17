@@ -965,3 +965,95 @@ test "cherry-pick conflict" {
     try testCherryPickConflict(.git);
     try testCherryPickConflict(.xit);
 }
+
+fn testLog(comptime repo_kind: rp.RepoKind) !void {
+    const allocator = std.testing.allocator;
+    const temp_dir_name = "temp-test-repo-log";
+
+    // create the temp dir
+    const cwd = std.fs.cwd();
+    var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
+    if (temp_dir_or_err) |*temp_dir| {
+        temp_dir.close();
+        try cwd.deleteTree(temp_dir_name);
+    } else |_| {}
+    var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
+    defer cwd.deleteTree(temp_dir_name) catch {};
+    defer temp_dir.close();
+
+    const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
+
+    var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, writers);
+    defer repo.deinit();
+
+    // A --- B --- C --------- G --- H [master]
+    //        \               /
+    //         \             /
+    //          D --- E --- F [foo]
+
+    try addFile(repo_kind, &repo, "master.md", "a");
+    const commit_a = try repo.commit(null, .{ .message = "a" });
+    try addFile(repo_kind, &repo, "master.md", "b");
+    const commit_b = try repo.commit(null, .{ .message = "b" });
+    try repo.addBranch(.{ .name = "foo" });
+    {
+        var result = try repo.switchHead("foo", .{ .force = false });
+        defer result.deinit();
+    }
+    try addFile(repo_kind, &repo, "foo.md", "d");
+    const commit_d = try repo.commit(null, .{ .message = "d" });
+    {
+        var result = try repo.switchHead("master", .{ .force = false });
+        defer result.deinit();
+    }
+    try addFile(repo_kind, &repo, "master.md", "c");
+    const commit_c = try repo.commit(null, .{ .message = "c" });
+    {
+        var result = try repo.switchHead("foo", .{ .force = false });
+        defer result.deinit();
+    }
+    try addFile(repo_kind, &repo, "foo.md", "e");
+    const commit_e = try repo.commit(null, .{ .message = "e" });
+    try addFile(repo_kind, &repo, "foo.md", "f");
+    const commit_f = try repo.commit(null, .{ .message = "f" });
+    {
+        var result = try repo.switchHead("master", .{ .force = false });
+        defer result.deinit();
+    }
+    const commit_g = blk: {
+        var result = try repo.merge(.{ .new = .{ .source_name = "foo" } });
+        defer result.deinit();
+        try std.testing.expect(.success == result.data);
+        break :blk result.data.success.oid;
+    };
+    try addFile(repo_kind, &repo, "master.md", "h");
+    const commit_h = try repo.commit(null, .{ .message = "h" });
+
+    // put oids in a set
+    var oid_set = std.StringArrayHashMap(void).init(allocator);
+    defer oid_set.deinit();
+    try oid_set.put(&commit_a, {});
+    try oid_set.put(&commit_b, {});
+    try oid_set.put(&commit_c, {});
+    try oid_set.put(&commit_d, {});
+    try oid_set.put(&commit_e, {});
+    try oid_set.put(&commit_f, {});
+    try oid_set.put(&commit_g, {});
+    try oid_set.put(&commit_h, {});
+
+    // assert that all commits have been found in the log
+    // and they aren't repeated
+    var commit_iter = try repo.log(null);
+    defer commit_iter.deinit();
+    while (try commit_iter.next()) |commit_object| {
+        defer commit_object.deinit();
+        try std.testing.expect(oid_set.contains(&commit_object.oid));
+        _ = oid_set.swapRemove(&commit_object.oid);
+    }
+    try std.testing.expectEqual(0, oid_set.count());
+}
+
+test "log" {
+    try testLog(.git);
+    try testLog(.xit);
+}
