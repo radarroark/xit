@@ -28,18 +28,11 @@ pub fn LogCommitList(comptime Widget: type, comptime repo_kind: rp.RepoKind) typ
             }
 
             // walk the commits
-            var cursor = try repo.core.latestCursor();
-            const core_cursor = switch (repo_kind) {
-                .git => .{ .core = &repo.core },
-                .xit => .{ .core = &repo.core, .cursor = &cursor },
-            };
-            if (try ref.readHeadMaybe(repo_kind, core_cursor)) |oid| {
-                var commit_iter = try repo.log(oid);
-                defer commit_iter.deinit();
-                while (try commit_iter.next()) |commit_object| {
-                    errdefer commit_object.deinit();
-                    try commits.append(commit_object.*);
-                }
+            var commit_iter = try repo.log(null);
+            defer commit_iter.deinit();
+            while (try commit_iter.next()) |commit_object| {
+                errdefer commit_object.deinit();
+                try commits.append(commit_object.*);
             }
 
             var inner_box = try wgt.Box(Widget).init(allocator, null, .vert);

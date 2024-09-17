@@ -928,16 +928,18 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             try chk.restore(repo_kind, core_cursor, self.allocator, path);
         }
 
-        pub fn log(self: *Repo(repo_kind), oid_maybe: ?[hash.SHA1_HEX_LEN]u8) !obj.ObjectIterator(repo_kind) {
-            const oid = oid_maybe orelse blk: {
+        pub fn log(self: *Repo(repo_kind), oids_maybe: ?[]const [hash.SHA1_HEX_LEN]u8) !obj.ObjectIterator(repo_kind) {
+            if (oids_maybe) |oids| {
+                return try obj.ObjectIterator(repo_kind).init(self.allocator, &self.core, oids);
+            } else {
                 var cursor = try self.core.latestCursor();
                 const core_cursor = switch (repo_kind) {
                     .git => .{ .core = &self.core },
                     .xit => .{ .core = &self.core, .cursor = &cursor },
                 };
-                break :blk try ref.readHead(repo_kind, core_cursor);
-            };
-            return try obj.ObjectIterator(repo_kind).init(self.allocator, &self.core, oid);
+                const head_oid = try ref.readHead(repo_kind, core_cursor);
+                return try obj.ObjectIterator(repo_kind).init(self.allocator, &self.core, &.{head_oid});
+            }
         }
 
         pub fn merge(self: *Repo(repo_kind), input: mrg.MergeInput) !mrg.Merge {

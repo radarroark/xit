@@ -871,19 +871,22 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind) type {
         oid_queue: std.DoublyLinkedList([hash.SHA1_HEX_LEN]u8),
         object: Object(repo_kind),
 
-        pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core, oid: [hash.SHA1_HEX_LEN]u8) !ObjectIterator(repo_kind) {
-            var oid_queue = std.DoublyLinkedList([hash.SHA1_HEX_LEN]u8){};
-            var node = try allocator.create(std.DoublyLinkedList([hash.SHA1_HEX_LEN]u8).Node);
-            errdefer allocator.destroy(node);
-            node.data = oid;
-            oid_queue.append(node);
-            return .{
+        pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core, oids: []const [hash.SHA1_HEX_LEN]u8) !ObjectIterator(repo_kind) {
+            var self = ObjectIterator(repo_kind){
                 .allocator = allocator,
                 .core = core,
                 .cursor = try core.latestCursor(),
-                .oid_queue = oid_queue,
+                .oid_queue = std.DoublyLinkedList([hash.SHA1_HEX_LEN]u8){},
                 .object = undefined,
             };
+            errdefer self.deinit();
+            for (oids) |oid| {
+                var node = try allocator.create(std.DoublyLinkedList([hash.SHA1_HEX_LEN]u8).Node);
+                errdefer allocator.destroy(node);
+                node.data = oid;
+                self.oid_queue.append(node);
+            }
+            return self;
         }
 
         pub fn deinit(self: *ObjectIterator(repo_kind)) void {
