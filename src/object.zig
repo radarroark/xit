@@ -869,6 +869,7 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind) type {
             .xit => @import("xitdb").Database(.file, hash.Hash).Cursor,
         },
         oid_queue: std.DoublyLinkedList([hash.SHA1_HEX_LEN]u8),
+        oids_seen: std.AutoHashMap([hash.SHA1_HEX_LEN]u8, void),
         object: Object(repo_kind),
 
         pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core, oids: []const [hash.SHA1_HEX_LEN]u8) !ObjectIterator(repo_kind) {
@@ -877,6 +878,7 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind) type {
                 .core = core,
                 .cursor = try core.latestCursor(),
                 .oid_queue = std.DoublyLinkedList([hash.SHA1_HEX_LEN]u8){},
+                .oids_seen = std.AutoHashMap([hash.SHA1_HEX_LEN]u8, void).init(allocator),
                 .object = undefined,
             };
             errdefer self.deinit();
@@ -893,6 +895,7 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind) type {
             while (self.oid_queue.popFirst()) |node| {
                 self.allocator.destroy(node);
             }
+            self.oids_seen.deinit();
         }
 
         pub fn next(self: *ObjectIterator(repo_kind)) !?*Object(repo_kind) {
@@ -900,22 +903,24 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind) type {
                 .git => .{ .core = self.core },
                 .xit => .{ .core = self.core, .cursor = &self.cursor },
             };
-            if (self.oid_queue.popFirst()) |node| {
+            while (self.oid_queue.popFirst()) |node| {
                 const next_oid = node.data;
                 self.allocator.destroy(node);
-                var commit_object = try Object(repo_kind).init(self.allocator, core_cursor, next_oid);
-                errdefer commit_object.deinit();
-                self.object = commit_object;
-                for (commit_object.content.commit.parents.items) |parent_oid| {
-                    var new_node = try self.allocator.create(std.DoublyLinkedList([hash.SHA1_HEX_LEN]u8).Node);
-                    errdefer self.allocator.destroy(new_node);
-                    new_node.data = parent_oid;
-                    self.oid_queue.append(new_node);
+                if (!self.oids_seen.contains(next_oid)) {
+                    try self.oids_seen.put(next_oid, {});
+                    var commit_object = try Object(repo_kind).init(self.allocator, core_cursor, next_oid);
+                    errdefer commit_object.deinit();
+                    self.object = commit_object;
+                    for (commit_object.content.commit.parents.items) |parent_oid| {
+                        var new_node = try self.allocator.create(std.DoublyLinkedList([hash.SHA1_HEX_LEN]u8).Node);
+                        errdefer self.allocator.destroy(new_node);
+                        new_node.data = parent_oid;
+                        self.oid_queue.append(new_node);
+                    }
+                    return &self.object;
                 }
-                return &self.object;
-            } else {
-                return null;
             }
+            return null;
         }
     };
 }
