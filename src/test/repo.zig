@@ -62,13 +62,7 @@ fn testSimple(comptime repo_kind: rp.RepoKind) !void {
     try oid_set.put(&commit_d, {});
 
     // assert that all commits have been found in the log
-    var cursor = try repo.core.latestCursor();
-    const core_cursor = switch (repo_kind) {
-        .git => .{ .core = &repo.core },
-        .xit => .{ .core = &repo.core, .cursor = &cursor },
-    };
-    const head_oid = try ref.readHead(repo_kind, core_cursor);
-    var commit_iter = try repo.log(head_oid);
+    var commit_iter = try repo.log(null);
     defer commit_iter.deinit();
     while (try commit_iter.next()) |commit_object| {
         defer commit_object.deinit();
