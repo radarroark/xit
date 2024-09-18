@@ -872,7 +872,12 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind) type {
         oids_seen: std.AutoHashMap([hash.SHA1_HEX_LEN]u8, void),
         object: Object(repo_kind),
 
-        pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind).Core, oids: []const [hash.SHA1_HEX_LEN]u8) !ObjectIterator(repo_kind) {
+        pub fn init(
+            allocator: std.mem.Allocator,
+            core: *rp.Repo(repo_kind).Core,
+            start_oids: []const [hash.SHA1_HEX_LEN]u8,
+            end_oids_maybe: ?[]const [hash.SHA1_HEX_LEN]u8,
+        ) !ObjectIterator(repo_kind) {
             var self = ObjectIterator(repo_kind){
                 .allocator = allocator,
                 .core = core,
@@ -882,12 +887,28 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind) type {
                 .object = undefined,
             };
             errdefer self.deinit();
-            for (oids) |oid| {
+
+            for (start_oids) |start_oid| {
                 var node = try allocator.create(std.DoublyLinkedList([hash.SHA1_HEX_LEN]u8).Node);
                 errdefer allocator.destroy(node);
-                node.data = oid;
+                node.data = start_oid;
                 self.oid_queue.append(node);
             }
+
+            if (end_oids_maybe) |end_oids| {
+                const core_cursor = switch (repo_kind) {
+                    .git => .{ .core = self.core },
+                    .xit => .{ .core = self.core, .cursor = &self.cursor },
+                };
+                for (end_oids) |end_oid| {
+                    var commit_object = try Object(repo_kind).init(allocator, core_cursor, end_oid);
+                    defer commit_object.deinit();
+                    for (commit_object.content.commit.parents.items) |parent_oid| {
+                        try self.oids_seen.put(parent_oid, {});
+                    }
+                }
+            }
+
             return self;
         }
 

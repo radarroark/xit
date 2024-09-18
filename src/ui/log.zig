@@ -28,7 +28,7 @@ pub fn LogCommitList(comptime Widget: type, comptime repo_kind: rp.RepoKind) typ
             }
 
             // walk the commits
-            var commit_iter = try repo.log(null);
+            var commit_iter = try repo.log(null, null);
             defer commit_iter.deinit();
             while (try commit_iter.next()) |commit_object| {
                 errdefer commit_object.deinit();
