@@ -62,7 +62,7 @@ fn testSimple(comptime repo_kind: rp.RepoKind) !void {
     try oid_set.put(&commit_d, {});
 
     // assert that all commits have been found in the log
-    var commit_iter = try repo.log(null);
+    var commit_iter = try repo.log(null, null);
     defer commit_iter.deinit();
     while (try commit_iter.next()) |commit_object| {
         defer commit_object.deinit();
@@ -1043,14 +1043,35 @@ fn testLog(comptime repo_kind: rp.RepoKind) !void {
 
     // assert that all commits have been found in the log
     // and they aren't repeated
-    var commit_iter = try repo.log(null);
-    defer commit_iter.deinit();
-    while (try commit_iter.next()) |commit_object| {
-        defer commit_object.deinit();
-        try std.testing.expect(oid_set.contains(&commit_object.oid));
-        _ = oid_set.swapRemove(&commit_object.oid);
+    {
+        var commit_iter = try repo.log(null, null);
+        defer commit_iter.deinit();
+        while (try commit_iter.next()) |commit_object| {
+            defer commit_object.deinit();
+            try std.testing.expect(oid_set.contains(&commit_object.oid));
+            _ = oid_set.swapRemove(&commit_object.oid);
+        }
+        try std.testing.expectEqual(0, oid_set.count());
     }
-    try std.testing.expectEqual(0, oid_set.count());
+
+    try oid_set.put(&commit_c, {});
+    try oid_set.put(&commit_d, {});
+    try oid_set.put(&commit_e, {});
+    try oid_set.put(&commit_f, {});
+    try oid_set.put(&commit_g, {});
+
+    // assert that only some commits have been found in the log
+    // and they aren't repeated
+    {
+        var commit_iter = try repo.log(&.{commit_g}, &.{ commit_c, commit_d });
+        defer commit_iter.deinit();
+        while (try commit_iter.next()) |commit_object| {
+            defer commit_object.deinit();
+            try std.testing.expect(oid_set.contains(&commit_object.oid));
+            _ = oid_set.swapRemove(&commit_object.oid);
+        }
+        try std.testing.expectEqual(0, oid_set.count());
+    }
 }
 
 test "log" {

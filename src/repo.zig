@@ -434,7 +434,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     try self.restore(sub_command.restore.path);
                 },
                 .log => {
-                    var commit_iter = try self.log(null);
+                    var commit_iter = try self.log(null, null);
                     defer commit_iter.deinit();
                     while (try commit_iter.next()) |commit_object| {
                         defer commit_object.deinit();
@@ -928,9 +928,9 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             try chk.restore(repo_kind, core_cursor, self.allocator, path);
         }
 
-        pub fn log(self: *Repo(repo_kind), oids_maybe: ?[]const [hash.SHA1_HEX_LEN]u8) !obj.ObjectIterator(repo_kind) {
-            if (oids_maybe) |oids| {
-                return try obj.ObjectIterator(repo_kind).init(self.allocator, &self.core, oids);
+        pub fn log(self: *Repo(repo_kind), start_oids_maybe: ?[]const [hash.SHA1_HEX_LEN]u8, end_oids_maybe: ?[]const [hash.SHA1_HEX_LEN]u8) !obj.ObjectIterator(repo_kind) {
+            if (start_oids_maybe) |start_oids| {
+                return try obj.ObjectIterator(repo_kind).init(self.allocator, &self.core, start_oids, end_oids_maybe);
             } else {
                 var cursor = try self.core.latestCursor();
                 const core_cursor = switch (repo_kind) {
@@ -938,7 +938,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     .xit => .{ .core = &self.core, .cursor = &cursor },
                 };
                 const head_oid = try ref.readHead(repo_kind, core_cursor);
-                return try obj.ObjectIterator(repo_kind).init(self.allocator, &self.core, &.{head_oid});
+                return try obj.ObjectIterator(repo_kind).init(self.allocator, &self.core, &.{head_oid}, end_oids_maybe);
             }
         }
 
