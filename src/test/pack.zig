@@ -2,6 +2,8 @@ const std = @import("std");
 const hash = @import("../hash.zig");
 const rp = @import("../repo.zig");
 const obj = @import("../object.zig");
+const pack = @import("../pack.zig");
+const ref = @import("../ref.zig");
 
 const c = @cImport({
     @cInclude("git2.h");
@@ -115,10 +117,10 @@ test "pack" {
 
         // get previous commit
         var parent_object: ?*c.git_object = null;
-        var ref: ?*c.git_reference = null;
-        try std.testing.expectEqual(0, c.git_revparse_ext(&parent_object, &ref, repo, "HEAD"));
+        var parent_ref: ?*c.git_reference = null;
+        try std.testing.expectEqual(0, c.git_revparse_ext(&parent_object, &parent_ref, repo, "HEAD"));
         defer c.git_object_free(parent_object);
-        defer c.git_reference_free(ref);
+        defer c.git_reference_free(parent_ref);
         var parent_commit: ?*c.git_commit = null;
         try std.testing.expectEqual(0, c.git_commit_lookup(&parent_commit, repo, c.git_object_id(parent_object)));
         defer c.git_commit_free(parent_commit);
@@ -201,5 +203,19 @@ test "pack" {
         var object = try obj.Object(.git).init(allocator, .{ .core = &r.core }, commit_oid_hex);
         defer object.deinit();
         try std.testing.expectEqualStrings(message, object.content.commit.metadata.message);
+    }
+
+    // write a pack object
+    {
+        var r = try rp.Repo(.git).init(allocator, .{ .cwd = repo_dir });
+        defer r.deinit();
+
+        const head_oid = try ref.readHead(.git, .{ .core = &r.core });
+
+        var obj_iter = try obj.ObjectIterator(.git).init(allocator, &r.core, &.{head_oid}, .{ .recursive = true });
+        defer obj_iter.deinit();
+
+        var pack_writer = pack.PackObjectWriter.init(&obj_iter);
+        _ = &pack_writer;
     }
 }
