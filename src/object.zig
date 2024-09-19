@@ -850,8 +850,8 @@ pub fn TreeDiff(comptime repo_kind: rp.RepoKind) type {
                 const obj = try Object(repo_kind).init(self.arena.allocator(), core_cursor, oid);
                 return switch (obj.content) {
                     .blob => std.StringArrayHashMap(TreeEntry).init(self.arena.allocator()),
-                    .tree => obj.content.tree.entries,
-                    .commit => self.loadTree(core_cursor, obj.content.commit.tree),
+                    .tree => |tree| tree.entries,
+                    .commit => |commit| self.loadTree(core_cursor, commit.tree),
                 };
             } else {
                 return std.StringArrayHashMap(TreeEntry).init(self.arena.allocator());
@@ -871,11 +871,17 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind) type {
         oid_queue: std.DoublyLinkedList([hash.SHA1_HEX_LEN]u8),
         oid_excludes: std.AutoHashMap([hash.SHA1_HEX_LEN]u8, void),
         object: Object(repo_kind),
+        options: Options,
+
+        pub const Options = struct {
+            recursive: bool,
+        };
 
         pub fn init(
             allocator: std.mem.Allocator,
             core: *rp.Repo(repo_kind).Core,
             start_oids: []const [hash.SHA1_HEX_LEN]u8,
+            options: Options,
         ) !ObjectIterator(repo_kind) {
             var self = ObjectIterator(repo_kind){
                 .allocator = allocator,
@@ -884,6 +890,7 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind) type {
                 .oid_queue = std.DoublyLinkedList([hash.SHA1_HEX_LEN]u8){},
                 .oid_excludes = std.AutoHashMap([hash.SHA1_HEX_LEN]u8, void).init(allocator),
                 .object = undefined,
+                .options = options,
             };
             errdefer self.deinit();
 
@@ -918,13 +925,34 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind) type {
                     errdefer object.deinit();
                     self.object = object;
                     switch (object.content) {
-                        .blob, .tree => {},
+                        .blob => {},
+                        .tree => |tree| {
+                            if (self.options.recursive) {
+                                for (tree.entries.values()) |entry| {
+                                    const entry_oid = std.fmt.bytesToHex(entry.oid, .lower);
+                                    if (!self.oid_excludes.contains(entry_oid)) {
+                                        var new_node = try self.allocator.create(std.DoublyLinkedList([hash.SHA1_HEX_LEN]u8).Node);
+                                        errdefer self.allocator.destroy(new_node);
+                                        new_node.data = entry_oid;
+                                        self.oid_queue.append(new_node);
+                                    }
+                                }
+                            }
+                        },
                         .commit => |commit| {
                             for (commit.parents.items) |parent_oid| {
                                 var new_node = try self.allocator.create(std.DoublyLinkedList([hash.SHA1_HEX_LEN]u8).Node);
                                 errdefer self.allocator.destroy(new_node);
                                 new_node.data = parent_oid;
                                 self.oid_queue.append(new_node);
+                            }
+                            if (self.options.recursive) {
+                                if (!self.oid_excludes.contains(commit.tree)) {
+                                    var new_node = try self.allocator.create(std.DoublyLinkedList([hash.SHA1_HEX_LEN]u8).Node);
+                                    errdefer self.allocator.destroy(new_node);
+                                    new_node.data = commit.tree;
+                                    self.oid_queue.append(new_node);
+                                }
                             }
                         },
                     }
@@ -944,10 +972,20 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind) type {
             var object = try Object(repo_kind).init(self.allocator, core_cursor, oid);
             defer object.deinit();
             switch (object.content) {
-                .blob, .tree => {},
+                .blob => {},
+                .tree => |tree| {
+                    if (self.options.recursive) {
+                        for (tree.entries.values()) |entry| {
+                            try self.exclude(std.fmt.bytesToHex(entry.oid, .lower));
+                        }
+                    }
+                },
                 .commit => |commit| {
                     for (commit.parents.items) |parent_oid| {
                         try self.oid_excludes.put(parent_oid, {});
+                    }
+                    if (self.options.recursive) {
+                        try self.exclude(commit.tree);
                     }
                 },
             }

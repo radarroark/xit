@@ -1073,6 +1073,18 @@ fn testLog(comptime repo_kind: rp.RepoKind) !void {
         }
         try std.testing.expectEqual(0, oid_set.count());
     }
+
+    // iterate over all objects recursively
+    {
+        var count: usize = 0;
+        var obj_iter = try obj.ObjectIterator(repo_kind).init(allocator, &repo.core, &.{commit_g}, .{ .recursive = true });
+        defer obj_iter.deinit();
+        while (try obj_iter.next()) |object| {
+            defer object.deinit();
+            count += 1;
+        }
+        try std.testing.expectEqual(20, count);
+    }
 }
 
 test "log" {
