@@ -1251,7 +1251,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
-        var iter = try repo.log(&.{commit3}, null);
+        var iter = try repo.log(&.{commit3});
         defer iter.deinit();
 
         var object3 = try iter.next();
