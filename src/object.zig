@@ -914,14 +914,19 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind) type {
                 self.allocator.destroy(node);
                 if (!self.oid_excludes.contains(next_oid)) {
                     try self.oid_excludes.put(next_oid, {});
-                    var commit_object = try Object(repo_kind).init(self.allocator, core_cursor, next_oid);
-                    errdefer commit_object.deinit();
-                    self.object = commit_object;
-                    for (commit_object.content.commit.parents.items) |parent_oid| {
-                        var new_node = try self.allocator.create(std.DoublyLinkedList([hash.SHA1_HEX_LEN]u8).Node);
-                        errdefer self.allocator.destroy(new_node);
-                        new_node.data = parent_oid;
-                        self.oid_queue.append(new_node);
+                    var object = try Object(repo_kind).init(self.allocator, core_cursor, next_oid);
+                    errdefer object.deinit();
+                    self.object = object;
+                    switch (object.content) {
+                        .blob, .tree => {},
+                        .commit => |commit| {
+                            for (commit.parents.items) |parent_oid| {
+                                var new_node = try self.allocator.create(std.DoublyLinkedList([hash.SHA1_HEX_LEN]u8).Node);
+                                errdefer self.allocator.destroy(new_node);
+                                new_node.data = parent_oid;
+                                self.oid_queue.append(new_node);
+                            }
+                        },
                     }
                     return &self.object;
                 }
@@ -929,15 +934,22 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind) type {
             return null;
         }
 
-        pub fn excludeParents(self: *ObjectIterator(repo_kind), oid: [hash.SHA1_HEX_LEN]u8) !void {
+        pub fn exclude(self: *ObjectIterator(repo_kind), oid: [hash.SHA1_HEX_LEN]u8) !void {
+            try self.oid_excludes.put(oid, {});
+
             const core_cursor = switch (repo_kind) {
                 .git => .{ .core = self.core },
                 .xit => .{ .core = self.core, .cursor = &self.cursor },
             };
-            var commit_object = try Object(repo_kind).init(self.allocator, core_cursor, oid);
-            defer commit_object.deinit();
-            for (commit_object.content.commit.parents.items) |parent_oid| {
-                try self.oid_excludes.put(parent_oid, {});
+            var object = try Object(repo_kind).init(self.allocator, core_cursor, oid);
+            defer object.deinit();
+            switch (object.content) {
+                .blob, .tree => {},
+                .commit => |commit| {
+                    for (commit.parents.items) |parent_oid| {
+                        try self.oid_excludes.put(parent_oid, {});
+                    }
+                },
             }
         }
     };

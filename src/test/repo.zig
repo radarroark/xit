@@ -1065,8 +1065,7 @@ fn testLog(comptime repo_kind: rp.RepoKind) !void {
     {
         var commit_iter = try repo.log(&.{commit_g});
         defer commit_iter.deinit();
-        try commit_iter.excludeParents(commit_c);
-        try commit_iter.excludeParents(commit_d);
+        try commit_iter.exclude(commit_b);
         while (try commit_iter.next()) |commit_object| {
             defer commit_object.deinit();
             try std.testing.expect(oid_set.contains(&commit_object.oid));
