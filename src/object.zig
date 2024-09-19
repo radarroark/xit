@@ -869,21 +869,20 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind) type {
             .xit => @import("xitdb").Database(.file, hash.Hash).Cursor,
         },
         oid_queue: std.DoublyLinkedList([hash.SHA1_HEX_LEN]u8),
-        oids_seen: std.AutoHashMap([hash.SHA1_HEX_LEN]u8, void),
+        oid_excludes: std.AutoHashMap([hash.SHA1_HEX_LEN]u8, void),
         object: Object(repo_kind),
 
         pub fn init(
             allocator: std.mem.Allocator,
             core: *rp.Repo(repo_kind).Core,
             start_oids: []const [hash.SHA1_HEX_LEN]u8,
-            end_oids_maybe: ?[]const [hash.SHA1_HEX_LEN]u8,
         ) !ObjectIterator(repo_kind) {
             var self = ObjectIterator(repo_kind){
                 .allocator = allocator,
                 .core = core,
                 .cursor = try core.latestCursor(),
                 .oid_queue = std.DoublyLinkedList([hash.SHA1_HEX_LEN]u8){},
-                .oids_seen = std.AutoHashMap([hash.SHA1_HEX_LEN]u8, void).init(allocator),
+                .oid_excludes = std.AutoHashMap([hash.SHA1_HEX_LEN]u8, void).init(allocator),
                 .object = undefined,
             };
             errdefer self.deinit();
@@ -895,20 +894,6 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind) type {
                 self.oid_queue.append(node);
             }
 
-            if (end_oids_maybe) |end_oids| {
-                const core_cursor = switch (repo_kind) {
-                    .git => .{ .core = self.core },
-                    .xit => .{ .core = self.core, .cursor = &self.cursor },
-                };
-                for (end_oids) |end_oid| {
-                    var commit_object = try Object(repo_kind).init(allocator, core_cursor, end_oid);
-                    defer commit_object.deinit();
-                    for (commit_object.content.commit.parents.items) |parent_oid| {
-                        try self.oids_seen.put(parent_oid, {});
-                    }
-                }
-            }
-
             return self;
         }
 
@@ -916,7 +901,7 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind) type {
             while (self.oid_queue.popFirst()) |node| {
                 self.allocator.destroy(node);
             }
-            self.oids_seen.deinit();
+            self.oid_excludes.deinit();
         }
 
         pub fn next(self: *ObjectIterator(repo_kind)) !?*Object(repo_kind) {
@@ -927,8 +912,8 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind) type {
             while (self.oid_queue.popFirst()) |node| {
                 const next_oid = node.data;
                 self.allocator.destroy(node);
-                if (!self.oids_seen.contains(next_oid)) {
-                    try self.oids_seen.put(next_oid, {});
+                if (!self.oid_excludes.contains(next_oid)) {
+                    try self.oid_excludes.put(next_oid, {});
                     var commit_object = try Object(repo_kind).init(self.allocator, core_cursor, next_oid);
                     errdefer commit_object.deinit();
                     self.object = commit_object;
@@ -942,6 +927,18 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind) type {
                 }
             }
             return null;
+        }
+
+        pub fn excludeParents(self: *ObjectIterator(repo_kind), oid: [hash.SHA1_HEX_LEN]u8) !void {
+            const core_cursor = switch (repo_kind) {
+                .git => .{ .core = self.core },
+                .xit => .{ .core = self.core, .cursor = &self.cursor },
+            };
+            var commit_object = try Object(repo_kind).init(self.allocator, core_cursor, oid);
+            defer commit_object.deinit();
+            for (commit_object.content.commit.parents.items) |parent_oid| {
+                try self.oid_excludes.put(parent_oid, {});
+            }
         }
     };
 }
