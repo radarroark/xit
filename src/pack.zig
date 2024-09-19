@@ -829,3 +829,13 @@ pub const LooseOrPackObjectReader = union(enum) {
         }
     }
 };
+
+pub const PackObjectWriter = struct {
+    obj_iter: *obj.ObjectIterator(.git),
+
+    pub fn init(obj_iter: *obj.ObjectIterator(.git)) PackObjectWriter {
+        return .{
+            .obj_iter = obj_iter,
+        };
+    }
+};
