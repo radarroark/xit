@@ -56,7 +56,7 @@ pub fn objectToFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_k
         },
         .tree => {
             // load the tree
-            var tree_object = try obj.Object(repo_kind).init(allocator, core_cursor, oid_hex);
+            var tree_object = try obj.Object(repo_kind, .full).init(allocator, core_cursor, oid_hex);
             defer tree_object.deinit();
 
             // update each entry recursively
@@ -71,7 +71,7 @@ pub fn objectToFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_k
     }
 }
 
-fn pathToTreeEntry(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, parent: obj.Object(repo_kind), path_parts: []const []const u8) !?obj.TreeEntry {
+fn pathToTreeEntry(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, parent: obj.Object(repo_kind, .full), path_parts: []const []const u8) !?obj.TreeEntry {
     const path_part = path_parts[0];
     const tree_entry = parent.content.tree.entries.get(path_part) orelse return null;
 
@@ -80,7 +80,7 @@ fn pathToTreeEntry(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_ki
     }
 
     const oid_hex = std.fmt.bytesToHex(tree_entry.oid, .lower);
-    var tree_object = try obj.Object(repo_kind).init(allocator, core_cursor, oid_hex);
+    var tree_object = try obj.Object(repo_kind, .full).init(allocator, core_cursor, oid_hex);
     defer tree_object.deinit();
 
     switch (tree_object.content) {
@@ -310,11 +310,11 @@ pub fn migrate(
 pub fn restore(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, path: []const u8) !void {
     // get the current commit
     const current_oid = try ref.readHead(repo_kind, core_cursor);
-    var commit_object = try obj.Object(repo_kind).init(allocator, core_cursor, current_oid);
+    var commit_object = try obj.Object(repo_kind, .full).init(allocator, core_cursor, current_oid);
     defer commit_object.deinit();
 
     // get the tree of the current commit
-    var tree_object = try obj.Object(repo_kind).init(allocator, core_cursor, commit_object.content.commit.tree);
+    var tree_object = try obj.Object(repo_kind, .full).init(allocator, core_cursor, commit_object.content.commit.tree);
     defer tree_object.deinit();
 
     // get the entry for the given path

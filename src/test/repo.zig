@@ -1077,7 +1077,7 @@ fn testLog(comptime repo_kind: rp.RepoKind) !void {
     // iterate over all objects recursively
     {
         var count: usize = 0;
-        var obj_iter = try obj.ObjectIterator(repo_kind).init(allocator, &repo.core, &.{commit_g}, .{ .recursive = true });
+        var obj_iter = try obj.ObjectIterator(repo_kind, .full).init(allocator, &repo.core, &.{commit_g}, .{ .recursive = true });
         defer obj_iter.deinit();
         while (try obj_iter.next()) |object| {
             defer object.deinit();

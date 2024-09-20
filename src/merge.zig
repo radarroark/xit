@@ -29,7 +29,7 @@ fn getDescendent(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
     var queue = std.DoublyLinkedList(Parent){};
 
     {
-        const object = try obj.Object(repo_kind).init(arena.allocator(), core_cursor, oid1.*);
+        const object = try obj.Object(repo_kind, .full).init(arena.allocator(), core_cursor, oid1.*);
         for (object.content.commit.parents.items) |parent_oid| {
             var node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
             node.data = .{ .oid = parent_oid, .kind = .one };
@@ -38,7 +38,7 @@ fn getDescendent(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
     }
 
     {
-        const object = try obj.Object(repo_kind).init(arena.allocator(), core_cursor, oid2.*);
+        const object = try obj.Object(repo_kind, .full).init(arena.allocator(), core_cursor, oid2.*);
         for (object.content.commit.parents.items) |parent_oid| {
             var node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
             node.data = .{ .oid = parent_oid, .kind = .two };
@@ -66,7 +66,7 @@ fn getDescendent(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
 
         // TODO: instead of appending to the end, append it in descending order of timestamp
         // so we prioritize more recent commits and avoid wasteful traversal deep in the history.
-        const object = try obj.Object(repo_kind).init(arena.allocator(), core_cursor, node.data.oid);
+        const object = try obj.Object(repo_kind, .full).init(arena.allocator(), core_cursor, node.data.oid);
         for (object.content.commit.parents.items) |parent_oid| {
             var new_node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
             new_node.data = .{ .oid = parent_oid, .kind = node.data.kind };
@@ -141,7 +141,7 @@ pub fn commonAncestor(comptime repo_kind: rp.RepoKind, allocator: std.mem.Alloca
 
         // TODO: instead of appending to the end, append it in descending order of timestamp
         // so we prioritize more recent commits and avoid wasteful traversal deep in the history.
-        const object = try obj.Object(repo_kind).init(arena.allocator(), core_cursor, node.data.oid);
+        const object = try obj.Object(repo_kind, .full).init(arena.allocator(), core_cursor, node.data.oid);
         for (object.content.commit.parents.items) |parent_oid| {
             const is_stale = is_common_ancestor or stale_oids.contains(&parent_oid);
             var new_node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
@@ -726,7 +726,7 @@ pub const Merge = struct {
                 switch (merge_kind) {
                     .merge => common_oid = try commonAncestor(repo_kind, allocator, core_cursor, &current_oid, &source_oid),
                     .cherry_pick => {
-                        var object = try obj.Object(repo_kind).init(allocator, core_cursor, source_oid);
+                        var object = try obj.Object(repo_kind, .full).init(allocator, core_cursor, source_oid);
                         defer object.deinit();
                         const parent_oid = if (object.content.commit.parents.items.len == 1) object.content.commit.parents.items[0] else return error.CommitMustHaveOneParent;
                         switch (object.content) {
@@ -789,7 +789,7 @@ pub const Merge = struct {
                         .message = try std.fmt.allocPrint(arena.allocator(), "merge from {s}", .{source_name}),
                     },
                     .cherry_pick => blk: {
-                        const object = try obj.Object(repo_kind).init(arena.allocator(), core_cursor, source_oid);
+                        const object = try obj.Object(repo_kind, .full).init(arena.allocator(), core_cursor, source_oid);
                         switch (object.content) {
                             .commit => break :blk object.content.commit.metadata,
                             else => return error.NotACommitObject,
@@ -993,7 +993,7 @@ pub const Merge = struct {
                 switch (merge_kind) {
                     .merge => common_oid = try commonAncestor(repo_kind, allocator, core_cursor, &current_oid, &source_oid),
                     .cherry_pick => {
-                        var object = try obj.Object(repo_kind).init(allocator, core_cursor, source_oid);
+                        var object = try obj.Object(repo_kind, .full).init(allocator, core_cursor, source_oid);
                         defer object.deinit();
                         const parent_oid = if (object.content.commit.parents.items.len == 1) object.content.commit.parents.items[0] else return error.CommitMustHaveOneParent;
                         switch (object.content) {
