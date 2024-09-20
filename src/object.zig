@@ -502,6 +502,96 @@ pub fn writeCommit(
     return std.fmt.bytesToHex(commit_sha1_bytes_buffer, .lower);
 }
 
+pub const Change = struct {
+    old: ?TreeEntry,
+    new: ?TreeEntry,
+};
+
+pub fn TreeDiff(comptime repo_kind: rp.RepoKind) type {
+    return struct {
+        changes: std.StringArrayHashMap(Change),
+        arena: std.heap.ArenaAllocator,
+
+        pub fn init(allocator: std.mem.Allocator) TreeDiff(repo_kind) {
+            return .{
+                .changes = std.StringArrayHashMap(Change).init(allocator),
+                .arena = std.heap.ArenaAllocator.init(allocator),
+            };
+        }
+
+        pub fn deinit(self: *TreeDiff(repo_kind)) void {
+            self.changes.deinit();
+            self.arena.deinit();
+        }
+
+        pub fn compare(self: *TreeDiff(repo_kind), core_cursor: rp.Repo(repo_kind).CoreCursor, old_oid_maybe: ?[hash.SHA1_HEX_LEN]u8, new_oid_maybe: ?[hash.SHA1_HEX_LEN]u8, path_list_maybe: ?std.ArrayList([]const u8)) !void {
+            if (old_oid_maybe == null and new_oid_maybe == null) {
+                return;
+            }
+            const old_entries = try self.loadTree(core_cursor, old_oid_maybe);
+            const new_entries = try self.loadTree(core_cursor, new_oid_maybe);
+            // deletions and edits
+            {
+                var iter = old_entries.iterator();
+                while (iter.next()) |old_entry| {
+                    const old_key = old_entry.key_ptr.*;
+                    const old_value = old_entry.value_ptr.*;
+                    var path_list = if (path_list_maybe) |path_list| try path_list.clone() else std.ArrayList([]const u8).init(self.arena.allocator());
+                    try path_list.append(old_key);
+                    const path = try io.joinPath(self.arena.allocator(), path_list.items);
+                    if (new_entries.get(old_key)) |new_value| {
+                        if (!old_value.eql(new_value)) {
+                            const old_value_tree = isTree(old_value);
+                            const new_value_tree = isTree(new_value);
+                            try self.compare(core_cursor, if (old_value_tree) std.fmt.bytesToHex(&old_value.oid, .lower) else null, if (new_value_tree) std.fmt.bytesToHex(&new_value.oid, .lower) else null, path_list);
+                            if (!old_value_tree or !new_value_tree) {
+                                try self.changes.put(path, Change{ .old = if (old_value_tree) null else old_value, .new = if (new_value_tree) null else new_value });
+                            }
+                        }
+                    } else {
+                        if (isTree(old_value)) {
+                            try self.compare(core_cursor, std.fmt.bytesToHex(&old_value.oid, .lower), null, path_list);
+                        } else {
+                            try self.changes.put(path, Change{ .old = old_value, .new = null });
+                        }
+                    }
+                }
+            }
+            // additions
+            {
+                var iter = new_entries.iterator();
+                while (iter.next()) |new_entry| {
+                    const new_key = new_entry.key_ptr.*;
+                    const new_value = new_entry.value_ptr.*;
+                    var path_list = if (path_list_maybe) |path_list| try path_list.clone() else std.ArrayList([]const u8).init(self.arena.allocator());
+                    try path_list.append(new_key);
+                    const path = try io.joinPath(self.arena.allocator(), path_list.items);
+                    if (old_entries.get(new_key)) |_| {
+                        continue;
+                    } else if (isTree(new_value)) {
+                        try self.compare(core_cursor, null, std.fmt.bytesToHex(&new_value.oid, .lower), path_list);
+                    } else {
+                        try self.changes.put(path, Change{ .old = null, .new = new_value });
+                    }
+                }
+            }
+        }
+
+        fn loadTree(self: *TreeDiff(repo_kind), core_cursor: rp.Repo(repo_kind).CoreCursor, oid_maybe: ?[hash.SHA1_HEX_LEN]u8) !std.StringArrayHashMap(TreeEntry) {
+            if (oid_maybe) |oid| {
+                const obj = try Object(repo_kind).init(self.arena.allocator(), core_cursor, oid);
+                return switch (obj.content) {
+                    .blob => std.StringArrayHashMap(TreeEntry).init(self.arena.allocator()),
+                    .tree => |tree| tree.entries,
+                    .commit => |commit| self.loadTree(core_cursor, commit.tree),
+                };
+            } else {
+                return std.StringArrayHashMap(TreeEntry).init(self.arena.allocator());
+            }
+        }
+    };
+}
+
 pub const ObjectKind = enum {
     blob,
     tree,
@@ -766,96 +856,6 @@ pub fn Object(comptime repo_kind: rp.RepoKind) type {
         pub fn deinit(self: *Object(repo_kind)) void {
             self.arena.deinit();
             self.allocator.destroy(self.arena);
-        }
-    };
-}
-
-pub const Change = struct {
-    old: ?TreeEntry,
-    new: ?TreeEntry,
-};
-
-pub fn TreeDiff(comptime repo_kind: rp.RepoKind) type {
-    return struct {
-        changes: std.StringArrayHashMap(Change),
-        arena: std.heap.ArenaAllocator,
-
-        pub fn init(allocator: std.mem.Allocator) TreeDiff(repo_kind) {
-            return .{
-                .changes = std.StringArrayHashMap(Change).init(allocator),
-                .arena = std.heap.ArenaAllocator.init(allocator),
-            };
-        }
-
-        pub fn deinit(self: *TreeDiff(repo_kind)) void {
-            self.changes.deinit();
-            self.arena.deinit();
-        }
-
-        pub fn compare(self: *TreeDiff(repo_kind), core_cursor: rp.Repo(repo_kind).CoreCursor, old_oid_maybe: ?[hash.SHA1_HEX_LEN]u8, new_oid_maybe: ?[hash.SHA1_HEX_LEN]u8, path_list_maybe: ?std.ArrayList([]const u8)) !void {
-            if (old_oid_maybe == null and new_oid_maybe == null) {
-                return;
-            }
-            const old_entries = try self.loadTree(core_cursor, old_oid_maybe);
-            const new_entries = try self.loadTree(core_cursor, new_oid_maybe);
-            // deletions and edits
-            {
-                var iter = old_entries.iterator();
-                while (iter.next()) |old_entry| {
-                    const old_key = old_entry.key_ptr.*;
-                    const old_value = old_entry.value_ptr.*;
-                    var path_list = if (path_list_maybe) |path_list| try path_list.clone() else std.ArrayList([]const u8).init(self.arena.allocator());
-                    try path_list.append(old_key);
-                    const path = try io.joinPath(self.arena.allocator(), path_list.items);
-                    if (new_entries.get(old_key)) |new_value| {
-                        if (!old_value.eql(new_value)) {
-                            const old_value_tree = isTree(old_value);
-                            const new_value_tree = isTree(new_value);
-                            try self.compare(core_cursor, if (old_value_tree) std.fmt.bytesToHex(&old_value.oid, .lower) else null, if (new_value_tree) std.fmt.bytesToHex(&new_value.oid, .lower) else null, path_list);
-                            if (!old_value_tree or !new_value_tree) {
-                                try self.changes.put(path, Change{ .old = if (old_value_tree) null else old_value, .new = if (new_value_tree) null else new_value });
-                            }
-                        }
-                    } else {
-                        if (isTree(old_value)) {
-                            try self.compare(core_cursor, std.fmt.bytesToHex(&old_value.oid, .lower), null, path_list);
-                        } else {
-                            try self.changes.put(path, Change{ .old = old_value, .new = null });
-                        }
-                    }
-                }
-            }
-            // additions
-            {
-                var iter = new_entries.iterator();
-                while (iter.next()) |new_entry| {
-                    const new_key = new_entry.key_ptr.*;
-                    const new_value = new_entry.value_ptr.*;
-                    var path_list = if (path_list_maybe) |path_list| try path_list.clone() else std.ArrayList([]const u8).init(self.arena.allocator());
-                    try path_list.append(new_key);
-                    const path = try io.joinPath(self.arena.allocator(), path_list.items);
-                    if (old_entries.get(new_key)) |_| {
-                        continue;
-                    } else if (isTree(new_value)) {
-                        try self.compare(core_cursor, null, std.fmt.bytesToHex(&new_value.oid, .lower), path_list);
-                    } else {
-                        try self.changes.put(path, Change{ .old = null, .new = new_value });
-                    }
-                }
-            }
-        }
-
-        fn loadTree(self: *TreeDiff(repo_kind), core_cursor: rp.Repo(repo_kind).CoreCursor, oid_maybe: ?[hash.SHA1_HEX_LEN]u8) !std.StringArrayHashMap(TreeEntry) {
-            if (oid_maybe) |oid| {
-                const obj = try Object(repo_kind).init(self.arena.allocator(), core_cursor, oid);
-                return switch (obj.content) {
-                    .blob => std.StringArrayHashMap(TreeEntry).init(self.arena.allocator()),
-                    .tree => |tree| tree.entries,
-                    .commit => |commit| self.loadTree(core_cursor, commit.tree),
-                };
-            } else {
-                return std.StringArrayHashMap(TreeEntry).init(self.arena.allocator());
-            }
         }
     };
 }
