@@ -215,7 +215,7 @@ test "pack" {
         var obj_iter = try obj.ObjectIterator(.git, .raw).init(allocator, &r.core, &.{head_oid}, .{ .recursive = true });
         defer obj_iter.deinit();
 
-        var pack_writer = try pack.PackObjectWriter.init(&obj_iter);
-        _ = &pack_writer;
+        var pack_writer = try pack.PackObjectWriter.init(allocator, &obj_iter);
+        defer pack_writer.deinit();
     }
 }
