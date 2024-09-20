@@ -831,26 +831,34 @@ pub const LooseOrPackObjectReader = union(enum) {
 };
 
 pub const PackObjectWriter = struct {
-    obj_iter: *obj.ObjectIterator(.git, .raw),
+    objects: std.ArrayList(obj.Object(.git, .raw)),
     header: [12]u8,
 
-    pub fn init(obj_iter: *obj.ObjectIterator(.git, .raw)) !PackObjectWriter {
-        var count: u32 = 0;
+    pub fn init(allocator: std.mem.Allocator, obj_iter: *obj.ObjectIterator(.git, .raw)) !PackObjectWriter {
+        var self = PackObjectWriter{
+            .objects = std.ArrayList(obj.Object(.git, .raw)).init(allocator),
+            .header = [_]u8{0} ** 12,
+        };
+        errdefer self.deinit();
+
         while (try obj_iter.next()) |object| {
-            defer object.deinit();
-            count += 1;
+            errdefer object.deinit();
+            try self.objects.append(object.*);
         }
 
-        var header = [_]u8{0} ** 12;
-        var header_stream = std.io.fixedBufferStream(&header);
+        var header_stream = std.io.fixedBufferStream(&self.header);
         const header_writer = header_stream.writer();
         _ = try header_writer.write("PACK");
         try header_writer.writeInt(u32, 2, .big); // version
-        try header_writer.writeInt(u32, count, .big);
+        try header_writer.writeInt(u32, @intCast(self.objects.items.len), .big);
 
-        return .{
-            .obj_iter = obj_iter,
-            .header = header,
-        };
+        return self;
+    }
+
+    pub fn deinit(self: *PackObjectWriter) void {
+        for (self.objects.items) |*object| {
+            object.deinit();
+        }
+        self.objects.deinit();
     }
 };
