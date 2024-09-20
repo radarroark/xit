@@ -831,11 +831,26 @@ pub const LooseOrPackObjectReader = union(enum) {
 };
 
 pub const PackObjectWriter = struct {
-    obj_iter: *obj.ObjectIterator(.git),
+    obj_iter: *obj.ObjectIterator(.git, .raw),
+    header: [12]u8,
 
-    pub fn init(obj_iter: *obj.ObjectIterator(.git)) PackObjectWriter {
+    pub fn init(obj_iter: *obj.ObjectIterator(.git, .raw)) !PackObjectWriter {
+        var count: u32 = 0;
+        while (try obj_iter.next()) |object| {
+            defer object.deinit();
+            count += 1;
+        }
+
+        var header = [_]u8{0} ** 12;
+        var header_stream = std.io.fixedBufferStream(&header);
+        const header_writer = header_stream.writer();
+        _ = try header_writer.write("PACK");
+        try header_writer.writeInt(u32, 2, .big); // version
+        try header_writer.writeInt(u32, count, .big);
+
         return .{
             .obj_iter = obj_iter,
+            .header = header,
         };
     }
 };

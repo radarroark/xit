@@ -200,7 +200,7 @@ test "pack" {
         var r = try rp.Repo(.git).init(allocator, .{ .cwd = repo_dir });
         defer r.deinit();
 
-        var object = try obj.Object(.git).init(allocator, .{ .core = &r.core }, commit_oid_hex);
+        var object = try obj.Object(.git, .full).init(allocator, .{ .core = &r.core }, commit_oid_hex);
         defer object.deinit();
         try std.testing.expectEqualStrings(message, object.content.commit.metadata.message);
     }
@@ -212,10 +212,10 @@ test "pack" {
 
         const head_oid = try ref.readHead(.git, .{ .core = &r.core });
 
-        var obj_iter = try obj.ObjectIterator(.git).init(allocator, &r.core, &.{head_oid}, .{ .recursive = true });
+        var obj_iter = try obj.ObjectIterator(.git, .raw).init(allocator, &r.core, &.{head_oid}, .{ .recursive = true });
         defer obj_iter.deinit();
 
-        var pack_writer = pack.PackObjectWriter.init(&obj_iter);
+        var pack_writer = try pack.PackObjectWriter.init(&obj_iter);
         _ = &pack_writer;
     }
 }

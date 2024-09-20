@@ -928,10 +928,10 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             try chk.restore(repo_kind, core_cursor, self.allocator, path);
         }
 
-        pub fn log(self: *Repo(repo_kind), start_oids_maybe: ?[]const [hash.SHA1_HEX_LEN]u8) !obj.ObjectIterator(repo_kind) {
+        pub fn log(self: *Repo(repo_kind), start_oids_maybe: ?[]const [hash.SHA1_HEX_LEN]u8) !obj.ObjectIterator(repo_kind, .full) {
             const options = .{ .recursive = false };
             if (start_oids_maybe) |start_oids| {
-                return try obj.ObjectIterator(repo_kind).init(self.allocator, &self.core, start_oids, options);
+                return try obj.ObjectIterator(repo_kind, .full).init(self.allocator, &self.core, start_oids, options);
             } else {
                 var cursor = try self.core.latestCursor();
                 const core_cursor = switch (repo_kind) {
@@ -939,7 +939,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     .xit => .{ .core = &self.core, .cursor = &cursor },
                 };
                 const head_oid = try ref.readHead(repo_kind, core_cursor);
-                return try obj.ObjectIterator(repo_kind).init(self.allocator, &self.core, &.{head_oid}, options);
+                return try obj.ObjectIterator(repo_kind, .full).init(self.allocator, &self.core, &.{head_oid}, options);
             }
         }
 

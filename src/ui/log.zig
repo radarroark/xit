@@ -15,11 +15,11 @@ pub fn LogCommitList(comptime Widget: type, comptime repo_kind: rp.RepoKind) typ
     return struct {
         scroll: wgt.Scroll(Widget),
         repo: *rp.Repo(repo_kind),
-        commits: std.ArrayList(obj.Object(repo_kind)),
+        commits: std.ArrayList(obj.Object(repo_kind, .full)),
 
         pub fn init(allocator: std.mem.Allocator, repo: *rp.Repo(repo_kind)) !LogCommitList(Widget, repo_kind) {
             // init commits
-            var commits = std.ArrayList(obj.Object(repo_kind)).init(allocator);
+            var commits = std.ArrayList(obj.Object(repo_kind, .full)).init(allocator);
             errdefer {
                 for (commits.items) |*commit| {
                     commit.deinit();
