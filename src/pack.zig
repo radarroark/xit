@@ -835,12 +835,21 @@ pub const LooseOrPackObjectReader = union(enum) {
 
 pub const PackObjectWriter = struct {
     objects: std.ArrayList(obj.Object(.git, .raw)),
-    bytes: std.ArrayList(u8),
+    object_index: usize,
+    header_bytes: std.ArrayList(u8),
+    header_index: usize,
+    mode: enum {
+        header,
+        object,
+    },
 
     pub fn init(allocator: std.mem.Allocator, obj_iter: *obj.ObjectIterator(.git, .raw)) !PackObjectWriter {
         var self = PackObjectWriter{
             .objects = std.ArrayList(obj.Object(.git, .raw)).init(allocator),
-            .bytes = std.ArrayList(u8).init(allocator),
+            .object_index = 0,
+            .header_bytes = std.ArrayList(u8).init(allocator),
+            .header_index = 0,
+            .mode = .header,
         };
         errdefer self.deinit();
 
@@ -849,7 +858,7 @@ pub const PackObjectWriter = struct {
             try self.objects.append(object.*);
         }
 
-        const writer = self.bytes.writer();
+        const writer = self.header_bytes.writer();
         _ = try writer.write("PACK");
         try writer.writeInt(u32, 2, .big); // version
         try writer.writeInt(u32, @intCast(self.objects.items.len), .big);
@@ -862,6 +871,36 @@ pub const PackObjectWriter = struct {
             object.deinit();
         }
         self.objects.deinit();
-        self.bytes.deinit();
+        self.header_bytes.deinit();
+    }
+
+    pub fn read(self: *PackObjectWriter, buffer: []u8) !usize {
+        var size: usize = 0;
+        while (size < buffer.len and self.object_index < self.objects.items.len) {
+            size += try self.readImpl(buffer[size..]);
+        }
+        return size;
+    }
+
+    fn readImpl(self: *PackObjectWriter, buffer: []u8) !usize {
+        switch (self.mode) {
+            .header => {
+                const size = @min(self.header_bytes.items.len - self.header_index, buffer.len);
+                @memcpy(buffer[0..size], self.header_bytes.items[self.header_index .. self.header_index + size]);
+                if (size < buffer.len) {
+                    self.header_bytes.clearAndFree();
+                    self.header_index = 0;
+                    self.mode = .object;
+                } else {
+                    self.header_index += size;
+                }
+                return size;
+            },
+            .object => {
+                self.object_index += 1;
+                self.mode = .header;
+                return 0;
+            },
+        }
     }
 };
