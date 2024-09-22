@@ -57,9 +57,9 @@ fn findOffset(idx_file: std.fs.File, fanout_table: [256]u32, oid_list_pos: u64, 
     try idx_file.seekTo(offset_pos);
     const offset: packed struct {
         value: u31,
-        high_bit: u1,
+        extra: bool,
     } = @bitCast(try reader.readInt(u32, .big));
-    if (offset.high_bit == 0) {
+    if (!offset.extra) {
         return offset.value;
     }
 
@@ -143,7 +143,7 @@ const PackObjectKind = enum(u3) {
 const PackObjectHeader = packed struct {
     size: u4,
     kind: PackObjectKind,
-    high_bit: u1,
+    extra: bool,
 };
 
 pub const PackObjectReader = struct {
@@ -270,13 +270,13 @@ pub const PackObjectReader = struct {
         var size: u64 = obj_header.size;
         {
             var shift: u6 = @bitSizeOf(@TypeOf(obj_header.size));
-            var cont = obj_header.high_bit == 1;
+            var cont = obj_header.extra;
             while (cont) {
                 const next_byte: packed struct {
                     value: u7,
-                    high_bit: u1,
+                    extra: bool,
                 } = @bitCast(try reader.readByte());
-                cont = next_byte.high_bit == 1;
+                cont = next_byte.extra;
                 const value: u64 = next_byte.value;
                 size |= (value << shift);
                 shift += 7;
@@ -315,10 +315,10 @@ pub const PackObjectReader = struct {
                     while (true) {
                         const next_byte: packed struct {
                             value: u7,
-                            high_bit: u1,
+                            extra: bool,
                         } = @bitCast(try reader.readByte());
                         offset = (offset << 7) | next_byte.value;
-                        if (next_byte.high_bit == 0) {
+                        if (!next_byte.extra) {
                             break;
                         }
                         offset += 1; // "offset encoding" https://git-scm.com/docs/pack-format
@@ -410,10 +410,10 @@ pub const PackObjectReader = struct {
             while (cont) {
                 const next_byte: packed struct {
                     value: u7,
-                    high_bit: u1,
+                    extra: bool,
                 } = @bitCast(try zlib_reader.readByte());
                 bytes_read += 1;
-                cont = next_byte.high_bit == 1;
+                cont = next_byte.extra;
                 const value: u64 = next_byte.value;
                 base_size |= (value << shift);
                 shift += 7;
@@ -428,10 +428,10 @@ pub const PackObjectReader = struct {
             while (cont) {
                 const next_byte: packed struct {
                     value: u7,
-                    high_bit: u1,
+                    extra: bool,
                 } = @bitCast(try zlib_reader.readByte());
                 bytes_read += 1;
-                cont = next_byte.high_bit == 1;
+                cont = next_byte.extra;
                 const value: u64 = next_byte.value;
                 recon_size |= (value << shift);
                 shift += 7;
@@ -863,6 +863,10 @@ pub const PackObjectWriter = struct {
         try writer.writeInt(u32, 2, .big); // version
         try writer.writeInt(u32, @intCast(self.objects.items.len), .big);
 
+        if (self.objects.items.len > 0) {
+            try self.writeObjectHeader();
+        }
+
         return self;
     }
 
@@ -877,12 +881,12 @@ pub const PackObjectWriter = struct {
     pub fn read(self: *PackObjectWriter, buffer: []u8) !usize {
         var size: usize = 0;
         while (size < buffer.len and self.object_index < self.objects.items.len) {
-            size += try self.readImpl(buffer[size..]);
+            size += try self.readStep(buffer[size..]);
         }
         return size;
     }
 
-    fn readImpl(self: *PackObjectWriter, buffer: []u8) !usize {
+    fn readStep(self: *PackObjectWriter, buffer: []u8) !usize {
         switch (self.mode) {
             .header => {
                 const size = @min(self.header_bytes.items.len - self.header_index, buffer.len);
@@ -899,8 +903,52 @@ pub const PackObjectWriter = struct {
             .object => {
                 self.object_index += 1;
                 self.mode = .header;
+                if (self.object_index < self.objects.items.len) {
+                    try self.writeObjectHeader();
+                }
                 return 0;
             },
+        }
+    }
+
+    fn writeObjectHeader(self: *PackObjectWriter) !void {
+        const object = self.objects.items[self.object_index];
+        const size = object.len;
+
+        const first_size_parts: packed struct {
+            low_bits: u4,
+            high_bits: u60,
+        } = @bitCast(size);
+
+        const obj_header = PackObjectHeader{
+            .size = first_size_parts.low_bits,
+            .kind = switch (object.content) {
+                .blob => .blob,
+                .tree => .tree,
+                .commit => .commit,
+            },
+            .extra = first_size_parts.high_bits > 0,
+        };
+
+        const writer = self.header_bytes.writer();
+        try writer.writeByte(@bitCast(obj_header));
+
+        // set size of object (little endian variable length format)
+        var next_size = first_size_parts.high_bits;
+        while (next_size > 0) {
+            const size_parts: packed struct {
+                low_bits: u7,
+                high_bits: u53,
+            } = @bitCast(next_size);
+            const next_byte: packed struct {
+                value: u7,
+                extra: bool,
+            } = .{
+                .value = size_parts.low_bits,
+                .extra = size_parts.high_bits > 0,
+            };
+            try writer.writeByte(@bitCast(next_byte));
+            next_size = size_parts.high_bits;
         }
     }
 };
