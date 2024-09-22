@@ -901,12 +901,16 @@ pub const PackObjectWriter = struct {
                 return size;
             },
             .object => {
-                self.object_index += 1;
-                self.mode = .header;
-                if (self.object_index < self.objects.items.len) {
-                    try self.writeObjectHeader();
+                const object = &self.objects.items[self.object_index];
+                const size = try object.object_reader.reader.read(buffer);
+                if (size < buffer.len) {
+                    self.object_index += 1;
+                    self.mode = .header;
+                    if (self.object_index < self.objects.items.len) {
+                        try self.writeObjectHeader();
+                    }
                 }
-                return 0;
+                return size;
             },
         }
     }
