@@ -832,12 +832,12 @@ pub const LooseOrPackObjectReader = union(enum) {
 
 pub const PackObjectWriter = struct {
     objects: std.ArrayList(obj.Object(.git, .raw)),
-    header: [12]u8,
+    bytes: std.ArrayList(u8),
 
     pub fn init(allocator: std.mem.Allocator, obj_iter: *obj.ObjectIterator(.git, .raw)) !PackObjectWriter {
         var self = PackObjectWriter{
             .objects = std.ArrayList(obj.Object(.git, .raw)).init(allocator),
-            .header = [_]u8{0} ** 12,
+            .bytes = std.ArrayList(u8).init(allocator),
         };
         errdefer self.deinit();
 
@@ -846,11 +846,10 @@ pub const PackObjectWriter = struct {
             try self.objects.append(object.*);
         }
 
-        var header_stream = std.io.fixedBufferStream(&self.header);
-        const header_writer = header_stream.writer();
-        _ = try header_writer.write("PACK");
-        try header_writer.writeInt(u32, 2, .big); // version
-        try header_writer.writeInt(u32, @intCast(self.objects.items.len), .big);
+        const writer = self.bytes.writer();
+        _ = try writer.write("PACK");
+        try writer.writeInt(u32, 2, .big); // version
+        try writer.writeInt(u32, @intCast(self.objects.items.len), .big);
 
         return self;
     }
@@ -860,5 +859,6 @@ pub const PackObjectWriter = struct {
             object.deinit();
         }
         self.objects.deinit();
+        self.bytes.deinit();
     }
 };
