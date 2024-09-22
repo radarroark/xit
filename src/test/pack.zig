@@ -217,5 +217,17 @@ test "pack" {
 
         var pack_writer = try pack.PackObjectWriter.init(allocator, &obj_iter);
         defer pack_writer.deinit();
+
+        var pack_file = try temp_dir.createFile("test.pack", .{});
+        defer pack_file.close();
+
+        var buffer = [_]u8{0} ** 1024;
+        while (true) {
+            const size = try pack_writer.read(&buffer);
+            try pack_file.writeAll(buffer[0..size]);
+            if (size < buffer.len) {
+                break;
+            }
+        }
     }
 }
