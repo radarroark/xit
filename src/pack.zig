@@ -131,6 +131,21 @@ fn searchPackIndexes(pack_dir: std.fs.Dir, oid_hex: [hash.SHA1_HEX_LEN]u8) !Pack
     return error.ObjectNotFound;
 }
 
+const PackObjectKind = enum(u3) {
+    commit = 1,
+    tree = 2,
+    blob = 3,
+    tag = 4,
+    ofs_delta = 6,
+    ref_delta = 7,
+};
+
+const PackObjectHeader = packed struct {
+    size: u4,
+    kind: PackObjectKind,
+    high_bit: u1,
+};
+
 pub const PackObjectReader = struct {
     pack_file: std.fs.File,
     stream: compress.ZlibStream,
@@ -249,19 +264,7 @@ pub const PackObjectReader = struct {
         const reader = pack_file.reader();
 
         // parse object header
-        const PackObjectKind = enum(u3) {
-            commit = 1,
-            tree = 2,
-            blob = 3,
-            tag = 4,
-            ofs_delta = 6,
-            ref_delta = 7,
-        };
-        const obj_header: packed struct {
-            size: u4,
-            kind: PackObjectKind,
-            high_bit: u1,
-        } = @bitCast(try reader.readByte());
+        const obj_header: PackObjectHeader = @bitCast(try reader.readByte());
 
         // get size of object (little endian variable length format)
         var size: u64 = obj_header.size;
