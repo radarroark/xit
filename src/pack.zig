@@ -241,7 +241,7 @@ pub const PackObjectReader = struct {
         }
         const obj_count = try reader.readInt(u32, .big);
 
-        const start_position = try pack_file.getPos();
+        var start_position = try pack_file.getPos();
 
         for (0..obj_count) |_| {
             var pack_reader = try PackObjectReader.initAtPosition(pack_file_path, pack_file_path_len, start_position);
@@ -262,6 +262,11 @@ pub const PackObjectReader = struct {
             if (std.mem.eql(u8, &oid_hex, &std.fmt.bytesToHex(oid, .lower))) {
                 return try PackObjectReader.initAtPosition(pack_file_path, pack_file_path_len, start_position);
             }
+
+            // make sure the stream is at the end so the file position is correct
+            while (try pack_reader.stream.next()) |_| {}
+
+            start_position = try pack_reader.pack_file.getPos();
         }
 
         return error.ObjectNotFound;
