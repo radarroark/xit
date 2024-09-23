@@ -75,7 +75,7 @@ pub fn main() !void {
             };
         }
 
-        var commits = std.ArrayList(obj.Object(.git)).init(allocator);
+        var commits = std.ArrayList(obj.Object(.git, .full)).init(allocator);
         defer {
             for (commits.items) |*commit| {
                 commit.deinit();
