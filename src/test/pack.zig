@@ -205,7 +205,7 @@ test "pack" {
         try std.testing.expectEqualStrings(message, object.content.commit.metadata.message);
     }
 
-    // write a pack object
+    // write and read a pack object
     {
         var r = try rp.Repo(.git).init(allocator, .{ .cwd = repo_dir });
         defer r.deinit();
@@ -229,5 +229,11 @@ test "pack" {
                 break;
             }
         }
+
+        var pack_file_path = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
+        const pack_file_path_slice = try temp_dir.realpath("test.pack", &pack_file_path);
+
+        var pack_reader = try pack.PackObjectReader.initWithPath(pack_file_path, pack_file_path_slice.len, head_oid);
+        defer pack_reader.deinit();
     }
 }
