@@ -159,7 +159,8 @@ pub const PackObjectReader = struct {
         delta: struct {
             init: union(enum) {
                 ofs: struct {
-                    pack_file_name: [pack_file_name_len]u8,
+                    pack_file_path: [std.fs.MAX_PATH_BYTES]u8,
+                    pack_file_path_len: usize,
                     position: u64,
                 },
                 ref: struct {
@@ -176,10 +177,6 @@ pub const PackObjectReader = struct {
             cache_arena: *std.heap.ArenaAllocator,
         },
     },
-
-    const pack_prefix = "pack-";
-    const pack_suffix = ".pack";
-    const pack_file_name_len = pack_prefix.len + hash.SHA1_HEX_LEN + pack_suffix.len;
 
     const Location = struct {
         offset: usize,
@@ -233,10 +230,17 @@ pub const PackObjectReader = struct {
 
         const pack_offset = try searchPackIndexes(pack_dir, oid_hex);
 
+        const pack_prefix = "pack-";
+        const pack_suffix = ".pack";
+        const pack_file_name_len = pack_prefix.len + hash.SHA1_HEX_LEN + pack_suffix.len;
+
         var file_name_buf = [_]u8{0} ** pack_file_name_len;
         const file_name = try std.fmt.bufPrint(&file_name_buf, "{s}{s}{s}", .{ pack_prefix, pack_offset.pack_id, pack_suffix });
 
-        var pack_file = try pack_dir.openFile(file_name, .{ .mode = .read_only });
+        var pack_file_path = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
+        const pack_file_path_slice = try pack_dir.realpath(file_name, &pack_file_path);
+
+        var pack_file = try std.fs.openFileAbsolute(pack_file_path_slice, .{ .mode = .read_only });
         defer pack_file.close();
         const reader = pack_file.reader();
 
@@ -251,14 +255,11 @@ pub const PackObjectReader = struct {
         }
         _ = try reader.readInt(u32, .big); // number of objects
 
-        return try PackObjectReader.initAtPosition(core, file_name_buf, pack_offset.value);
+        return try PackObjectReader.initAtPosition(pack_file_path, pack_file_path_slice.len, pack_offset.value);
     }
 
-    fn initAtPosition(core: *rp.Repo(.git).Core, pack_file_name: [pack_file_name_len]u8, position: u64) !PackObjectReader {
-        var pack_dir = try core.git_dir.openDir("objects/pack", .{});
-        defer pack_dir.close();
-
-        var pack_file = try pack_dir.openFile(&pack_file_name, .{ .mode = .read_only });
+    fn initAtPosition(pack_file_path: [std.fs.MAX_PATH_BYTES]u8, pack_file_path_len: usize, position: u64) !PackObjectReader {
+        var pack_file = try std.fs.openFileAbsolute(pack_file_path[0..pack_file_path_len], .{ .mode = .read_only });
         errdefer pack_file.close();
         try pack_file.seekTo(position);
         const reader = pack_file.reader();
@@ -337,7 +338,8 @@ pub const PackObjectReader = struct {
                         .delta = .{
                             .init = .{
                                 .ofs = .{
-                                    .pack_file_name = pack_file_name,
+                                    .pack_file_path = pack_file_path,
+                                    .pack_file_path_len = pack_file_path_len,
                                     .position = position - offset,
                                 },
                             },
@@ -392,7 +394,7 @@ pub const PackObjectReader = struct {
         const base_reader = try allocator.create(PackObjectReader);
         errdefer allocator.destroy(base_reader);
         base_reader.* = switch (self.internal.delta.init) {
-            .ofs => try PackObjectReader.initAtPosition(core, self.internal.delta.init.ofs.pack_file_name, self.internal.delta.init.ofs.position),
+            .ofs => try PackObjectReader.initAtPosition(self.internal.delta.init.ofs.pack_file_path, self.internal.delta.init.ofs.pack_file_path_len, self.internal.delta.init.ofs.position),
             .ref => try PackObjectReader.initWithOid(core, self.internal.delta.init.ref.oid_hex),
         };
         errdefer base_reader.deinit();
