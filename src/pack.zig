@@ -194,7 +194,7 @@ pub const PackObjectReader = struct {
     pub const Error = compress.ZlibStream.Reader.Error || error{ Unseekable, UnexpectedEndOfStream, InvalidDeltaCache };
 
     pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(.git).Core, oid_hex: [hash.SHA1_HEX_LEN]u8) !PackObjectReader {
-        var pack_reader = try PackObjectReader.initWithOid(core, oid_hex);
+        var pack_reader = try PackObjectReader.initWithIndex(core, oid_hex);
 
         // make a list of the chain of deltified objects,
         // and initialize each one. we can't do this during the initial
@@ -224,7 +224,49 @@ pub const PackObjectReader = struct {
         return pack_reader;
     }
 
-    fn initWithOid(core: *rp.Repo(.git).Core, oid_hex: [hash.SHA1_HEX_LEN]u8) !PackObjectReader {
+    pub fn initWithPath(pack_file_path: [std.fs.MAX_PATH_BYTES]u8, pack_file_path_len: usize, oid_hex: [hash.SHA1_HEX_LEN]u8) !PackObjectReader {
+        var pack_file = try std.fs.openFileAbsolute(pack_file_path[0..pack_file_path_len], .{ .mode = .read_only });
+        defer pack_file.close();
+        const reader = pack_file.reader();
+
+        // parse header
+        const sig = try reader.readBytesNoEof(4);
+        if (!std.mem.eql(u8, "PACK", &sig)) {
+            return error.InvalidPackFileSig;
+        }
+        const version = try reader.readInt(u32, .big);
+        if (version != 2) {
+            return error.InvalidPackFileVersion;
+        }
+        const obj_count = try reader.readInt(u32, .big);
+
+        const start_position = try pack_file.getPos();
+
+        for (0..obj_count) |_| {
+            var pack_reader = try PackObjectReader.initAtPosition(pack_file_path, pack_file_path_len, start_position);
+            defer pack_reader.deinit();
+
+            var header_bytes = [_]u8{0} ** 128;
+            const type_name = switch (pack_reader.header().kind) {
+                .blob => "blob",
+                .tree => "tree",
+                .commit => "commit",
+            };
+            const file_size = pack_reader.header().size;
+            const header_str = try std.fmt.bufPrint(&header_bytes, "{s} {}\x00", .{ type_name, file_size });
+
+            var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+            try hash.sha1Reader(&pack_reader, header_str, &oid);
+
+            if (std.mem.eql(u8, &oid_hex, &std.fmt.bytesToHex(oid, .lower))) {
+                return try PackObjectReader.initAtPosition(pack_file_path, pack_file_path_len, start_position);
+            }
+        }
+
+        return error.ObjectNotFound;
+    }
+
+    fn initWithIndex(core: *rp.Repo(.git).Core, oid_hex: [hash.SHA1_HEX_LEN]u8) !PackObjectReader {
         var pack_dir = try core.git_dir.openDir("objects/pack", .{ .iterate = true });
         defer pack_dir.close();
 
@@ -395,7 +437,7 @@ pub const PackObjectReader = struct {
         errdefer allocator.destroy(base_reader);
         base_reader.* = switch (self.internal.delta.init) {
             .ofs => try PackObjectReader.initAtPosition(self.internal.delta.init.ofs.pack_file_path, self.internal.delta.init.ofs.pack_file_path_len, self.internal.delta.init.ofs.position),
-            .ref => try PackObjectReader.initWithOid(core, self.internal.delta.init.ref.oid_hex),
+            .ref => try PackObjectReader.initWithIndex(core, self.internal.delta.init.ref.oid_hex),
         };
         errdefer base_reader.deinit();
 
@@ -836,21 +878,25 @@ pub const LooseOrPackObjectReader = union(enum) {
 };
 
 pub const PackObjectWriter = struct {
+    allocator: std.mem.Allocator,
     objects: std.ArrayList(obj.Object(.git, .raw)),
     object_index: usize,
-    header_bytes: std.ArrayList(u8),
-    header_index: usize,
-    mode: enum {
+    out_bytes: std.ArrayList(u8),
+    out_index: usize,
+    mode: union(enum) {
         header,
-        object,
+        object: struct {
+            stream: ?std.compress.flate.deflate.Compressor(.zlib, std.ArrayList(u8).Writer),
+        },
     },
 
     pub fn init(allocator: std.mem.Allocator, obj_iter: *obj.ObjectIterator(.git, .raw)) !PackObjectWriter {
         var self = PackObjectWriter{
+            .allocator = allocator,
             .objects = std.ArrayList(obj.Object(.git, .raw)).init(allocator),
             .object_index = 0,
-            .header_bytes = std.ArrayList(u8).init(allocator),
-            .header_index = 0,
+            .out_bytes = std.ArrayList(u8).init(allocator),
+            .out_index = 0,
             .mode = .header,
         };
         errdefer self.deinit();
@@ -860,7 +906,7 @@ pub const PackObjectWriter = struct {
             try self.objects.append(object.*);
         }
 
-        const writer = self.header_bytes.writer();
+        const writer = self.out_bytes.writer();
         _ = try writer.write("PACK");
         try writer.writeInt(u32, 2, .big); // version
         try writer.writeInt(u32, @intCast(self.objects.items.len), .big);
@@ -877,7 +923,7 @@ pub const PackObjectWriter = struct {
             object.deinit();
         }
         self.objects.deinit();
-        self.header_bytes.deinit();
+        self.out_bytes.deinit();
     }
 
     pub fn read(self: *PackObjectWriter, buffer: []u8) !usize {
@@ -891,28 +937,61 @@ pub const PackObjectWriter = struct {
     fn readStep(self: *PackObjectWriter, buffer: []u8) !usize {
         switch (self.mode) {
             .header => {
-                const size = @min(self.header_bytes.items.len - self.header_index, buffer.len);
-                @memcpy(buffer[0..size], self.header_bytes.items[self.header_index .. self.header_index + size]);
+                const size = @min(self.out_bytes.items.len - self.out_index, buffer.len);
+                @memcpy(buffer[0..size], self.out_bytes.items[self.out_index .. self.out_index + size]);
                 if (size < buffer.len) {
-                    self.header_bytes.clearAndFree();
-                    self.header_index = 0;
-                    self.mode = .object;
+                    self.out_bytes.clearAndFree();
+                    self.out_index = 0;
+                    self.mode = .{
+                        .object = .{
+                            .stream = try std.compress.zlib.compressor(self.out_bytes.writer(), .{ .level = .default }),
+                        },
+                    };
                 } else {
-                    self.header_index += size;
+                    self.out_index += size;
                 }
                 return size;
             },
-            .object => {
-                const object = &self.objects.items[self.object_index];
-                const size = try object.object_reader.reader.read(buffer);
-                if (size < buffer.len) {
+            .object => |*o| {
+                if (self.out_index < self.out_bytes.items.len) {
+                    const size = @min(self.out_bytes.items.len - self.out_index, buffer.len);
+                    @memcpy(buffer[0..size], self.out_bytes.items[self.out_index .. self.out_index + size]);
+                    self.out_index += size;
+                    return size;
+                } else {
+                    // everything in out_bytes has been written, so we can clear it
+                    self.out_bytes.clearAndFree();
+                    self.out_index = 0;
+
+                    if (o.stream) |*stream| {
+                        const object = &self.objects.items[self.object_index];
+                        var temp_buffer = [_]u8{0} ** 1024;
+                        const uncompressed_size = try object.object_reader.reader.read(&temp_buffer);
+
+                        if (uncompressed_size > 0) {
+                            // write to out_bytes and return so we can read it next
+                            // time this fn is called
+                            _ = try stream.write(temp_buffer[0..uncompressed_size]);
+                            return 0;
+                        } else {
+                            try stream.finish();
+                            o.stream = null;
+                            // if finish() added more data to out_bytes,
+                            // return so we can read it next time this fn is called
+                            if (self.out_index < self.out_bytes.items.len) {
+                                return 0;
+                            }
+                        }
+                    }
+
+                    // there is nothing more to write, so move on to the next object
                     self.object_index += 1;
                     self.mode = .header;
                     if (self.object_index < self.objects.items.len) {
                         try self.writeObjectHeader();
                     }
+                    return 0;
                 }
-                return size;
             },
         }
     }
@@ -936,7 +1015,7 @@ pub const PackObjectWriter = struct {
             .extra = first_size_parts.high_bits > 0,
         };
 
-        const writer = self.header_bytes.writer();
+        const writer = self.out_bytes.writer();
         try writer.writeByte(@bitCast(obj_header));
 
         // set size of object (little endian variable length format)
