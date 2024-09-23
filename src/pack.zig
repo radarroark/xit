@@ -175,6 +175,7 @@ pub const PackObjectReader = struct {
             chunks: std.ArrayList(Chunk),
             cache: std.AutoArrayHashMap(Location, []const u8),
             cache_arena: *std.heap.ArenaAllocator,
+            recon_size: u64,
         },
     },
 
@@ -393,6 +394,7 @@ pub const PackObjectReader = struct {
                             .chunks = undefined,
                             .cache = undefined,
                             .cache_arena = undefined,
+                            .recon_size = undefined,
                         },
                     },
                 };
@@ -423,6 +425,7 @@ pub const PackObjectReader = struct {
                             .chunks = undefined,
                             .cache = undefined,
                             .cache_arena = undefined,
+                            .recon_size = undefined,
                         },
                     },
                 };
@@ -575,6 +578,7 @@ pub const PackObjectReader = struct {
                     .chunks = chunks,
                     .cache = cache,
                     .cache_arena = cache_arena,
+                    .recon_size = recon_size,
                 },
             },
         };
@@ -652,7 +656,10 @@ pub const PackObjectReader = struct {
     pub fn header(self: PackObjectReader) obj.ObjectHeader {
         return switch (self.internal) {
             .basic => self.internal.basic.header,
-            .delta => self.internal.delta.base_reader.header(),
+            .delta => .{
+                .kind = self.internal.delta.base_reader.header().kind,
+                .size = self.internal.delta.recon_size,
+            },
         };
     }
 
