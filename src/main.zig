@@ -36,8 +36,8 @@ pub fn xitMain(
     defer command.deinit();
 
     switch (command) {
-        .invalid => {
-            try writers.err.print("\"{s}\" is not a valid command\n", .{command.invalid.name});
+        .invalid => |invalid| {
+            try writers.err.print("\"{s}\" is not a valid command\n", .{invalid.name});
             try writers.out.print(USAGE, .{});
         },
         .tui => {
@@ -45,8 +45,8 @@ pub fn xitMain(
             defer repo.deinit();
             try ui.start(repo_kind, &repo, allocator);
         },
-        .cli => {
-            if (command.cli) |sub_command| {
+        .cli => |cli| {
+            if (cli) |sub_command| {
                 var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = cwd }, sub_command, writers);
                 defer repo.deinit();
             } else {

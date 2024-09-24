@@ -444,8 +444,8 @@ pub const PackObjectReader = struct {
         const base_reader = try allocator.create(PackObjectReader);
         errdefer allocator.destroy(base_reader);
         base_reader.* = switch (self.internal.delta.init) {
-            .ofs => try PackObjectReader.initAtPosition(self.internal.delta.init.ofs.pack_file_path, self.internal.delta.init.ofs.pack_file_path_len, self.internal.delta.init.ofs.position),
-            .ref => try PackObjectReader.initWithIndex(core, self.internal.delta.init.ref.oid_hex),
+            .ofs => |ofs| try PackObjectReader.initAtPosition(ofs.pack_file_path, ofs.pack_file_path_len, ofs.position),
+            .ref => |ref| try PackObjectReader.initWithIndex(core, ref.oid_hex),
         };
         errdefer base_reader.deinit();
 
@@ -603,13 +603,13 @@ pub const PackObjectReader = struct {
             // seek the base reader to the correct position
             var position = switch (self.internal.delta.base_reader.internal) {
                 .basic => self.internal.delta.base_reader.relative_position,
-                .delta => self.internal.delta.base_reader.internal.delta.real_position,
+                .delta => |delta| delta.real_position,
             };
             if (position > location.offset) {
                 try self.internal.delta.base_reader.reset();
                 position = switch (self.internal.delta.base_reader.internal) {
                     .basic => self.internal.delta.base_reader.relative_position,
-                    .delta => self.internal.delta.base_reader.internal.delta.real_position,
+                    .delta => |delta| delta.real_position,
                 };
             }
             if (position < location.offset) {
@@ -636,9 +636,9 @@ pub const PackObjectReader = struct {
         // the base object if necessary, because it won't be used anymore.
         switch (self.internal.delta.base_reader.internal) {
             .basic => {},
-            .delta => {
-                _ = self.internal.delta.base_reader.internal.delta.cache_arena.reset(.free_all);
-                self.internal.delta.base_reader.internal.delta.cache.clearAndFree();
+            .delta => |*delta| {
+                _ = delta.cache_arena.reset(.free_all);
+                delta.cache.clearAndFree();
             },
         }
     }
@@ -647,13 +647,13 @@ pub const PackObjectReader = struct {
         self.pack_file.close();
         switch (self.internal) {
             .basic => {},
-            .delta => {
-                self.internal.delta.base_reader.deinit();
-                self.internal.delta.allocator.destroy(self.internal.delta.base_reader);
-                self.internal.delta.chunks.deinit();
-                self.internal.delta.cache.deinit();
-                self.internal.delta.cache_arena.deinit();
-                self.internal.delta.allocator.destroy(self.internal.delta.cache_arena);
+            .delta => |*delta| {
+                delta.base_reader.deinit();
+                delta.allocator.destroy(delta.base_reader);
+                delta.chunks.deinit();
+                delta.cache.deinit();
+                delta.cache_arena.deinit();
+                delta.allocator.destroy(delta.cache_arena);
             },
         }
     }
@@ -661,9 +661,9 @@ pub const PackObjectReader = struct {
     pub fn header(self: PackObjectReader) obj.ObjectHeader {
         return switch (self.internal) {
             .basic => self.internal.basic.header,
-            .delta => .{
-                .kind = self.internal.delta.base_reader.header().kind,
-                .size = self.internal.delta.recon_size,
+            .delta => |delta| .{
+                .kind = delta.base_reader.header().kind,
+                .size = delta.recon_size,
             },
         };
     }
@@ -675,11 +675,11 @@ pub const PackObjectReader = struct {
 
         switch (self.internal) {
             .basic => {},
-            .delta => {
-                self.internal.delta.chunk_index = 0;
-                self.internal.delta.chunk_position = 0;
-                self.internal.delta.real_position = 0;
-                try self.internal.delta.base_reader.reset();
+            .delta => |*delta| {
+                delta.chunk_index = 0;
+                delta.chunk_position = 0;
+                delta.real_position = 0;
+                try delta.base_reader.reset();
             },
         }
     }
@@ -692,18 +692,18 @@ pub const PackObjectReader = struct {
                 self.relative_position += size;
                 return size;
             },
-            .delta => {
+            .delta => |*delta| {
                 var bytes_read: usize = 0;
                 while (bytes_read < dest.len) {
-                    if (self.internal.delta.chunk_index == self.internal.delta.chunks.items.len) {
+                    if (delta.chunk_index == delta.chunks.items.len) {
                         break;
                     }
-                    const chunk = self.internal.delta.chunks.items[self.internal.delta.chunk_index];
+                    const chunk = delta.chunks.items[delta.chunk_index];
                     var dest_slice = dest[bytes_read..];
-                    const bytes_to_read = @min(chunk.location.size - self.internal.delta.chunk_position, dest_slice.len);
+                    const bytes_to_read = @min(chunk.location.size - delta.chunk_position, dest_slice.len);
                     switch (chunk.kind) {
                         .add_new => {
-                            const offset = chunk.location.offset + self.internal.delta.chunk_position;
+                            const offset = chunk.location.offset + delta.chunk_position;
                             if (self.relative_position > offset) {
                                 try self.pack_file.seekTo(self.start_position);
                                 self.stream = std.compress.zlib.decompressor(self.pack_file.reader());
@@ -720,20 +720,20 @@ pub const PackObjectReader = struct {
                             }
                             self.relative_position += size;
                             bytes_read += size;
-                            self.internal.delta.chunk_position += size;
-                            self.internal.delta.real_position += size;
+                            delta.chunk_position += size;
+                            delta.real_position += size;
                         },
                         .copy_from_base => {
-                            const buffer = self.internal.delta.cache.get(chunk.location) orelse return error.InvalidDeltaCache;
-                            @memcpy(dest_slice[0..bytes_to_read], buffer[self.internal.delta.chunk_position .. self.internal.delta.chunk_position + bytes_to_read]);
+                            const buffer = delta.cache.get(chunk.location) orelse return error.InvalidDeltaCache;
+                            @memcpy(dest_slice[0..bytes_to_read], buffer[delta.chunk_position .. delta.chunk_position + bytes_to_read]);
                             bytes_read += bytes_to_read;
-                            self.internal.delta.chunk_position += bytes_to_read;
-                            self.internal.delta.real_position += bytes_to_read;
+                            delta.chunk_position += bytes_to_read;
+                            delta.real_position += bytes_to_read;
                         },
                     }
-                    if (self.internal.delta.chunk_position == chunk.location.size) {
-                        self.internal.delta.chunk_index += 1;
-                        self.internal.delta.chunk_position = 0;
+                    if (delta.chunk_position == chunk.location.size) {
+                        delta.chunk_index += 1;
+                        delta.chunk_position = 0;
                     }
                 }
                 return bytes_read;

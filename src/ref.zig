@@ -236,23 +236,21 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind
             defer refs_dir.close();
             var heads_dir = try refs_dir.openDir("heads", .{});
             defer heads_dir.close();
-            var ref_file = heads_dir.openFile(target, .{ .mode = .read_only }) catch |err| {
-                switch (err) {
-                    error.FileNotFound => {
-                        if (oid_hex_maybe) |oid_hex| {
-                            // the HEAD is detached, so just update it with the oid
-                            try lock.lock_file.writeAll(&oid_hex);
-                        } else {
-                            // point HEAD at the ref, even though the ref doesn't exist
-                            var write_buffer = [_]u8{0} ** MAX_READ_BYTES;
-                            const content = try std.fmt.bufPrint(&write_buffer, "ref: refs/heads/{s}", .{target});
-                            try lock.lock_file.writeAll(content);
-                        }
-                        lock.success = true;
-                        return;
-                    },
-                    else => return err,
-                }
+            var ref_file = heads_dir.openFile(target, .{ .mode = .read_only }) catch |err| switch (err) {
+                error.FileNotFound => {
+                    if (oid_hex_maybe) |oid_hex| {
+                        // the HEAD is detached, so just update it with the oid
+                        try lock.lock_file.writeAll(&oid_hex);
+                    } else {
+                        // point HEAD at the ref, even though the ref doesn't exist
+                        var write_buffer = [_]u8{0} ** MAX_READ_BYTES;
+                        const content = try std.fmt.bufPrint(&write_buffer, "ref: refs/heads/{s}", .{target});
+                        try lock.lock_file.writeAll(content);
+                    }
+                    lock.success = true;
+                    return;
+                },
+                else => return err,
             };
             defer ref_file.close();
 
@@ -335,11 +333,9 @@ pub fn updateRecur(
             // read file and get ref name if necessary
             var buffer = [_]u8{0} ** MAX_READ_BYTES;
             const ref_name_maybe = blk: {
-                const old_content = read(repo_kind, core_cursor, path, &buffer) catch |err| {
-                    switch (err) {
-                        error.FileNotFound => break :blk null,
-                        else => return err,
-                    }
+                const old_content = read(repo_kind, core_cursor, path, &buffer) catch |err| switch (err) {
+                    error.FileNotFound => break :blk null,
+                    else => return err,
                 };
                 if (std.mem.startsWith(u8, old_content, REF_START_STR) and old_content.len > REF_START_STR.len) {
                     break :blk old_content[REF_START_STR.len..];

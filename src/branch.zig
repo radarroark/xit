@@ -176,11 +176,9 @@ pub fn remove(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).C
                     break;
                 }
 
-                std.fs.deleteDirAbsolute(parent_path) catch |err| {
-                    switch (err) {
-                        error.DirNotEmpty => break,
-                        else => return err,
-                    }
+                std.fs.deleteDirAbsolute(parent_path) catch |err| switch (err) {
+                    error.DirNotEmpty => break,
+                    else => return err,
                 };
                 parent_path_maybe = std.fs.path.dirname(parent_path);
             }

@@ -217,25 +217,23 @@ pub fn migrate(
                 result.conflict(allocator);
                 try result.data.conflict.stale_files.put(path, {});
             } else {
-                const meta = io.getMetadata(core_cursor.core.repo_dir, path) catch |err| {
-                    switch (err) {
-                        error.FileNotFound, error.NotDir => {
-                            // if the path doesn't exist in the workspace,
-                            // but one of its parents *does* exist and isn't tracked
-                            if (untrackedParent(repo_kind, core_cursor.core.repo_dir, path, index.*)) |_| {
-                                result.conflict(allocator);
-                                if (entry_maybe) |_| {
-                                    try result.data.conflict.stale_files.put(path, {});
-                                } else if (change.new) |_| {
-                                    try result.data.conflict.untracked_overwritten.put(path, {});
-                                } else {
-                                    try result.data.conflict.untracked_removed.put(path, {});
-                                }
+                const meta = io.getMetadata(core_cursor.core.repo_dir, path) catch |err| switch (err) {
+                    error.FileNotFound, error.NotDir => {
+                        // if the path doesn't exist in the workspace,
+                        // but one of its parents *does* exist and isn't tracked
+                        if (untrackedParent(repo_kind, core_cursor.core.repo_dir, path, index.*)) |_| {
+                            result.conflict(allocator);
+                            if (entry_maybe) |_| {
+                                try result.data.conflict.stale_files.put(path, {});
+                            } else if (change.new) |_| {
+                                try result.data.conflict.untracked_overwritten.put(path, {});
+                            } else {
+                                try result.data.conflict.untracked_removed.put(path, {});
                             }
-                            continue;
-                        },
-                        else => return err,
-                    }
+                        }
+                        continue;
+                    },
+                    else => return err,
                 };
                 switch (meta.kind()) {
                     .file => {
@@ -416,11 +414,11 @@ pub const Switch = struct {
     pub fn deinit(self: *Switch) void {
         switch (self.data) {
             .success => {},
-            .conflict => {
-                self.data.conflict.stale_files.deinit();
-                self.data.conflict.stale_dirs.deinit();
-                self.data.conflict.untracked_overwritten.deinit();
-                self.data.conflict.untracked_removed.deinit();
+            .conflict => |*result_conflict| {
+                result_conflict.stale_files.deinit();
+                result_conflict.stale_dirs.deinit();
+                result_conflict.untracked_overwritten.deinit();
+                result_conflict.untracked_removed.deinit();
             },
         }
     }

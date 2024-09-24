@@ -221,8 +221,8 @@ pub fn Log(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                                     break :blk 1;
                                 }
                             },
-                            .codepoint => {
-                                switch (key.codepoint) {
+                            .codepoint => |codepoint| {
+                                switch (codepoint) {
                                     13 => {
                                         if (child.* == .ui_log_commit_list) {
                                             break :blk 1;
@@ -269,14 +269,14 @@ pub fn Log(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                 if (self.box.children.getIndex(child_id)) |current_index| {
                     const child = &self.box.children.values()[current_index].widget;
                     switch (child.*) {
-                        .ui_log_commit_list => {
-                            const commit_list = &child.ui_log_commit_list;
+                        .ui_log_commit_list => |child_ui_log_commit_list| {
+                            const commit_list = &child_ui_log_commit_list;
                             if (commit_list.getSelectedIndex()) |commit_index| {
                                 return commit_index == 0;
                             }
                         },
-                        .ui_diff => {
-                            const diff = &child.ui_diff;
+                        .ui_diff => |child_ui_diff| {
+                            const diff = &child_ui_diff;
                             return diff.getScrollY() == 0;
                         },
                         else => {},

@@ -242,31 +242,29 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
         fn runCommand(self: *Repo(repo_kind), sub_command: cmd.SubCommand, writers: anytype) !void {
             switch (sub_command) {
-                .init => {
-                    self.* = Repo(repo_kind).initNew(self.allocator, self.init_opts.cwd, sub_command.init.dir) catch |err| {
-                        switch (err) {
-                            error.RepoAlreadyExists => {
-                                try writers.err.print("{s} is already a repository\n", .{sub_command.init.dir});
-                                return;
-                            },
-                            else => return err,
-                        }
+                .init => |init_cmd| {
+                    self.* = Repo(repo_kind).initNew(self.allocator, self.init_opts.cwd, init_cmd.dir) catch |err| switch (err) {
+                        error.RepoAlreadyExists => {
+                            try writers.err.print("{s} is already a repository\n", .{init_cmd.dir});
+                            return;
+                        },
+                        else => return err,
                     };
                 },
-                .add => {
-                    try self.add(sub_command.add.paths.items);
+                .add => |add_cmd| {
+                    try self.add(add_cmd.paths.items);
                 },
-                .unadd => {
-                    try self.unadd(sub_command.unadd.paths.items, sub_command.unadd.opts);
+                .unadd => |unadd_cmd| {
+                    try self.unadd(unadd_cmd.paths.items, unadd_cmd.opts);
                 },
-                .rm => {
-                    try self.rm(sub_command.rm.paths.items, sub_command.rm.opts);
+                .rm => |rm_cmd| {
+                    try self.rm(rm_cmd.paths.items, rm_cmd.opts);
                 },
-                .reset => {
-                    try self.reset(sub_command.reset.path);
+                .reset => |reset_cmd| {
+                    try self.reset(reset_cmd.path);
                 },
-                .commit => {
-                    _ = try self.commit(null, sub_command.commit);
+                .commit => |commit_cmd| {
+                    _ = try self.commit(null, commit_cmd);
                 },
                 .status => {
                     var stat = try self.status();
@@ -328,7 +326,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         }
                     }
                 },
-                .diff => {
+                .diff => |diff_cmd| {
                     const DiffState = union(df.DiffKind) {
                         workspace: st.Status(repo_kind),
                         index: st.Status(repo_kind),
@@ -342,17 +340,17 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                             }
                         }
                     };
-                    const diff_opts = sub_command.diff.diff_opts;
+                    const diff_opts = diff_cmd.diff_opts;
                     var diff_state: DiffState = switch (diff_opts) {
                         .workspace => .{ .workspace = try self.status() },
                         .index => .{ .index = try self.status() },
-                        .tree => .{ .tree = try self.treeDiff(diff_opts.tree.old, diff_opts.tree.new) },
+                        .tree => |tree| .{ .tree = try self.treeDiff(tree.old, tree.new) },
                     };
                     defer diff_state.deinit();
                     var diff_iter = try self.filePairs(switch (diff_opts) {
-                        .workspace => .{
+                        .workspace => |workspace| .{
                             .workspace = .{
-                                .conflict_diff_kind = diff_opts.workspace.conflict_diff_kind,
+                                .conflict_diff_kind = workspace.conflict_diff_kind,
                                 .status = &diff_state.workspace,
                             },
                         },
@@ -390,17 +388,17 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                                         .del => "-",
                                     },
                                     switch (edit) {
-                                        .eql => edit.eql.new_line.text,
-                                        .ins => edit.ins.new_line.text,
-                                        .del => edit.del.old_line.text,
+                                        .eql => |eql| eql.new_line.text,
+                                        .ins => |ins| ins.new_line.text,
+                                        .del => |del| del.old_line.text,
                                     },
                                 });
                             }
                         }
                     }
                 },
-                .branch => {
-                    switch (sub_command.branch) {
+                .branch => |branch_cmd| {
+                    switch (branch_cmd) {
                         .list => {
                             var cursor = try self.core.latestCursor();
                             const core_cursor = switch (repo_kind) {
@@ -422,16 +420,16 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                                 try writers.out.print("{s} {s}\n", .{ if (is_current_branch) "*" else " ", r.name });
                             }
                         },
-                        .add => try self.addBranch(sub_command.branch.add),
-                        .remove => try self.removeBranch(sub_command.branch.remove),
+                        .add => try self.addBranch(branch_cmd.add),
+                        .remove => try self.removeBranch(branch_cmd.remove),
                     }
                 },
-                .switch_head => {
-                    var result = try self.switchHead(sub_command.switch_head.target, .{ .force = false });
+                .switch_head => |switch_head_cmd| {
+                    var result = try self.switchHead(switch_head_cmd.target, .{ .force = false });
                     defer result.deinit();
                 },
-                .restore => {
-                    try self.restore(sub_command.restore.path);
+                .restore => |restore_cmd| {
+                    try self.restore(restore_cmd.path);
                 },
                 .log => {
                     var commit_iter = try self.log(null);
@@ -452,8 +450,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 },
                 .merge, .cherry_pick => {
                     var result = switch (sub_command) {
-                        .merge => try self.merge(sub_command.merge),
-                        .cherry_pick => try self.cherryPick(sub_command.cherry_pick),
+                        .merge => |merge_cmd| try self.merge(merge_cmd),
+                        .cherry_pick => |cherry_pick_cmd| try self.cherryPick(cherry_pick_cmd),
                         else => unreachable,
                     };
                     defer result.deinit();
@@ -470,8 +468,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         .fast_forward => {
                             try writers.out.print("Fast-forward\n", .{});
                         },
-                        .conflict => {
-                            for (result.data.conflict.conflicts.keys(), result.data.conflict.conflicts.values()) |path, conflict| {
+                        .conflict => |result_conflict| {
+                            for (result_conflict.conflicts.keys(), result_conflict.conflicts.values()) |path, conflict| {
                                 if (conflict.renamed) |renamed| {
                                     const conflict_type = if (conflict.current != null)
                                         "file/directory"
@@ -508,8 +506,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         },
                     }
                 },
-                .config => {
-                    switch (sub_command.config) {
+                .config => |config_cmd| {
+                    switch (config_cmd) {
                         .list => {
                             var conf = try self.config();
                             defer conf.deinit();
@@ -520,12 +518,12 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                                 }
                             }
                         },
-                        .add => try self.addConfig(sub_command.config.add),
-                        .remove => try self.removeConfig(sub_command.config.remove),
+                        .add => |config_add_cmd| try self.addConfig(config_add_cmd),
+                        .remove => |config_remove_cmd| try self.removeConfig(config_remove_cmd),
                     }
                 },
-                .remote => {
-                    switch (sub_command.remote) {
+                .remote => |remote_cmd| {
+                    switch (remote_cmd) {
                         .list => {
                             var rem = try self.remote();
                             defer rem.deinit();
@@ -536,8 +534,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                                 }
                             }
                         },
-                        .add => try self.addRemote(sub_command.remote.add),
-                        .remove => try self.removeRemote(sub_command.remote.remove),
+                        .add => |remote_add_cmd| try self.addRemote(remote_add_cmd),
+                        .remove => |remote_remove_cmd| try self.removeRemote(remote_remove_cmd),
                     }
                 },
             }
@@ -761,8 +759,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 .xit => .{ .core = &self.core, .cursor = &cursor },
             };
             switch (status_kind) {
-                .added => {
-                    switch (status_kind.added) {
+                .added => |added| {
+                    switch (added) {
                         .created => {
                             var a = try df.LineIterator(repo_kind).initFromNothing(self.allocator, path);
                             errdefer a.deinit();
@@ -788,8 +786,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         },
                     }
                 },
-                .not_added => {
-                    switch (status_kind.not_added) {
+                .not_added => |not_added| {
+                    switch (not_added) {
                         .modified => {
                             const meta = try io.getMetadata(self.core.repo_dir, path);
                             const mode = io.getMode(meta);
