@@ -65,14 +65,14 @@ pub const SubCommand = union(SubCommandKind) {
 
     pub fn deinit(self: *SubCommand) void {
         switch (self.*) {
-            .add => {
-                self.add.paths.deinit();
+            .add => |*add| {
+                add.paths.deinit();
             },
-            .unadd => {
-                self.unadd.paths.deinit();
+            .unadd => |*unadd| {
+                unadd.paths.deinit();
             },
-            .rm => {
-                self.rm.paths.deinit();
+            .rm => |*rm| {
+                rm.paths.deinit();
             },
             else => {},
         }
@@ -353,8 +353,8 @@ pub const Command = union(enum) {
 
     pub fn deinit(self: *Command) void {
         switch (self.*) {
-            .cli => {
-                if (self.cli) |*sub_command| {
+            .cli => |*cli| {
+                if (cli.*) |*sub_command| {
                     sub_command.deinit();
                 }
             },

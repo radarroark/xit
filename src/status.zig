@@ -276,12 +276,12 @@ pub fn HeadTree(comptime repo_kind: rp.RepoKind) type {
         }
 
         fn read(self: *HeadTree(repo_kind), core_cursor: rp.Repo(repo_kind).CoreCursor, prefix: []const u8, oid: [hash.SHA1_HEX_LEN]u8) !void {
-            var object = try obj.Object(repo_kind, .full).init(self.arena.allocator(), core_cursor, oid);
+            const object = try obj.Object(repo_kind, .full).init(self.arena.allocator(), core_cursor, oid);
 
             switch (object.content) {
                 .blob => {},
-                .tree => {
-                    var iter = object.content.tree.entries.iterator();
+                .tree => |tree| {
+                    var iter = tree.entries.iterator();
                     while (iter.next()) |entry| {
                         const name = entry.key_ptr.*;
                         const path = try io.joinPath(self.arena.allocator(), &.{ prefix, name });

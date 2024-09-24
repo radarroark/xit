@@ -69,10 +69,10 @@ fn createPatchEntries(
         defer edit.deinit(allocator);
 
         switch (edit) {
-            .eql => {
+            .eql => |eql| {
                 const node_list = node_list_maybe orelse return error.NodeListNotFound;
                 const node_id_cursor = (try node_list.readPath(void, &.{
-                    .{ .array_list_get = .{ .index = edit.eql.old_line.num - 1 } },
+                    .{ .array_list_get = .{ .index = eql.old_line.num - 1 } },
                 })) orelse return error.ExpectedNode;
 
                 const node_id_bytes = try node_id_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
@@ -92,7 +92,7 @@ fn createPatchEntries(
 
                 last_node = .{ .id = node_id, .origin = .old };
             },
-            .ins => {
+            .ins => |ins| {
                 const node_id = NodeId{
                     .node = new_node_count,
                     .patch_id = patch_hash,
@@ -104,20 +104,20 @@ fn createPatchEntries(
                 try buffer.writer().writeInt(NodeIdInt, @bitCast(last_node.id), .big);
                 try patch_entries.append(buffer.items);
 
-                const content = try arena.allocator().dupe(u8, edit.ins.new_line.text);
+                const content = try arena.allocator().dupe(u8, ins.new_line.text);
                 try patch_content_entries.append(content);
 
                 new_node_count += 1;
 
                 last_node = .{ .id = node_id, .origin = .new };
             },
-            .del => {
+            .del => |del| {
                 var buffer = std.ArrayList(u8).init(arena.allocator());
                 try buffer.writer().writeInt(u8, @intFromEnum(ChangeKind.delete_node), .big);
 
                 const node_list = node_list_maybe orelse return error.NodeListNotFound;
                 const node_id_cursor = (try node_list.readPath(void, &.{
-                    .{ .array_list_get = .{ .index = edit.del.old_line.num - 1 } },
+                    .{ .array_list_get = .{ .index = del.old_line.num - 1 } },
                 })) orelse return error.ExpectedNode;
 
                 const node_id_bytes = try node_id_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);

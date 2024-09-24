@@ -189,9 +189,9 @@ pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                                 .del => "-",
                             },
                             switch (edit) {
-                                .eql => edit.eql.new_line.text,
-                                .ins => edit.ins.new_line.text,
-                                .del => edit.del.old_line.text,
+                                .eql => |eql| eql.new_line.text,
+                                .ins => |ins| ins.new_line.text,
+                                .del => |del| del.old_line.text,
                             },
                         });
                     }

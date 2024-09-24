@@ -199,15 +199,15 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                         const parsed_line = try ParsedLine.init(arena, token_kinds.items, tokens.items);
                         switch (parsed_line) {
                             .empty => {},
-                            .section_header => {
+                            .section_header => |section_header| {
                                 if (current_section_name_maybe) |current_section_name| {
                                     try sections.put(current_section_name, current_variables);
                                     current_variables = Variables.init(arena.allocator());
                                 }
-                                current_section_name_maybe = parsed_line.section_header;
+                                current_section_name_maybe = section_header;
                             },
-                            .variable => {
-                                try current_variables.put(parsed_line.variable.name, parsed_line.variable.value);
+                            .variable => |variable| {
+                                try current_variables.put(variable.name, variable.value);
                             },
                             .invalid => return error.InvalidLine,
                         }

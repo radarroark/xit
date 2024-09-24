@@ -79,11 +79,9 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
             switch (repo_kind) {
                 .git => {
                     // open index
-                    const index_file = core_cursor.core.git_dir.openFile("index", .{ .mode = .read_only }) catch |err| {
-                        switch (err) {
-                            error.FileNotFound => return index,
-                            else => return err,
-                        }
+                    const index_file = core_cursor.core.git_dir.openFile("index", .{ .mode = .read_only }) catch |err| switch (err) {
+                        error.FileNotFound => return index,
+                        else => return err,
                     };
                     defer index_file.close();
 

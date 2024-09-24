@@ -23,12 +23,12 @@ pub fn StatusListItem(comptime Widget: type) type {
 
         pub fn init(allocator: std.mem.Allocator, status: StatusItem) !StatusListItem(Widget) {
             const status_kind_sym = switch (status.kind) {
-                .added => switch (status.kind.added) {
+                .added => |added| switch (added) {
                     .created => "+",
                     .modified => "±",
                     .deleted => "-",
                 },
-                .not_added => switch (status.kind.not_added) {
+                .not_added => |not_added| switch (not_added) {
                     .modified => "±",
                     .deleted => "-",
                 },
@@ -430,8 +430,8 @@ pub fn StatusContent(comptime Widget: type, comptime repo_kind: rp.RepoKind) typ
                                     break :blk @intFromEnum(FocusKind.diff);
                                 }
                             },
-                            .codepoint => {
-                                switch (key.codepoint) {
+                            .codepoint => |codepoint| {
+                                switch (codepoint) {
                                     13 => {
                                         if (child.* == .ui_status_list) {
                                             break :blk @intFromEnum(FocusKind.status_list);
@@ -482,15 +482,13 @@ pub fn StatusContent(comptime Widget: type, comptime repo_kind: rp.RepoKind) typ
                 if (self.box.children.getIndex(child_id)) |current_index| {
                     const child = &self.box.children.values()[current_index].widget;
                     switch (child.*) {
-                        .ui_status_list => {
-                            const status_list = &child.ui_status_list;
-                            if (status_list.getSelectedIndex()) |status_index| {
+                        .ui_status_list => |child_ui_status_list| {
+                            if (child_ui_status_list.getSelectedIndex()) |status_index| {
                                 return status_index == 0;
                             }
                         },
-                        .ui_diff => {
-                            const diff = &child.ui_diff;
-                            return diff.getScrollY() == 0;
+                        .ui_diff => |child_ui_diff| {
+                            return child_ui_diff.getScrollY() == 0;
                         },
                         else => {},
                     }
@@ -599,21 +597,19 @@ pub fn Status(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
 
                     var index = blk: {
                         switch (child.*) {
-                            .ui_status_tabs => {
-                                const status_tabs = &child.ui_status_tabs;
+                            .ui_status_tabs => |*child_ui_status_tabs| {
                                 if (key == .arrow_down) {
                                     break :blk @intFromEnum(FocusKind.status_content);
                                 } else {
-                                    try status_tabs.input(key, root_focus);
+                                    try child_ui_status_tabs.input(key, root_focus);
                                 }
                             },
-                            .stack => {
-                                const stack = &child.stack;
-                                if (stack.getSelected()) |selected_widget| {
+                            .stack => |*child_stack| {
+                                if (child_stack.getSelected()) |selected_widget| {
                                     if (key == .arrow_up and selected_widget.ui_status_content.scrolledToTop()) {
                                         break :blk @intFromEnum(FocusKind.status_tabs);
                                     } else {
-                                        try stack.input(key, root_focus);
+                                        try child_stack.input(key, root_focus);
                                     }
                                 }
                             },

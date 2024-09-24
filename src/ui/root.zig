@@ -173,8 +173,8 @@ pub fn Root(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                                 .ui_root_tabs => {
                                     try child.input(key, root_focus);
                                 },
-                                .stack => {
-                                    if (child.stack.getSelected()) |selected_widget| {
+                                .stack => |stack| {
+                                    if (stack.getSelected()) |selected_widget| {
                                         switch (selected_widget.*) {
                                             .ui_log => {
                                                 if (selected_widget.ui_log.scrolledToTop()) {

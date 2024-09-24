@@ -161,17 +161,17 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
 
         pub fn next(self: *LineIterator(repo_kind)) !?[]const u8 {
             switch (self.source) {
-                .object => {
-                    if (self.source.object.eof) {
+                .object => |*object| {
+                    if (object.eof) {
                         return null;
                     }
                     var line_arr = std.ArrayList(u8).init(self.allocator);
                     errdefer line_arr.deinit();
                     var buffer = [_]u8{0} ** 1;
                     while (true) {
-                        const size = try self.source.object.object_reader.reader.read(&buffer);
+                        const size = try object.object_reader.reader.read(&buffer);
                         if (size == 0) {
-                            self.source.object.eof = true;
+                            object.eof = true;
                             break;
                         } else if (buffer[0] == '\n') {
                             break;
@@ -184,21 +184,21 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                     }
                     return try line_arr.toOwnedSlice();
                 },
-                .workspace => {
-                    if (self.source.workspace.eof) {
+                .workspace => |*workspace| {
+                    if (workspace.eof) {
                         return null;
                     }
                     var line_arr = std.ArrayList(u8).init(self.allocator);
                     errdefer line_arr.deinit();
-                    self.source.workspace.file.reader().streamUntilDelimiter(line_arr.writer(), '\n', MAX_READ_BYTES) catch |err| switch (err) {
-                        error.EndOfStream => self.source.workspace.eof = true,
+                    workspace.file.reader().streamUntilDelimiter(line_arr.writer(), '\n', MAX_READ_BYTES) catch |err| switch (err) {
+                        error.EndOfStream => workspace.eof = true,
                         else => return err,
                     };
                     return try line_arr.toOwnedSlice();
                 },
                 .nothing => return null,
-                .buffer => {
-                    if (self.source.buffer.iter.next()) |line| {
+                .buffer => |*buffer| {
+                    if (buffer.iter.next()) |line| {
                         const line_copy = try self.allocator.alloc(u8, line.len);
                         errdefer self.allocator.free(line_copy);
                         @memcpy(line_copy, line);
@@ -217,16 +217,16 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
 
         pub fn reset(self: *LineIterator(repo_kind)) !void {
             switch (self.source) {
-                .object => {
-                    self.source.object.eof = false;
-                    try self.source.object.object_reader.reset();
+                .object => |*object| {
+                    object.eof = false;
+                    try object.object_reader.reset();
                 },
-                .workspace => {
-                    self.source.workspace.eof = false;
-                    try self.source.workspace.file.seekTo(0);
+                .workspace => |*workspace| {
+                    workspace.eof = false;
+                    try workspace.file.seekTo(0);
                 },
                 .nothing => {},
-                .buffer => self.source.buffer.iter.reset(),
+                .buffer => |*buffer| buffer.iter.reset(),
             }
         }
 
@@ -236,8 +236,8 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
 
         pub fn deinit(self: *LineIterator(repo_kind)) void {
             switch (self.source) {
-                .object => self.source.object.object_reader.deinit(),
-                .workspace => self.source.workspace.file.close(),
+                .object => |*object| object.object_reader.deinit(),
+                .workspace => |*workspace| workspace.file.close(),
                 .nothing => {},
                 .buffer => {},
             }
@@ -247,8 +247,8 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
         fn seekTo(self: *LineIterator(repo_kind), position: u64) !void {
             try self.reset();
             switch (self.source) {
-                .object => try self.source.object.object_reader.seekTo(position),
-                .workspace => try self.source.workspace.file.seekTo(position),
+                .object => |*object| try object.object_reader.seekTo(position),
+                .workspace => |*workspace| try workspace.file.seekTo(position),
                 .nothing => {},
                 .buffer => {
                     var line_count: usize = 0;
@@ -303,12 +303,12 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
 
             pub fn deinit(self: Edit, allocator: std.mem.Allocator) void {
                 switch (self) {
-                    .eql => {
-                        allocator.free(self.eql.old_line.text);
-                        allocator.free(self.eql.new_line.text);
+                    .eql => |eql| {
+                        allocator.free(eql.old_line.text);
+                        allocator.free(eql.new_line.text);
                     },
-                    .ins => allocator.free(self.ins.new_line.text),
-                    .del => allocator.free(self.del.old_line.text),
+                    .ins => |ins| allocator.free(ins.new_line.text),
+                    .del => |del| allocator.free(del.old_line.text),
                 }
             }
         };
@@ -996,18 +996,18 @@ pub fn Hunk(comptime repo_kind: rp.RepoKind) type {
             };
             for (self.edits.items) |edit| {
                 switch (edit) {
-                    .eql => {
-                        if (o.ins_start == 0) o.ins_start = edit.eql.new_line.num;
+                    .eql => |eql| {
+                        if (o.ins_start == 0) o.ins_start = eql.new_line.num;
                         o.ins_count += 1;
-                        if (o.del_start == 0) o.del_start = edit.eql.old_line.num;
+                        if (o.del_start == 0) o.del_start = eql.old_line.num;
                         o.del_count += 1;
                     },
-                    .ins => {
-                        if (o.ins_start == 0) o.ins_start = edit.ins.new_line.num;
+                    .ins => |ins| {
+                        if (o.ins_start == 0) o.ins_start = ins.new_line.num;
                         o.ins_count += 1;
                     },
-                    .del => {
-                        if (o.del_start == 0) o.del_start = edit.del.old_line.num;
+                    .del => |del| {
+                        if (o.del_start == 0) o.del_start = del.old_line.num;
                         o.del_count += 1;
                     },
                 }
@@ -1276,16 +1276,16 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
             };
             var next_index = self.next_index;
             switch (self.diff_opts) {
-                .workspace => {
-                    if (next_index < self.diff_opts.workspace.status.conflicts.count()) {
-                        const path = self.diff_opts.workspace.status.conflicts.keys()[next_index];
+                .workspace => |workspace| {
+                    if (next_index < workspace.status.conflicts.count()) {
+                        const path = workspace.status.conflicts.keys()[next_index];
                         const meta = try io.getMetadata(self.core.repo_dir, path);
-                        const stage: usize = switch (self.diff_opts.workspace.conflict_diff_kind) {
+                        const stage: usize = switch (workspace.conflict_diff_kind) {
                             .common => 1,
                             .current => 2,
                             .source => 3,
                         };
-                        const index_entries_for_path = self.diff_opts.workspace.status.index.entries.get(path) orelse return error.EntryNotFound;
+                        const index_entries_for_path = workspace.status.index.entries.get(path) orelse return error.EntryNotFound;
                         // if there is an entry for the stage we are diffing
                         if (index_entries_for_path[stage]) |index_entry| {
                             var a = try LineIterator(repo_kind).initFromIndex(core_cursor, self.allocator, index_entry);
@@ -1305,12 +1305,12 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
                             return try self.next();
                         }
                     } else {
-                        next_index -= self.diff_opts.workspace.status.conflicts.count();
+                        next_index -= workspace.status.conflicts.count();
                     }
 
-                    if (next_index < self.diff_opts.workspace.status.workspace_modified.count()) {
-                        const entry = self.diff_opts.workspace.status.workspace_modified.values()[next_index];
-                        const index_entries_for_path = self.diff_opts.workspace.status.index.entries.get(entry.path) orelse return error.EntryNotFound;
+                    if (next_index < workspace.status.workspace_modified.count()) {
+                        const entry = workspace.status.workspace_modified.values()[next_index];
+                        const index_entries_for_path = workspace.status.index.entries.get(entry.path) orelse return error.EntryNotFound;
                         var a = try LineIterator(repo_kind).initFromIndex(core_cursor, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
                         errdefer a.deinit();
                         var b = try LineIterator(repo_kind).initFromWorkspace(core_cursor, self.allocator, entry.path, io.getMode(entry.meta));
@@ -1318,12 +1318,12 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
                         self.next_index += 1;
                         return .{ .path = entry.path, .a = a, .b = b };
                     } else {
-                        next_index -= self.diff_opts.workspace.status.workspace_modified.count();
+                        next_index -= workspace.status.workspace_modified.count();
                     }
 
-                    if (next_index < self.diff_opts.workspace.status.workspace_deleted.count()) {
-                        const path = self.diff_opts.workspace.status.workspace_deleted.keys()[next_index];
-                        const index_entries_for_path = self.diff_opts.workspace.status.index.entries.get(path) orelse return error.EntryNotFound;
+                    if (next_index < workspace.status.workspace_deleted.count()) {
+                        const path = workspace.status.workspace_deleted.keys()[next_index];
+                        const index_entries_for_path = workspace.status.index.entries.get(path) orelse return error.EntryNotFound;
                         var a = try LineIterator(repo_kind).initFromIndex(core_cursor, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
                         errdefer a.deinit();
                         var b = try LineIterator(repo_kind).initFromNothing(self.allocator, path);
@@ -1332,36 +1332,36 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
                         return .{ .path = path, .a = a, .b = b };
                     }
                 },
-                .index => {
-                    if (next_index < self.diff_opts.index.status.index_added.count()) {
-                        const path = self.diff_opts.index.status.index_added.keys()[next_index];
+                .index => |index| {
+                    if (next_index < index.status.index_added.count()) {
+                        const path = index.status.index_added.keys()[next_index];
                         var a = try LineIterator(repo_kind).initFromNothing(self.allocator, path);
                         errdefer a.deinit();
-                        const index_entries_for_path = self.diff_opts.index.status.index.entries.get(path) orelse return error.EntryNotFound;
+                        const index_entries_for_path = index.status.index.entries.get(path) orelse return error.EntryNotFound;
                         var b = try LineIterator(repo_kind).initFromIndex(core_cursor, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
                         errdefer b.deinit();
                         self.next_index += 1;
                         return .{ .path = path, .a = a, .b = b };
                     } else {
-                        next_index -= self.diff_opts.index.status.index_added.count();
+                        next_index -= index.status.index_added.count();
                     }
 
-                    if (next_index < self.diff_opts.index.status.index_modified.count()) {
-                        const path = self.diff_opts.index.status.index_modified.keys()[next_index];
-                        var a = try LineIterator(repo_kind).initFromHead(core_cursor, self.allocator, path, self.diff_opts.index.status.head_tree.entries.get(path) orelse return error.EntryNotFound);
+                    if (next_index < index.status.index_modified.count()) {
+                        const path = index.status.index_modified.keys()[next_index];
+                        var a = try LineIterator(repo_kind).initFromHead(core_cursor, self.allocator, path, index.status.head_tree.entries.get(path) orelse return error.EntryNotFound);
                         errdefer a.deinit();
-                        const index_entries_for_path = self.diff_opts.index.status.index.entries.get(path) orelse return error.EntryNotFound;
+                        const index_entries_for_path = index.status.index.entries.get(path) orelse return error.EntryNotFound;
                         var b = try LineIterator(repo_kind).initFromIndex(core_cursor, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
                         errdefer b.deinit();
                         self.next_index += 1;
                         return .{ .path = path, .a = a, .b = b };
                     } else {
-                        next_index -= self.diff_opts.index.status.index_modified.count();
+                        next_index -= index.status.index_modified.count();
                     }
 
-                    if (next_index < self.diff_opts.index.status.index_deleted.count()) {
-                        const path = self.diff_opts.index.status.index_deleted.keys()[next_index];
-                        var a = try LineIterator(repo_kind).initFromHead(core_cursor, self.allocator, path, self.diff_opts.index.status.head_tree.entries.get(path) orelse return error.EntryNotFound);
+                    if (next_index < index.status.index_deleted.count()) {
+                        const path = index.status.index_deleted.keys()[next_index];
+                        var a = try LineIterator(repo_kind).initFromHead(core_cursor, self.allocator, path, index.status.head_tree.entries.get(path) orelse return error.EntryNotFound);
                         errdefer a.deinit();
                         var b = try LineIterator(repo_kind).initFromNothing(self.allocator, path);
                         errdefer b.deinit();
@@ -1369,10 +1369,10 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
                         return .{ .path = path, .a = a, .b = b };
                     }
                 },
-                .tree => {
-                    if (next_index < self.diff_opts.tree.tree_diff.changes.count()) {
-                        const path = self.diff_opts.tree.tree_diff.changes.keys()[next_index];
-                        const change = self.diff_opts.tree.tree_diff.changes.values()[next_index];
+                .tree => |tree| {
+                    if (next_index < tree.tree_diff.changes.count()) {
+                        const path = tree.tree_diff.changes.keys()[next_index];
+                        const change = tree.tree_diff.changes.values()[next_index];
                         var a = if (change.old) |old|
                             try LineIterator(repo_kind).initFromOid(core_cursor, self.allocator, path, old.oid, old.mode)
                         else

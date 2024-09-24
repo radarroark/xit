@@ -320,8 +320,8 @@ fn writeBlobWithConflict(
 
                 if (try self.parent.diff3_iter.next()) |chunk| {
                     switch (chunk) {
-                        .clean => {
-                            for (chunk.clean.begin..chunk.clean.end) |line_num| {
+                        .clean => |clean| {
+                            for (clean.begin..clean.end) |line_num| {
                                 const common_line = try self.parent.common_iter.get(line_num);
                                 {
                                     errdefer self.parent.allocator.free(common_line);
@@ -330,12 +330,12 @@ fn writeBlobWithConflict(
                                 self.parent.current_line = self.parent.line_buffer.items[0];
                             }
                         },
-                        .conflict => {
-                            var o_lines = try LineRange.init(self.parent.allocator, self.parent.common_iter, chunk.conflict.o_range);
+                        .conflict => |conflict| {
+                            var o_lines = try LineRange.init(self.parent.allocator, self.parent.common_iter, conflict.o_range);
                             defer o_lines.deinit();
-                            var a_lines = try LineRange.init(self.parent.allocator, self.parent.current_iter, chunk.conflict.a_range);
+                            var a_lines = try LineRange.init(self.parent.allocator, self.parent.current_iter, conflict.a_range);
                             defer a_lines.deinit();
-                            var b_lines = try LineRange.init(self.parent.allocator, self.parent.source_iter, chunk.conflict.b_range);
+                            var b_lines = try LineRange.init(self.parent.allocator, self.parent.source_iter, conflict.b_range);
                             defer b_lines.deinit();
 
                             // if o == a or a == b, return b to autoresolve conflict
@@ -694,7 +694,7 @@ pub const Merge = struct {
         };
 
         switch (merge_input) {
-            .new => {
+            .new => |new| {
                 // make sure there is no stored merge state
                 switch (repo_kind) {
                     .git => {
@@ -717,8 +717,8 @@ pub const Merge = struct {
 
                 // we need to return the source name so copy it into a new buffer
                 // so we an ensure it lives as long as the rest of the return struct
-                const source_name = try arena.allocator().alloc(u8, merge_input.new.source_name.len);
-                @memcpy(source_name, merge_input.new.source_name);
+                const source_name = try arena.allocator().alloc(u8, new.source_name.len);
+                @memcpy(source_name, new.source_name);
 
                 // get the oids for the three-way merge
                 const source_oid = try ref.resolve(repo_kind, core_cursor, source_name) orelse return error.InvalidTarget;
