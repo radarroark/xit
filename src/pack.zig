@@ -167,6 +167,7 @@ pub const PackObjectReader = struct {
                 },
             },
             allocator: std.mem.Allocator,
+            initialized: bool,
             base_reader: *PackObjectReader,
             chunk_index: usize,
             chunk_position: u64,
@@ -393,6 +394,7 @@ pub const PackObjectReader = struct {
                                 },
                             },
                             .allocator = allocator,
+                            .initialized = false,
                             .base_reader = undefined,
                             .chunk_index = 0,
                             .chunk_position = 0,
@@ -424,6 +426,7 @@ pub const PackObjectReader = struct {
                                 },
                             },
                             .allocator = allocator,
+                            .initialized = false,
                             .base_reader = undefined,
                             .chunk_index = 0,
                             .chunk_position = 0,
@@ -577,6 +580,7 @@ pub const PackObjectReader = struct {
                 .delta = .{
                     .init = self.internal.delta.init,
                     .allocator = allocator,
+                    .initialized = true,
                     .base_reader = base_reader,
                     .chunk_index = 0,
                     .chunk_position = 0,
@@ -649,15 +653,17 @@ pub const PackObjectReader = struct {
         switch (self.internal) {
             .basic => {},
             .delta => |*delta| {
-                delta.base_reader.deinit();
-                delta.allocator.destroy(delta.base_reader);
-                delta.chunks.deinit();
-                delta.cache.deinit();
-                delta.cache_arena.deinit();
-                delta.allocator.destroy(delta.cache_arena);
                 switch (delta.init) {
                     .ofs => |ofs| delta.allocator.free(ofs.pack_file_path),
                     .ref => {},
+                }
+                if (delta.initialized) {
+                    delta.base_reader.deinit();
+                    delta.allocator.destroy(delta.base_reader);
+                    delta.chunks.deinit();
+                    delta.cache.deinit();
+                    delta.cache_arena.deinit();
+                    delta.allocator.destroy(delta.cache_arena);
                 }
             },
         }
