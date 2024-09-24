@@ -230,14 +230,14 @@ test "pack" {
             }
         }
 
-        var pack_file_path = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
-        const pack_file_path_slice = try temp_dir.realpath("test.pack", &pack_file_path);
+        const pack_file_path = try temp_dir.realpathAlloc(allocator, "test.pack");
+        defer allocator.free(pack_file_path);
 
         for (&[_]*c.git_oid{ &commit_oid1, &commit_oid2 }) |commit_oid| {
             var commit_oid_hex = [_]u8{0} ** hash.SHA1_HEX_LEN;
             try std.testing.expectEqual(0, c.git_oid_fmt(@ptrCast(&commit_oid_hex), commit_oid));
 
-            var pack_reader = try pack.PackObjectReader.initWithPath(pack_file_path, pack_file_path_slice.len, commit_oid_hex);
+            var pack_reader = try pack.PackObjectReader.initWithPath(allocator, pack_file_path, commit_oid_hex);
             defer pack_reader.deinit();
         }
     }
