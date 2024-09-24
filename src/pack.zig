@@ -159,8 +159,7 @@ pub const PackObjectReader = struct {
         delta: struct {
             init: union(enum) {
                 ofs: struct {
-                    pack_file_path: [std.fs.MAX_PATH_BYTES]u8,
-                    pack_file_path_len: usize,
+                    pack_file_path: []const u8,
                     position: u64,
                 },
                 ref: struct {
@@ -195,7 +194,7 @@ pub const PackObjectReader = struct {
     pub const Error = compress.ZlibStream.Reader.Error || error{ Unseekable, UnexpectedEndOfStream, InvalidDeltaCache };
 
     pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(.git).Core, oid_hex: [hash.SHA1_HEX_LEN]u8) !PackObjectReader {
-        var pack_reader = try PackObjectReader.initWithIndex(core, oid_hex);
+        var pack_reader = try PackObjectReader.initWithIndex(allocator, core, oid_hex);
 
         // make a list of the chain of deltified objects,
         // and initialize each one. we can't do this during the initial
@@ -225,8 +224,8 @@ pub const PackObjectReader = struct {
         return pack_reader;
     }
 
-    pub fn initWithPath(pack_file_path: [std.fs.MAX_PATH_BYTES]u8, pack_file_path_len: usize, oid_hex: [hash.SHA1_HEX_LEN]u8) !PackObjectReader {
-        var pack_file = try std.fs.openFileAbsolute(pack_file_path[0..pack_file_path_len], .{ .mode = .read_only });
+    pub fn initWithPath(allocator: std.mem.Allocator, pack_file_path: []const u8, oid_hex: [hash.SHA1_HEX_LEN]u8) !PackObjectReader {
+        var pack_file = try std.fs.openFileAbsolute(pack_file_path, .{ .mode = .read_only });
         defer pack_file.close();
         const reader = pack_file.reader();
 
@@ -244,7 +243,7 @@ pub const PackObjectReader = struct {
         var start_position = try pack_file.getPos();
 
         for (0..obj_count) |_| {
-            var pack_reader = try PackObjectReader.initAtPosition(pack_file_path, pack_file_path_len, start_position);
+            var pack_reader = try PackObjectReader.initAtPosition(allocator, pack_file_path, start_position);
             defer pack_reader.deinit();
 
             var header_bytes = [_]u8{0} ** 128;
@@ -260,7 +259,7 @@ pub const PackObjectReader = struct {
             try hash.sha1Reader(&pack_reader, header_str, &oid);
 
             if (std.mem.eql(u8, &oid_hex, &std.fmt.bytesToHex(oid, .lower))) {
-                return try PackObjectReader.initAtPosition(pack_file_path, pack_file_path_len, start_position);
+                return try PackObjectReader.initAtPosition(allocator, pack_file_path, start_position);
             }
 
             // make sure the stream is at the end so the file position is correct
@@ -272,7 +271,7 @@ pub const PackObjectReader = struct {
         return error.ObjectNotFound;
     }
 
-    fn initWithIndex(core: *rp.Repo(.git).Core, oid_hex: [hash.SHA1_HEX_LEN]u8) !PackObjectReader {
+    fn initWithIndex(allocator: std.mem.Allocator, core: *rp.Repo(.git).Core, oid_hex: [hash.SHA1_HEX_LEN]u8) !PackObjectReader {
         var pack_dir = try core.git_dir.openDir("objects/pack", .{ .iterate = true });
         defer pack_dir.close();
 
@@ -285,10 +284,10 @@ pub const PackObjectReader = struct {
         var file_name_buf = [_]u8{0} ** pack_file_name_len;
         const file_name = try std.fmt.bufPrint(&file_name_buf, "{s}{s}{s}", .{ pack_prefix, pack_offset.pack_id, pack_suffix });
 
-        var pack_file_path = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
-        const pack_file_path_slice = try pack_dir.realpath(file_name, &pack_file_path);
+        const pack_file_path = try pack_dir.realpathAlloc(allocator, file_name);
+        defer allocator.free(pack_file_path);
 
-        var pack_file = try std.fs.openFileAbsolute(pack_file_path_slice, .{ .mode = .read_only });
+        var pack_file = try std.fs.openFileAbsolute(pack_file_path, .{ .mode = .read_only });
         defer pack_file.close();
         const reader = pack_file.reader();
 
@@ -303,11 +302,11 @@ pub const PackObjectReader = struct {
         }
         _ = try reader.readInt(u32, .big); // number of objects
 
-        return try PackObjectReader.initAtPosition(pack_file_path, pack_file_path_slice.len, pack_offset.value);
+        return try PackObjectReader.initAtPosition(allocator, pack_file_path, pack_offset.value);
     }
 
-    fn initAtPosition(pack_file_path: [std.fs.MAX_PATH_BYTES]u8, pack_file_path_len: usize, position: u64) !PackObjectReader {
-        var pack_file = try std.fs.openFileAbsolute(pack_file_path[0..pack_file_path_len], .{ .mode = .read_only });
+    fn initAtPosition(allocator: std.mem.Allocator, pack_file_path: []const u8, position: u64) !PackObjectReader {
+        var pack_file = try std.fs.openFileAbsolute(pack_file_path, .{ .mode = .read_only });
         errdefer pack_file.close();
         try pack_file.seekTo(position);
         const reader = pack_file.reader();
@@ -374,6 +373,9 @@ pub const PackObjectReader = struct {
                     }
                 }
 
+                const pack_file_path_copy = try allocator.dupe(u8, pack_file_path);
+                errdefer allocator.free(pack_file_path_copy);
+
                 const start_position = try pack_file.getPos();
 
                 return .{
@@ -386,12 +388,11 @@ pub const PackObjectReader = struct {
                         .delta = .{
                             .init = .{
                                 .ofs = .{
-                                    .pack_file_path = pack_file_path,
-                                    .pack_file_path_len = pack_file_path_len,
+                                    .pack_file_path = pack_file_path_copy,
                                     .position = position - offset,
                                 },
                             },
-                            .allocator = undefined,
+                            .allocator = allocator,
                             .base_reader = undefined,
                             .chunk_index = 0,
                             .chunk_position = 0,
@@ -422,7 +423,7 @@ pub const PackObjectReader = struct {
                                     .oid_hex = std.fmt.bytesToHex(base_oid, .lower),
                                 },
                             },
-                            .allocator = undefined,
+                            .allocator = allocator,
                             .base_reader = undefined,
                             .chunk_index = 0,
                             .chunk_position = 0,
@@ -444,8 +445,8 @@ pub const PackObjectReader = struct {
         const base_reader = try allocator.create(PackObjectReader);
         errdefer allocator.destroy(base_reader);
         base_reader.* = switch (self.internal.delta.init) {
-            .ofs => |ofs| try PackObjectReader.initAtPosition(ofs.pack_file_path, ofs.pack_file_path_len, ofs.position),
-            .ref => |ref| try PackObjectReader.initWithIndex(core, ref.oid_hex),
+            .ofs => |ofs| try PackObjectReader.initAtPosition(allocator, ofs.pack_file_path, ofs.position),
+            .ref => |ref| try PackObjectReader.initWithIndex(allocator, core, ref.oid_hex),
         };
         errdefer base_reader.deinit();
 
@@ -654,6 +655,10 @@ pub const PackObjectReader = struct {
                 delta.cache.deinit();
                 delta.cache_arena.deinit();
                 delta.allocator.destroy(delta.cache_arena);
+                switch (delta.init) {
+                    .ofs => |ofs| delta.allocator.free(ofs.pack_file_path),
+                    .ref => {},
+                }
             },
         }
     }
