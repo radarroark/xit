@@ -93,7 +93,7 @@ pub fn ConfigListItem(comptime Widget: type) type {
 
 pub fn ConfigList(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
     return struct {
-        box: wgt.Box(Widget),
+        scroll: wgt.Scroll(Widget),
         config: cfg.Config(repo_kind),
         allocator: std.mem.Allocator,
         arena: *std.heap.ArenaAllocator,
@@ -110,31 +110,34 @@ pub fn ConfigList(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
             }
 
             // init box
-            var box = try wgt.Box(Widget).init(allocator, null, .vert);
-            errdefer box.deinit();
+            var inner_box = try wgt.Box(Widget).init(allocator, null, .vert);
+            errdefer inner_box.deinit();
 
             for (config.sections.keys(), config.sections.values()) |section_name, variables| {
                 for (variables.keys(), variables.values()) |name, value| {
                     const full_name = try std.fmt.allocPrint(arena.allocator(), "{s}.{s}", .{ section_name, name });
                     var config_item = try ConfigListItem(Widget).init(allocator, full_name, value);
-                    try box.children.put(config_item.getFocus().id, .{ .widget = .{ .ui_config_list_item = config_item }, .rect = null, .min_size = null });
+                    try inner_box.children.put(config_item.getFocus().id, .{ .widget = .{ .ui_config_list_item = config_item }, .rect = null, .min_size = null });
                 }
             }
 
-            var ui_config = ConfigList(Widget, repo_kind){
-                .box = box,
+            // init scroll
+            var scroll = try wgt.Scroll(Widget).init(allocator, .{ .box = inner_box }, .vert);
+            errdefer scroll.deinit();
+            if (inner_box.children.count() > 0) {
+                scroll.getFocus().child_id = inner_box.children.keys()[0];
+            }
+
+            return ConfigList(Widget, repo_kind){
+                .scroll = scroll,
                 .config = config,
                 .allocator = allocator,
                 .arena = arena,
             };
-            if (box.children.count() > 0) {
-                ui_config.getFocus().child_id = box.children.keys()[0];
-            }
-            return ui_config;
         }
 
         pub fn deinit(self: *ConfigList(Widget, repo_kind)) void {
-            self.box.deinit();
+            self.scroll.deinit();
             self.config.deinit();
             self.arena.deinit();
             self.allocator.destroy(self.arena);
@@ -142,12 +145,12 @@ pub fn ConfigList(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
 
         pub fn build(self: *ConfigList(Widget, repo_kind), constraint: layout.Constraint, root_focus: *Focus) !void {
             self.clearGrid();
-            try self.box.build(constraint, root_focus);
+            try self.scroll.build(constraint, root_focus);
         }
 
         pub fn input(self: *ConfigList(Widget, repo_kind), key: inp.Key, root_focus: *Focus) !void {
             if (self.getFocus().child_id) |child_id| {
-                const children = &self.box.children;
+                const children = &self.scroll.child.box.children;
                 if (children.getIndex(child_id)) |current_index| {
                     var index = current_index;
 
@@ -189,29 +192,37 @@ pub fn ConfigList(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
 
                     if (index != current_index) {
                         try root_focus.setFocus(children.keys()[index]);
+                        self.updateScroll(index);
                     }
                 }
             }
         }
 
         pub fn clearGrid(self: *ConfigList(Widget, repo_kind)) void {
-            self.box.clearGrid();
+            self.scroll.clearGrid();
         }
 
         pub fn getGrid(self: ConfigList(Widget, repo_kind)) ?Grid {
-            return self.box.getGrid();
+            return self.scroll.getGrid();
         }
 
         pub fn getFocus(self: *ConfigList(Widget, repo_kind)) *Focus {
-            return self.box.getFocus();
+            return self.scroll.getFocus();
         }
 
         pub fn getSelectedIndex(self: ConfigList(Widget, repo_kind)) ?usize {
-            if (self.box.focus.child_id) |child_id| {
-                const children = &self.box.children;
+            if (self.scroll.child.box.focus.child_id) |child_id| {
+                const children = &self.scroll.child.box.children;
                 return children.getIndex(child_id);
             } else {
                 return null;
+            }
+        }
+
+        fn updateScroll(self: *ConfigList(Widget, repo_kind), index: usize) void {
+            const box = &self.scroll.child.box;
+            if (box.children.values()[index].rect) |rect| {
+                self.scroll.scrollToRect(rect);
             }
         }
     };
