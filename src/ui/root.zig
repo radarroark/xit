@@ -138,7 +138,7 @@ pub fn Root(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                         }
 
                         {
-                            var config = Widget{ .ui_config = try ui_config.Config(Widget, repo_kind).init(allocator, repo) };
+                            var config = Widget{ .ui_config_list = try ui_config.ConfigList(Widget, repo_kind).init(allocator, repo) };
                             errdefer config.deinit();
                             try stack.children.put(config.getFocus().id, config);
                         }
@@ -198,8 +198,8 @@ pub fn Root(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                                                     try child.input(key, root_focus);
                                                 }
                                             },
-                                            .ui_config => {
-                                                if (selected_widget.ui_config.getSelectedIndex() == 0) {
+                                            .ui_config_list => {
+                                                if (selected_widget.ui_config_list.getSelectedIndex() == 0) {
                                                     index = @intFromEnum(FocusKind.tabs);
                                                 } else {
                                                     try child.input(key, root_focus);
