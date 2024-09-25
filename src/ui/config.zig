@@ -41,9 +41,9 @@ pub fn ConfigItem(comptime Widget: type) type {
             self.clearGrid();
             for (self.box.children.keys(), self.box.children.values()) |id, *item| {
                 item.widget.text_box.border_style = if (self.getFocus().child_id == id)
-                    (if (root_focus.grandchild_id == id) .double else .dashed)
+                    (if (root_focus.grandchild_id == id) .double_dashed else .single_dashed)
                 else
-                    .dashed;
+                    .single_dashed;
             }
             try self.box.build(constraint, root_focus);
         }
