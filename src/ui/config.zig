@@ -24,7 +24,7 @@ pub fn ConfigItem(comptime Widget: type) type {
             var value_text_box = try wgt.TextBox(Widget).init(allocator, value, .single);
             errdefer value_text_box.deinit();
             value_text_box.getFocus().focusable = true;
-            try box.children.put(value_text_box.getFocus().id, .{ .widget = .{ .text_box = value_text_box }, .rect = null, .min_size = null });
+            try box.children.put(value_text_box.getFocus().id, .{ .widget = .{ .text_box = value_text_box }, .rect = null, .min_size = .{ .width = 30, .height = null } });
 
             var self = ConfigItem(Widget){
                 .box = box,
