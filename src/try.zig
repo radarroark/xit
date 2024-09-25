@@ -7,7 +7,7 @@ const mn = @import("./main.zig");
 const rp = @import("./repo.zig");
 const obj = @import("./object.zig");
 
-const COMMIT_COUNT = 5;
+const COMMIT_COUNT = 2;
 
 fn copyDir(src_dir: std.fs.Dir, dest_dir: std.fs.Dir) !void {
     var iter = src_dir.iterate();
@@ -68,6 +68,7 @@ pub fn main() !void {
         var status = try git_repo.status();
         defer status.deinit();
         for (status.workspace_deleted.keys()) |path| {
+            if (std.mem.startsWith(u8, path, "deps/")) continue;
             try writers.out.print("Restoring: {s}\n", .{path});
             git_repo.restore(path) catch |err| switch (err) {
                 error.FileNotFound, error.ObjectInvalid => try writers.err.print("Failed to restore: {s}\n", .{path}),
