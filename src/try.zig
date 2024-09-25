@@ -125,6 +125,10 @@ pub fn main() !void {
             try build_zig.writeAll("\n// ...and here's another one!");
         }
         try temp_dir.deleteFile("build.zig.zon");
+
+        // set some config values
+        try xit_repo.addConfig(.{ .name = "core.editor", .value = "vim" });
+        try xit_repo.addConfig(.{ .name = "branch.master.remote", .value = "origin" });
     }
 
     var args = std.ArrayList([]const u8).init(allocator);

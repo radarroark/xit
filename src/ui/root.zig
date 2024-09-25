@@ -7,13 +7,14 @@ const Grid = xitui.grid.Grid;
 const Focus = xitui.focus.Focus;
 const ui_log = @import("./log.zig");
 const ui_status = @import("./status.zig");
+const ui_config = @import("./config.zig");
 const rp = @import("../repo.zig");
 
 pub fn RootTabs(comptime Widget: type) type {
     return struct {
         box: wgt.Box(Widget),
 
-        const FocusKind = enum { log, status };
+        const FocusKind = enum { log, status, config };
 
         pub fn init(allocator: std.mem.Allocator) !RootTabs(Widget) {
             var box = try wgt.Box(Widget).init(allocator, null, .horiz);
@@ -24,6 +25,7 @@ pub fn RootTabs(comptime Widget: type) type {
                 const name = switch (focus_kind) {
                     .log => "log",
                     .status => "status",
+                    .config => "config",
                 };
                 var text_box = try wgt.TextBox(Widget).init(allocator, name, .single);
                 errdefer text_box.deinit();
@@ -135,6 +137,12 @@ pub fn Root(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                             try stack.children.put(status.getFocus().id, status);
                         }
 
+                        {
+                            var config = Widget{ .ui_config = try ui_config.Config(Widget, repo_kind).init(allocator, repo) };
+                            errdefer config.deinit();
+                            try stack.children.put(config.getFocus().id, config);
+                        }
+
                         try box.children.put(stack.getFocus().id, .{ .widget = .{ .stack = stack }, .rect = null, .min_size = null });
                     },
                 }
@@ -185,6 +193,13 @@ pub fn Root(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                                             },
                                             .ui_status => {
                                                 if (selected_widget.ui_status.getSelectedIndex() == 0) {
+                                                    index = @intFromEnum(FocusKind.tabs);
+                                                } else {
+                                                    try child.input(key, root_focus);
+                                                }
+                                            },
+                                            .ui_config => {
+                                                if (selected_widget.ui_config.getSelectedIndex() == 0) {
                                                     index = @intFromEnum(FocusKind.tabs);
                                                 } else {
                                                     try child.input(key, root_focus);

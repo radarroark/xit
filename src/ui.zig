@@ -10,6 +10,7 @@ const ui_root = @import("./ui/root.zig");
 const ui_log = @import("./ui/log.zig");
 const ui_diff = @import("./ui/diff.zig");
 const ui_status = @import("./ui/status.zig");
+const ui_config = @import("./ui/config.zig");
 const rp = @import("./repo.zig");
 
 pub fn Widget(comptime repo_kind: rp.RepoKind) type {
@@ -29,6 +30,7 @@ pub fn Widget(comptime repo_kind: rp.RepoKind) type {
         ui_status_tabs: ui_status.StatusTabs(Widget(repo_kind), repo_kind),
         ui_status_list: ui_status.StatusList(Widget(repo_kind)),
         ui_status_list_item: ui_status.StatusListItem(Widget(repo_kind)),
+        ui_config: ui_config.Config(Widget(repo_kind), repo_kind),
 
         pub fn deinit(self: *Widget(repo_kind)) void {
             switch (self.*) {
