@@ -31,6 +31,7 @@ pub fn Widget(comptime repo_kind: rp.RepoKind) type {
         ui_status_list: ui_status.StatusList(Widget(repo_kind)),
         ui_status_list_item: ui_status.StatusListItem(Widget(repo_kind)),
         ui_config: ui_config.Config(Widget(repo_kind), repo_kind),
+        ui_config_item: ui_config.ConfigItem(Widget(repo_kind)),
 
         pub fn deinit(self: *Widget(repo_kind)) void {
             switch (self.*) {
