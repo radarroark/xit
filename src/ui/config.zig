@@ -8,11 +8,11 @@ const Focus = xitui.focus.Focus;
 const rp = @import("../repo.zig");
 const cfg = @import("../config.zig");
 
-pub fn ConfigItem(comptime Widget: type) type {
+pub fn ConfigListItem(comptime Widget: type) type {
     return struct {
         box: wgt.Box(Widget),
 
-        pub fn init(allocator: std.mem.Allocator, full_name: []const u8, value: []const u8) !ConfigItem(Widget) {
+        pub fn init(allocator: std.mem.Allocator, full_name: []const u8, value: []const u8) !ConfigListItem(Widget) {
             var box = try wgt.Box(Widget).init(allocator, null, .horiz);
             errdefer box.deinit();
 
@@ -26,18 +26,18 @@ pub fn ConfigItem(comptime Widget: type) type {
             value_text_box.getFocus().focusable = true;
             try box.children.put(value_text_box.getFocus().id, .{ .widget = .{ .text_box = value_text_box }, .rect = null, .min_size = .{ .width = 30, .height = null } });
 
-            var self = ConfigItem(Widget){
+            var self = ConfigListItem(Widget){
                 .box = box,
             };
             self.getFocus().child_id = box.children.keys()[0];
             return self;
         }
 
-        pub fn deinit(self: *ConfigItem(Widget)) void {
+        pub fn deinit(self: *ConfigListItem(Widget)) void {
             self.box.deinit();
         }
 
-        pub fn build(self: *ConfigItem(Widget), constraint: layout.Constraint, root_focus: *Focus) !void {
+        pub fn build(self: *ConfigListItem(Widget), constraint: layout.Constraint, root_focus: *Focus) !void {
             self.clearGrid();
             for (self.box.children.keys(), self.box.children.values()) |id, *item| {
                 item.widget.text_box.border_style = if (self.getFocus().child_id == id)
@@ -48,7 +48,7 @@ pub fn ConfigItem(comptime Widget: type) type {
             try self.box.build(constraint, root_focus);
         }
 
-        pub fn input(self: *ConfigItem(Widget), key: inp.Key, root_focus: *Focus) !void {
+        pub fn input(self: *ConfigListItem(Widget), key: inp.Key, root_focus: *Focus) !void {
             if (self.getFocus().child_id) |child_id| {
                 const children = &self.box.children;
                 if (children.getIndex(child_id)) |current_index| {
@@ -73,32 +73,32 @@ pub fn ConfigItem(comptime Widget: type) type {
             }
         }
 
-        pub fn clearGrid(self: *ConfigItem(Widget)) void {
+        pub fn clearGrid(self: *ConfigListItem(Widget)) void {
             self.box.clearGrid();
         }
 
-        pub fn getGrid(self: ConfigItem(Widget)) ?Grid {
+        pub fn getGrid(self: ConfigListItem(Widget)) ?Grid {
             return self.box.getGrid();
         }
 
-        pub fn getFocus(self: *ConfigItem(Widget)) *Focus {
+        pub fn getFocus(self: *ConfigListItem(Widget)) *Focus {
             return self.box.getFocus();
         }
 
-        pub fn setBorder(self: *ConfigItem(Widget), border_style: ?wgt.Box(Widget).BorderStyle) void {
+        pub fn setBorder(self: *ConfigListItem(Widget), border_style: ?wgt.Box(Widget).BorderStyle) void {
             self.box.children.values()[1].widget.text_box.border_style = border_style;
         }
     };
 }
 
-pub fn Config(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
+pub fn ConfigList(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
     return struct {
         box: wgt.Box(Widget),
         config: cfg.Config(repo_kind),
         allocator: std.mem.Allocator,
         arena: *std.heap.ArenaAllocator,
 
-        pub fn init(allocator: std.mem.Allocator, repo: *rp.Repo(repo_kind)) !Config(Widget, repo_kind) {
+        pub fn init(allocator: std.mem.Allocator, repo: *rp.Repo(repo_kind)) !ConfigList(Widget, repo_kind) {
             var config = try repo.config();
             errdefer config.deinit();
 
@@ -116,12 +116,12 @@ pub fn Config(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
             for (config.sections.keys(), config.sections.values()) |section_name, variables| {
                 for (variables.keys(), variables.values()) |name, value| {
                     const full_name = try std.fmt.allocPrint(arena.allocator(), "{s}.{s}", .{ section_name, name });
-                    var config_item = try ConfigItem(Widget).init(allocator, full_name, value);
-                    try box.children.put(config_item.getFocus().id, .{ .widget = .{ .ui_config_item = config_item }, .rect = null, .min_size = null });
+                    var config_item = try ConfigListItem(Widget).init(allocator, full_name, value);
+                    try box.children.put(config_item.getFocus().id, .{ .widget = .{ .ui_config_list_item = config_item }, .rect = null, .min_size = null });
                 }
             }
 
-            var ui_config = Config(Widget, repo_kind){
+            var ui_config = ConfigList(Widget, repo_kind){
                 .box = box,
                 .config = config,
                 .allocator = allocator,
@@ -133,19 +133,19 @@ pub fn Config(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
             return ui_config;
         }
 
-        pub fn deinit(self: *Config(Widget, repo_kind)) void {
+        pub fn deinit(self: *ConfigList(Widget, repo_kind)) void {
             self.box.deinit();
             self.config.deinit();
             self.arena.deinit();
             self.allocator.destroy(self.arena);
         }
 
-        pub fn build(self: *Config(Widget, repo_kind), constraint: layout.Constraint, root_focus: *Focus) !void {
+        pub fn build(self: *ConfigList(Widget, repo_kind), constraint: layout.Constraint, root_focus: *Focus) !void {
             self.clearGrid();
             try self.box.build(constraint, root_focus);
         }
 
-        pub fn input(self: *Config(Widget, repo_kind), key: inp.Key, root_focus: *Focus) !void {
+        pub fn input(self: *ConfigList(Widget, repo_kind), key: inp.Key, root_focus: *Focus) !void {
             if (self.getFocus().child_id) |child_id| {
                 const children = &self.box.children;
                 if (children.getIndex(child_id)) |current_index| {
@@ -194,19 +194,19 @@ pub fn Config(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
             }
         }
 
-        pub fn clearGrid(self: *Config(Widget, repo_kind)) void {
+        pub fn clearGrid(self: *ConfigList(Widget, repo_kind)) void {
             self.box.clearGrid();
         }
 
-        pub fn getGrid(self: Config(Widget, repo_kind)) ?Grid {
+        pub fn getGrid(self: ConfigList(Widget, repo_kind)) ?Grid {
             return self.box.getGrid();
         }
 
-        pub fn getFocus(self: *Config(Widget, repo_kind)) *Focus {
+        pub fn getFocus(self: *ConfigList(Widget, repo_kind)) *Focus {
             return self.box.getFocus();
         }
 
-        pub fn getSelectedIndex(self: Config(Widget, repo_kind)) ?usize {
+        pub fn getSelectedIndex(self: ConfigList(Widget, repo_kind)) ?usize {
             if (self.box.focus.child_id) |child_id| {
                 const children = &self.box.children;
                 return children.getIndex(child_id);
