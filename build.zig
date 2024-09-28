@@ -19,6 +19,7 @@ pub fn build(b: *std.Build) !void {
         exe.root_module.addAnonymousImport("xitui", .{
             .root_source_file = b.path("../xitui/src/lib.zig"),
         });
+        exe.root_module.addImport("network", b.dependency("network", .{}).module("network"));
         b.installArtifact(exe);
 
         const run_cmd = b.addRunArtifact(exe);
@@ -45,6 +46,7 @@ pub fn build(b: *std.Build) !void {
         exe.root_module.addAnonymousImport("xitui", .{
             .root_source_file = b.path("../xitui/src/lib.zig"),
         });
+        exe.root_module.addImport("network", b.dependency("network", .{}).module("network"));
         b.installArtifact(exe);
 
         const run_cmd = b.addRunArtifact(exe);
@@ -83,6 +85,7 @@ pub fn build(b: *std.Build) !void {
         unit_tests.linkLibC();
         unit_tests.addIncludePath(b.path("deps/test/libgit2/include"));
         unit_tests.linkLibrary(git2.step);
+        unit_tests.root_module.addImport("network", b.dependency("network", .{}).module("network"));
 
         const run_unit_tests = b.addRunArtifact(unit_tests);
         run_unit_tests.has_side_effects = true;
@@ -116,6 +119,7 @@ pub fn build(b: *std.Build) !void {
         unit_tests.linkLibC();
         unit_tests.addIncludePath(b.path("deps/test/libgit2/include"));
         unit_tests.linkLibrary(git2.step);
+        unit_tests.root_module.addImport("network", b.dependency("network", .{}).module("network"));
 
         const run_unit_tests = b.addRunArtifact(unit_tests);
         run_unit_tests.has_side_effects = true;
