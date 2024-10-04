@@ -153,7 +153,7 @@ pub fn writeBlob(
                 header: []const u8,
 
                 pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor(.read_write)) !void {
-                    if (cursor.pointer() == null) {
+                    if (cursor.slot() == null) {
                         var writer = try cursor.writer();
                         try writer.writeAll(ctx.header);
                         // TODO: use buffered io
@@ -269,7 +269,7 @@ fn writeTree(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).Co
 
                 pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor(.read_write)) !void {
                     // exit early if there is nothing to commit
-                    if (cursor.pointer() != null) {
+                    if (cursor.slot() != null) {
                         return;
                     }
                     var tree_cursor = try ctx.cursor.writePath(void, &.{
