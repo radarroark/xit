@@ -141,8 +141,6 @@ pub fn writeBlob(
             try std.fs.rename(hash_prefix_dir, compressed_tmp_file_name, hash_prefix_dir, hash_suffix);
         },
         .xit => {
-            const xitdb = @import("xitdb");
-
             const file_hash = hash.bytesToHash(sha1_bytes_buffer);
             const FileReaderType = @TypeOf(reader);
 
@@ -152,7 +150,7 @@ pub fn writeBlob(
                 sha1_hex: [hash.SHA1_HEX_LEN]u8,
                 header: []const u8,
 
-                pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor(.read_write)) !void {
+                pub fn run(ctx: @This(), cursor: *rp.Repo(repo_kind).DB.Cursor(.read_write)) !void {
                     if (cursor.slot() == null) {
                         var writer = try cursor.writer();
                         try writer.writeAll(ctx.header);
@@ -261,13 +259,12 @@ fn writeTree(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).Co
             try std.fs.rename(tree_hash_prefix_dir, tree_comp_tmp_file_name, tree_hash_prefix_dir, tree_hash_suffix);
         },
         .xit => {
-            const xitdb = @import("xitdb");
             const Ctx = struct {
-                cursor: *xitdb.Database(.file, hash.Hash).Cursor(.read_write),
+                cursor: *rp.Repo(repo_kind).DB.Cursor(.read_write),
                 tree_sha1_bytes: *const [hash.SHA1_BYTES_LEN]u8,
                 tree_bytes: []const u8,
 
-                pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor(.read_write)) !void {
+                pub fn run(ctx: @This(), cursor: *rp.Repo(repo_kind).DB.Cursor(.read_write)) !void {
                     // exit early if there is nothing to commit
                     if (cursor.slot() != null) {
                         return;
@@ -624,16 +621,14 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
         internal: switch (repo_kind) {
             .git => void,
             .xit => struct {
-                const xitdb = @import("xitdb");
-
                 header_offset: u64,
-                cursor: *xitdb.Database(.file, hash.Hash).Cursor(.read_write),
+                cursor: *rp.Repo(repo_kind).DB.Cursor(.read_write),
             },
         },
 
         pub const Reader = switch (repo_kind) {
             .git => pack.LooseOrPackObjectReader,
-            .xit => @import("xitdb").Database(.file, hash.Hash).Cursor(.read_write).Reader,
+            .xit => rp.Repo(repo_kind).DB.Cursor(.read_write).Reader,
         };
 
         pub fn init(allocator: std.mem.Allocator, core_cursor: rp.Repo(repo_kind).CoreCursor, oid: [hash.SHA1_HEX_LEN]u8) !@This() {
@@ -648,13 +643,12 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
                     };
                 },
                 .xit => {
-                    const xitdb = @import("xitdb");
                     if (try core_cursor.cursor.readPath(void, &.{
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
                         .{ .hash_map_get = .{ .value = try hash.hexToHash(&oid) } },
                     })) |cursor| {
                         // put cursor on the heap so the pointer is stable (the reader uses it internally)
-                        const cursor_ptr = try allocator.create(xitdb.Database(.file, hash.Hash).Cursor(.read_write));
+                        const cursor_ptr = try allocator.create(rp.Repo(repo_kind).DB.Cursor(.read_write));
                         errdefer allocator.destroy(cursor_ptr);
                         cursor_ptr.* = cursor;
                         var rdr = try cursor_ptr.reader();
@@ -909,7 +903,7 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime load_kind: Objec
         core: *rp.Repo(repo_kind).Core,
         cursor: switch (repo_kind) {
             .git => void,
-            .xit => @import("xitdb").Database(.file, hash.Hash).Cursor(.read_write),
+            .xit => rp.Repo(repo_kind).DB.Cursor(.read_write),
         },
         oid_queue: std.DoublyLinkedList([hash.SHA1_HEX_LEN]u8),
         oid_excludes: std.AutoHashMap([hash.SHA1_HEX_LEN]u8, void),

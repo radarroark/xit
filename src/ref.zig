@@ -356,14 +356,13 @@ pub fn updateRecur(
             }
         },
         .xit => {
-            const xitdb = @import("xitdb");
             const Ctx = struct {
                 core_cursor: rp.Repo(repo_kind).CoreCursor,
                 allocator: std.mem.Allocator,
                 oid_hex: *const [hash.SHA1_HEX_LEN]u8,
                 file_name: []const u8,
 
-                pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor(.read_write)) !void {
+                pub fn run(ctx: @This(), cursor: *rp.Repo(repo_kind).DB.Cursor(.read_write)) !void {
                     const file_name_hash = hash.hashBuffer(ctx.file_name);
 
                     var buffer = [_]u8{0} ** MAX_READ_BYTES;
@@ -402,7 +401,7 @@ pub fn updateRecur(
                     });
                 }
             };
-            var db_path_parts = std.ArrayList(xitdb.Database(.file, hash.Hash).PathPart(Ctx)).init(allocator);
+            var db_path_parts = std.ArrayList(rp.Repo(repo_kind).DB.PathPart(Ctx)).init(allocator);
             defer db_path_parts.deinit();
             for (path_parts[0 .. path_parts.len - 1]) |part_name| {
                 try db_path_parts.append(.{ .hash_map_get = .{ .value = hash.hashBuffer(part_name) } });

@@ -495,14 +495,12 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     try lock_file.writeAll(&overall_sha1_buffer);
                 },
                 .xit => {
-                    const xitdb = @import("xitdb");
-
                     const Ctx = struct {
                         core_cursor: rp.Repo(repo_kind).CoreCursor,
                         allocator: std.mem.Allocator,
                         index: *Index(repo_kind),
 
-                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor(.read_write)) !void {
+                        pub fn run(ctx: @This(), cursor: *rp.Repo(repo_kind).DB.Cursor(.read_write)) !void {
                             // remove items no longer in the index
                             var iter = try cursor.iter();
                             defer iter.deinit();
