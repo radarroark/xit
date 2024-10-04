@@ -38,7 +38,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 db_file: std.fs.File,
                 db: xitdb.Database(.file, hash.Hash),
 
-                pub fn latestCursor(self: *@This()) !xitdb.Database(.file, hash.Hash).Cursor {
+                pub fn latestCursor(self: *@This()) !xitdb.Database(.file, hash.Hash).Cursor(.read_write) {
                     return (try self.db.rootCursor().readPath(void, &.{
                         .{ .array_list_get = .{ .index = -1 } },
                     })) orelse return error.DatabaseEmpty;
@@ -55,7 +55,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 const xitdb = @import("xitdb");
 
                 core: *Core,
-                cursor: *xitdb.Database(.file, hash.Hash).Cursor,
+                cursor: *xitdb.Database(.file, hash.Hash).Cursor(.read_write),
             },
         };
 
@@ -210,7 +210,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         core: *Repo(repo_kind).Core,
                         allocator: std.mem.Allocator,
 
-                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor) !void {
+                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor(.read_write)) !void {
                             try ref.writeHead(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, "master", null);
                         }
                     };
@@ -556,7 +556,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         metadata: obj.CommitMetadata,
                         result: *[hash.SHA1_HEX_LEN]u8,
 
-                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor) !void {
+                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor(.read_write)) !void {
                             try pch.writePatch(.{ .core = ctx.core, .cursor = cursor }, ctx.allocator);
                             ctx.result.* = try obj.writeCommit(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, ctx.parent_oids_maybe, ctx.metadata);
                         }
@@ -597,7 +597,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         allocator: std.mem.Allocator,
                         paths: []const []const u8,
 
-                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor) !void {
+                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor(.read_write)) !void {
                             var index = try idx.Index(repo_kind).init(ctx.allocator, .{ .core = ctx.core, .cursor = cursor });
                             defer index.deinit();
 
@@ -681,7 +681,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         paths: []const []const u8,
                         opts: idx.IndexRemoveOptions,
 
-                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor) !void {
+                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor(.read_write)) !void {
                             var index = try idx.Index(repo_kind).init(ctx.allocator, .{ .core = ctx.core, .cursor = cursor });
                             defer index.deinit();
 
@@ -849,7 +849,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         allocator: std.mem.Allocator,
                         input: bch.AddBranchInput,
 
-                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor) !void {
+                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor(.read_write)) !void {
                             try bch.add(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, ctx.input);
                         }
                     };
@@ -874,7 +874,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         allocator: std.mem.Allocator,
                         input: bch.RemoveBranchInput,
 
-                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor) !void {
+                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor(.read_write)) !void {
                             try bch.remove(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, ctx.input);
                         }
                     };
@@ -902,7 +902,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         options: chk.Switch.Options,
                         result: *chk.Switch,
 
-                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor) !void {
+                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor(.read_write)) !void {
                             ctx.result.* = try chk.Switch.init(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, ctx.target, ctx.options);
                         }
                     };
@@ -954,7 +954,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         input: mrg.MergeInput,
                         result: *mrg.Merge,
 
-                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor) !void {
+                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor(.read_write)) !void {
                             ctx.result.* = try mrg.Merge.init(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, .merge, ctx.input);
                             // no need to make a new transaction if nothing was done
                             if (.nothing == ctx.result.data) {
@@ -989,7 +989,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         input: mrg.MergeInput,
                         result: *mrg.Merge,
 
-                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor) !void {
+                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor(.read_write)) !void {
                             ctx.result.* = try mrg.Merge.init(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, .cherry_pick, ctx.input);
                             // no need to make a new transaction if nothing was done
                             if (.nothing == ctx.result.data) {
@@ -1040,7 +1040,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         conf: *cfg.Config(repo_kind),
                         input: cfg.AddConfigInput,
 
-                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor) !void {
+                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor(.read_write)) !void {
                             try ctx.conf.add(.{ .core = ctx.core, .cursor = cursor }, ctx.input);
                         }
                     };
@@ -1074,7 +1074,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         conf: *cfg.Config(repo_kind),
                         input: cfg.RemoveConfigInput,
 
-                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor) !void {
+                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor(.read_write)) !void {
                             try ctx.conf.remove(.{ .core = ctx.core, .cursor = cursor }, ctx.input);
                         }
                     };
@@ -1121,7 +1121,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         conf: *cfg.Config(repo_kind),
                         input: cfg.AddConfigInput,
 
-                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor) !void {
+                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor(.read_write)) !void {
                             try ctx.conf.add(.{ .core = ctx.core, .cursor = cursor }, ctx.input);
                         }
                     };
@@ -1161,7 +1161,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         conf: *cfg.Config(repo_kind),
                         input: cfg.RemoveConfigInput,
 
-                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor) !void {
+                        pub fn run(ctx: @This(), cursor: *xitdb.Database(.file, hash.Hash).Cursor(.read_write)) !void {
                             try ctx.conf.remove(.{ .core = ctx.core, .cursor = cursor }, ctx.input);
                         }
                     };
