@@ -24,8 +24,8 @@ const FIRST_NODE_ID_INT: NodeIdInt = 0;
 
 /// TODO: turn this into an iterator all entries don't need to be in memory at the same time
 fn createPatchEntries(
-    root_cursor: *xitdb.Database(.file, hash.Hash).Cursor,
-    branch_cursor: *xitdb.Database(.file, hash.Hash).Cursor,
+    root_cursor: *xitdb.Database(.file, hash.Hash).Cursor(.read_write),
+    branch_cursor: *xitdb.Database(.file, hash.Hash).Cursor(.read_write),
     allocator: std.mem.Allocator,
     arena: *std.heap.ArenaAllocator,
     line_iter_pair: *df.LineIteratorPair(.xit),
@@ -138,8 +138,8 @@ fn createPatchEntries(
 }
 
 fn patchHash(
-    root_cursor: *xitdb.Database(.file, hash.Hash).Cursor,
-    branch_cursor: *xitdb.Database(.file, hash.Hash).Cursor,
+    root_cursor: *xitdb.Database(.file, hash.Hash).Cursor(.read_write),
+    branch_cursor: *xitdb.Database(.file, hash.Hash).Cursor(.read_write),
     allocator: std.mem.Allocator,
     line_iter_pair: *df.LineIteratorPair(.xit),
 ) !hash.Hash {
@@ -170,8 +170,8 @@ fn patchHash(
 }
 
 fn writePatchForFile(
-    root_cursor: *xitdb.Database(.file, hash.Hash).Cursor,
-    branch_cursor: *xitdb.Database(.file, hash.Hash).Cursor,
+    root_cursor: *xitdb.Database(.file, hash.Hash).Cursor(.read_write),
+    branch_cursor: *xitdb.Database(.file, hash.Hash).Cursor(.read_write),
     allocator: std.mem.Allocator,
     line_iter_pair: *df.LineIteratorPair(.xit),
 ) !hash.Hash {
@@ -228,8 +228,8 @@ fn writePatchForFile(
 }
 
 fn applyPatchForFile(
-    root_cursor: *xitdb.Database(.file, hash.Hash).Cursor,
-    branch_cursor: *xitdb.Database(.file, hash.Hash).Cursor,
+    root_cursor: *xitdb.Database(.file, hash.Hash).Cursor(.read_write),
+    branch_cursor: *xitdb.Database(.file, hash.Hash).Cursor(.read_write),
     allocator: std.mem.Allocator,
     patch_hash: hash.Hash,
     path: []const u8,

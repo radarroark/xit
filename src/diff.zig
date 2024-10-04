@@ -1250,7 +1250,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
         core: *rp.Repo(repo_kind).Core,
         cursor: switch (repo_kind) {
             .git => void,
-            .xit => @import("xitdb").Database(.file, hash.Hash).Cursor,
+            .xit => @import("xitdb").Database(.file, hash.Hash).Cursor(.read_write),
         },
         diff_opts: DiffOptions(repo_kind),
         next_index: usize,
