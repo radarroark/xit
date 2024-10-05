@@ -622,13 +622,13 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
             .git => void,
             .xit => struct {
                 header_offset: u64,
-                cursor: *rp.Repo(repo_kind).DB.Cursor(.read_write),
+                cursor: *rp.Repo(repo_kind).DB.Cursor(.read_only),
             },
         },
 
         pub const Reader = switch (repo_kind) {
             .git => pack.LooseOrPackObjectReader,
-            .xit => rp.Repo(repo_kind).DB.Cursor(.read_write).Reader,
+            .xit => rp.Repo(repo_kind).DB.Cursor(.read_only).Reader,
         };
 
         pub fn init(allocator: std.mem.Allocator, core_cursor: rp.Repo(repo_kind).CoreCursor, oid: [hash.SHA1_HEX_LEN]u8) !@This() {
@@ -648,7 +648,7 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
                         .{ .hash_map_get = .{ .value = try hash.hexToHash(&oid) } },
                     })) |cursor| {
                         // put cursor on the heap so the pointer is stable (the reader uses it internally)
-                        const cursor_ptr = try allocator.create(rp.Repo(repo_kind).DB.Cursor(.read_write));
+                        const cursor_ptr = try allocator.create(rp.Repo(repo_kind).DB.Cursor(.read_only));
                         errdefer allocator.destroy(cursor_ptr);
                         cursor_ptr.* = cursor;
                         var rdr = try cursor_ptr.reader();
