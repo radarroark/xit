@@ -42,9 +42,9 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 db: DB,
 
                 pub fn latestCursor(self: *@This()) !DB.Cursor(.read_write) {
-                    return (try self.db.rootCursor().readPath(void, &.{
+                    return try self.db.rootCursor().writePath(void, &.{
                         .{ .array_list_get = .{ .index = -1 } },
-                    })) orelse return error.DatabaseEmpty;
+                    });
                 }
             },
         };
