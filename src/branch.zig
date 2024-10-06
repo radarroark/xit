@@ -71,43 +71,25 @@ pub fn add(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, all
             const name_hash = hash.hashBuffer(name);
 
             // store ref name
-            var ref_name_cursor = try state.moment.cursor.writePath(void, &.{
-                .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-name-set") } },
-                .hash_map_init,
-                .{ .hash_map_get = .{ .key = name_hash } },
-            });
+            const ref_name_set_cursor = try state.moment.put(hash.hashBuffer("ref-name-set"));
+            const ref_name_set = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(ref_name_set_cursor);
+            var ref_name_cursor = try ref_name_set.putKey(name_hash);
             try ref_name_cursor.writeBytes(name, .once);
-            const name_slot = ref_name_cursor.slot();
-
-            // add ref name to refs/heads/{refname}
-            _ = try state.moment.cursor.writePath(void, &.{
-                .{ .hash_map_get = .{ .value = hash.hashBuffer("refs") } },
-                .hash_map_init,
-                .{ .hash_map_get = .{ .value = hash.hashBuffer("heads") } },
-                .hash_map_init,
-                .{ .hash_map_get = .{ .key = name_hash } },
-                .{ .write = .{ .slot = name_slot } },
-            });
 
             // store ref content
             const head_file_buffer = try ref.readHead(repo_kind, state);
-            var ref_content_cursor = try state.moment.cursor.writePath(void, &.{
-                .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-content-set") } },
-                .hash_map_init,
-                .{ .hash_map_get = .{ .key = hash.hashBuffer(&head_file_buffer) } },
-            });
+            const ref_content_set_cursor = try state.moment.put(hash.hashBuffer("ref-content-set"));
+            const ref_content_set = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(ref_content_set_cursor);
+            var ref_content_cursor = try ref_content_set.putKey(hash.hashBuffer(&head_file_buffer));
             try ref_content_cursor.writeBytes(&head_file_buffer, .once);
-            const ref_content_slot = ref_content_cursor.slot();
 
-            // add ref content to refs/heads/{refname}
-            _ = try state.moment.cursor.writePath(void, &.{
-                .{ .hash_map_get = .{ .value = hash.hashBuffer("refs") } },
-                .hash_map_init,
-                .{ .hash_map_get = .{ .value = hash.hashBuffer("heads") } },
-                .hash_map_init,
-                .{ .hash_map_get = .{ .value = name_hash } },
-                .{ .write = .{ .slot = ref_content_slot } },
-            });
+            // add ref name and content to refs/heads/{refname}
+            const refs_cursor = try state.moment.put(hash.hashBuffer("refs"));
+            const refs = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(refs_cursor);
+            const heads_cursor = try refs.put(hash.hashBuffer("heads"));
+            const heads = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(heads_cursor);
+            try heads.putKeyData(name_hash, .{ .slot = ref_name_cursor.slot() });
+            try heads.putData(name_hash, .{ .slot = ref_content_cursor.slot() });
 
             // get current branch name
             const current_branch_name = try ref.readHeadName(repo_kind, state, allocator);
@@ -115,23 +97,11 @@ pub fn add(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, all
 
             // if there is a branch map for the current branch,
             // make one for the new branch with the same value
-            const branch_name_hash = hash.hashBuffer(current_branch_name);
-            if (try state.moment.cursor.readPath(void, &.{
-                .{ .hash_map_get = .{ .value = hash.hashBuffer("branches") } },
-                .{ .hash_map_get = .{ .value = branch_name_hash } },
-            })) |*current_branch_cursor| {
-                _ = try state.moment.cursor.writePath(void, &.{
-                    .{ .hash_map_get = .{ .value = hash.hashBuffer("branches") } },
-                    .hash_map_init,
-                    .{ .hash_map_get = .{ .key = name_hash } },
-                    .{ .write = .{ .slot = name_slot } },
-                });
-                _ = try state.moment.cursor.writePath(void, &.{
-                    .{ .hash_map_get = .{ .value = hash.hashBuffer("branches") } },
-                    .hash_map_init,
-                    .{ .hash_map_get = .{ .value = name_hash } },
-                    .{ .write = .{ .slot = current_branch_cursor.slot() } },
-                });
+            const branches_cursor = try state.moment.put(hash.hashBuffer("branches"));
+            const branches = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(branches_cursor);
+            try branches.putKeyData(name_hash, .{ .slot = ref_name_cursor.slot() });
+            if (try branches.get(hash.hashBuffer(current_branch_name))) |*current_branch_cursor| {
+                try branches.putData(name_hash, .{ .slot = current_branch_cursor.slot() });
             }
         },
     }
@@ -196,20 +166,16 @@ pub fn remove(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, 
             const name_hash = hash.hashBuffer(input.name);
 
             // remove from refs/heads/{name}
-            _ = try state.moment.cursor.writePath(void, &.{
-                .{ .hash_map_get = .{ .value = hash.hashBuffer("refs") } },
-                .hash_map_init,
-                .{ .hash_map_get = .{ .value = hash.hashBuffer("heads") } },
-                .hash_map_init,
-                .{ .hash_map_remove = name_hash },
-            });
+            const refs_cursor = try state.moment.put(hash.hashBuffer("refs"));
+            const refs = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(refs_cursor);
+            const heads_cursor = try refs.put(hash.hashBuffer("heads"));
+            const heads = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(heads_cursor);
+            try heads.remove(name_hash);
 
             // remove branch map
-            _ = try state.moment.cursor.writePath(void, &.{
-                .{ .hash_map_get = .{ .value = hash.hashBuffer("branches") } },
-                .hash_map_init,
-                .{ .hash_map_remove = name_hash },
-            });
+            const branches_cursor = try state.moment.put(hash.hashBuffer("branches"));
+            const branches = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(branches_cursor);
+            try branches.remove(name_hash);
         },
     }
 }
