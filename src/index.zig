@@ -62,7 +62,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
             path: []const u8,
         };
 
-        pub fn init(allocator: std.mem.Allocator, core_cursor: rp.Repo(repo_kind).CoreCursor) !Index(repo_kind) {
+        pub fn init(allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State) !Index(repo_kind) {
             const arena = try allocator.create(std.heap.ArenaAllocator);
             arena.* = std.heap.ArenaAllocator.init(allocator);
             var index = Index(repo_kind){
@@ -79,7 +79,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
             switch (repo_kind) {
                 .git => {
                     // open index
-                    const index_file = core_cursor.core.git_dir.openFile("index", .{ .mode = .read_only }) catch |err| switch (err) {
+                    const index_file = state.core.git_dir.openFile("index", .{ .mode = .read_only }) catch |err| switch (err) {
                         error.FileNotFound => return index,
                         else => return err,
                     };
@@ -142,7 +142,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     _ = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
                 },
                 .xit => {
-                    if (try core_cursor.cursor.readPath(void, &.{
+                    if (try state.cursor.readPath(void, &.{
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("index") } },
                     })) |index_cursor| {
                         var iter = try index_cursor.iter();
@@ -206,7 +206,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
         /// if path is a file, adds it as an entry to the index struct.
         /// if path is a dir, adds its children recursively.
         /// ignoring symlinks for now but will add that later.
-        pub fn addPath(self: *Index(repo_kind), core_cursor: rp.Repo(repo_kind).CoreCursor, path: []const u8) !void {
+        pub fn addPath(self: *Index(repo_kind), state: rp.Repo(repo_kind).State, path: []const u8) !void {
             // remove entries that are parents of this path (directory replaces file)
             {
                 var parent_path_maybe = std.fs.path.dirname(path);
@@ -220,15 +220,15 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
             // remove entries that are children of this path (file replaces directory)
             try self.removeChildren(path);
             // read the metadata
-            const meta = try io.getMetadata(core_cursor.core.repo_dir, path);
+            const meta = try io.getMetadata(state.core.repo_dir, path);
             switch (meta.kind()) {
                 .file => {
-                    const file = try core_cursor.core.repo_dir.openFile(path, .{ .mode = .read_only });
+                    const file = try state.core.repo_dir.openFile(path, .{ .mode = .read_only });
                     defer file.close();
 
                     // write the object
                     var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-                    try obj.writeBlob(repo_kind, core_cursor, self.allocator, file, meta.size(), &oid);
+                    try obj.writeBlob(repo_kind, state, self.allocator, file, meta.size(), &oid);
                     // add the entry
                     const times = io.getTimes(meta);
                     const stat = try io.getStat(file);
@@ -256,7 +256,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     try self.addEntry(entry);
                 },
                 .directory => {
-                    var dir = try core_cursor.core.repo_dir.openDir(path, .{ .iterate = true });
+                    var dir = try state.core.repo_dir.openDir(path, .{ .iterate = true });
                     defer dir.close();
                     var iter = dir.iterate();
                     while (try iter.next()) |entry| {
@@ -273,7 +273,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                             try std.fmt.allocPrint(self.arena.allocator(), "{s}", .{entry.name})
                         else
                             try io.joinPath(self.arena.allocator(), &.{ path, entry.name });
-                        try self.addPath(core_cursor, subpath);
+                        try self.addPath(state, subpath);
                     }
                 },
                 else => return,
@@ -391,8 +391,8 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
             }
         }
 
-        pub fn addOrRemovePath(self: *Index(repo_kind), core_cursor: rp.Repo(repo_kind).CoreCursor, path: []const u8, action: enum { add, rm }) !void {
-            if (core_cursor.core.repo_dir.openFile(path, .{ .mode = .read_only })) |file| {
+        pub fn addOrRemovePath(self: *Index(repo_kind), state: rp.Repo(repo_kind).State, path: []const u8, action: enum { add, rm }) !void {
+            if (state.core.repo_dir.openFile(path, .{ .mode = .read_only })) |file| {
                 file.close();
             } else |err| {
                 switch (err) {
@@ -409,7 +409,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                 }
             }
             switch (action) {
-                .add => try self.addPath(core_cursor, path),
+                .add => try self.addPath(state, path),
                 .rm => {
                     if (!self.entries.contains(path)) {
                         return error.CannotRemoveUnindexedFile;
@@ -419,7 +419,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
             }
         }
 
-        pub fn write(self: *Index(repo_kind), allocator: std.mem.Allocator, core_cursor: rp.Repo(repo_kind).CoreCursor) !void {
+        pub fn write(self: *Index(repo_kind), allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State) !void {
             switch (repo_kind) {
                 .git => {
                     // sort the entries
@@ -444,7 +444,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                         }
                     }
 
-                    const lock_file = core_cursor.lock_file_maybe orelse return error.NoLockFile;
+                    const lock_file = state.lock_file_maybe orelse return error.NoLockFile;
                     try lock_file.setEndPos(0); // truncate file in case this method is called multiple times
 
                     // write the header
@@ -496,7 +496,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                 },
                 .xit => {
                     const Ctx = struct {
-                        core_cursor: rp.Repo(repo_kind).CoreCursor,
+                        state: rp.Repo(repo_kind).State,
                         allocator: std.mem.Allocator,
                         index: *Index(repo_kind),
 
@@ -549,7 +549,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                     }
                                 }
 
-                                var path_cursor = try ctx.core_cursor.cursor.writePath(void, &.{
+                                var path_cursor = try ctx.state.cursor.writePath(void, &.{
                                     .{ .hash_map_get = .{ .value = hash.hashBuffer("path-set") } },
                                     .hash_map_init,
                                     .{ .hash_map_get = .{ .key = path_hash } },
@@ -560,7 +560,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                     .{ .write = .{ .slot = path_cursor.slot_ptr.slot } },
                                 });
 
-                                var entry_buffer_cursor = try ctx.core_cursor.cursor.writePath(void, &.{
+                                var entry_buffer_cursor = try ctx.state.cursor.writePath(void, &.{
                                     .{ .hash_map_get = .{ .value = hash.hashBuffer("entry-buffer-set") } },
                                     .hash_map_init,
                                     .{ .hash_map_get = .{ .key = hash.hashBuffer(entry_buffer.items) } },
@@ -573,10 +573,10 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                             }
                         }
                     };
-                    _ = try core_cursor.cursor.writePath(Ctx, &.{
+                    _ = try state.cursor.writePath(Ctx, &.{
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("index") } },
                         .hash_map_init,
-                        .{ .ctx = Ctx{ .core_cursor = core_cursor, .allocator = allocator, .index = self } },
+                        .{ .ctx = Ctx{ .state = state, .allocator = allocator, .index = self } },
                     });
                 },
             }

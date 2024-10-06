@@ -48,7 +48,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             },
         };
 
-        pub const CoreCursor = switch (repo_kind) {
+        // bundle of the repo's state that is passed to internal functions
+        pub const State = switch (repo_kind) {
             .git => struct {
                 core: *Core,
                 lock_file_maybe: ?std.fs.File = null,
