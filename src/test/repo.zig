@@ -151,10 +151,10 @@ fn testMerge(comptime repo_kind: rp.RepoKind) !void {
     try addFile(repo_kind, &repo, "master.md", "k");
     const commit_k = try repo.commit(null, .{ .message = "k" });
 
-    var cursor = try repo.core.latestCursor();
+    var moment = try repo.core.latestMoment();
     const core_cursor = switch (repo_kind) {
         .git => .{ .core = &repo.core },
-        .xit => .{ .core = &repo.core, .cursor = &cursor },
+        .xit => .{ .core = &repo.core, .moment = &moment },
     };
 
     // there are multiple common ancestors, b and d,

@@ -33,7 +33,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 repo_dir: std.fs.Dir,
                 git_dir: std.fs.Dir,
 
-                pub fn latestCursor(_: *@This()) !void {}
+                pub fn latestMoment(_: *@This()) !void {}
             },
             .xit => struct {
                 repo_dir: std.fs.Dir,
@@ -41,9 +41,10 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 db_file: std.fs.File,
                 db: DB,
 
-                pub fn latestCursor(self: *@This()) !DB.Cursor(.read_write) {
+                pub fn latestMoment(self: *@This()) !DB.HashMap(.read_write) {
                     const history = try DB.ArrayList(.read_write).init(self.db.rootCursor());
-                    return try history.put(-1);
+                    const moment_cursor = try history.put(-1);
+                    return .{ .cursor = moment_cursor };
                 }
             },
         };
@@ -56,7 +57,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             },
             .xit => struct {
                 core: *Core,
-                cursor: *DB.Cursor(.read_write),
+                moment: *DB.HashMap(.read_write),
             },
         };
 
@@ -209,7 +210,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
-                            try ref.writeHead(repo_kind, .{ .core = ctx.core, .cursor = &moment.cursor }, ctx.allocator, "master", null);
+                            try ref.writeHead(repo_kind, .{ .core = ctx.core, .moment = &moment }, ctx.allocator, "master", null);
                         }
                     };
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
@@ -397,10 +398,10 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 .branch => |branch_cmd| {
                     switch (branch_cmd) {
                         .list => {
-                            var cursor = try self.core.latestCursor();
+                            var moment = try self.core.latestMoment();
                             const state = switch (repo_kind) {
                                 .git => .{ .core = &self.core },
-                                .xit => .{ .core = &self.core, .cursor = &cursor },
+                                .xit => .{ .core = &self.core, .moment = &moment },
                             };
 
                             var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, state, self.allocator, "HEAD");
@@ -555,8 +556,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
-                            try pch.writePatch(.{ .core = ctx.core, .cursor = &moment.cursor }, ctx.allocator);
-                            ctx.result.* = try obj.writeCommit(repo_kind, .{ .core = ctx.core, .cursor = &moment.cursor }, ctx.allocator, ctx.parent_oids_maybe, ctx.metadata);
+                            try pch.writePatch(.{ .core = ctx.core, .moment = &moment }, ctx.allocator);
+                            ctx.result.* = try obj.writeCommit(repo_kind, .{ .core = ctx.core, .moment = &moment }, ctx.allocator, ctx.parent_oids_maybe, ctx.metadata);
                         }
                     };
 
@@ -597,14 +598,14 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
 
-                            var index = try idx.Index(repo_kind).init(ctx.allocator, .{ .core = ctx.core, .cursor = &moment.cursor });
+                            var index = try idx.Index(repo_kind).init(ctx.allocator, .{ .core = ctx.core, .moment = &moment });
                             defer index.deinit();
 
                             for (ctx.paths) |path| {
-                                try index.addOrRemovePath(.{ .core = ctx.core, .cursor = &moment.cursor }, path, .add);
+                                try index.addOrRemovePath(.{ .core = ctx.core, .moment = &moment }, path, .add);
                             }
 
-                            try index.write(ctx.allocator, .{ .core = ctx.core, .cursor = &moment.cursor });
+                            try index.write(ctx.allocator, .{ .core = ctx.core, .moment = &moment });
                         }
                     };
 
@@ -681,10 +682,10 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
 
-                            var index = try idx.Index(repo_kind).init(ctx.allocator, .{ .core = ctx.core, .cursor = &moment.cursor });
+                            var index = try idx.Index(repo_kind).init(ctx.allocator, .{ .core = ctx.core, .moment = &moment });
                             defer index.deinit();
 
-                            var head_tree = try st.HeadTree(repo_kind).init(ctx.allocator, .{ .core = ctx.core, .cursor = &moment.cursor });
+                            var head_tree = try st.HeadTree(repo_kind).init(ctx.allocator, .{ .core = ctx.core, .moment = &moment });
                             defer head_tree.deinit();
 
                             for (ctx.paths) |path| {
@@ -701,7 +702,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                                                 return error.CannotRemoveFileWithUnstagedChanges;
                                             }
                                         }
-                                        try index.addOrRemovePath(.{ .core = ctx.core, .cursor = &moment.cursor }, path, .rm);
+                                        try index.addOrRemovePath(.{ .core = ctx.core, .moment = &moment }, path, .rm);
                                     },
                                     else => return error.UnexpectedPathType,
                                 }
@@ -718,7 +719,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                                 }
                             }
 
-                            try index.write(ctx.allocator, .{ .core = ctx.core, .cursor = &moment.cursor });
+                            try index.write(ctx.allocator, .{ .core = ctx.core, .moment = &moment });
                         }
                     };
 
@@ -743,19 +744,19 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
         }
 
         pub fn status(self: *Repo(repo_kind)) !st.Status(repo_kind) {
-            var cursor = try self.core.latestCursor();
+            var moment = try self.core.latestMoment();
             const state = switch (repo_kind) {
                 .git => .{ .core = &self.core },
-                .xit => .{ .core = &self.core, .cursor = &cursor },
+                .xit => .{ .core = &self.core, .moment = &moment },
             };
             return try st.Status(repo_kind).init(self.allocator, state);
         }
 
         pub fn filePair(self: *Repo(repo_kind), path: []const u8, status_kind: st.StatusKind, stat: *st.Status(repo_kind)) !df.LineIteratorPair(repo_kind) {
-            var cursor = try self.core.latestCursor();
+            var moment = try self.core.latestMoment();
             const state = switch (repo_kind) {
                 .git => .{ .core = &self.core },
-                .xit => .{ .core = &self.core, .cursor = &cursor },
+                .xit => .{ .core = &self.core, .moment = &moment },
             };
             switch (status_kind) {
                 .added => |added| {
@@ -826,10 +827,10 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
         }
 
         pub fn treeDiff(self: *Repo(repo_kind), old_oid_maybe: ?[hash.SHA1_HEX_LEN]u8, new_oid_maybe: ?[hash.SHA1_HEX_LEN]u8) !obj.TreeDiff(repo_kind) {
-            var cursor = try self.core.latestCursor();
+            var moment = try self.core.latestMoment();
             const state = switch (repo_kind) {
                 .git => .{ .core = &self.core },
-                .xit => .{ .core = &self.core, .cursor = &cursor },
+                .xit => .{ .core = &self.core, .moment = &moment },
             };
             var tree_diff = obj.TreeDiff(repo_kind).init(self.allocator);
             errdefer tree_diff.deinit();
@@ -848,7 +849,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
-                            try bch.add(repo_kind, .{ .core = ctx.core, .cursor = &moment.cursor }, ctx.allocator, ctx.input);
+                            try bch.add(repo_kind, .{ .core = ctx.core, .moment = &moment }, ctx.allocator, ctx.input);
                         }
                     };
 
@@ -872,7 +873,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
-                            try bch.remove(repo_kind, .{ .core = ctx.core, .cursor = &moment.cursor }, ctx.allocator, ctx.input);
+                            try bch.remove(repo_kind, .{ .core = ctx.core, .moment = &moment }, ctx.allocator, ctx.input);
                         }
                     };
 
@@ -900,7 +901,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
-                            ctx.result.* = try chk.Switch.init(repo_kind, .{ .core = ctx.core, .cursor = &moment.cursor }, ctx.allocator, ctx.target, ctx.options);
+                            ctx.result.* = try chk.Switch.init(repo_kind, .{ .core = ctx.core, .moment = &moment }, ctx.allocator, ctx.target, ctx.options);
                         }
                     };
 
@@ -916,10 +917,10 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
         }
 
         pub fn restore(self: *Repo(repo_kind), path: []const u8) !void {
-            var cursor = try self.core.latestCursor();
+            var moment = try self.core.latestMoment();
             const state = switch (repo_kind) {
                 .git => .{ .core = &self.core },
-                .xit => .{ .core = &self.core, .cursor = &cursor },
+                .xit => .{ .core = &self.core, .moment = &moment },
             };
             try chk.restore(repo_kind, state, self.allocator, path);
         }
@@ -929,10 +930,10 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             if (start_oids_maybe) |start_oids| {
                 return try obj.ObjectIterator(repo_kind, .full).init(self.allocator, &self.core, start_oids, options);
             } else {
-                var cursor = try self.core.latestCursor();
+                var moment = try self.core.latestMoment();
                 const state = switch (repo_kind) {
                     .git => .{ .core = &self.core },
-                    .xit => .{ .core = &self.core, .cursor = &cursor },
+                    .xit => .{ .core = &self.core, .moment = &moment },
                 };
                 const head_oid = try ref.readHead(repo_kind, state);
                 return try obj.ObjectIterator(repo_kind, .full).init(self.allocator, &self.core, &.{head_oid}, options);
@@ -953,7 +954,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
-                            ctx.result.* = try mrg.Merge.init(repo_kind, .{ .core = ctx.core, .cursor = &moment.cursor }, ctx.allocator, .merge, ctx.input);
+                            ctx.result.* = try mrg.Merge.init(repo_kind, .{ .core = ctx.core, .moment = &moment }, ctx.allocator, .merge, ctx.input);
                             // no need to make a new transaction if nothing was done
                             if (.nothing == ctx.result.data) {
                                 return error.CancelTransaction;
@@ -989,7 +990,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
-                            ctx.result.* = try mrg.Merge.init(repo_kind, .{ .core = ctx.core, .cursor = &moment.cursor }, ctx.allocator, .cherry_pick, ctx.input);
+                            ctx.result.* = try mrg.Merge.init(repo_kind, .{ .core = ctx.core, .moment = &moment }, ctx.allocator, .cherry_pick, ctx.input);
                             // no need to make a new transaction if nothing was done
                             if (.nothing == ctx.result.data) {
                                 return error.CancelTransaction;
@@ -1012,10 +1013,10 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
         }
 
         pub fn config(self: *Repo(repo_kind)) !cfg.Config(repo_kind) {
-            var cursor = try self.core.latestCursor();
+            var moment = try self.core.latestMoment();
             const state = switch (repo_kind) {
                 .git => .{ .core = &self.core },
-                .xit => .{ .core = &self.core, .cursor = &cursor },
+                .xit => .{ .core = &self.core, .moment = &moment },
             };
             return try cfg.Config(repo_kind).init(state, self.allocator);
         }
@@ -1040,7 +1041,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
-                            try ctx.conf.add(.{ .core = ctx.core, .cursor = &moment.cursor }, ctx.input);
+                            try ctx.conf.add(.{ .core = ctx.core, .moment = &moment }, ctx.input);
                         }
                     };
 
@@ -1073,7 +1074,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
-                            try ctx.conf.remove(.{ .core = ctx.core, .cursor = &moment.cursor }, ctx.input);
+                            try ctx.conf.remove(.{ .core = ctx.core, .moment = &moment }, ctx.input);
                         }
                     };
 
@@ -1119,7 +1120,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
-                            try ctx.conf.add(.{ .core = ctx.core, .cursor = &moment.cursor }, ctx.input);
+                            try ctx.conf.add(.{ .core = ctx.core, .moment = &moment }, ctx.input);
                         }
                     };
 
@@ -1158,7 +1159,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
-                            try ctx.conf.remove(.{ .core = ctx.core, .cursor = &moment.cursor }, ctx.input);
+                            try ctx.conf.remove(.{ .core = ctx.core, .moment = &moment }, ctx.input);
                         }
                     };
 

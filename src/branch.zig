@@ -71,7 +71,7 @@ pub fn add(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, all
             const name_hash = hash.hashBuffer(name);
 
             // store ref name
-            var ref_name_cursor = try state.cursor.writePath(void, &.{
+            var ref_name_cursor = try state.moment.cursor.writePath(void, &.{
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-name-set") } },
                 .hash_map_init,
                 .{ .hash_map_get = .{ .key = name_hash } },
@@ -80,7 +80,7 @@ pub fn add(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, all
             const name_slot = ref_name_cursor.slot_ptr.slot;
 
             // add ref name to refs/heads/{refname}
-            _ = try state.cursor.writePath(void, &.{
+            _ = try state.moment.cursor.writePath(void, &.{
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("refs") } },
                 .hash_map_init,
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("heads") } },
@@ -91,7 +91,7 @@ pub fn add(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, all
 
             // store ref content
             const head_file_buffer = try ref.readHead(repo_kind, state);
-            var ref_content_cursor = try state.cursor.writePath(void, &.{
+            var ref_content_cursor = try state.moment.cursor.writePath(void, &.{
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-content-set") } },
                 .hash_map_init,
                 .{ .hash_map_get = .{ .key = hash.hashBuffer(&head_file_buffer) } },
@@ -100,7 +100,7 @@ pub fn add(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, all
             const ref_content_slot = ref_content_cursor.slot_ptr.slot;
 
             // add ref content to refs/heads/{refname}
-            _ = try state.cursor.writePath(void, &.{
+            _ = try state.moment.cursor.writePath(void, &.{
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("refs") } },
                 .hash_map_init,
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("heads") } },
@@ -116,17 +116,17 @@ pub fn add(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, all
             // if there is a branch map for the current branch,
             // make one for the new branch with the same value
             const branch_name_hash = hash.hashBuffer(current_branch_name);
-            if (try state.cursor.readPath(void, &.{
+            if (try state.moment.cursor.readPath(void, &.{
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("branches") } },
                 .{ .hash_map_get = .{ .value = branch_name_hash } },
             })) |*current_branch_cursor| {
-                _ = try state.cursor.writePath(void, &.{
+                _ = try state.moment.cursor.writePath(void, &.{
                     .{ .hash_map_get = .{ .value = hash.hashBuffer("branches") } },
                     .hash_map_init,
                     .{ .hash_map_get = .{ .key = name_hash } },
                     .{ .write = .{ .slot = name_slot } },
                 });
-                _ = try state.cursor.writePath(void, &.{
+                _ = try state.moment.cursor.writePath(void, &.{
                     .{ .hash_map_get = .{ .value = hash.hashBuffer("branches") } },
                     .hash_map_init,
                     .{ .hash_map_get = .{ .value = name_hash } },
@@ -196,7 +196,7 @@ pub fn remove(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, 
             const name_hash = hash.hashBuffer(input.name);
 
             // remove from refs/heads/{name}
-            _ = try state.cursor.writePath(void, &.{
+            _ = try state.moment.cursor.writePath(void, &.{
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("refs") } },
                 .hash_map_init,
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("heads") } },
@@ -205,7 +205,7 @@ pub fn remove(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, 
             });
 
             // remove branch map
-            _ = try state.cursor.writePath(void, &.{
+            _ = try state.moment.cursor.writePath(void, &.{
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("branches") } },
                 .hash_map_init,
                 .{ .hash_map_remove = name_hash },

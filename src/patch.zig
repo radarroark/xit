@@ -420,7 +420,7 @@ pub fn writePatch(state: rp.Repo(.xit).State, allocator: std.mem.Allocator) !voi
 
     // get current branch name slot
     const branch_name_hash = hash.hashBuffer(current_branch_name);
-    var branch_name_cursor = try state.cursor.writePath(void, &.{
+    var branch_name_cursor = try state.moment.cursor.writePath(void, &.{
         .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-name-set") } },
         .hash_map_init,
         .{ .hash_map_get = .{ .key = branch_name_hash } },
@@ -429,13 +429,13 @@ pub fn writePatch(state: rp.Repo(.xit).State, allocator: std.mem.Allocator) !voi
     const branch_name_slot = branch_name_cursor.slot_ptr.slot;
 
     // init branch map
-    _ = try state.cursor.writePath(void, &.{
+    _ = try state.moment.cursor.writePath(void, &.{
         .{ .hash_map_get = .{ .value = hash.hashBuffer("branches") } },
         .hash_map_init,
         .{ .hash_map_get = .{ .key = branch_name_hash } },
         .{ .write = .{ .slot = branch_name_slot } },
     });
-    var branch_cursor = try state.cursor.writePath(void, &.{
+    var branch_cursor = try state.moment.cursor.writePath(void, &.{
         .{ .hash_map_get = .{ .value = hash.hashBuffer("branches") } },
         .hash_map_init,
         .{ .hash_map_get = .{ .value = branch_name_hash } },
@@ -451,7 +451,7 @@ pub fn writePatch(state: rp.Repo(.xit).State, allocator: std.mem.Allocator) !voi
     while (try file_iter.next()) |*line_iter_pair_ptr| {
         var line_iter_pair = line_iter_pair_ptr.*;
         defer line_iter_pair.deinit();
-        const patch_hash = try writePatchForFile(state.cursor, &branch_cursor, allocator, &line_iter_pair);
-        try applyPatchForFile(state.cursor, &branch_cursor, allocator, patch_hash, line_iter_pair.path);
+        const patch_hash = try writePatchForFile(&state.moment.cursor, &branch_cursor, allocator, &line_iter_pair);
+        try applyPatchForFile(&state.moment.cursor, &branch_cursor, allocator, patch_hash, line_iter_pair.path);
     }
 }

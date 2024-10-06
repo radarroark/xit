@@ -707,7 +707,7 @@ pub const Merge = struct {
                         }
                     },
                     .xit => {
-                        if (try state.cursor.readPath(void, &.{
+                        if (try state.moment.cursor.readPath(void, &.{
                             .{ .hash_map_get = .{ .value = hash.hashBuffer(merge_head_name) } },
                         })) |_| {
                             return error.UnfinishedMergeAlreadyInProgress;
@@ -874,12 +874,12 @@ pub const Merge = struct {
 
                         // exit early if there were conflicts
                         if (conflicts.count() > 0) {
-                            var merge_head_cursor = try state.cursor.writePath(void, &.{
+                            var merge_head_cursor = try state.moment.cursor.writePath(void, &.{
                                 .{ .hash_map_get = .{ .value = hash.hashBuffer(merge_head_name) } },
                             });
                             try merge_head_cursor.writeBytes(&source_oid, .replace);
 
-                            var merge_msg_cursor = try state.cursor.writePath(void, &.{
+                            var merge_msg_cursor = try state.moment.cursor.writePath(void, &.{
                                 .{ .hash_map_get = .{ .value = hash.hashBuffer("MERGE_MSG") } },
                             });
                             try merge_msg_cursor.writeBytes(commit_metadata.message, .replace);
@@ -968,7 +968,7 @@ pub const Merge = struct {
                         commit_metadata.message = try merge_msg.readToEndAlloc(arena.allocator(), MAX_READ_BYTES);
                     },
                     .xit => {
-                        const source_oid_cursor = (try state.cursor.readPath(void, &.{
+                        const source_oid_cursor = (try state.moment.cursor.readPath(void, &.{
                             .{ .hash_map_get = .{ .value = hash.hashBuffer(merge_head_name) } },
                         })) orelse return error.MergeHeadNotFound;
                         const source_oid_slice = try source_oid_cursor.readBytes(&source_oid);
@@ -976,7 +976,7 @@ pub const Merge = struct {
                             return error.InvalidMergeHead;
                         }
 
-                        const merge_msg_cursor = (try state.cursor.readPath(void, &.{
+                        const merge_msg_cursor = (try state.moment.cursor.readPath(void, &.{
                             .{ .hash_map_get = .{ .value = hash.hashBuffer("MERGE_MSG") } },
                         })) orelse return error.MergeMessageNotFound;
                         commit_metadata.message = try merge_msg_cursor.readBytesAlloc(arena.allocator(), MAX_READ_BYTES);
@@ -1017,10 +1017,10 @@ pub const Merge = struct {
                         try state.core.git_dir.deleteFile("MERGE_MSG");
                     },
                     .xit => {
-                        _ = try state.cursor.writePath(void, &.{
+                        _ = try state.moment.cursor.writePath(void, &.{
                             .{ .hash_map_remove = hash.hashBuffer(merge_head_name) },
                         });
-                        _ = try state.cursor.writePath(void, &.{
+                        _ = try state.moment.cursor.writePath(void, &.{
                             .{ .hash_map_remove = hash.hashBuffer("MERGE_MSG") },
                         });
                     },
