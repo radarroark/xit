@@ -208,8 +208,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         allocator: std.mem.Allocator,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
-                            var map = try DB.HashMap(.read_write).init(cursor.*);
-                            try ref.writeHead(repo_kind, .{ .core = ctx.core, .cursor = &map.cursor }, ctx.allocator, "master", null);
+                            var moment = try DB.HashMap(.read_write).init(cursor.*);
+                            try ref.writeHead(repo_kind, .{ .core = ctx.core, .cursor = &moment.cursor }, ctx.allocator, "master", null);
                         }
                     };
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
@@ -554,9 +554,9 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         result: *[hash.SHA1_HEX_LEN]u8,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
-                            var map = try DB.HashMap(.read_write).init(cursor.*);
-                            try pch.writePatch(.{ .core = ctx.core, .cursor = &map.cursor }, ctx.allocator);
-                            ctx.result.* = try obj.writeCommit(repo_kind, .{ .core = ctx.core, .cursor = &map.cursor }, ctx.allocator, ctx.parent_oids_maybe, ctx.metadata);
+                            var moment = try DB.HashMap(.read_write).init(cursor.*);
+                            try pch.writePatch(.{ .core = ctx.core, .cursor = &moment.cursor }, ctx.allocator);
+                            ctx.result.* = try obj.writeCommit(repo_kind, .{ .core = ctx.core, .cursor = &moment.cursor }, ctx.allocator, ctx.parent_oids_maybe, ctx.metadata);
                         }
                     };
 
@@ -595,16 +595,16 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         paths: []const []const u8,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
-                            var map = try DB.HashMap(.read_write).init(cursor.*);
+                            var moment = try DB.HashMap(.read_write).init(cursor.*);
 
-                            var index = try idx.Index(repo_kind).init(ctx.allocator, .{ .core = ctx.core, .cursor = &map.cursor });
+                            var index = try idx.Index(repo_kind).init(ctx.allocator, .{ .core = ctx.core, .cursor = &moment.cursor });
                             defer index.deinit();
 
                             for (ctx.paths) |path| {
-                                try index.addOrRemovePath(.{ .core = ctx.core, .cursor = &map.cursor }, path, .add);
+                                try index.addOrRemovePath(.{ .core = ctx.core, .cursor = &moment.cursor }, path, .add);
                             }
 
-                            try index.write(ctx.allocator, .{ .core = ctx.core, .cursor = &map.cursor });
+                            try index.write(ctx.allocator, .{ .core = ctx.core, .cursor = &moment.cursor });
                         }
                     };
 
@@ -679,12 +679,12 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         opts: idx.IndexRemoveOptions,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
-                            var map = try DB.HashMap(.read_write).init(cursor.*);
+                            var moment = try DB.HashMap(.read_write).init(cursor.*);
 
-                            var index = try idx.Index(repo_kind).init(ctx.allocator, .{ .core = ctx.core, .cursor = &map.cursor });
+                            var index = try idx.Index(repo_kind).init(ctx.allocator, .{ .core = ctx.core, .cursor = &moment.cursor });
                             defer index.deinit();
 
-                            var head_tree = try st.HeadTree(repo_kind).init(ctx.allocator, .{ .core = ctx.core, .cursor = &map.cursor });
+                            var head_tree = try st.HeadTree(repo_kind).init(ctx.allocator, .{ .core = ctx.core, .cursor = &moment.cursor });
                             defer head_tree.deinit();
 
                             for (ctx.paths) |path| {
@@ -701,7 +701,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                                                 return error.CannotRemoveFileWithUnstagedChanges;
                                             }
                                         }
-                                        try index.addOrRemovePath(.{ .core = ctx.core, .cursor = &map.cursor }, path, .rm);
+                                        try index.addOrRemovePath(.{ .core = ctx.core, .cursor = &moment.cursor }, path, .rm);
                                     },
                                     else => return error.UnexpectedPathType,
                                 }
@@ -718,7 +718,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                                 }
                             }
 
-                            try index.write(ctx.allocator, .{ .core = ctx.core, .cursor = &map.cursor });
+                            try index.write(ctx.allocator, .{ .core = ctx.core, .cursor = &moment.cursor });
                         }
                     };
 
@@ -847,8 +847,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         input: bch.AddBranchInput,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
-                            var map = try DB.HashMap(.read_write).init(cursor.*);
-                            try bch.add(repo_kind, .{ .core = ctx.core, .cursor = &map.cursor }, ctx.allocator, ctx.input);
+                            var moment = try DB.HashMap(.read_write).init(cursor.*);
+                            try bch.add(repo_kind, .{ .core = ctx.core, .cursor = &moment.cursor }, ctx.allocator, ctx.input);
                         }
                     };
 
@@ -871,8 +871,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         input: bch.RemoveBranchInput,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
-                            var map = try DB.HashMap(.read_write).init(cursor.*);
-                            try bch.remove(repo_kind, .{ .core = ctx.core, .cursor = &map.cursor }, ctx.allocator, ctx.input);
+                            var moment = try DB.HashMap(.read_write).init(cursor.*);
+                            try bch.remove(repo_kind, .{ .core = ctx.core, .cursor = &moment.cursor }, ctx.allocator, ctx.input);
                         }
                     };
 
@@ -899,8 +899,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         result: *chk.Switch,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
-                            var map = try DB.HashMap(.read_write).init(cursor.*);
-                            ctx.result.* = try chk.Switch.init(repo_kind, .{ .core = ctx.core, .cursor = &map.cursor }, ctx.allocator, ctx.target, ctx.options);
+                            var moment = try DB.HashMap(.read_write).init(cursor.*);
+                            ctx.result.* = try chk.Switch.init(repo_kind, .{ .core = ctx.core, .cursor = &moment.cursor }, ctx.allocator, ctx.target, ctx.options);
                         }
                     };
 
@@ -952,8 +952,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         result: *mrg.Merge,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
-                            var map = try DB.HashMap(.read_write).init(cursor.*);
-                            ctx.result.* = try mrg.Merge.init(repo_kind, .{ .core = ctx.core, .cursor = &map.cursor }, ctx.allocator, .merge, ctx.input);
+                            var moment = try DB.HashMap(.read_write).init(cursor.*);
+                            ctx.result.* = try mrg.Merge.init(repo_kind, .{ .core = ctx.core, .cursor = &moment.cursor }, ctx.allocator, .merge, ctx.input);
                             // no need to make a new transaction if nothing was done
                             if (.nothing == ctx.result.data) {
                                 return error.CancelTransaction;
@@ -988,8 +988,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         result: *mrg.Merge,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
-                            var map = try DB.HashMap(.read_write).init(cursor.*);
-                            ctx.result.* = try mrg.Merge.init(repo_kind, .{ .core = ctx.core, .cursor = &map.cursor }, ctx.allocator, .cherry_pick, ctx.input);
+                            var moment = try DB.HashMap(.read_write).init(cursor.*);
+                            ctx.result.* = try mrg.Merge.init(repo_kind, .{ .core = ctx.core, .cursor = &moment.cursor }, ctx.allocator, .cherry_pick, ctx.input);
                             // no need to make a new transaction if nothing was done
                             if (.nothing == ctx.result.data) {
                                 return error.CancelTransaction;
@@ -1039,8 +1039,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         input: cfg.AddConfigInput,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
-                            var map = try DB.HashMap(.read_write).init(cursor.*);
-                            try ctx.conf.add(.{ .core = ctx.core, .cursor = &map.cursor }, ctx.input);
+                            var moment = try DB.HashMap(.read_write).init(cursor.*);
+                            try ctx.conf.add(.{ .core = ctx.core, .cursor = &moment.cursor }, ctx.input);
                         }
                     };
 
@@ -1072,8 +1072,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         input: cfg.RemoveConfigInput,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
-                            var map = try DB.HashMap(.read_write).init(cursor.*);
-                            try ctx.conf.remove(.{ .core = ctx.core, .cursor = &map.cursor }, ctx.input);
+                            var moment = try DB.HashMap(.read_write).init(cursor.*);
+                            try ctx.conf.remove(.{ .core = ctx.core, .cursor = &moment.cursor }, ctx.input);
                         }
                     };
 
@@ -1118,8 +1118,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         input: cfg.AddConfigInput,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
-                            var map = try DB.HashMap(.read_write).init(cursor.*);
-                            try ctx.conf.add(.{ .core = ctx.core, .cursor = &map.cursor }, ctx.input);
+                            var moment = try DB.HashMap(.read_write).init(cursor.*);
+                            try ctx.conf.add(.{ .core = ctx.core, .cursor = &moment.cursor }, ctx.input);
                         }
                     };
 
@@ -1157,8 +1157,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         input: cfg.RemoveConfigInput,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
-                            var map = try DB.HashMap(.read_write).init(cursor.*);
-                            try ctx.conf.remove(.{ .core = ctx.core, .cursor = &map.cursor }, ctx.input);
+                            var moment = try DB.HashMap(.read_write).init(cursor.*);
+                            try ctx.conf.remove(.{ .core = ctx.core, .cursor = &moment.cursor }, ctx.input);
                         }
                     };
 
