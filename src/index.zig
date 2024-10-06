@@ -544,13 +544,13 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                         const path_set = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(path_set_cursor);
                         var path_cursor = try path_set.putKey(path_hash);
                         try path_cursor.writeBytes(path, .once);
-                        try index_map.putKeyData(path_hash, .{ .slot = path_cursor.slot_ptr.slot });
+                        try index_map.putKeyData(path_hash, .{ .slot = path_cursor.slot() });
 
                         const entry_buffer_set_cursor = try state.moment.put(hash.hashBuffer("entry-buffer-set"));
                         const entry_buffer_set = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(entry_buffer_set_cursor);
                         var entry_buffer_cursor = try entry_buffer_set.putKey(hash.hashBuffer(entry_buffer.items));
                         try entry_buffer_cursor.writeBytes(entry_buffer.items, .once);
-                        try index_map.putData(path_hash, .{ .slot = entry_buffer_cursor.slot_ptr.slot });
+                        try index_map.putData(path_hash, .{ .slot = entry_buffer_cursor.slot() });
                     }
                 },
             }

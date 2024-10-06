@@ -277,7 +277,7 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).Stat
                 try ref_content_cursor.writeBytes(content, .once);
                 _ = try state.moment.cursor.writePath(void, &.{
                     .{ .hash_map_get = .{ .value = hash.hashBuffer("HEAD") } },
-                    .{ .write = .{ .slot = ref_content_cursor.slot_ptr.slot } },
+                    .{ .write = .{ .slot = ref_content_cursor.slot() } },
                 });
             } else {
                 if (oid_hex_maybe) |oid_hex| {
@@ -290,7 +290,7 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).Stat
                     try ref_content_cursor.writeBytes(&oid_hex, .once);
                     _ = try state.moment.cursor.writePath(void, &.{
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("HEAD") } },
-                        .{ .write = .{ .slot = ref_content_cursor.slot_ptr.slot } },
+                        .{ .write = .{ .slot = ref_content_cursor.slot() } },
                     });
                 } else {
                     // point HEAD at the ref, even though the ref doesn't exist
@@ -304,7 +304,7 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).Stat
                     try ref_content_cursor.writeBytes(content, .once);
                     _ = try state.moment.cursor.writePath(void, &.{
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("HEAD") } },
-                        .{ .write = .{ .slot = ref_content_cursor.slot_ptr.slot } },
+                        .{ .write = .{ .slot = ref_content_cursor.slot() } },
                     });
                 }
             }
@@ -387,7 +387,7 @@ pub fn updateRecur(
                     try ref_name_cursor.writeBytes(ctx.file_name, .once);
                     _ = try cursor.writePath(void, &.{
                         .{ .hash_map_get = .{ .key = file_name_hash } },
-                        .{ .write = .{ .slot = ref_name_cursor.slot_ptr.slot } },
+                        .{ .write = .{ .slot = ref_name_cursor.slot() } },
                     });
                     var ref_content_cursor = try ctx.state.moment.cursor.writePath(void, &.{
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-content-set") } },
@@ -397,7 +397,7 @@ pub fn updateRecur(
                     try ref_content_cursor.writeBytes(ctx.oid_hex, .once);
                     _ = try cursor.writePath(void, &.{
                         .{ .hash_map_get = .{ .value = file_name_hash } },
-                        .{ .write = .{ .slot = ref_content_cursor.slot_ptr.slot } },
+                        .{ .write = .{ .slot = ref_content_cursor.slot() } },
                     });
                 }
             };
