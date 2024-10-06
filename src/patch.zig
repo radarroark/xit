@@ -445,7 +445,7 @@ pub fn writePatch(state: rp.Repo(.xit).State, allocator: std.mem.Allocator) !voi
     // init file iterator for index diff
     var status = try st.Status(.xit).init(allocator, state);
     defer status.deinit();
-    var file_iter = try df.FileIterator(.xit).init(allocator, state.core, .{ .index = .{ .status = &status } });
+    var file_iter = try df.FileIterator(.xit).init(allocator, state, .{ .index = .{ .status = &status } });
 
     // iterate over each modified file and create/apply the patch
     while (try file_iter.next()) |*line_iter_pair_ptr| {

@@ -42,6 +42,12 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 db: DB,
 
                 pub fn latestMoment(self: *@This()) !DB.HashMap(.read_write) {
+                    // this method is used by read-only fns to get a moment without
+                    // starting a transaction. the moment is technically still
+                    // read-write, but that is just so it can be put in a State instance.
+                    // in reality it is read-only, and writes won't work because we
+                    // aren't in a transaction.
+                    if (self.db.tx_start != null) return error.NotMeantToRunInTransaction;
                     const history = try DB.ArrayList(.read_write).init(self.db.rootCursor());
                     const moment_cursor = try history.put(-1);
                     return .{ .cursor = moment_cursor };
@@ -823,7 +829,12 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
         }
 
         pub fn filePairs(self: *Repo(repo_kind), diff_opts: df.DiffOptions(repo_kind)) !df.FileIterator(repo_kind) {
-            return try df.FileIterator(repo_kind).init(self.allocator, &self.core, diff_opts);
+            var moment = try self.core.latestMoment();
+            const state = switch (repo_kind) {
+                .git => .{ .core = &self.core },
+                .xit => .{ .core = &self.core, .moment = &moment },
+            };
+            return try df.FileIterator(repo_kind).init(self.allocator, state, diff_opts);
         }
 
         pub fn treeDiff(self: *Repo(repo_kind), old_oid_maybe: ?[hash.SHA1_HEX_LEN]u8, new_oid_maybe: ?[hash.SHA1_HEX_LEN]u8) !obj.TreeDiff(repo_kind) {
@@ -927,16 +938,16 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
         pub fn log(self: *Repo(repo_kind), start_oids_maybe: ?[]const [hash.SHA1_HEX_LEN]u8) !obj.ObjectIterator(repo_kind, .full) {
             const options = .{ .recursive = false };
+            var moment = try self.core.latestMoment();
+            const state = switch (repo_kind) {
+                .git => .{ .core = &self.core },
+                .xit => .{ .core = &self.core, .moment = &moment },
+            };
             if (start_oids_maybe) |start_oids| {
-                return try obj.ObjectIterator(repo_kind, .full).init(self.allocator, &self.core, start_oids, options);
+                return try obj.ObjectIterator(repo_kind, .full).init(self.allocator, state, start_oids, options);
             } else {
-                var moment = try self.core.latestMoment();
-                const state = switch (repo_kind) {
-                    .git => .{ .core = &self.core },
-                    .xit => .{ .core = &self.core, .moment = &moment },
-                };
                 const head_oid = try ref.readHead(repo_kind, state);
-                return try obj.ObjectIterator(repo_kind, .full).init(self.allocator, &self.core, &.{head_oid}, options);
+                return try obj.ObjectIterator(repo_kind, .full).init(self.allocator, state, &.{head_oid}, options);
             }
         }
 

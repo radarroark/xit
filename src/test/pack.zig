@@ -212,7 +212,7 @@ test "pack" {
 
         const head_oid = try ref.readHead(.git, .{ .core = &r.core });
 
-        var obj_iter = try obj.ObjectIterator(.git, .raw).init(allocator, &r.core, &.{head_oid}, .{ .recursive = true });
+        var obj_iter = try obj.ObjectIterator(.git, .raw).init(allocator, .{ .core = &r.core }, &.{head_oid}, .{ .recursive = true });
         defer obj_iter.deinit();
 
         var pack_writer = try pack.PackObjectWriter.init(allocator, &obj_iter);
