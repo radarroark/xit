@@ -219,9 +219,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                     }
                 },
                 .xit => {
-                    if (try state.moment.cursor.readPath(void, &.{
-                        .{ .hash_map_get = .{ .value = hash.hashBuffer("config") } },
-                    })) |config_cursor| {
+                    if (try state.moment.get(hash.hashBuffer("config"))) |config_cursor| {
                         var config_iter = try config_cursor.iter();
                         defer config_iter.deinit();
                         while (try config_iter.next()) |*section_cursor| {
@@ -287,49 +285,31 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                 switch (repo_kind) {
                     .git => try self.write(state),
                     .xit => {
-                        // ensure section name is saved
-                        const section_name_hash = hash.hashBuffer(section_name);
-                        var section_name_cursor = try state.moment.cursor.writePath(void, &.{
-                            .{ .hash_map_get = .{ .value = hash.hashBuffer("config-name-set") } },
-                            .hash_map_init,
-                            .{ .hash_map_get = .{ .key = section_name_hash } },
-                        });
-                        try section_name_cursor.writeBytes(section_name, .once);
-                        const section_name_slot = section_name_cursor.slot();
-                        _ = try state.moment.cursor.writePath(void, &.{
-                            .{ .hash_map_get = .{ .value = hash.hashBuffer("config") } },
-                            .hash_map_init,
-                            .{ .hash_map_get = .{ .key = section_name_hash } },
-                            .{ .write = .{ .slot = section_name_slot } },
-                        });
+                        const config_name_set_cursor = try state.moment.put(hash.hashBuffer("config-name-set"));
+                        const config_name_set = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(config_name_set_cursor);
 
-                        // ensure variable name is saved
+                        // store section name
+                        const section_name_hash = hash.hashBuffer(section_name);
+                        var section_name_cursor = try config_name_set.putKey(section_name_hash);
+                        try section_name_cursor.writeBytes(section_name, .once);
+
+                        // add section name to config
+                        const config_cursor = try state.moment.put(hash.hashBuffer("config"));
+                        const config = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(config_cursor);
+                        try config.putKeyData(section_name_hash, .{ .slot = section_name_cursor.slot() });
+
+                        // store variable name
                         const var_name_hash = hash.hashBuffer(var_name);
-                        var var_name_cursor = try state.moment.cursor.writePath(void, &.{
-                            .{ .hash_map_get = .{ .value = hash.hashBuffer("config-name-set") } },
-                            .hash_map_init,
-                            .{ .hash_map_get = .{ .key = var_name_hash } },
-                        });
+                        var var_name_cursor = try config_name_set.putKey(var_name_hash);
                         try var_name_cursor.writeBytes(var_name, .once);
-                        const var_name_slot = var_name_cursor.slot();
-                        _ = try state.moment.cursor.writePath(void, &.{
-                            .{ .hash_map_get = .{ .value = hash.hashBuffer("config") } },
-                            .hash_map_init,
-                            .{ .hash_map_get = .{ .value = section_name_hash } },
-                            .hash_map_init,
-                            .{ .hash_map_get = .{ .key = var_name_hash } },
-                            .{ .write = .{ .slot = var_name_slot } },
-                        });
+
+                        // add var name to config
+                        const section_cursor = try config.put(section_name_hash);
+                        const section = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(section_cursor);
+                        try section.putKeyData(var_name_hash, .{ .slot = var_name_cursor.slot() });
 
                         // save the variable
-                        _ = try state.moment.cursor.writePath(void, &.{
-                            .{ .hash_map_get = .{ .value = hash.hashBuffer("config") } },
-                            .hash_map_init,
-                            .{ .hash_map_get = .{ .value = section_name_hash } },
-                            .hash_map_init,
-                            .{ .hash_map_get = .{ .value = var_name_hash } },
-                            .{ .write = .{ .bytes = var_value } },
-                        });
+                        try section.putData(var_name_hash, .{ .bytes = var_value });
                     },
                 }
             } else {
@@ -353,20 +333,14 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                 switch (repo_kind) {
                     .git => try self.write(state),
                     .xit => {
+                        const config_cursor = try state.moment.put(hash.hashBuffer("config"));
+                        const config = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(config_cursor);
                         if (!self.sections.contains(section_name)) {
-                            _ = try state.moment.cursor.writePath(void, &.{
-                                .{ .hash_map_get = .{ .value = hash.hashBuffer("config") } },
-                                .hash_map_init,
-                                .{ .hash_map_remove = hash.hashBuffer(section_name) },
-                            });
+                            try config.remove(hash.hashBuffer(section_name));
                         } else {
-                            _ = try state.moment.cursor.writePath(void, &.{
-                                .{ .hash_map_get = .{ .value = hash.hashBuffer("config") } },
-                                .hash_map_init,
-                                .{ .hash_map_get = .{ .value = hash.hashBuffer(section_name) } },
-                                .hash_map_init,
-                                .{ .hash_map_remove = hash.hashBuffer(var_name) },
-                            });
+                            const section_cursor = try config.put(hash.hashBuffer(section_name));
+                            const section = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(section_cursor);
+                            try section.remove(hash.hashBuffer(var_name));
                         }
                     },
                 }
