@@ -185,9 +185,7 @@ pub fn read(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, pa
             return std.mem.sliceTo(buffer[0..size], '\n');
         },
         .xit => {
-            if (try state.moment.cursor.readPath(void, &.{
-                .{ .hash_map_get = .{ .value = hash.hashBuffer(path) } },
-            })) |target_bytes_cursor| {
+            if (try state.moment.get(hash.hashBuffer(path))) |target_bytes_cursor| {
                 return try target_bytes_cursor.readBytes(buffer);
             } else {
                 return error.KeyNotFound;
@@ -261,6 +259,9 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).Stat
             lock.success = true;
         },
         .xit => {
+            const ref_content_set_cursor = try state.moment.put(hash.hashBuffer("ref-content-set"));
+            const ref_content_set = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(ref_content_set_cursor);
+
             if (try state.moment.cursor.readPath(void, &.{
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("refs") } },
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("heads") } },
@@ -269,43 +270,22 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).Stat
                 // point HEAD at the ref
                 var write_buffer = [_]u8{0} ** MAX_READ_BYTES;
                 const content = try std.fmt.bufPrint(&write_buffer, "ref: refs/heads/{s}", .{target});
-                var ref_content_cursor = try state.moment.cursor.writePath(void, &.{
-                    .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-content-set") } },
-                    .hash_map_init,
-                    .{ .hash_map_get = .{ .key = hash.hashBuffer(content) } },
-                });
+                var ref_content_cursor = try ref_content_set.putKey(hash.hashBuffer(content));
                 try ref_content_cursor.writeBytes(content, .once);
-                _ = try state.moment.cursor.writePath(void, &.{
-                    .{ .hash_map_get = .{ .value = hash.hashBuffer("HEAD") } },
-                    .{ .write = .{ .slot = ref_content_cursor.slot() } },
-                });
+                try state.moment.putData(hash.hashBuffer("HEAD"), .{ .slot = ref_content_cursor.slot() });
             } else {
                 if (oid_hex_maybe) |oid_hex| {
                     // the HEAD is detached, so just update it with the oid
-                    var ref_content_cursor = try state.moment.cursor.writePath(void, &.{
-                        .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-content-set") } },
-                        .hash_map_init,
-                        .{ .hash_map_get = .{ .key = try hash.hexToHash(&oid_hex) } },
-                    });
+                    var ref_content_cursor = try ref_content_set.putKey(try hash.hexToHash(&oid_hex));
                     try ref_content_cursor.writeBytes(&oid_hex, .once);
-                    _ = try state.moment.cursor.writePath(void, &.{
-                        .{ .hash_map_get = .{ .value = hash.hashBuffer("HEAD") } },
-                        .{ .write = .{ .slot = ref_content_cursor.slot() } },
-                    });
+                    try state.moment.putData(hash.hashBuffer("HEAD"), .{ .slot = ref_content_cursor.slot() });
                 } else {
                     // point HEAD at the ref, even though the ref doesn't exist
                     var write_buffer = [_]u8{0} ** MAX_READ_BYTES;
                     const content = try std.fmt.bufPrint(&write_buffer, "ref: refs/heads/{s}", .{target});
-                    var ref_content_cursor = try state.moment.cursor.writePath(void, &.{
-                        .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-content-set") } },
-                        .hash_map_init,
-                        .{ .hash_map_get = .{ .key = hash.hashBuffer(content) } },
-                    });
+                    var ref_content_cursor = try ref_content_set.putKey(hash.hashBuffer(content));
                     try ref_content_cursor.writeBytes(content, .once);
-                    _ = try state.moment.cursor.writePath(void, &.{
-                        .{ .hash_map_get = .{ .value = hash.hashBuffer("HEAD") } },
-                        .{ .write = .{ .slot = ref_content_cursor.slot() } },
-                    });
+                    try state.moment.putData(hash.hashBuffer("HEAD"), .{ .slot = ref_content_cursor.slot() });
                 }
             }
         },
@@ -356,64 +336,41 @@ pub fn updateRecur(
             }
         },
         .xit => {
-            const Ctx = struct {
-                state: rp.Repo(repo_kind).State,
-                allocator: std.mem.Allocator,
-                oid_hex: *const [hash.SHA1_HEX_LEN]u8,
-                file_name: []const u8,
-
-                pub fn run(ctx: @This(), cursor: *rp.Repo(repo_kind).DB.Cursor(.read_write)) !void {
-                    const file_name_hash = hash.hashBuffer(ctx.file_name);
-
-                    var buffer = [_]u8{0} ** MAX_READ_BYTES;
-                    if (try cursor.readPath(void, &.{
-                        .{ .hash_map_get = .{ .value = file_name_hash } },
-                    })) |old_content_cursor| {
-                        const old_content = try old_content_cursor.readBytes(&buffer);
-                        // if it's a ref, update it recursively
-                        if (std.mem.startsWith(u8, old_content, REF_START_STR) and old_content.len > REF_START_STR.len) {
-                            const ref_name = old_content[REF_START_STR.len..];
-                            try updateRecur(repo_kind, ctx.state, ctx.allocator, &.{ "refs", "heads", ref_name }, ctx.oid_hex);
-                            return;
-                        }
-                    }
-
-                    // otherwise, update with the oid
-                    var ref_name_cursor = try ctx.state.moment.cursor.writePath(void, &.{
-                        .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-name-set") } },
-                        .hash_map_init,
-                        .{ .hash_map_get = .{ .key = file_name_hash } },
-                    });
-                    try ref_name_cursor.writeBytes(ctx.file_name, .once);
-                    _ = try cursor.writePath(void, &.{
-                        .{ .hash_map_get = .{ .key = file_name_hash } },
-                        .{ .write = .{ .slot = ref_name_cursor.slot() } },
-                    });
-                    var ref_content_cursor = try ctx.state.moment.cursor.writePath(void, &.{
-                        .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-content-set") } },
-                        .hash_map_init,
-                        .{ .hash_map_get = .{ .key = try hash.hexToHash(ctx.oid_hex) } },
-                    });
-                    try ref_content_cursor.writeBytes(ctx.oid_hex, .once);
-                    _ = try cursor.writePath(void, &.{
-                        .{ .hash_map_get = .{ .value = file_name_hash } },
-                        .{ .write = .{ .slot = ref_content_cursor.slot() } },
-                    });
-                }
-            };
-            var db_path_parts = std.ArrayList(rp.Repo(repo_kind).DB.PathPart(Ctx)).init(allocator);
+            var db_path_parts = std.ArrayList(rp.Repo(repo_kind).DB.PathPart(void)).init(allocator);
             defer db_path_parts.deinit();
             for (path_parts[0 .. path_parts.len - 1]) |part_name| {
                 try db_path_parts.append(.{ .hash_map_get = .{ .value = hash.hashBuffer(part_name) } });
                 try db_path_parts.append(.hash_map_init);
             }
-            try db_path_parts.append(.{ .ctx = Ctx{
-                .state = state,
-                .allocator = allocator,
-                .oid_hex = oid_hex,
-                .file_name = path_parts[path_parts.len - 1],
-            } });
-            _ = try state.moment.cursor.writePath(Ctx, db_path_parts.items);
+
+            const butlast_cursor = try state.moment.cursor.writePath(void, db_path_parts.items);
+            const butlast = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(butlast_cursor);
+
+            const file_name = path_parts[path_parts.len - 1];
+            const file_name_hash = hash.hashBuffer(file_name);
+
+            var buffer = [_]u8{0} ** MAX_READ_BYTES;
+            if (try butlast.get(file_name_hash)) |old_content_cursor| {
+                const old_content = try old_content_cursor.readBytes(&buffer);
+                // if it's a ref, update it recursively
+                if (std.mem.startsWith(u8, old_content, REF_START_STR) and old_content.len > REF_START_STR.len) {
+                    const ref_name = old_content[REF_START_STR.len..];
+                    try updateRecur(repo_kind, state, allocator, &.{ "refs", "heads", ref_name }, oid_hex);
+                    return;
+                }
+            }
+
+            // otherwise, update with the oid
+            const ref_name_set_cursor = try state.moment.put(hash.hashBuffer("ref-name-set"));
+            const ref_name_set = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(ref_name_set_cursor);
+            var ref_name_cursor = try ref_name_set.putKey(file_name_hash);
+            try ref_name_cursor.writeBytes(file_name, .once);
+            try butlast.putKeyData(file_name_hash, .{ .slot = ref_name_cursor.slot() });
+            const ref_content_set_cursor = try state.moment.put(hash.hashBuffer("ref-content-set"));
+            const ref_content_set = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(ref_content_set_cursor);
+            var ref_content_cursor = try ref_content_set.putKey(try hash.hexToHash(oid_hex));
+            try ref_content_cursor.writeBytes(oid_hex, .once);
+            try butlast.putData(file_name_hash, .{ .slot = ref_content_cursor.slot() });
         },
     }
 }
