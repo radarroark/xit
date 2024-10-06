@@ -21,18 +21,18 @@ const rp = @import("./repo.zig");
 
 const MAX_FILE_READ_BYTES = 1024; // FIXME: this is arbitrary...
 
-pub fn objectToFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, path: []const u8, tree_entry: obj.TreeEntry) !void {
+pub fn objectToFile(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, allocator: std.mem.Allocator, path: []const u8, tree_entry: obj.TreeEntry) !void {
     const oid_hex = std.fmt.bytesToHex(tree_entry.oid, .lower);
 
     switch (tree_entry.mode.object_type) {
         .regular_file => {
             // open the reader
-            var obj_rdr = try obj.ObjectReader(repo_kind).init(allocator, core_cursor, oid_hex);
+            var obj_rdr = try obj.ObjectReader(repo_kind).init(allocator, state, oid_hex);
             defer obj_rdr.deinit();
 
             // create parent dir(s)
             if (std.fs.path.dirname(path)) |dir| {
-                try core_cursor.core.repo_dir.makePath(dir);
+                try state.core.repo_dir.makePath(dir);
             }
 
             // open the out file
@@ -40,7 +40,7 @@ pub fn objectToFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_k
                 .windows => .{},
                 else => .{ .mode = @as(u32, @bitCast(tree_entry.mode)) },
             };
-            const out_file = try core_cursor.core.repo_dir.createFile(path, out_flags);
+            const out_file = try state.core.repo_dir.createFile(path, out_flags);
             defer out_file.close();
 
             // write the decompressed data to the output file
@@ -56,14 +56,14 @@ pub fn objectToFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_k
         },
         .tree => {
             // load the tree
-            var tree_object = try obj.Object(repo_kind, .full).init(allocator, core_cursor, oid_hex);
+            var tree_object = try obj.Object(repo_kind, .full).init(allocator, state, oid_hex);
             defer tree_object.deinit();
 
             // update each entry recursively
             for (tree_object.content.tree.entries.keys(), tree_object.content.tree.entries.values()) |sub_path, entry| {
                 const new_path = try io.joinPath(allocator, &.{ path, sub_path });
                 defer allocator.free(new_path);
-                try objectToFile(repo_kind, core_cursor, allocator, new_path, entry);
+                try objectToFile(repo_kind, state, allocator, new_path, entry);
             }
         },
         // TODO: handle symlinks
@@ -71,7 +71,7 @@ pub fn objectToFile(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_k
     }
 }
 
-fn pathToTreeEntry(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, parent: obj.Object(repo_kind, .full), path_parts: []const []const u8) !?obj.TreeEntry {
+fn pathToTreeEntry(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, allocator: std.mem.Allocator, parent: obj.Object(repo_kind, .full), path_parts: []const []const u8) !?obj.TreeEntry {
     const path_part = path_parts[0];
     const tree_entry = parent.content.tree.entries.get(path_part) orelse return null;
 
@@ -80,12 +80,12 @@ fn pathToTreeEntry(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_ki
     }
 
     const oid_hex = std.fmt.bytesToHex(tree_entry.oid, .lower);
-    var tree_object = try obj.Object(repo_kind, .full).init(allocator, core_cursor, oid_hex);
+    var tree_object = try obj.Object(repo_kind, .full).init(allocator, state, oid_hex);
     defer tree_object.deinit();
 
     switch (tree_object.content) {
         .blob => return null,
-        .tree => return pathToTreeEntry(repo_kind, core_cursor, allocator, tree_object, path_parts[1..]),
+        .tree => return pathToTreeEntry(repo_kind, state, allocator, tree_object, path_parts[1..]),
         .commit => return error.ObjectInvalid,
     }
 }
@@ -182,7 +182,7 @@ fn untrackedFile(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
 
 pub fn migrate(
     comptime repo_kind: rp.RepoKind,
-    core_cursor: rp.Repo(repo_kind).CoreCursor,
+    state: rp.Repo(repo_kind).State,
     allocator: std.mem.Allocator,
     tree_diff: obj.TreeDiff(repo_kind),
     index: *idx.Index(repo_kind),
@@ -217,11 +217,11 @@ pub fn migrate(
                 result.conflict(allocator);
                 try result.data.conflict.stale_files.put(path, {});
             } else {
-                const meta = io.getMetadata(core_cursor.core.repo_dir, path) catch |err| switch (err) {
+                const meta = io.getMetadata(state.core.repo_dir, path) catch |err| switch (err) {
                     error.FileNotFound, error.NotDir => {
                         // if the path doesn't exist in the workspace,
                         // but one of its parents *does* exist and isn't tracked
-                        if (untrackedParent(repo_kind, core_cursor.core.repo_dir, path, index.*)) |_| {
+                        if (untrackedParent(repo_kind, state.core.repo_dir, path, index.*)) |_| {
                             result.conflict(allocator);
                             if (entry_maybe) |_| {
                                 try result.data.conflict.stale_files.put(path, {});
@@ -237,7 +237,7 @@ pub fn migrate(
                 };
                 switch (meta.kind()) {
                     .file => {
-                        const file = try core_cursor.core.repo_dir.openFile(path, .{ .mode = .read_only });
+                        const file = try state.core.repo_dir.openFile(path, .{ .mode = .read_only });
                         defer file.close();
                         // if the path is a file that differs from the index
                         if (try compareIndexToWorkspace(repo_kind, entry_maybe, file) != .none) {
@@ -253,7 +253,7 @@ pub fn migrate(
                     },
                     .directory => {
                         // if the path is a dir with a descendent that isn't in the index
-                        if (try untrackedFile(repo_kind, allocator, core_cursor.core.repo_dir, path, index.*)) {
+                        if (try untrackedFile(repo_kind, allocator, state.core.repo_dir, path, index.*)) {
                             result.conflict(allocator);
                             if (entry_maybe) |_| {
                                 try result.data.conflict.stale_files.put(path, {});
@@ -276,10 +276,10 @@ pub fn migrate(
 
     for (remove_files.keys()) |path| {
         // update working tree
-        try core_cursor.core.repo_dir.deleteFile(path);
+        try state.core.repo_dir.deleteFile(path);
         var dir_path_maybe = std.fs.path.dirname(path);
         while (dir_path_maybe) |dir_path| {
-            core_cursor.core.repo_dir.deleteDir(dir_path) catch |err| switch (err) {
+            state.core.repo_dir.deleteDir(dir_path) catch |err| switch (err) {
                 error.DirNotEmpty => break,
                 else => return err,
             };
@@ -292,27 +292,27 @@ pub fn migrate(
 
     for (add_files.keys(), add_files.values()) |path, tree_entry| {
         // update working tree
-        try objectToFile(repo_kind, core_cursor, allocator, path, tree_entry);
+        try objectToFile(repo_kind, state, allocator, path, tree_entry);
         // update index
-        try index.addPath(core_cursor, path);
+        try index.addPath(state, path);
     }
 
     for (edit_files.keys(), edit_files.values()) |path, tree_entry| {
         // update working tree
-        try objectToFile(repo_kind, core_cursor, allocator, path, tree_entry);
+        try objectToFile(repo_kind, state, allocator, path, tree_entry);
         // update index
-        try index.addPath(core_cursor, path);
+        try index.addPath(state, path);
     }
 }
 
-pub fn restore(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, path: []const u8) !void {
+pub fn restore(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, allocator: std.mem.Allocator, path: []const u8) !void {
     // get the current commit
-    const current_oid = try ref.readHead(repo_kind, core_cursor);
-    var commit_object = try obj.Object(repo_kind, .full).init(allocator, core_cursor, current_oid);
+    const current_oid = try ref.readHead(repo_kind, state);
+    var commit_object = try obj.Object(repo_kind, .full).init(allocator, state, current_oid);
     defer commit_object.deinit();
 
     // get the tree of the current commit
-    var tree_object = try obj.Object(repo_kind, .full).init(allocator, core_cursor, commit_object.content.commit.tree);
+    var tree_object = try obj.Object(repo_kind, .full).init(allocator, state, commit_object.content.commit.tree);
     defer tree_object.deinit();
 
     // get the entry for the given path
@@ -326,10 +326,10 @@ pub fn restore(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).
         }
     }
     try path_parts.append(path[start..]);
-    const tree_entry = try pathToTreeEntry(repo_kind, core_cursor, allocator, tree_object, path_parts.items) orelse return error.ObjectNotFound;
+    const tree_entry = try pathToTreeEntry(repo_kind, state, allocator, tree_object, path_parts.items) orelse return error.ObjectNotFound;
 
     // restore file in the working tree
-    try objectToFile(repo_kind, core_cursor, allocator, path, tree_entry);
+    try objectToFile(repo_kind, state, allocator, path, tree_entry);
 }
 
 pub const Switch = struct {
@@ -347,15 +347,15 @@ pub const Switch = struct {
         force: bool,
     };
 
-    pub fn init(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, target: []const u8, options: Options) !Switch {
+    pub fn init(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, allocator: std.mem.Allocator, target: []const u8, options: Options) !Switch {
         // get the current commit and target oid
-        const current_oid = try ref.readHead(repo_kind, core_cursor);
-        const target_oid = try ref.resolve(repo_kind, core_cursor, target) orelse return error.InvalidTarget;
+        const current_oid = try ref.readHead(repo_kind, state);
+        const target_oid = try ref.resolve(repo_kind, state, target) orelse return error.InvalidTarget;
 
         // compare the commits
         var tree_diff = obj.TreeDiff(repo_kind).init(allocator);
         defer tree_diff.deinit();
-        try tree_diff.compare(core_cursor, current_oid, target_oid, null);
+        try tree_diff.compare(state, current_oid, target_oid, null);
 
         var result = Switch{ .data = .{ .success = {} } };
         errdefer result.deinit();
@@ -363,15 +363,15 @@ pub const Switch = struct {
         switch (repo_kind) {
             .git => {
                 // create lock file
-                var lock = try io.LockFile.init(allocator, core_cursor.core.git_dir, "index");
+                var lock = try io.LockFile.init(allocator, state.core.git_dir, "index");
                 defer lock.deinit();
 
                 // read index
-                var index = try idx.Index(repo_kind).init(allocator, core_cursor);
+                var index = try idx.Index(repo_kind).init(allocator, state);
                 defer index.deinit();
 
                 // update the working tree
-                try migrate(repo_kind, core_cursor, allocator, tree_diff, &index, if (options.force) null else &result);
+                try migrate(repo_kind, state, allocator, tree_diff, &index, if (options.force) null else &result);
 
                 // return early if conflict
                 if (result.data == .conflict) {
@@ -379,21 +379,21 @@ pub const Switch = struct {
                 }
 
                 // update the index
-                try index.write(allocator, .{ .core = core_cursor.core, .lock_file_maybe = lock.lock_file });
+                try index.write(allocator, .{ .core = state.core, .lock_file_maybe = lock.lock_file });
 
                 // update HEAD
-                try ref.writeHead(repo_kind, core_cursor, allocator, target, target_oid);
+                try ref.writeHead(repo_kind, state, allocator, target, target_oid);
 
                 // finish lock
                 lock.success = true;
             },
             .xit => {
                 // read index
-                var index = try idx.Index(repo_kind).init(allocator, core_cursor);
+                var index = try idx.Index(repo_kind).init(allocator, state);
                 defer index.deinit();
 
                 // update the working tree
-                try migrate(repo_kind, core_cursor, allocator, tree_diff, &index, if (options.force) null else &result);
+                try migrate(repo_kind, state, allocator, tree_diff, &index, if (options.force) null else &result);
 
                 // return early if conflict
                 if (result.data == .conflict) {
@@ -401,10 +401,10 @@ pub const Switch = struct {
                 }
 
                 // update the index
-                try index.write(allocator, core_cursor);
+                try index.write(allocator, state);
 
                 // update HEAD
-                try ref.writeHead(repo_kind, core_cursor, allocator, target, target_oid);
+                try ref.writeHead(repo_kind, state, allocator, target, target_oid);
             },
         }
 

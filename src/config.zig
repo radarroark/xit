@@ -27,7 +27,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
 
         const Variables = std.StringArrayHashMap([]const u8);
 
-        pub fn init(core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator) !Config(repo_kind) {
+        pub fn init(state: rp.Repo(repo_kind).State, allocator: std.mem.Allocator) !Config(repo_kind) {
             var arena = try allocator.create(std.heap.ArenaAllocator);
             arena.* = std.heap.ArenaAllocator.init(allocator);
             errdefer {
@@ -122,7 +122,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                         }
                     };
 
-                    var config_file = try core_cursor.core.git_dir.createFile("config", .{ .read = true, .truncate = false });
+                    var config_file = try state.core.git_dir.createFile("config", .{ .read = true, .truncate = false });
                     defer config_file.close();
 
                     const reader = config_file.reader();
@@ -219,7 +219,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                     }
                 },
                 .xit => {
-                    if (try core_cursor.cursor.readPath(void, &.{
+                    if (try state.cursor.readPath(void, &.{
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("config") } },
                     })) |config_cursor| {
                         var config_iter = try config_cursor.iter();
@@ -257,7 +257,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
             self.allocator.destroy(self.arena);
         }
 
-        pub fn add(self: *Config(repo_kind), core_cursor: rp.Repo(repo_kind).CoreCursor, input: AddConfigInput) !void {
+        pub fn add(self: *Config(repo_kind), state: rp.Repo(repo_kind).State, input: AddConfigInput) !void {
             // validate the config name
             for (input.name, 0..) |char, i| {
                 switch (char) {
@@ -285,18 +285,18 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                 }
 
                 switch (repo_kind) {
-                    .git => try self.write(core_cursor),
+                    .git => try self.write(state),
                     .xit => {
                         // ensure section name is saved
                         const section_name_hash = hash.hashBuffer(section_name);
-                        var section_name_cursor = try core_cursor.cursor.writePath(void, &.{
+                        var section_name_cursor = try state.cursor.writePath(void, &.{
                             .{ .hash_map_get = .{ .value = hash.hashBuffer("config-name-set") } },
                             .hash_map_init,
                             .{ .hash_map_get = .{ .key = section_name_hash } },
                         });
                         try section_name_cursor.writeBytes(section_name, .once);
                         const section_name_slot = section_name_cursor.slot_ptr.slot;
-                        _ = try core_cursor.cursor.writePath(void, &.{
+                        _ = try state.cursor.writePath(void, &.{
                             .{ .hash_map_get = .{ .value = hash.hashBuffer("config") } },
                             .hash_map_init,
                             .{ .hash_map_get = .{ .key = section_name_hash } },
@@ -305,14 +305,14 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
 
                         // ensure variable name is saved
                         const var_name_hash = hash.hashBuffer(var_name);
-                        var var_name_cursor = try core_cursor.cursor.writePath(void, &.{
+                        var var_name_cursor = try state.cursor.writePath(void, &.{
                             .{ .hash_map_get = .{ .value = hash.hashBuffer("config-name-set") } },
                             .hash_map_init,
                             .{ .hash_map_get = .{ .key = var_name_hash } },
                         });
                         try var_name_cursor.writeBytes(var_name, .once);
                         const var_name_slot = var_name_cursor.slot_ptr.slot;
-                        _ = try core_cursor.cursor.writePath(void, &.{
+                        _ = try state.cursor.writePath(void, &.{
                             .{ .hash_map_get = .{ .value = hash.hashBuffer("config") } },
                             .hash_map_init,
                             .{ .hash_map_get = .{ .value = section_name_hash } },
@@ -322,7 +322,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                         });
 
                         // save the variable
-                        _ = try core_cursor.cursor.writePath(void, &.{
+                        _ = try state.cursor.writePath(void, &.{
                             .{ .hash_map_get = .{ .value = hash.hashBuffer("config") } },
                             .hash_map_init,
                             .{ .hash_map_get = .{ .value = section_name_hash } },
@@ -337,7 +337,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
             }
         }
 
-        pub fn remove(self: *Config(repo_kind), core_cursor: rp.Repo(repo_kind).CoreCursor, input: RemoveConfigInput) !void {
+        pub fn remove(self: *Config(repo_kind), state: rp.Repo(repo_kind).State, input: RemoveConfigInput) !void {
             if (std.mem.lastIndexOfScalar(u8, input.name, '.')) |index| {
                 const section_name = try self.arena.allocator().dupe(u8, input.name[0..index]);
                 const var_name = try self.arena.allocator().dupe(u8, input.name[index + 1 ..]);
@@ -351,16 +351,16 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                 }
 
                 switch (repo_kind) {
-                    .git => try self.write(core_cursor),
+                    .git => try self.write(state),
                     .xit => {
                         if (!self.sections.contains(section_name)) {
-                            _ = try core_cursor.cursor.writePath(void, &.{
+                            _ = try state.cursor.writePath(void, &.{
                                 .{ .hash_map_get = .{ .value = hash.hashBuffer("config") } },
                                 .hash_map_init,
                                 .{ .hash_map_remove = hash.hashBuffer(section_name) },
                             });
                         } else {
-                            _ = try core_cursor.cursor.writePath(void, &.{
+                            _ = try state.cursor.writePath(void, &.{
                                 .{ .hash_map_get = .{ .value = hash.hashBuffer("config") } },
                                 .hash_map_init,
                                 .{ .hash_map_get = .{ .value = hash.hashBuffer(section_name) } },
@@ -375,8 +375,8 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
             }
         }
 
-        fn write(self: *Config(repo_kind), core_cursor: rp.Repo(.git).CoreCursor) !void {
-            const lock_file = core_cursor.lock_file_maybe orelse return error.NoLockFile;
+        fn write(self: *Config(repo_kind), state: rp.Repo(.git).State) !void {
+            const lock_file = state.lock_file_maybe orelse return error.NoLockFile;
             try lock_file.setEndPos(0); // truncate file in case this method is called multiple times
 
             for (self.sections.keys(), self.sections.values()) |section_name, variables| {

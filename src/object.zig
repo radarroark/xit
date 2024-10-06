@@ -71,7 +71,7 @@ pub const Tree = struct {
 /// maybe i'll figure that out later.
 pub fn writeBlob(
     comptime repo_kind: rp.RepoKind,
-    core_cursor: rp.Repo(repo_kind).CoreCursor,
+    state: rp.Repo(repo_kind).State,
     allocator: std.mem.Allocator,
     file: anytype,
     file_size: u64,
@@ -91,7 +91,7 @@ pub fn writeBlob(
 
     switch (repo_kind) {
         .git => {
-            var objects_dir = try core_cursor.core.git_dir.openDir("objects", .{});
+            var objects_dir = try state.core.git_dir.openDir("objects", .{});
             defer objects_dir.close();
 
             // make the two char dir
@@ -145,7 +145,7 @@ pub fn writeBlob(
             const FileReaderType = @TypeOf(reader);
 
             const Ctx = struct {
-                core_cursor: rp.Repo(repo_kind).CoreCursor,
+                state: rp.Repo(repo_kind).State,
                 reader: *const FileReaderType,
                 sha1_hex: [hash.SHA1_HEX_LEN]u8,
                 header: []const u8,
@@ -165,7 +165,7 @@ pub fn writeBlob(
                         }
                         try writer.finish();
 
-                        _ = try ctx.core_cursor.cursor.writePath(void, &.{
+                        _ = try ctx.state.cursor.writePath(void, &.{
                             .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
                             .hash_map_init,
                             .{ .hash_map_get = .{ .value = try hash.hexToHash(&ctx.sha1_hex) } },
@@ -174,17 +174,17 @@ pub fn writeBlob(
                     }
                 }
             };
-            _ = try core_cursor.cursor.writePath(Ctx, &.{
+            _ = try state.cursor.writePath(Ctx, &.{
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("file-values") } },
                 .hash_map_init,
                 .{ .hash_map_get = .{ .value = file_hash } },
-                .{ .ctx = Ctx{ .core_cursor = core_cursor, .reader = &reader, .sha1_hex = sha1_hex, .header = header } },
+                .{ .ctx = Ctx{ .state = state, .reader = &reader, .sha1_hex = sha1_hex, .header = header } },
             });
         },
     }
 }
 
-fn writeTree(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, tree: *Tree, sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8) !void {
+fn writeTree(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, allocator: std.mem.Allocator, tree: *Tree, sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8) !void {
     // sort the entries. this is needed for xit,
     // because its index entries are stored as a
     // hash map, thus making their order random.
@@ -214,7 +214,7 @@ fn writeTree(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).Co
 
     switch (repo_kind) {
         .git => {
-            var objects_dir = try core_cursor.core.git_dir.openDir("objects", .{});
+            var objects_dir = try state.core.git_dir.openDir("objects", .{});
             defer objects_dir.close();
 
             // make the two char dir
@@ -280,12 +280,12 @@ fn writeTree(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).Co
                     });
                 }
             };
-            _ = try core_cursor.cursor.writePath(Ctx, &.{
+            _ = try state.cursor.writePath(Ctx, &.{
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
                 .hash_map_init,
                 .{ .hash_map_get = .{ .value = hash.bytesToHash(sha1_bytes_buffer) } },
                 .{ .ctx = Ctx{
-                    .cursor = core_cursor.cursor,
+                    .cursor = state.cursor,
                     .tree_sha1_bytes = sha1_bytes_buffer,
                     .tree_bytes = tree_bytes,
                 } },
@@ -299,7 +299,7 @@ fn writeTree(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).Co
 // for it and add that as an entry to the original tree.
 fn addIndexEntries(
     comptime repo_kind: rp.RepoKind,
-    core_cursor: rp.Repo(repo_kind).CoreCursor,
+    state: rp.Repo(repo_kind).State,
     allocator: std.mem.Allocator,
     tree: *Tree,
     index: idx.Index(repo_kind),
@@ -324,7 +324,7 @@ fn addIndexEntries(
 
             try addIndexEntries(
                 repo_kind,
-                core_cursor,
+                state,
                 allocator,
                 &subtree,
                 index,
@@ -333,7 +333,7 @@ fn addIndexEntries(
             );
 
             var tree_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-            try writeTree(repo_kind, core_cursor, allocator, &subtree, &tree_sha1_bytes_buffer);
+            try writeTree(repo_kind, state, allocator, &subtree, &tree_sha1_bytes_buffer);
 
             try tree.addTreeEntry(name, &tree_sha1_bytes_buffer);
         } else {
@@ -375,35 +375,35 @@ fn createCommitContents(allocator: std.mem.Allocator, tree_sha1_hex: [hash.SHA1_
 
 pub fn writeCommit(
     comptime repo_kind: rp.RepoKind,
-    core_cursor: rp.Repo(repo_kind).CoreCursor,
+    state: rp.Repo(repo_kind).State,
     allocator: std.mem.Allocator,
     parent_oids_maybe: ?[]const [hash.SHA1_HEX_LEN]u8,
     metadata: CommitMetadata,
 ) ![hash.SHA1_HEX_LEN]u8 {
     var commit_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
     const parent_oids = if (parent_oids_maybe) |oids| oids else blk: {
-        const head_oid_maybe = try ref.readHeadMaybe(repo_kind, core_cursor);
+        const head_oid_maybe = try ref.readHeadMaybe(repo_kind, state);
         break :blk if (head_oid_maybe) |head_oid| &.{head_oid} else &.{};
     };
 
     // read index
-    var index = try idx.Index(repo_kind).init(allocator, core_cursor);
+    var index = try idx.Index(repo_kind).init(allocator, state);
     defer index.deinit();
 
     switch (repo_kind) {
         .git => {
             // open the objects dir
-            var objects_dir = try core_cursor.core.git_dir.openDir("objects", .{});
+            var objects_dir = try state.core.git_dir.openDir("objects", .{});
             defer objects_dir.close();
 
             // create tree and add index entries
             var tree = Tree.init(allocator);
             defer tree.deinit();
-            try addIndexEntries(repo_kind, core_cursor, allocator, &tree, index, "", index.root_children.keys());
+            try addIndexEntries(repo_kind, state, allocator, &tree, index, "", index.root_children.keys());
 
             // write and hash tree
             var tree_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-            try writeTree(repo_kind, core_cursor, allocator, &tree, &tree_sha1_bytes_buffer);
+            try writeTree(repo_kind, state, allocator, &tree, &tree_sha1_bytes_buffer);
             const tree_sha1_hex = std.fmt.bytesToHex(tree_sha1_bytes_buffer, .lower);
 
             // create commit contents
@@ -450,17 +450,17 @@ pub fn writeCommit(
             try std.fs.rename(commit_hash_prefix_dir, commit_comp_tmp_file_name, commit_hash_prefix_dir, commit_hash_suffix);
 
             // write commit id to HEAD
-            try ref.updateRecur(repo_kind, core_cursor, allocator, &.{"HEAD"}, &commit_sha1_hex);
+            try ref.updateRecur(repo_kind, state, allocator, &.{"HEAD"}, &commit_sha1_hex);
         },
         .xit => {
             // create tree and add index entries
             var tree = Tree.init(allocator);
             defer tree.deinit();
-            try addIndexEntries(repo_kind, core_cursor, allocator, &tree, index, "", index.root_children.keys());
+            try addIndexEntries(repo_kind, state, allocator, &tree, index, "", index.root_children.keys());
 
             // write and hash tree
             var tree_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-            try writeTree(repo_kind, core_cursor, allocator, &tree, &tree_sha1_bytes_buffer);
+            try writeTree(repo_kind, state, allocator, &tree, &tree_sha1_bytes_buffer);
             const tree_sha1_hex = std.fmt.bytesToHex(tree_sha1_bytes_buffer, .lower);
 
             // create commit contents
@@ -476,7 +476,7 @@ pub fn writeCommit(
             const commit_sha1_hex = std.fmt.bytesToHex(commit_sha1_bytes_buffer, .lower);
 
             // write commit content
-            var content_cursor = try core_cursor.cursor.writePath(void, &.{
+            var content_cursor = try state.cursor.writePath(void, &.{
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("object-values") } },
                 .hash_map_init,
                 .{ .hash_map_get = .{ .value = hash.bytesToHash(&commit_sha1_bytes_buffer) } },
@@ -484,7 +484,7 @@ pub fn writeCommit(
             try content_cursor.writeBytes(commit, .once);
 
             // write commit
-            _ = try core_cursor.cursor.writePath(void, &.{
+            _ = try state.cursor.writePath(void, &.{
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
                 .hash_map_init,
                 .{ .hash_map_get = .{ .value = hash.bytesToHash(&commit_sha1_bytes_buffer) } },
@@ -492,7 +492,7 @@ pub fn writeCommit(
             });
 
             // write commit id to HEAD
-            try ref.updateRecur(repo_kind, core_cursor, allocator, &.{"HEAD"}, &commit_sha1_hex);
+            try ref.updateRecur(repo_kind, state, allocator, &.{"HEAD"}, &commit_sha1_hex);
         },
     }
 
@@ -521,12 +521,12 @@ pub fn TreeDiff(comptime repo_kind: rp.RepoKind) type {
             self.arena.deinit();
         }
 
-        pub fn compare(self: *TreeDiff(repo_kind), core_cursor: rp.Repo(repo_kind).CoreCursor, old_oid_maybe: ?[hash.SHA1_HEX_LEN]u8, new_oid_maybe: ?[hash.SHA1_HEX_LEN]u8, path_list_maybe: ?std.ArrayList([]const u8)) !void {
+        pub fn compare(self: *TreeDiff(repo_kind), state: rp.Repo(repo_kind).State, old_oid_maybe: ?[hash.SHA1_HEX_LEN]u8, new_oid_maybe: ?[hash.SHA1_HEX_LEN]u8, path_list_maybe: ?std.ArrayList([]const u8)) !void {
             if (old_oid_maybe == null and new_oid_maybe == null) {
                 return;
             }
-            const old_entries = try self.loadTree(core_cursor, old_oid_maybe);
-            const new_entries = try self.loadTree(core_cursor, new_oid_maybe);
+            const old_entries = try self.loadTree(state, old_oid_maybe);
+            const new_entries = try self.loadTree(state, new_oid_maybe);
             // deletions and edits
             {
                 var iter = old_entries.iterator();
@@ -540,14 +540,14 @@ pub fn TreeDiff(comptime repo_kind: rp.RepoKind) type {
                         if (!old_value.eql(new_value)) {
                             const old_value_tree = isTree(old_value);
                             const new_value_tree = isTree(new_value);
-                            try self.compare(core_cursor, if (old_value_tree) std.fmt.bytesToHex(&old_value.oid, .lower) else null, if (new_value_tree) std.fmt.bytesToHex(&new_value.oid, .lower) else null, path_list);
+                            try self.compare(state, if (old_value_tree) std.fmt.bytesToHex(&old_value.oid, .lower) else null, if (new_value_tree) std.fmt.bytesToHex(&new_value.oid, .lower) else null, path_list);
                             if (!old_value_tree or !new_value_tree) {
                                 try self.changes.put(path, Change{ .old = if (old_value_tree) null else old_value, .new = if (new_value_tree) null else new_value });
                             }
                         }
                     } else {
                         if (isTree(old_value)) {
-                            try self.compare(core_cursor, std.fmt.bytesToHex(&old_value.oid, .lower), null, path_list);
+                            try self.compare(state, std.fmt.bytesToHex(&old_value.oid, .lower), null, path_list);
                         } else {
                             try self.changes.put(path, Change{ .old = old_value, .new = null });
                         }
@@ -566,7 +566,7 @@ pub fn TreeDiff(comptime repo_kind: rp.RepoKind) type {
                     if (old_entries.get(new_key)) |_| {
                         continue;
                     } else if (isTree(new_value)) {
-                        try self.compare(core_cursor, null, std.fmt.bytesToHex(&new_value.oid, .lower), path_list);
+                        try self.compare(state, null, std.fmt.bytesToHex(&new_value.oid, .lower), path_list);
                     } else {
                         try self.changes.put(path, Change{ .old = null, .new = new_value });
                     }
@@ -574,13 +574,13 @@ pub fn TreeDiff(comptime repo_kind: rp.RepoKind) type {
             }
         }
 
-        fn loadTree(self: *TreeDiff(repo_kind), core_cursor: rp.Repo(repo_kind).CoreCursor, oid_maybe: ?[hash.SHA1_HEX_LEN]u8) !std.StringArrayHashMap(TreeEntry) {
+        fn loadTree(self: *TreeDiff(repo_kind), state: rp.Repo(repo_kind).State, oid_maybe: ?[hash.SHA1_HEX_LEN]u8) !std.StringArrayHashMap(TreeEntry) {
             if (oid_maybe) |oid| {
-                const obj = try Object(repo_kind, .full).init(self.arena.allocator(), core_cursor, oid);
+                const obj = try Object(repo_kind, .full).init(self.arena.allocator(), state, oid);
                 return switch (obj.content) {
                     .blob => std.StringArrayHashMap(TreeEntry).init(self.arena.allocator()),
                     .tree => |tree| tree.entries,
-                    .commit => |commit| self.loadTree(core_cursor, commit.tree),
+                    .commit => |commit| self.loadTree(state, commit.tree),
                 };
             } else {
                 return std.StringArrayHashMap(TreeEntry).init(self.arena.allocator());
@@ -631,10 +631,10 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
             .xit => rp.Repo(repo_kind).DB.Cursor(.read_only).Reader,
         };
 
-        pub fn init(allocator: std.mem.Allocator, core_cursor: rp.Repo(repo_kind).CoreCursor, oid: [hash.SHA1_HEX_LEN]u8) !@This() {
+        pub fn init(allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State, oid: [hash.SHA1_HEX_LEN]u8) !@This() {
             switch (repo_kind) {
                 .git => {
-                    const reader = try pack.LooseOrPackObjectReader.init(allocator, core_cursor.core, oid);
+                    const reader = try pack.LooseOrPackObjectReader.init(allocator, state.core, oid);
                     return .{
                         .allocator = allocator,
                         .header = reader.header(),
@@ -643,7 +643,7 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
                     };
                 },
                 .xit => {
-                    if (try core_cursor.cursor.readPath(void, &.{
+                    if (try state.cursor.readPath(void, &.{
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
                         .{ .hash_map_get = .{ .value = try hash.hexToHash(&oid) } },
                     })) |cursor| {
@@ -753,8 +753,8 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime load_kind: ObjectLoadKin
         len: u64,
         object_reader: ObjectReader(repo_kind),
 
-        pub fn init(allocator: std.mem.Allocator, core_cursor: rp.Repo(repo_kind).CoreCursor, oid: [hash.SHA1_HEX_LEN]u8) !Object(repo_kind, load_kind) {
-            var obj_rdr = try ObjectReader(repo_kind).init(allocator, core_cursor, oid);
+        pub fn init(allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State, oid: [hash.SHA1_HEX_LEN]u8) !Object(repo_kind, load_kind) {
+            var obj_rdr = try ObjectReader(repo_kind).init(allocator, state, oid);
             errdefer obj_rdr.deinit();
 
             const arena = try allocator.create(std.heap.ArenaAllocator);
@@ -949,7 +949,7 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime load_kind: Objec
         }
 
         pub fn next(self: *ObjectIterator(repo_kind, load_kind)) !?*Object(repo_kind, load_kind) {
-            const core_cursor = switch (repo_kind) {
+            const state = switch (repo_kind) {
                 .git => .{ .core = self.core },
                 .xit => .{ .core = self.core, .cursor = &self.cursor },
             };
@@ -960,17 +960,17 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime load_kind: Objec
                     try self.oid_excludes.put(next_oid, {});
                     switch (load_kind) {
                         .raw => {
-                            var object = try Object(repo_kind, .full).init(self.allocator, core_cursor, next_oid);
+                            var object = try Object(repo_kind, .full).init(self.allocator, state, next_oid);
                             defer object.deinit();
                             try self.addToQueue(object.content);
 
-                            var raw_object = try Object(repo_kind, .raw).init(self.allocator, core_cursor, next_oid);
+                            var raw_object = try Object(repo_kind, .raw).init(self.allocator, state, next_oid);
                             errdefer raw_object.deinit();
                             self.object = raw_object;
                             return &self.object;
                         },
                         .full => {
-                            var object = try Object(repo_kind, .full).init(self.allocator, core_cursor, next_oid);
+                            var object = try Object(repo_kind, .full).init(self.allocator, state, next_oid);
                             errdefer object.deinit();
                             try self.addToQueue(object.content);
                             self.object = object;
@@ -1020,11 +1020,11 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime load_kind: Objec
         pub fn exclude(self: *ObjectIterator(repo_kind, load_kind), oid: [hash.SHA1_HEX_LEN]u8) !void {
             try self.oid_excludes.put(oid, {});
 
-            const core_cursor = switch (repo_kind) {
+            const state = switch (repo_kind) {
                 .git => .{ .core = self.core },
                 .xit => .{ .core = self.core, .cursor = &self.cursor },
             };
-            var object = try Object(repo_kind, .full).init(self.allocator, core_cursor, oid);
+            var object = try Object(repo_kind, .full).init(self.allocator, state, oid);
             defer object.deinit();
             switch (object.content) {
                 .blob => {},

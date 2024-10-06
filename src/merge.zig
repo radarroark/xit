@@ -10,7 +10,7 @@ const df = @import("./diff.zig");
 
 const MAX_READ_BYTES = 1024; // FIXME: this is arbitrary...
 
-fn getDescendent(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, core_cursor: rp.Repo(repo_kind).CoreCursor, oid1: *const [hash.SHA1_HEX_LEN]u8, oid2: *const [hash.SHA1_HEX_LEN]u8) ![hash.SHA1_HEX_LEN]u8 {
+fn getDescendent(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State, oid1: *const [hash.SHA1_HEX_LEN]u8, oid2: *const [hash.SHA1_HEX_LEN]u8) ![hash.SHA1_HEX_LEN]u8 {
     if (std.mem.eql(u8, oid1, oid2)) {
         return oid1.*;
     }
@@ -29,7 +29,7 @@ fn getDescendent(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
     var queue = std.DoublyLinkedList(Parent){};
 
     {
-        const object = try obj.Object(repo_kind, .full).init(arena.allocator(), core_cursor, oid1.*);
+        const object = try obj.Object(repo_kind, .full).init(arena.allocator(), state, oid1.*);
         for (object.content.commit.parents.items) |parent_oid| {
             var node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
             node.data = .{ .oid = parent_oid, .kind = .one };
@@ -38,7 +38,7 @@ fn getDescendent(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
     }
 
     {
-        const object = try obj.Object(repo_kind, .full).init(arena.allocator(), core_cursor, oid2.*);
+        const object = try obj.Object(repo_kind, .full).init(arena.allocator(), state, oid2.*);
         for (object.content.commit.parents.items) |parent_oid| {
             var node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
             node.data = .{ .oid = parent_oid, .kind = .two };
@@ -66,7 +66,7 @@ fn getDescendent(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
 
         // TODO: instead of appending to the end, append it in descending order of timestamp
         // so we prioritize more recent commits and avoid wasteful traversal deep in the history.
-        const object = try obj.Object(repo_kind, .full).init(arena.allocator(), core_cursor, node.data.oid);
+        const object = try obj.Object(repo_kind, .full).init(arena.allocator(), state, node.data.oid);
         for (object.content.commit.parents.items) |parent_oid| {
             var new_node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
             new_node.data = .{ .oid = parent_oid, .kind = node.data.kind };
@@ -77,7 +77,7 @@ fn getDescendent(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
     return error.DescendentNotFound;
 }
 
-pub fn commonAncestor(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, core_cursor: rp.Repo(repo_kind).CoreCursor, oid1: *const [hash.SHA1_HEX_LEN]u8, oid2: *const [hash.SHA1_HEX_LEN]u8) ![hash.SHA1_HEX_LEN]u8 {
+pub fn commonAncestor(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State, oid1: *const [hash.SHA1_HEX_LEN]u8, oid2: *const [hash.SHA1_HEX_LEN]u8) ![hash.SHA1_HEX_LEN]u8 {
     if (std.mem.eql(u8, oid1, oid2)) {
         return oid1.*;
     }
@@ -141,7 +141,7 @@ pub fn commonAncestor(comptime repo_kind: rp.RepoKind, allocator: std.mem.Alloca
 
         // TODO: instead of appending to the end, append it in descending order of timestamp
         // so we prioritize more recent commits and avoid wasteful traversal deep in the history.
-        const object = try obj.Object(repo_kind, .full).init(arena.allocator(), core_cursor, node.data.oid);
+        const object = try obj.Object(repo_kind, .full).init(arena.allocator(), state, node.data.oid);
         for (object.content.commit.parents.items) |parent_oid| {
             const is_stale = is_common_ancestor or stale_oids.contains(&parent_oid);
             var new_node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
@@ -168,7 +168,7 @@ pub fn commonAncestor(comptime repo_kind: rp.RepoKind, allocator: std.mem.Alloca
     if (common_ancestor_count > 1) {
         var oid = parents_of_both.keys()[0][0..hash.SHA1_HEX_LEN].*;
         for (parents_of_both.keys()[1..]) |next_oid| {
-            oid = try getDescendent(repo_kind, allocator, core_cursor, oid[0..hash.SHA1_HEX_LEN], next_oid[0..hash.SHA1_HEX_LEN]);
+            oid = try getDescendent(repo_kind, allocator, state, oid[0..hash.SHA1_HEX_LEN], next_oid[0..hash.SHA1_HEX_LEN]);
         }
         return oid;
     } else if (common_ancestor_count == 1) {
@@ -191,7 +191,7 @@ pub const MergeConflict = struct {
 
 fn writeBlobWithConflict(
     comptime repo_kind: rp.RepoKind,
-    core_cursor: rp.Repo(repo_kind).CoreCursor,
+    state: rp.Repo(repo_kind).State,
     allocator: std.mem.Allocator,
     common_oid_maybe: ?[hash.SHA1_BYTES_LEN]u8,
     current_oid: [hash.SHA1_BYTES_LEN]u8,
@@ -202,13 +202,13 @@ fn writeBlobWithConflict(
     has_conflict: *bool,
 ) ![hash.SHA1_BYTES_LEN]u8 {
     var common_iter = if (common_oid_maybe) |common_oid|
-        try df.LineIterator(repo_kind).initFromOid(core_cursor, allocator, "", common_oid, null)
+        try df.LineIterator(repo_kind).initFromOid(state, allocator, "", common_oid, null)
     else
         try df.LineIterator(repo_kind).initFromNothing(allocator, "");
     defer common_iter.deinit();
-    var current_iter = try df.LineIterator(repo_kind).initFromOid(core_cursor, allocator, "", current_oid, null);
+    var current_iter = try df.LineIterator(repo_kind).initFromOid(state, allocator, "", current_oid, null);
     defer current_iter.deinit();
-    var source_iter = try df.LineIterator(repo_kind).initFromOid(core_cursor, allocator, "", source_oid, null);
+    var source_iter = try df.LineIterator(repo_kind).initFromOid(state, allocator, "", source_oid, null);
     defer source_iter.deinit();
     var diff3_iter = try df.Diff3Iterator(repo_kind).init(allocator, &common_iter, &current_iter, &source_iter);
     defer diff3_iter.deinit();
@@ -458,7 +458,7 @@ fn writeBlobWithConflict(
     };
 
     var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-    try obj.writeBlob(repo_kind, core_cursor, allocator, &stream, try stream.count(), &oid);
+    try obj.writeBlob(repo_kind, state, allocator, &stream, try stream.count(), &oid);
     has_conflict.* = stream.has_conflict;
     return oid;
 }
@@ -470,7 +470,7 @@ pub const SamePathConflictResult = struct {
 
 fn samePathConflict(
     comptime repo_kind: rp.RepoKind,
-    core_cursor: rp.Repo(repo_kind).CoreCursor,
+    state: rp.Repo(repo_kind).State,
     allocator: std.mem.Allocator,
     common_name: []const u8,
     current_name: []const u8,
@@ -520,7 +520,7 @@ fn samePathConflict(
                 var has_conflict = oid_maybe == null or mode_maybe == null;
 
                 const common_oid_maybe = if (common_entry_maybe) |common_entry| common_entry.oid else null;
-                const oid = oid_maybe orelse try writeBlobWithConflict(repo_kind, core_cursor, allocator, common_oid_maybe, current_entry.oid, source_entry.oid, common_name, current_name, source_name, &has_conflict);
+                const oid = oid_maybe orelse try writeBlobWithConflict(repo_kind, state, allocator, common_oid_maybe, current_entry.oid, source_entry.oid, common_name, current_name, source_name, &has_conflict);
                 const mode = mode_maybe orelse current_entry.mode;
 
                 return .{
@@ -664,7 +664,7 @@ pub const Merge = struct {
 
     pub fn init(
         comptime repo_kind: rp.RepoKind,
-        core_cursor: rp.Repo(repo_kind).CoreCursor,
+        state: rp.Repo(repo_kind).State,
         allocator: std.mem.Allocator,
         merge_kind: MergeKind,
         merge_input: MergeInput,
@@ -679,8 +679,8 @@ pub const Merge = struct {
         }
 
         // get the current branch name and oid
-        const current_name = try ref.readHeadName(repo_kind, core_cursor, arena.allocator());
-        const current_oid = try ref.readHead(repo_kind, core_cursor);
+        const current_name = try ref.readHeadName(repo_kind, state, arena.allocator());
+        const current_oid = try ref.readHead(repo_kind, state);
 
         // init the diff that we will use for the migration and the conflicts maps.
         // they're using the arena because they'll be included in the result.
@@ -698,7 +698,7 @@ pub const Merge = struct {
                 // make sure there is no stored merge state
                 switch (repo_kind) {
                     .git => {
-                        if (core_cursor.core.git_dir.openFile(merge_head_name, .{ .mode = .read_only })) |merge_head| {
+                        if (state.core.git_dir.openFile(merge_head_name, .{ .mode = .read_only })) |merge_head| {
                             defer merge_head.close();
                             return error.UnfinishedMergeAlreadyInProgress;
                         } else |err| switch (err) {
@@ -707,7 +707,7 @@ pub const Merge = struct {
                         }
                     },
                     .xit => {
-                        if (try core_cursor.cursor.readPath(void, &.{
+                        if (try state.cursor.readPath(void, &.{
                             .{ .hash_map_get = .{ .value = hash.hashBuffer(merge_head_name) } },
                         })) |_| {
                             return error.UnfinishedMergeAlreadyInProgress;
@@ -721,12 +721,12 @@ pub const Merge = struct {
                 @memcpy(source_name, new.source_name);
 
                 // get the oids for the three-way merge
-                const source_oid = try ref.resolve(repo_kind, core_cursor, source_name) orelse return error.InvalidTarget;
+                const source_oid = try ref.resolve(repo_kind, state, source_name) orelse return error.InvalidTarget;
                 var common_oid: [hash.SHA1_HEX_LEN]u8 = undefined;
                 switch (merge_kind) {
-                    .merge => common_oid = try commonAncestor(repo_kind, allocator, core_cursor, &current_oid, &source_oid),
+                    .merge => common_oid = try commonAncestor(repo_kind, allocator, state, &current_oid, &source_oid),
                     .cherry_pick => {
-                        var object = try obj.Object(repo_kind, .full).init(allocator, core_cursor, source_oid);
+                        var object = try obj.Object(repo_kind, .full).init(allocator, state, source_oid);
                         defer object.deinit();
                         const parent_oid = if (object.content.commit.parents.items.len == 1) object.content.commit.parents.items[0] else return error.CommitMustHaveOneParent;
                         switch (object.content) {
@@ -752,15 +752,15 @@ pub const Merge = struct {
 
                 // diff the common ancestor with the current oid
                 var current_diff = obj.TreeDiff(repo_kind).init(arena.allocator());
-                try current_diff.compare(core_cursor, common_oid, current_oid, null);
+                try current_diff.compare(state, common_oid, current_oid, null);
 
                 // diff the common ancestor with the source oid
                 var source_diff = obj.TreeDiff(repo_kind).init(arena.allocator());
-                try source_diff.compare(core_cursor, common_oid, source_oid, null);
+                try source_diff.compare(state, common_oid, source_oid, null);
 
                 // look for same path conflicts while populating the clean diff
                 for (source_diff.changes.keys(), source_diff.changes.values()) |path, source_change| {
-                    const same_path_result = try samePathConflict(repo_kind, core_cursor, allocator, &common_oid, current_name, source_name, current_diff.changes.get(path), source_change);
+                    const same_path_result = try samePathConflict(repo_kind, state, allocator, &common_oid, current_name, source_name, current_diff.changes.get(path), source_change);
                     if (same_path_result.change) |change| {
                         try clean_diff.changes.put(path, change);
                     }
@@ -789,7 +789,7 @@ pub const Merge = struct {
                         .message = try std.fmt.allocPrint(arena.allocator(), "merge from {s}", .{source_name}),
                     },
                     .cherry_pick => blk: {
-                        const object = try obj.Object(repo_kind, .full).init(arena.allocator(), core_cursor, source_oid);
+                        const object = try obj.Object(repo_kind, .full).init(arena.allocator(), state, source_oid);
                         switch (object.content) {
                             .commit => break :blk object.content.commit.metadata,
                             else => return error.NotACommitObject,
@@ -800,38 +800,38 @@ pub const Merge = struct {
                 switch (repo_kind) {
                     .git => {
                         // create lock file
-                        var lock = try io.LockFile.init(allocator, core_cursor.core.git_dir, "index");
+                        var lock = try io.LockFile.init(allocator, state.core.git_dir, "index");
                         defer lock.deinit();
 
                         // read index
-                        var index = try idx.Index(repo_kind).init(allocator, core_cursor);
+                        var index = try idx.Index(repo_kind).init(allocator, state);
                         defer index.deinit();
 
                         // update the working tree
-                        try chk.migrate(repo_kind, core_cursor, allocator, clean_diff, &index, null);
+                        try chk.migrate(repo_kind, state, allocator, clean_diff, &index, null);
 
                         for (conflicts.keys(), conflicts.values()) |path, conflict| {
                             // add conflict to index
                             try index.addConflictEntries(path, .{ conflict.common, conflict.current, conflict.source });
                             // write renamed file if necessary
                             if (conflict.renamed) |renamed| {
-                                try chk.objectToFile(repo_kind, core_cursor, allocator, renamed.path, renamed.tree_entry);
+                                try chk.objectToFile(repo_kind, state, allocator, renamed.path, renamed.tree_entry);
                             }
                         }
 
                         // update the index
-                        try index.write(allocator, .{ .core = core_cursor.core, .lock_file_maybe = lock.lock_file });
+                        try index.write(allocator, .{ .core = state.core, .lock_file_maybe = lock.lock_file });
 
                         // finish lock
                         lock.success = true;
 
                         // exit early if there were conflicts
                         if (conflicts.count() > 0) {
-                            const merge_head = try core_cursor.core.git_dir.createFile(merge_head_name, .{ .truncate = true, .lock = .exclusive });
+                            const merge_head = try state.core.git_dir.createFile(merge_head_name, .{ .truncate = true, .lock = .exclusive });
                             defer merge_head.close();
                             try merge_head.writeAll(&source_oid);
 
-                            const merge_msg = try core_cursor.core.git_dir.createFile("MERGE_MSG", .{ .truncate = true, .lock = .exclusive });
+                            const merge_msg = try state.core.git_dir.createFile("MERGE_MSG", .{ .truncate = true, .lock = .exclusive });
                             defer merge_msg.close();
                             try merge_msg.writeAll(commit_metadata.message);
 
@@ -849,18 +849,18 @@ pub const Merge = struct {
                     },
                     .xit => {
                         // read index
-                        var index = try idx.Index(repo_kind).init(allocator, core_cursor);
+                        var index = try idx.Index(repo_kind).init(allocator, state);
                         defer index.deinit();
 
                         // update the working tree
-                        try chk.migrate(repo_kind, core_cursor, allocator, clean_diff, &index, null);
+                        try chk.migrate(repo_kind, state, allocator, clean_diff, &index, null);
 
                         for (conflicts.keys(), conflicts.values()) |path, conflict| {
                             // add conflict to index
                             try index.addConflictEntries(path, .{ conflict.common, conflict.current, conflict.source });
                             // write renamed file if necessary
                             if (conflict.renamed) |renamed| {
-                                try chk.objectToFile(repo_kind, core_cursor, allocator, renamed.path, renamed.tree_entry);
+                                try chk.objectToFile(repo_kind, state, allocator, renamed.path, renamed.tree_entry);
                             }
                         }
 
@@ -870,16 +870,16 @@ pub const Merge = struct {
                         }
 
                         // update the index
-                        try index.write(allocator, core_cursor);
+                        try index.write(allocator, state);
 
                         // exit early if there were conflicts
                         if (conflicts.count() > 0) {
-                            var merge_head_cursor = try core_cursor.cursor.writePath(void, &.{
+                            var merge_head_cursor = try state.cursor.writePath(void, &.{
                                 .{ .hash_map_get = .{ .value = hash.hashBuffer(merge_head_name) } },
                             });
                             try merge_head_cursor.writeBytes(&source_oid, .replace);
 
-                            var merge_msg_cursor = try core_cursor.cursor.writePath(void, &.{
+                            var merge_msg_cursor = try state.cursor.writePath(void, &.{
                                 .{ .hash_map_get = .{ .value = hash.hashBuffer("MERGE_MSG") } },
                             });
                             try merge_msg_cursor.writeBytes(commit_metadata.message, .replace);
@@ -900,7 +900,7 @@ pub const Merge = struct {
 
                 if (std.mem.eql(u8, &current_oid, &common_oid)) {
                     // the common ancestor is the current oid, so just update HEAD
-                    try ref.updateRecur(repo_kind, core_cursor, allocator, &.{"HEAD"}, &source_oid);
+                    try ref.updateRecur(repo_kind, state, allocator, &.{"HEAD"}, &source_oid);
                     return .{
                         .arena = arena,
                         .allocator = allocator,
@@ -918,7 +918,7 @@ pub const Merge = struct {
                     .merge => &.{ current_oid, source_oid },
                     .cherry_pick => &.{common_oid},
                 };
-                const commit_oid = try obj.writeCommit(repo_kind, core_cursor, allocator, parent_oids, commit_metadata);
+                const commit_oid = try obj.writeCommit(repo_kind, state, allocator, parent_oids, commit_metadata);
 
                 return .{
                     .arena = arena,
@@ -934,7 +934,7 @@ pub const Merge = struct {
             .cont => {
                 // ensure there are no conflict entries in the index
                 {
-                    var index = try idx.Index(repo_kind).init(allocator, core_cursor);
+                    var index = try idx.Index(repo_kind).init(allocator, state);
                     defer index.deinit();
 
                     for (index.entries.values()) |*entries_for_path| {
@@ -950,7 +950,7 @@ pub const Merge = struct {
                 // read the stored merge state
                 switch (repo_kind) {
                     .git => {
-                        const merge_head = core_cursor.core.git_dir.openFile(merge_head_name, .{ .mode = .read_only }) catch |err| switch (err) {
+                        const merge_head = state.core.git_dir.openFile(merge_head_name, .{ .mode = .read_only }) catch |err| switch (err) {
                             error.FileNotFound => return error.MergeHeadNotFound,
                             else => return err,
                         };
@@ -960,7 +960,7 @@ pub const Merge = struct {
                             return error.InvalidMergeHead;
                         }
 
-                        const merge_msg = core_cursor.core.git_dir.openFile("MERGE_MSG", .{ .mode = .read_only }) catch |err| switch (err) {
+                        const merge_msg = state.core.git_dir.openFile("MERGE_MSG", .{ .mode = .read_only }) catch |err| switch (err) {
                             error.FileNotFound => return error.MergeMessageNotFound,
                             else => return err,
                         };
@@ -968,7 +968,7 @@ pub const Merge = struct {
                         commit_metadata.message = try merge_msg.readToEndAlloc(arena.allocator(), MAX_READ_BYTES);
                     },
                     .xit => {
-                        const source_oid_cursor = (try core_cursor.cursor.readPath(void, &.{
+                        const source_oid_cursor = (try state.cursor.readPath(void, &.{
                             .{ .hash_map_get = .{ .value = hash.hashBuffer(merge_head_name) } },
                         })) orelse return error.MergeHeadNotFound;
                         const source_oid_slice = try source_oid_cursor.readBytes(&source_oid);
@@ -976,7 +976,7 @@ pub const Merge = struct {
                             return error.InvalidMergeHead;
                         }
 
-                        const merge_msg_cursor = (try core_cursor.cursor.readPath(void, &.{
+                        const merge_msg_cursor = (try state.cursor.readPath(void, &.{
                             .{ .hash_map_get = .{ .value = hash.hashBuffer("MERGE_MSG") } },
                         })) orelse return error.MergeMessageNotFound;
                         commit_metadata.message = try merge_msg_cursor.readBytesAlloc(arena.allocator(), MAX_READ_BYTES);
@@ -991,9 +991,9 @@ pub const Merge = struct {
                 // get the common oid
                 var common_oid: [hash.SHA1_HEX_LEN]u8 = undefined;
                 switch (merge_kind) {
-                    .merge => common_oid = try commonAncestor(repo_kind, allocator, core_cursor, &current_oid, &source_oid),
+                    .merge => common_oid = try commonAncestor(repo_kind, allocator, state, &current_oid, &source_oid),
                     .cherry_pick => {
-                        var object = try obj.Object(repo_kind, .full).init(allocator, core_cursor, source_oid);
+                        var object = try obj.Object(repo_kind, .full).init(allocator, state, source_oid);
                         defer object.deinit();
                         const parent_oid = if (object.content.commit.parents.items.len == 1) object.content.commit.parents.items[0] else return error.CommitMustHaveOneParent;
                         switch (object.content) {
@@ -1008,19 +1008,19 @@ pub const Merge = struct {
                     .merge => &.{ current_oid, source_oid },
                     .cherry_pick => &.{common_oid},
                 };
-                const commit_oid = try obj.writeCommit(repo_kind, core_cursor, allocator, parent_oids, commit_metadata);
+                const commit_oid = try obj.writeCommit(repo_kind, state, allocator, parent_oids, commit_metadata);
 
                 // clean up the stored merge state
                 switch (repo_kind) {
                     .git => {
-                        try core_cursor.core.git_dir.deleteFile(merge_head_name);
-                        try core_cursor.core.git_dir.deleteFile("MERGE_MSG");
+                        try state.core.git_dir.deleteFile(merge_head_name);
+                        try state.core.git_dir.deleteFile("MERGE_MSG");
                     },
                     .xit => {
-                        _ = try core_cursor.cursor.writePath(void, &.{
+                        _ = try state.cursor.writePath(void, &.{
                             .{ .hash_map_remove = hash.hashBuffer(merge_head_name) },
                         });
-                        _ = try core_cursor.cursor.writePath(void, &.{
+                        _ = try state.cursor.writePath(void, &.{
                             .{ .hash_map_remove = hash.hashBuffer("MERGE_MSG") },
                         });
                     },

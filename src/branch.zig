@@ -18,7 +18,7 @@ pub const RemoveBranchInput = struct {
     name: []const u8,
 };
 
-pub fn add(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, input: AddBranchInput) !void {
+pub fn add(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, allocator: std.mem.Allocator, input: AddBranchInput) !void {
     const name = input.name;
     if (name.len == 0 or
         name[0] == '.' or
@@ -34,7 +34,7 @@ pub fn add(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).Core
 
     switch (repo_kind) {
         .git => {
-            var refs_dir = try core_cursor.core.git_dir.openDir("refs", .{});
+            var refs_dir = try state.core.git_dir.openDir("refs", .{});
             defer refs_dir.close();
             var heads_dir = try refs_dir.makeOpenPath("heads", .{});
             defer heads_dir.close();
@@ -58,7 +58,7 @@ pub fn add(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).Core
             defer lock.deinit();
 
             // get HEAD contents
-            const head_file_buffer = try ref.readHead(repo_kind, core_cursor);
+            const head_file_buffer = try ref.readHead(repo_kind, state);
 
             // write to lock file
             try lock.lock_file.writeAll(&head_file_buffer);
@@ -71,7 +71,7 @@ pub fn add(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).Core
             const name_hash = hash.hashBuffer(name);
 
             // store ref name
-            var ref_name_cursor = try core_cursor.cursor.writePath(void, &.{
+            var ref_name_cursor = try state.cursor.writePath(void, &.{
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-name-set") } },
                 .hash_map_init,
                 .{ .hash_map_get = .{ .key = name_hash } },
@@ -80,7 +80,7 @@ pub fn add(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).Core
             const name_slot = ref_name_cursor.slot_ptr.slot;
 
             // add ref name to refs/heads/{refname}
-            _ = try core_cursor.cursor.writePath(void, &.{
+            _ = try state.cursor.writePath(void, &.{
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("refs") } },
                 .hash_map_init,
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("heads") } },
@@ -90,8 +90,8 @@ pub fn add(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).Core
             });
 
             // store ref content
-            const head_file_buffer = try ref.readHead(repo_kind, core_cursor);
-            var ref_content_cursor = try core_cursor.cursor.writePath(void, &.{
+            const head_file_buffer = try ref.readHead(repo_kind, state);
+            var ref_content_cursor = try state.cursor.writePath(void, &.{
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-content-set") } },
                 .hash_map_init,
                 .{ .hash_map_get = .{ .key = hash.hashBuffer(&head_file_buffer) } },
@@ -100,7 +100,7 @@ pub fn add(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).Core
             const ref_content_slot = ref_content_cursor.slot_ptr.slot;
 
             // add ref content to refs/heads/{refname}
-            _ = try core_cursor.cursor.writePath(void, &.{
+            _ = try state.cursor.writePath(void, &.{
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("refs") } },
                 .hash_map_init,
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("heads") } },
@@ -110,23 +110,23 @@ pub fn add(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).Core
             });
 
             // get current branch name
-            const current_branch_name = try ref.readHeadName(repo_kind, core_cursor, allocator);
+            const current_branch_name = try ref.readHeadName(repo_kind, state, allocator);
             defer allocator.free(current_branch_name);
 
             // if there is a branch map for the current branch,
             // make one for the new branch with the same value
             const branch_name_hash = hash.hashBuffer(current_branch_name);
-            if (try core_cursor.cursor.readPath(void, &.{
+            if (try state.cursor.readPath(void, &.{
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("branches") } },
                 .{ .hash_map_get = .{ .value = branch_name_hash } },
             })) |*current_branch_cursor| {
-                _ = try core_cursor.cursor.writePath(void, &.{
+                _ = try state.cursor.writePath(void, &.{
                     .{ .hash_map_get = .{ .value = hash.hashBuffer("branches") } },
                     .hash_map_init,
                     .{ .hash_map_get = .{ .key = name_hash } },
                     .{ .write = .{ .slot = name_slot } },
                 });
-                _ = try core_cursor.cursor.writePath(void, &.{
+                _ = try state.cursor.writePath(void, &.{
                     .{ .hash_map_get = .{ .value = hash.hashBuffer("branches") } },
                     .hash_map_init,
                     .{ .hash_map_get = .{ .value = name_hash } },
@@ -137,10 +137,10 @@ pub fn add(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).Core
     }
 }
 
-pub fn remove(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, input: RemoveBranchInput) !void {
+pub fn remove(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, allocator: std.mem.Allocator, input: RemoveBranchInput) !void {
     switch (repo_kind) {
         .git => {
-            var refs_dir = try core_cursor.core.git_dir.openDir("refs", .{});
+            var refs_dir = try state.core.git_dir.openDir("refs", .{});
             defer refs_dir.close();
             var heads_dir = try refs_dir.makeOpenPath("heads", .{});
             defer heads_dir.close();
@@ -152,11 +152,11 @@ pub fn remove(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).C
             const ref_path = try heads_dir.realpath(input.name, &ref_buffer);
 
             // create lock file for HEAD
-            var head_lock = try io.LockFile.init(allocator, core_cursor.core.git_dir, "HEAD");
+            var head_lock = try io.LockFile.init(allocator, state.core.git_dir, "HEAD");
             defer head_lock.deinit();
 
             // don't allow current branch to be deleted
-            var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, core_cursor, allocator, "HEAD");
+            var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, state, allocator, "HEAD");
             defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
             if (current_branch_maybe) |current_branch| {
                 if (std.mem.eql(u8, current_branch.name, input.name)) {
@@ -185,7 +185,7 @@ pub fn remove(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).C
         },
         .xit => {
             // don't allow current branch to be deleted
-            var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, core_cursor, allocator, "HEAD");
+            var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, state, allocator, "HEAD");
             defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
             if (current_branch_maybe) |current_branch| {
                 if (std.mem.eql(u8, current_branch.name, input.name)) {
@@ -196,7 +196,7 @@ pub fn remove(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).C
             const name_hash = hash.hashBuffer(input.name);
 
             // remove from refs/heads/{name}
-            _ = try core_cursor.cursor.writePath(void, &.{
+            _ = try state.cursor.writePath(void, &.{
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("refs") } },
                 .hash_map_init,
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("heads") } },
@@ -205,7 +205,7 @@ pub fn remove(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).C
             });
 
             // remove branch map
-            _ = try core_cursor.cursor.writePath(void, &.{
+            _ = try state.cursor.writePath(void, &.{
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("branches") } },
                 .hash_map_init,
                 .{ .hash_map_remove = name_hash },

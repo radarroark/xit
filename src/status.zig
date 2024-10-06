@@ -57,7 +57,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind) type {
             meta: std.fs.File.Metadata,
         };
 
-        pub fn init(allocator: std.mem.Allocator, core_cursor: rp.Repo(repo_kind).CoreCursor) !Status(repo_kind) {
+        pub fn init(allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State) !Status(repo_kind) {
             var untracked = std.StringArrayHashMap(Entry).init(allocator);
             errdefer untracked.deinit();
 
@@ -86,15 +86,15 @@ pub fn Status(comptime repo_kind: rp.RepoKind) type {
                 allocator.destroy(arena);
             }
 
-            var index = try idx.Index(repo_kind).init(allocator, core_cursor);
+            var index = try idx.Index(repo_kind).init(allocator, state);
             errdefer index.deinit();
 
             var index_bools = try allocator.alloc(bool, index.entries.count());
             defer allocator.free(index_bools);
 
-            _ = try addEntries(repo_kind, arena.allocator(), &untracked, &workspace_modified, index, &index_bools, core_cursor.core.repo_dir, ".");
+            _ = try addEntries(repo_kind, arena.allocator(), &untracked, &workspace_modified, index, &index_bools, state.core.repo_dir, ".");
 
-            var head_tree = try HeadTree(repo_kind).init(allocator, core_cursor);
+            var head_tree = try HeadTree(repo_kind).init(allocator, state);
             errdefer head_tree.deinit();
 
             // for each entry in the index
@@ -249,7 +249,7 @@ pub fn HeadTree(comptime repo_kind: rp.RepoKind) type {
         arena: *std.heap.ArenaAllocator,
         allocator: std.mem.Allocator,
 
-        pub fn init(allocator: std.mem.Allocator, core_cursor: rp.Repo(repo_kind).CoreCursor) !HeadTree(repo_kind) {
+        pub fn init(allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State) !HeadTree(repo_kind) {
             const arena = try allocator.create(std.heap.ArenaAllocator);
             arena.* = std.heap.ArenaAllocator.init(allocator);
             var tree = HeadTree(repo_kind){
@@ -260,10 +260,10 @@ pub fn HeadTree(comptime repo_kind: rp.RepoKind) type {
             errdefer tree.deinit();
 
             // if head points to a valid object, read it
-            if (try ref.readHeadMaybe(repo_kind, core_cursor)) |head_file_buffer| {
-                var commit_object = try obj.Object(repo_kind, .full).init(allocator, core_cursor, head_file_buffer);
+            if (try ref.readHeadMaybe(repo_kind, state)) |head_file_buffer| {
+                var commit_object = try obj.Object(repo_kind, .full).init(allocator, state, head_file_buffer);
                 defer commit_object.deinit();
-                try tree.read(core_cursor, "", commit_object.content.commit.tree);
+                try tree.read(state, "", commit_object.content.commit.tree);
             }
 
             return tree;
@@ -275,8 +275,8 @@ pub fn HeadTree(comptime repo_kind: rp.RepoKind) type {
             self.allocator.destroy(self.arena);
         }
 
-        fn read(self: *HeadTree(repo_kind), core_cursor: rp.Repo(repo_kind).CoreCursor, prefix: []const u8, oid: [hash.SHA1_HEX_LEN]u8) !void {
-            const object = try obj.Object(repo_kind, .full).init(self.arena.allocator(), core_cursor, oid);
+        fn read(self: *HeadTree(repo_kind), state: rp.Repo(repo_kind).State, prefix: []const u8, oid: [hash.SHA1_HEX_LEN]u8) !void {
+            const object = try obj.Object(repo_kind, .full).init(self.arena.allocator(), state, oid);
 
             switch (object.content) {
                 .blob => {},
@@ -287,7 +287,7 @@ pub fn HeadTree(comptime repo_kind: rp.RepoKind) type {
                         const path = try io.joinPath(self.arena.allocator(), &.{ prefix, name });
                         if (obj.isTree(entry.value_ptr.*)) {
                             const oid_hex = std.fmt.bytesToHex(entry.value_ptr.*.oid[0..hash.SHA1_BYTES_LEN], .lower);
-                            try self.read(core_cursor, path, oid_hex);
+                            try self.read(state, path, oid_hex);
                         } else {
                             try self.entries.put(path, entry.value_ptr.*);
                         }

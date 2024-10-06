@@ -11,7 +11,7 @@ pub const Ref = struct {
     name: []const u8,
     oid_hex: ?[hash.SHA1_HEX_LEN]u8,
 
-    pub fn initWithName(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, dir_name: []const u8, name: []const u8) !Ref {
+    pub fn initWithName(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, allocator: std.mem.Allocator, dir_name: []const u8, name: []const u8) !Ref {
         const path = try io.joinPath(allocator, &.{ "refs", dir_name, name });
         defer allocator.free(path);
         const content = try std.fmt.allocPrint(allocator, "ref: {s}", .{path});
@@ -20,13 +20,13 @@ pub const Ref = struct {
         return .{
             .allocator = allocator,
             .name = name,
-            .oid_hex = try resolve(repo_kind, core_cursor, content),
+            .oid_hex = try resolve(repo_kind, state, content),
         };
     }
 
-    pub fn initFromLink(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, path: []const u8) !?Ref {
+    pub fn initFromLink(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, allocator: std.mem.Allocator, path: []const u8) !?Ref {
         var buffer = [_]u8{0} ** MAX_READ_BYTES;
-        const content = try read(repo_kind, core_cursor, path, &buffer);
+        const content = try read(repo_kind, state, path, &buffer);
 
         if (std.mem.startsWith(u8, content, REF_START_STR) and content.len > REF_START_STR.len) {
             const name_len = content.len - REF_START_STR.len;
@@ -37,7 +37,7 @@ pub const Ref = struct {
             return .{
                 .allocator = allocator,
                 .name = name,
-                .oid_hex = try resolve(repo_kind, core_cursor, content),
+                .oid_hex = try resolve(repo_kind, state, content),
             };
         } else {
             return null;
@@ -54,7 +54,7 @@ pub const RefList = struct {
     arena: *std.heap.ArenaAllocator,
     allocator: std.mem.Allocator,
 
-    pub fn init(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, dir_name: []const u8) !RefList {
+    pub fn init(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, allocator: std.mem.Allocator, dir_name: []const u8) !RefList {
         const arena = try allocator.create(std.heap.ArenaAllocator);
         arena.* = std.heap.ArenaAllocator.init(allocator);
         var ref_list = RefList{
@@ -66,17 +66,17 @@ pub const RefList = struct {
 
         switch (repo_kind) {
             .git => {
-                var refs_dir = try core_cursor.core.git_dir.openDir("refs", .{});
+                var refs_dir = try state.core.git_dir.openDir("refs", .{});
                 defer refs_dir.close();
                 var heads_dir = try refs_dir.openDir("heads", .{});
                 defer heads_dir.close();
 
                 var path = std.ArrayList([]const u8).init(allocator);
                 defer path.deinit();
-                try ref_list.addRefs(repo_kind, core_cursor, dir_name, heads_dir, &path);
+                try ref_list.addRefs(repo_kind, state, dir_name, heads_dir, &path);
             },
             .xit => {
-                if (try core_cursor.cursor.readPath(void, &.{
+                if (try state.cursor.readPath(void, &.{
                     .{ .hash_map_get = .{ .value = hash.hashBuffer("refs") } },
                     .{ .hash_map_get = .{ .value = hash.hashBuffer("heads") } },
                 })) |heads_cursor| {
@@ -85,7 +85,7 @@ pub const RefList = struct {
                     while (try iter.next()) |*next_cursor| {
                         const kv_pair = try next_cursor.readKeyValuePair();
                         const name = try kv_pair.key_cursor.readBytesAlloc(ref_list.arena.allocator(), MAX_READ_BYTES);
-                        const ref = try Ref.initWithName(repo_kind, core_cursor, ref_list.arena.allocator(), dir_name, name);
+                        const ref = try Ref.initWithName(repo_kind, state, ref_list.arena.allocator(), dir_name, name);
                         try ref_list.refs.append(ref);
                     }
                 }
@@ -101,7 +101,7 @@ pub const RefList = struct {
         self.allocator.destroy(self.arena);
     }
 
-    fn addRefs(self: *RefList, comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, dir_name: []const u8, dir: std.fs.Dir, path: *std.ArrayList([]const u8)) !void {
+    fn addRefs(self: *RefList, comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, dir_name: []const u8, dir: std.fs.Dir, path: *std.ArrayList([]const u8)) !void {
         var iter_dir = try dir.openDir(".", .{ .iterate = true });
         defer iter_dir.close();
         var iter = iter_dir.iterate();
@@ -112,13 +112,13 @@ pub const RefList = struct {
             switch (entry.kind) {
                 .file => {
                     const name = try io.joinPath(self.arena.allocator(), next_path.items);
-                    const ref = try Ref.initWithName(repo_kind, core_cursor, self.arena.allocator(), dir_name, name);
+                    const ref = try Ref.initWithName(repo_kind, state, self.arena.allocator(), dir_name, name);
                     try self.refs.append(ref);
                 },
                 .directory => {
                     var next_dir = try dir.openDir(entry.name, .{});
                     defer next_dir.close();
-                    try self.addRefs(repo_kind, core_cursor, dir_name, next_dir, &next_path);
+                    try self.addRefs(repo_kind, state, dir_name, next_dir, &next_path);
                 },
                 else => {},
             }
@@ -126,14 +126,14 @@ pub const RefList = struct {
     }
 };
 
-pub fn resolve(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, content: []const u8) !?[hash.SHA1_HEX_LEN]u8 {
+pub fn resolve(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, content: []const u8) !?[hash.SHA1_HEX_LEN]u8 {
     if (std.mem.startsWith(u8, content, REF_START_STR) and content.len > REF_START_STR.len) {
-        return try resolve(repo_kind, core_cursor, content[REF_START_STR.len..]);
+        return try resolve(repo_kind, state, content[REF_START_STR.len..]);
     }
 
     switch (repo_kind) {
         .git => {
-            var refs_dir = try core_cursor.core.git_dir.openDir("refs", .{});
+            var refs_dir = try state.core.git_dir.openDir("refs", .{});
             defer refs_dir.close();
             var heads_dir = try refs_dir.openDir("heads", .{});
             defer heads_dir.close();
@@ -143,7 +143,7 @@ pub fn resolve(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).
                 defer ref_file.close();
                 var buffer = [_]u8{0} ** MAX_READ_BYTES;
                 const size = try ref_file.reader().readAll(&buffer);
-                return try resolve(repo_kind, core_cursor, std.mem.sliceTo(buffer[0..size], '\n'));
+                return try resolve(repo_kind, state, std.mem.sliceTo(buffer[0..size], '\n'));
             }
 
             if (content.len == hash.SHA1_HEX_LEN) {
@@ -156,13 +156,13 @@ pub fn resolve(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).
         },
         .xit => {
             var db_buffer = [_]u8{0} ** MAX_READ_BYTES;
-            if (try core_cursor.cursor.readPath(void, &.{
+            if (try state.cursor.readPath(void, &.{
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("refs") } },
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("heads") } },
                 .{ .hash_map_get = .{ .value = hash.hashBuffer(content) } },
             })) |bytes_cursor| {
                 const bytes = try bytes_cursor.readBytes(&db_buffer);
-                return try resolve(repo_kind, core_cursor, bytes);
+                return try resolve(repo_kind, state, bytes);
             } else {
                 if (content.len == hash.SHA1_HEX_LEN) {
                     var buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
@@ -176,16 +176,16 @@ pub fn resolve(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).
     }
 }
 
-pub fn read(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, path: []const u8, buffer: *[MAX_READ_BYTES]u8) ![]u8 {
+pub fn read(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, path: []const u8, buffer: *[MAX_READ_BYTES]u8) ![]u8 {
     switch (repo_kind) {
         .git => {
-            const head_file = try core_cursor.core.git_dir.openFile(path, .{ .mode = .read_only });
+            const head_file = try state.core.git_dir.openFile(path, .{ .mode = .read_only });
             defer head_file.close();
             const size = try head_file.reader().readAll(buffer);
             return std.mem.sliceTo(buffer[0..size], '\n');
         },
         .xit => {
-            if (try core_cursor.cursor.readPath(void, &.{
+            if (try state.cursor.readPath(void, &.{
                 .{ .hash_map_get = .{ .value = hash.hashBuffer(path) } },
             })) |target_bytes_cursor| {
                 return try target_bytes_cursor.readBytes(buffer);
@@ -196,22 +196,22 @@ pub fn read(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).Cor
     }
 }
 
-pub fn readHeadMaybe(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor) !?[hash.SHA1_HEX_LEN]u8 {
+pub fn readHeadMaybe(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State) !?[hash.SHA1_HEX_LEN]u8 {
     var buffer = [_]u8{0} ** MAX_READ_BYTES;
-    return try resolve(repo_kind, core_cursor, try read(repo_kind, core_cursor, "HEAD", &buffer));
+    return try resolve(repo_kind, state, try read(repo_kind, state, "HEAD", &buffer));
 }
 
-pub fn readHead(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor) ![hash.SHA1_HEX_LEN]u8 {
-    if (try readHeadMaybe(repo_kind, core_cursor)) |buffer| {
+pub fn readHead(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State) ![hash.SHA1_HEX_LEN]u8 {
+    if (try readHeadMaybe(repo_kind, state)) |buffer| {
         return buffer;
     } else {
         return error.RefInvalidHash;
     }
 }
 
-pub fn readHeadName(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator) ![]u8 {
+pub fn readHeadName(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, allocator: std.mem.Allocator) ![]u8 {
     var buffer = [_]u8{0} ** MAX_READ_BYTES;
-    const content = try read(repo_kind, core_cursor, "HEAD", &buffer);
+    const content = try read(repo_kind, state, "HEAD", &buffer);
     if (std.mem.startsWith(u8, content, REF_START_STR) and content.len > REF_START_STR.len) {
         const ref_name = content[REF_START_STR.len..];
         const buf = try allocator.alloc(u8, ref_name.len);
@@ -225,14 +225,14 @@ pub fn readHeadName(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_k
 }
 
 /// makes HEAD point to a new ref
-pub fn writeHead(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind).CoreCursor, allocator: std.mem.Allocator, target: []const u8, oid_hex_maybe: ?[hash.SHA1_HEX_LEN]u8) !void {
+pub fn writeHead(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, allocator: std.mem.Allocator, target: []const u8, oid_hex_maybe: ?[hash.SHA1_HEX_LEN]u8) !void {
     switch (repo_kind) {
         .git => {
-            var lock = try io.LockFile.init(allocator, core_cursor.core.git_dir, "HEAD");
+            var lock = try io.LockFile.init(allocator, state.core.git_dir, "HEAD");
             defer lock.deinit();
 
             // if the target is a ref, just update HEAD to point to it
-            var refs_dir = try core_cursor.core.git_dir.openDir("refs", .{});
+            var refs_dir = try state.core.git_dir.openDir("refs", .{});
             defer refs_dir.close();
             var heads_dir = try refs_dir.openDir("heads", .{});
             defer heads_dir.close();
@@ -261,7 +261,7 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind
             lock.success = true;
         },
         .xit => {
-            if (try core_cursor.cursor.readPath(void, &.{
+            if (try state.cursor.readPath(void, &.{
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("refs") } },
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("heads") } },
                 .{ .hash_map_get = .{ .value = hash.hashBuffer(target) } },
@@ -269,26 +269,26 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind
                 // point HEAD at the ref
                 var write_buffer = [_]u8{0} ** MAX_READ_BYTES;
                 const content = try std.fmt.bufPrint(&write_buffer, "ref: refs/heads/{s}", .{target});
-                var ref_content_cursor = try core_cursor.cursor.writePath(void, &.{
+                var ref_content_cursor = try state.cursor.writePath(void, &.{
                     .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-content-set") } },
                     .hash_map_init,
                     .{ .hash_map_get = .{ .key = hash.hashBuffer(content) } },
                 });
                 try ref_content_cursor.writeBytes(content, .once);
-                _ = try core_cursor.cursor.writePath(void, &.{
+                _ = try state.cursor.writePath(void, &.{
                     .{ .hash_map_get = .{ .value = hash.hashBuffer("HEAD") } },
                     .{ .write = .{ .slot = ref_content_cursor.slot_ptr.slot } },
                 });
             } else {
                 if (oid_hex_maybe) |oid_hex| {
                     // the HEAD is detached, so just update it with the oid
-                    var ref_content_cursor = try core_cursor.cursor.writePath(void, &.{
+                    var ref_content_cursor = try state.cursor.writePath(void, &.{
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-content-set") } },
                         .hash_map_init,
                         .{ .hash_map_get = .{ .key = try hash.hexToHash(&oid_hex) } },
                     });
                     try ref_content_cursor.writeBytes(&oid_hex, .once);
-                    _ = try core_cursor.cursor.writePath(void, &.{
+                    _ = try state.cursor.writePath(void, &.{
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("HEAD") } },
                         .{ .write = .{ .slot = ref_content_cursor.slot_ptr.slot } },
                     });
@@ -296,13 +296,13 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind
                     // point HEAD at the ref, even though the ref doesn't exist
                     var write_buffer = [_]u8{0} ** MAX_READ_BYTES;
                     const content = try std.fmt.bufPrint(&write_buffer, "ref: refs/heads/{s}", .{target});
-                    var ref_content_cursor = try core_cursor.cursor.writePath(void, &.{
+                    var ref_content_cursor = try state.cursor.writePath(void, &.{
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-content-set") } },
                         .hash_map_init,
                         .{ .hash_map_get = .{ .key = hash.hashBuffer(content) } },
                     });
                     try ref_content_cursor.writeBytes(content, .once);
-                    _ = try core_cursor.cursor.writePath(void, &.{
+                    _ = try state.cursor.writePath(void, &.{
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("HEAD") } },
                         .{ .write = .{ .slot = ref_content_cursor.slot_ptr.slot } },
                     });
@@ -317,7 +317,7 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, core_cursor: rp.Repo(repo_kind
 /// used after a commit is made.
 pub fn updateRecur(
     comptime repo_kind: rp.RepoKind,
-    core_cursor: rp.Repo(repo_kind).CoreCursor,
+    state: rp.Repo(repo_kind).State,
     allocator: std.mem.Allocator,
     path_parts: []const []const u8,
     oid_hex: *const [hash.SHA1_HEX_LEN]u8,
@@ -327,13 +327,13 @@ pub fn updateRecur(
             const path = try io.joinPath(allocator, path_parts);
             defer allocator.free(path);
 
-            var lock = try io.LockFile.init(allocator, core_cursor.core.git_dir, path);
+            var lock = try io.LockFile.init(allocator, state.core.git_dir, path);
             defer lock.deinit();
 
             // read file and get ref name if necessary
             var buffer = [_]u8{0} ** MAX_READ_BYTES;
             const ref_name_maybe = blk: {
-                const old_content = read(repo_kind, core_cursor, path, &buffer) catch |err| switch (err) {
+                const old_content = read(repo_kind, state, path, &buffer) catch |err| switch (err) {
                     error.FileNotFound => break :blk null,
                     else => return err,
                 };
@@ -346,7 +346,7 @@ pub fn updateRecur(
 
             // if it's a ref, update it recursively
             if (ref_name_maybe) |ref_name| {
-                try updateRecur(repo_kind, core_cursor, allocator, &.{ "refs", "heads", ref_name }, oid_hex);
+                try updateRecur(repo_kind, state, allocator, &.{ "refs", "heads", ref_name }, oid_hex);
             }
             // otherwise, update it with the oid
             else {
@@ -357,7 +357,7 @@ pub fn updateRecur(
         },
         .xit => {
             const Ctx = struct {
-                core_cursor: rp.Repo(repo_kind).CoreCursor,
+                state: rp.Repo(repo_kind).State,
                 allocator: std.mem.Allocator,
                 oid_hex: *const [hash.SHA1_HEX_LEN]u8,
                 file_name: []const u8,
@@ -373,13 +373,13 @@ pub fn updateRecur(
                         // if it's a ref, update it recursively
                         if (std.mem.startsWith(u8, old_content, REF_START_STR) and old_content.len > REF_START_STR.len) {
                             const ref_name = old_content[REF_START_STR.len..];
-                            try updateRecur(repo_kind, ctx.core_cursor, ctx.allocator, &.{ "refs", "heads", ref_name }, ctx.oid_hex);
+                            try updateRecur(repo_kind, ctx.state, ctx.allocator, &.{ "refs", "heads", ref_name }, ctx.oid_hex);
                             return;
                         }
                     }
 
                     // otherwise, update with the oid
-                    var ref_name_cursor = try ctx.core_cursor.cursor.writePath(void, &.{
+                    var ref_name_cursor = try ctx.state.cursor.writePath(void, &.{
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-name-set") } },
                         .hash_map_init,
                         .{ .hash_map_get = .{ .key = file_name_hash } },
@@ -389,7 +389,7 @@ pub fn updateRecur(
                         .{ .hash_map_get = .{ .key = file_name_hash } },
                         .{ .write = .{ .slot = ref_name_cursor.slot_ptr.slot } },
                     });
-                    var ref_content_cursor = try ctx.core_cursor.cursor.writePath(void, &.{
+                    var ref_content_cursor = try ctx.state.cursor.writePath(void, &.{
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-content-set") } },
                         .hash_map_init,
                         .{ .hash_map_get = .{ .key = try hash.hexToHash(ctx.oid_hex) } },
@@ -408,12 +408,12 @@ pub fn updateRecur(
                 try db_path_parts.append(.hash_map_init);
             }
             try db_path_parts.append(.{ .ctx = Ctx{
-                .core_cursor = core_cursor,
+                .state = state,
                 .allocator = allocator,
                 .oid_hex = oid_hex,
                 .file_name = path_parts[path_parts.len - 1],
             } });
-            _ = try core_cursor.cursor.writePath(Ctx, db_path_parts.items);
+            _ = try state.cursor.writePath(Ctx, db_path_parts.items);
         },
     }
 }

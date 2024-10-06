@@ -413,14 +413,14 @@ fn applyPatchForFile(
     }
 }
 
-pub fn writePatch(core_cursor: rp.Repo(.xit).CoreCursor, allocator: std.mem.Allocator) !void {
+pub fn writePatch(state: rp.Repo(.xit).State, allocator: std.mem.Allocator) !void {
     // get current branch name
-    const current_branch_name = try ref.readHeadName(.xit, core_cursor, allocator);
+    const current_branch_name = try ref.readHeadName(.xit, state, allocator);
     defer allocator.free(current_branch_name);
 
     // get current branch name slot
     const branch_name_hash = hash.hashBuffer(current_branch_name);
-    var branch_name_cursor = try core_cursor.cursor.writePath(void, &.{
+    var branch_name_cursor = try state.cursor.writePath(void, &.{
         .{ .hash_map_get = .{ .value = hash.hashBuffer("ref-name-set") } },
         .hash_map_init,
         .{ .hash_map_get = .{ .key = branch_name_hash } },
@@ -429,13 +429,13 @@ pub fn writePatch(core_cursor: rp.Repo(.xit).CoreCursor, allocator: std.mem.Allo
     const branch_name_slot = branch_name_cursor.slot_ptr.slot;
 
     // init branch map
-    _ = try core_cursor.cursor.writePath(void, &.{
+    _ = try state.cursor.writePath(void, &.{
         .{ .hash_map_get = .{ .value = hash.hashBuffer("branches") } },
         .hash_map_init,
         .{ .hash_map_get = .{ .key = branch_name_hash } },
         .{ .write = .{ .slot = branch_name_slot } },
     });
-    var branch_cursor = try core_cursor.cursor.writePath(void, &.{
+    var branch_cursor = try state.cursor.writePath(void, &.{
         .{ .hash_map_get = .{ .value = hash.hashBuffer("branches") } },
         .hash_map_init,
         .{ .hash_map_get = .{ .value = branch_name_hash } },
@@ -443,15 +443,15 @@ pub fn writePatch(core_cursor: rp.Repo(.xit).CoreCursor, allocator: std.mem.Allo
     });
 
     // init file iterator for index diff
-    var status = try st.Status(.xit).init(allocator, core_cursor);
+    var status = try st.Status(.xit).init(allocator, state);
     defer status.deinit();
-    var file_iter = try df.FileIterator(.xit).init(allocator, core_cursor.core, .{ .index = .{ .status = &status } });
+    var file_iter = try df.FileIterator(.xit).init(allocator, state.core, .{ .index = .{ .status = &status } });
 
     // iterate over each modified file and create/apply the patch
     while (try file_iter.next()) |*line_iter_pair_ptr| {
         var line_iter_pair = line_iter_pair_ptr.*;
         defer line_iter_pair.deinit();
-        const patch_hash = try writePatchForFile(core_cursor.cursor, &branch_cursor, allocator, &line_iter_pair);
-        try applyPatchForFile(core_cursor.cursor, &branch_cursor, allocator, patch_hash, line_iter_pair.path);
+        const patch_hash = try writePatchForFile(state.cursor, &branch_cursor, allocator, &line_iter_pair);
+        try applyPatchForFile(state.cursor, &branch_cursor, allocator, patch_hash, line_iter_pair.path);
     }
 }
