@@ -142,7 +142,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     _ = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
                 },
                 .xit => {
-                    if (try state.cursor.readPath(void, &.{
+                    if (try state.moment.cursor.readPath(void, &.{
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("index") } },
                     })) |index_cursor| {
                         var iter = try index_cursor.iter();
@@ -549,7 +549,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                     }
                                 }
 
-                                var path_cursor = try ctx.state.cursor.writePath(void, &.{
+                                var path_cursor = try ctx.state.moment.cursor.writePath(void, &.{
                                     .{ .hash_map_get = .{ .value = hash.hashBuffer("path-set") } },
                                     .hash_map_init,
                                     .{ .hash_map_get = .{ .key = path_hash } },
@@ -560,7 +560,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                     .{ .write = .{ .slot = path_cursor.slot_ptr.slot } },
                                 });
 
-                                var entry_buffer_cursor = try ctx.state.cursor.writePath(void, &.{
+                                var entry_buffer_cursor = try ctx.state.moment.cursor.writePath(void, &.{
                                     .{ .hash_map_get = .{ .value = hash.hashBuffer("entry-buffer-set") } },
                                     .hash_map_init,
                                     .{ .hash_map_get = .{ .key = hash.hashBuffer(entry_buffer.items) } },
@@ -573,7 +573,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                             }
                         }
                     };
-                    _ = try state.cursor.writePath(Ctx, &.{
+                    _ = try state.moment.cursor.writePath(Ctx, &.{
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("index") } },
                         .hash_map_init,
                         .{ .ctx = Ctx{ .state = state, .allocator = allocator, .index = self } },

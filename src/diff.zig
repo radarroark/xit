@@ -1248,9 +1248,9 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
     return struct {
         allocator: std.mem.Allocator,
         core: *rp.Repo(repo_kind).Core,
-        cursor: switch (repo_kind) {
+        moment: switch (repo_kind) {
             .git => void,
-            .xit => rp.Repo(repo_kind).DB.Cursor(.read_write),
+            .xit => rp.Repo(repo_kind).DB.HashMap(.read_write),
         },
         diff_opts: DiffOptions(repo_kind),
         next_index: usize,
@@ -1263,7 +1263,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
             return .{
                 .allocator = allocator,
                 .core = core,
-                .cursor = try core.latestCursor(),
+                .moment = try core.latestMoment(),
                 .diff_opts = diff_opts,
                 .next_index = 0,
             };
@@ -1272,7 +1272,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
         pub fn next(self: *FileIterator(repo_kind)) !?LineIteratorPair(repo_kind) {
             const state = switch (repo_kind) {
                 .git => .{ .core = self.core },
-                .xit => .{ .core = self.core, .cursor = &self.cursor },
+                .xit => .{ .core = self.core, .moment = &self.moment },
             };
             var next_index = self.next_index;
             switch (self.diff_opts) {

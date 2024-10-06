@@ -219,7 +219,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                     }
                 },
                 .xit => {
-                    if (try state.cursor.readPath(void, &.{
+                    if (try state.moment.cursor.readPath(void, &.{
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("config") } },
                     })) |config_cursor| {
                         var config_iter = try config_cursor.iter();
@@ -289,14 +289,14 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                     .xit => {
                         // ensure section name is saved
                         const section_name_hash = hash.hashBuffer(section_name);
-                        var section_name_cursor = try state.cursor.writePath(void, &.{
+                        var section_name_cursor = try state.moment.cursor.writePath(void, &.{
                             .{ .hash_map_get = .{ .value = hash.hashBuffer("config-name-set") } },
                             .hash_map_init,
                             .{ .hash_map_get = .{ .key = section_name_hash } },
                         });
                         try section_name_cursor.writeBytes(section_name, .once);
                         const section_name_slot = section_name_cursor.slot_ptr.slot;
-                        _ = try state.cursor.writePath(void, &.{
+                        _ = try state.moment.cursor.writePath(void, &.{
                             .{ .hash_map_get = .{ .value = hash.hashBuffer("config") } },
                             .hash_map_init,
                             .{ .hash_map_get = .{ .key = section_name_hash } },
@@ -305,14 +305,14 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
 
                         // ensure variable name is saved
                         const var_name_hash = hash.hashBuffer(var_name);
-                        var var_name_cursor = try state.cursor.writePath(void, &.{
+                        var var_name_cursor = try state.moment.cursor.writePath(void, &.{
                             .{ .hash_map_get = .{ .value = hash.hashBuffer("config-name-set") } },
                             .hash_map_init,
                             .{ .hash_map_get = .{ .key = var_name_hash } },
                         });
                         try var_name_cursor.writeBytes(var_name, .once);
                         const var_name_slot = var_name_cursor.slot_ptr.slot;
-                        _ = try state.cursor.writePath(void, &.{
+                        _ = try state.moment.cursor.writePath(void, &.{
                             .{ .hash_map_get = .{ .value = hash.hashBuffer("config") } },
                             .hash_map_init,
                             .{ .hash_map_get = .{ .value = section_name_hash } },
@@ -322,7 +322,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                         });
 
                         // save the variable
-                        _ = try state.cursor.writePath(void, &.{
+                        _ = try state.moment.cursor.writePath(void, &.{
                             .{ .hash_map_get = .{ .value = hash.hashBuffer("config") } },
                             .hash_map_init,
                             .{ .hash_map_get = .{ .value = section_name_hash } },
@@ -354,13 +354,13 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                     .git => try self.write(state),
                     .xit => {
                         if (!self.sections.contains(section_name)) {
-                            _ = try state.cursor.writePath(void, &.{
+                            _ = try state.moment.cursor.writePath(void, &.{
                                 .{ .hash_map_get = .{ .value = hash.hashBuffer("config") } },
                                 .hash_map_init,
                                 .{ .hash_map_remove = hash.hashBuffer(section_name) },
                             });
                         } else {
-                            _ = try state.cursor.writePath(void, &.{
+                            _ = try state.moment.cursor.writePath(void, &.{
                                 .{ .hash_map_get = .{ .value = hash.hashBuffer("config") } },
                                 .hash_map_init,
                                 .{ .hash_map_get = .{ .value = hash.hashBuffer(section_name) } },
