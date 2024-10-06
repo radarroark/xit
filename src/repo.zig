@@ -398,15 +398,15 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     switch (branch_cmd) {
                         .list => {
                             var cursor = try self.core.latestCursor();
-                            const core_cursor = switch (repo_kind) {
+                            const state = switch (repo_kind) {
                                 .git => .{ .core = &self.core },
                                 .xit => .{ .core = &self.core, .cursor = &cursor },
                             };
 
-                            var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, core_cursor, self.allocator, "HEAD");
+                            var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, state, self.allocator, "HEAD");
                             defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
 
-                            var ref_list = try ref.RefList.init(repo_kind, core_cursor, self.allocator, "heads");
+                            var ref_list = try ref.RefList.init(repo_kind, state, self.allocator, "heads");
                             defer ref_list.deinit();
 
                             for (ref_list.refs.items) |r| {
@@ -744,16 +744,16 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
         pub fn status(self: *Repo(repo_kind)) !st.Status(repo_kind) {
             var cursor = try self.core.latestCursor();
-            const core_cursor = switch (repo_kind) {
+            const state = switch (repo_kind) {
                 .git => .{ .core = &self.core },
                 .xit => .{ .core = &self.core, .cursor = &cursor },
             };
-            return try st.Status(repo_kind).init(self.allocator, core_cursor);
+            return try st.Status(repo_kind).init(self.allocator, state);
         }
 
         pub fn filePair(self: *Repo(repo_kind), path: []const u8, status_kind: st.StatusKind, stat: *st.Status(repo_kind)) !df.LineIteratorPair(repo_kind) {
             var cursor = try self.core.latestCursor();
-            const core_cursor = switch (repo_kind) {
+            const state = switch (repo_kind) {
                 .git => .{ .core = &self.core },
                 .xit => .{ .core = &self.core, .cursor = &cursor },
             };
@@ -764,20 +764,20 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                             var a = try df.LineIterator(repo_kind).initFromNothing(self.allocator, path);
                             errdefer a.deinit();
                             const index_entries_for_path = stat.index.entries.get(path) orelse return error.EntryNotFound;
-                            var b = try df.LineIterator(repo_kind).initFromIndex(core_cursor, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
+                            var b = try df.LineIterator(repo_kind).initFromIndex(state, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
                             errdefer b.deinit();
                             return .{ .path = path, .a = a, .b = b };
                         },
                         .modified => {
-                            var a = try df.LineIterator(repo_kind).initFromHead(core_cursor, self.allocator, path, stat.head_tree.entries.get(path) orelse return error.EntryNotFound);
+                            var a = try df.LineIterator(repo_kind).initFromHead(state, self.allocator, path, stat.head_tree.entries.get(path) orelse return error.EntryNotFound);
                             errdefer a.deinit();
                             const index_entries_for_path = stat.index.entries.get(path) orelse return error.EntryNotFound;
-                            var b = try df.LineIterator(repo_kind).initFromIndex(core_cursor, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
+                            var b = try df.LineIterator(repo_kind).initFromIndex(state, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
                             errdefer b.deinit();
                             return .{ .path = path, .a = a, .b = b };
                         },
                         .deleted => {
-                            var a = try df.LineIterator(repo_kind).initFromHead(core_cursor, self.allocator, path, stat.head_tree.entries.get(path) orelse return error.EntryNotFound);
+                            var a = try df.LineIterator(repo_kind).initFromHead(state, self.allocator, path, stat.head_tree.entries.get(path) orelse return error.EntryNotFound);
                             errdefer a.deinit();
                             var b = try df.LineIterator(repo_kind).initFromNothing(self.allocator, path);
                             errdefer b.deinit();
@@ -792,15 +792,15 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                             const mode = io.getMode(meta);
 
                             const index_entries_for_path = stat.index.entries.get(path) orelse return error.EntryNotFound;
-                            var a = try df.LineIterator(repo_kind).initFromIndex(core_cursor, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
+                            var a = try df.LineIterator(repo_kind).initFromIndex(state, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
                             errdefer a.deinit();
-                            var b = try df.LineIterator(repo_kind).initFromWorkspace(core_cursor, self.allocator, path, mode);
+                            var b = try df.LineIterator(repo_kind).initFromWorkspace(state, self.allocator, path, mode);
                             errdefer b.deinit();
                             return .{ .path = path, .a = a, .b = b };
                         },
                         .deleted => {
                             const index_entries_for_path = stat.index.entries.get(path) orelse return error.EntryNotFound;
-                            var a = try df.LineIterator(repo_kind).initFromIndex(core_cursor, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
+                            var a = try df.LineIterator(repo_kind).initFromIndex(state, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
                             errdefer a.deinit();
                             var b = try df.LineIterator(repo_kind).initFromNothing(self.allocator, path);
                             errdefer b.deinit();
@@ -814,7 +814,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
                     var a = try df.LineIterator(repo_kind).initFromNothing(self.allocator, path);
                     errdefer a.deinit();
-                    var b = try df.LineIterator(repo_kind).initFromWorkspace(core_cursor, self.allocator, path, mode);
+                    var b = try df.LineIterator(repo_kind).initFromWorkspace(state, self.allocator, path, mode);
                     errdefer b.deinit();
                     return .{ .path = path, .a = a, .b = b };
                 },
@@ -827,13 +827,13 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
         pub fn treeDiff(self: *Repo(repo_kind), old_oid_maybe: ?[hash.SHA1_HEX_LEN]u8, new_oid_maybe: ?[hash.SHA1_HEX_LEN]u8) !obj.TreeDiff(repo_kind) {
             var cursor = try self.core.latestCursor();
-            const core_cursor = switch (repo_kind) {
+            const state = switch (repo_kind) {
                 .git => .{ .core = &self.core },
                 .xit => .{ .core = &self.core, .cursor = &cursor },
             };
             var tree_diff = obj.TreeDiff(repo_kind).init(self.allocator);
             errdefer tree_diff.deinit();
-            try tree_diff.compare(core_cursor, old_oid_maybe, new_oid_maybe, null);
+            try tree_diff.compare(state, old_oid_maybe, new_oid_maybe, null);
             return tree_diff;
         }
 
@@ -917,11 +917,11 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
         pub fn restore(self: *Repo(repo_kind), path: []const u8) !void {
             var cursor = try self.core.latestCursor();
-            const core_cursor = switch (repo_kind) {
+            const state = switch (repo_kind) {
                 .git => .{ .core = &self.core },
                 .xit => .{ .core = &self.core, .cursor = &cursor },
             };
-            try chk.restore(repo_kind, core_cursor, self.allocator, path);
+            try chk.restore(repo_kind, state, self.allocator, path);
         }
 
         pub fn log(self: *Repo(repo_kind), start_oids_maybe: ?[]const [hash.SHA1_HEX_LEN]u8) !obj.ObjectIterator(repo_kind, .full) {
@@ -930,11 +930,11 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 return try obj.ObjectIterator(repo_kind, .full).init(self.allocator, &self.core, start_oids, options);
             } else {
                 var cursor = try self.core.latestCursor();
-                const core_cursor = switch (repo_kind) {
+                const state = switch (repo_kind) {
                     .git => .{ .core = &self.core },
                     .xit => .{ .core = &self.core, .cursor = &cursor },
                 };
-                const head_oid = try ref.readHead(repo_kind, core_cursor);
+                const head_oid = try ref.readHead(repo_kind, state);
                 return try obj.ObjectIterator(repo_kind, .full).init(self.allocator, &self.core, &.{head_oid}, options);
             }
         }
@@ -1013,11 +1013,11 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
         pub fn config(self: *Repo(repo_kind)) !cfg.Config(repo_kind) {
             var cursor = try self.core.latestCursor();
-            const core_cursor = switch (repo_kind) {
+            const state = switch (repo_kind) {
                 .git => .{ .core = &self.core },
                 .xit => .{ .core = &self.core, .cursor = &cursor },
             };
-            return try cfg.Config(repo_kind).init(core_cursor, self.allocator);
+            return try cfg.Config(repo_kind).init(state, self.allocator);
         }
 
         pub fn addConfig(self: *Repo(repo_kind), input: cfg.AddConfigInput) !void {
