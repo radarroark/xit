@@ -142,44 +142,31 @@ pub fn writeBlob(
         },
         .xit => {
             const file_hash = hash.bytesToHash(sha1_bytes_buffer);
-            const FileReaderType = @TypeOf(reader);
 
-            const Ctx = struct {
-                state: rp.Repo(repo_kind).State,
-                reader: *const FileReaderType,
-                sha1_hex: [hash.SHA1_HEX_LEN]u8,
-                header: []const u8,
+            const file_values_cursor = try state.moment.put(hash.hashBuffer("file-values"));
+            const file_values = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(file_values_cursor);
+            var file_value_cursor = try file_values.put(file_hash);
 
-                pub fn run(ctx: @This(), cursor: *rp.Repo(repo_kind).DB.Cursor(.read_write)) !void {
-                    if (cursor.slot() == null) {
-                        var writer = try cursor.writer();
-                        try writer.writeAll(ctx.header);
-                        // TODO: use buffered io
-                        var read_buffer = [_]u8{0} ** MAX_READ_BYTES;
-                        while (true) {
-                            const size = try ctx.reader.read(&read_buffer);
-                            if (size == 0) {
-                                break;
-                            }
-                            try writer.writeAll(read_buffer[0..size]);
-                        }
-                        try writer.finish();
+            if (file_value_cursor.slot() == null) {
+                var writer = try file_value_cursor.writer();
+                try writer.writeAll(header);
 
-                        _ = try ctx.state.moment.cursor.writePath(void, &.{
-                            .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
-                            .hash_map_init,
-                            .{ .hash_map_get = .{ .value = try hash.hexToHash(&ctx.sha1_hex) } },
-                            .{ .write = .{ .slot = writer.slot } },
-                        });
+                // TODO: use buffered io
+                var read_buffer = [_]u8{0} ** MAX_READ_BYTES;
+                while (true) {
+                    const size = try reader.read(&read_buffer);
+                    if (size == 0) {
+                        break;
                     }
+                    try writer.writeAll(read_buffer[0..size]);
                 }
-            };
-            _ = try state.moment.cursor.writePath(Ctx, &.{
-                .{ .hash_map_get = .{ .value = hash.hashBuffer("file-values") } },
-                .hash_map_init,
-                .{ .hash_map_get = .{ .value = file_hash } },
-                .{ .ctx = Ctx{ .state = state, .reader = &reader, .sha1_hex = sha1_hex, .header = header } },
-            });
+
+                try writer.finish();
+
+                const objects_cursor = try state.moment.put(hash.hashBuffer("objects"));
+                const objects = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(objects_cursor);
+                try objects.putData(try hash.hexToHash(&sha1_hex), .{ .slot = writer.slot });
+            }
         },
     }
 }
@@ -259,37 +246,17 @@ fn writeTree(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, a
             try std.fs.rename(tree_hash_prefix_dir, tree_comp_tmp_file_name, tree_hash_prefix_dir, tree_hash_suffix);
         },
         .xit => {
-            const Ctx = struct {
-                cursor: *rp.Repo(repo_kind).DB.Cursor(.read_write),
-                tree_sha1_bytes: *const [hash.SHA1_BYTES_LEN]u8,
-                tree_bytes: []const u8,
+            const object_hash = hash.bytesToHash(sha1_bytes_buffer);
+            const objects_cursor = try state.moment.put(hash.hashBuffer("objects"));
+            const objects = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(objects_cursor);
 
-                pub fn run(ctx: @This(), cursor: *rp.Repo(repo_kind).DB.Cursor(.read_write)) !void {
-                    // exit early if there is nothing to commit
-                    if (cursor.slot() != null) {
-                        return;
-                    }
-                    var tree_cursor = try ctx.cursor.writePath(void, &.{
-                        .{ .hash_map_get = .{ .value = hash.hashBuffer("object-values") } },
-                        .hash_map_init,
-                        .{ .hash_map_get = .{ .value = hash.bytesToHash(ctx.tree_sha1_bytes) } },
-                    });
-                    try tree_cursor.writeBytes(ctx.tree_bytes, .once);
-                    _ = try cursor.writePath(void, &.{
-                        .{ .write = .{ .slot = tree_cursor.slot() } },
-                    });
-                }
-            };
-            _ = try state.moment.cursor.writePath(Ctx, &.{
-                .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
-                .hash_map_init,
-                .{ .hash_map_get = .{ .value = hash.bytesToHash(sha1_bytes_buffer) } },
-                .{ .ctx = Ctx{
-                    .cursor = &state.moment.cursor,
-                    .tree_sha1_bytes = sha1_bytes_buffer,
-                    .tree_bytes = tree_bytes,
-                } },
-            });
+            if (try objects.get(object_hash) == null) {
+                const object_values_cursor = try state.moment.put(hash.hashBuffer("object-values"));
+                const object_values = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(object_values_cursor);
+                var object_value_cursor = try object_values.put(object_hash);
+                try object_value_cursor.writeBytes(tree_bytes, .once);
+                try objects.putData(object_hash, .{ .slot = object_value_cursor.slot() });
+            }
         },
     }
 }
@@ -474,22 +441,18 @@ pub fn writeCommit(
             // calc the sha1 of its contents
             try hash.sha1Buffer(commit, &commit_sha1_bytes_buffer);
             const commit_sha1_hex = std.fmt.bytesToHex(commit_sha1_bytes_buffer, .lower);
+            const commit_hash = hash.bytesToHash(&commit_sha1_bytes_buffer);
 
             // write commit content
-            var content_cursor = try state.moment.cursor.writePath(void, &.{
-                .{ .hash_map_get = .{ .value = hash.hashBuffer("object-values") } },
-                .hash_map_init,
-                .{ .hash_map_get = .{ .value = hash.bytesToHash(&commit_sha1_bytes_buffer) } },
-            });
-            try content_cursor.writeBytes(commit, .once);
+            const object_values_cursor = try state.moment.put(hash.hashBuffer("object-values"));
+            const object_values = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(object_values_cursor);
+            var object_value_cursor = try object_values.put(commit_hash);
+            try object_value_cursor.writeBytes(commit, .once);
 
             // write commit
-            _ = try state.moment.cursor.writePath(void, &.{
-                .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
-                .hash_map_init,
-                .{ .hash_map_get = .{ .value = hash.bytesToHash(&commit_sha1_bytes_buffer) } },
-                .{ .write = .{ .slot = content_cursor.slot() } },
-            });
+            const objects_cursor = try state.moment.put(hash.hashBuffer("objects"));
+            const objects = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(objects_cursor);
+            try objects.putData(commit_hash, .{ .slot = object_value_cursor.slot() });
 
             // write commit id to HEAD
             try ref.updateRecur(repo_kind, state, allocator, &.{"HEAD"}, &commit_sha1_hex);
