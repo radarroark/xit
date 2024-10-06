@@ -725,9 +725,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 defer repo.deinit();
                 var count: u32 = 0;
                 var moment = try repo.core.latestMoment();
-                if (try moment.cursor.readPath(void, &.{
-                    .{ .hash_map_get = .{ .value = hash.hashBuffer("index") } },
-                })) |index_cursor| {
+                if (try moment.get(hash.hashBuffer("index"))) |index_cursor| {
                     var iter = try index_cursor.iter();
                     defer iter.deinit();
                     while (try iter.next()) |_| {
@@ -789,9 +787,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 defer repo.deinit();
                 var count: u32 = 0;
                 var moment = try repo.core.latestMoment();
-                if (try moment.cursor.readPath(void, &.{
-                    .{ .hash_map_get = .{ .value = hash.hashBuffer("index") } },
-                })) |index_cursor| {
+                if (try moment.get(hash.hashBuffer("index"))) |index_cursor| {
                     var iter = try index_cursor.iter();
                     defer iter.deinit();
                     while (try iter.next()) |_| {
