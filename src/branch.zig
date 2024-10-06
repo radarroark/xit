@@ -77,7 +77,7 @@ pub fn add(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, all
                 .{ .hash_map_get = .{ .key = name_hash } },
             });
             try ref_name_cursor.writeBytes(name, .once);
-            const name_slot = ref_name_cursor.slot_ptr.slot;
+            const name_slot = ref_name_cursor.slot();
 
             // add ref name to refs/heads/{refname}
             _ = try state.moment.cursor.writePath(void, &.{
@@ -97,7 +97,7 @@ pub fn add(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, all
                 .{ .hash_map_get = .{ .key = hash.hashBuffer(&head_file_buffer) } },
             });
             try ref_content_cursor.writeBytes(&head_file_buffer, .once);
-            const ref_content_slot = ref_content_cursor.slot_ptr.slot;
+            const ref_content_slot = ref_content_cursor.slot();
 
             // add ref content to refs/heads/{refname}
             _ = try state.moment.cursor.writePath(void, &.{
@@ -130,7 +130,7 @@ pub fn add(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, all
                     .{ .hash_map_get = .{ .value = hash.hashBuffer("branches") } },
                     .hash_map_init,
                     .{ .hash_map_get = .{ .value = name_hash } },
-                    .{ .write = .{ .slot = current_branch_cursor.slot_ptr.slot } },
+                    .{ .write = .{ .slot = current_branch_cursor.slot() } },
                 });
             }
         },

@@ -295,7 +295,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                             .{ .hash_map_get = .{ .key = section_name_hash } },
                         });
                         try section_name_cursor.writeBytes(section_name, .once);
-                        const section_name_slot = section_name_cursor.slot_ptr.slot;
+                        const section_name_slot = section_name_cursor.slot();
                         _ = try state.moment.cursor.writePath(void, &.{
                             .{ .hash_map_get = .{ .value = hash.hashBuffer("config") } },
                             .hash_map_init,
@@ -311,7 +311,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                             .{ .hash_map_get = .{ .key = var_name_hash } },
                         });
                         try var_name_cursor.writeBytes(var_name, .once);
-                        const var_name_slot = var_name_cursor.slot_ptr.slot;
+                        const var_name_slot = var_name_cursor.slot();
                         _ = try state.moment.cursor.writePath(void, &.{
                             .{ .hash_map_get = .{ .value = hash.hashBuffer("config") } },
                             .hash_map_init,

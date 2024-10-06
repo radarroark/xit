@@ -44,7 +44,7 @@ fn createPatchEntries(
         .{ .hash_map_get = .{ .key = path_hash } },
     });
     try path_cursor.writeBytes(line_iter_pair.path, .once);
-    const path_slot = path_cursor.slot_ptr.slot;
+    const path_slot = path_cursor.slot();
 
     // init node list
     _ = try branch_cursor.writePath(void, &.{
@@ -247,7 +247,7 @@ fn applyPatchForFile(
         .{ .hash_map_get = .{ .key = path_hash } },
     });
     try path_cursor.writeBytes(path, .once);
-    const path_slot = path_cursor.slot_ptr.slot;
+    const path_slot = path_cursor.slot();
 
     // init parent->children node map
     _ = try branch_cursor.writePath(void, &.{
@@ -426,7 +426,7 @@ pub fn writePatch(state: rp.Repo(.xit).State, allocator: std.mem.Allocator) !voi
         .{ .hash_map_get = .{ .key = branch_name_hash } },
     });
     try branch_name_cursor.writeBytes(current_branch_name, .once);
-    const branch_name_slot = branch_name_cursor.slot_ptr.slot;
+    const branch_name_slot = branch_name_cursor.slot();
 
     // init branch map
     _ = try state.moment.cursor.writePath(void, &.{

@@ -276,7 +276,7 @@ fn writeTree(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, a
                     });
                     try tree_cursor.writeBytes(ctx.tree_bytes, .once);
                     _ = try cursor.writePath(void, &.{
-                        .{ .write = .{ .slot = tree_cursor.slot_ptr.slot } },
+                        .{ .write = .{ .slot = tree_cursor.slot() } },
                     });
                 }
             };
@@ -488,7 +488,7 @@ pub fn writeCommit(
                 .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
                 .hash_map_init,
                 .{ .hash_map_get = .{ .value = hash.bytesToHash(&commit_sha1_bytes_buffer) } },
-                .{ .write = .{ .slot = content_cursor.slot_ptr.slot } },
+                .{ .write = .{ .slot = content_cursor.slot() } },
             });
 
             // write commit id to HEAD
