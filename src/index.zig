@@ -142,9 +142,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     _ = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
                 },
                 .xit => {
-                    if (try state.moment.cursor.readPath(void, &.{
-                        .{ .hash_map_get = .{ .value = hash.hashBuffer("index") } },
-                    })) |index_cursor| {
+                    if (try state.moment.get(hash.hashBuffer("index"))) |index_cursor| {
                         var iter = try index_cursor.iter();
                         defer iter.deinit();
                         while (try iter.next()) |*next_cursor| {
@@ -495,89 +493,65 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     try lock_file.writeAll(&overall_sha1_buffer);
                 },
                 .xit => {
-                    const Ctx = struct {
-                        state: rp.Repo(repo_kind).State,
-                        allocator: std.mem.Allocator,
-                        index: *Index(repo_kind),
+                    const index_map_cursor = try state.moment.put(hash.hashBuffer("index"));
+                    var index_map = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(index_map_cursor);
 
-                        pub fn run(ctx: @This(), cursor: *rp.Repo(repo_kind).DB.Cursor(.read_write)) !void {
-                            // remove items no longer in the index
-                            var iter = try cursor.iter();
-                            defer iter.deinit();
-                            while (try iter.next()) |*next_cursor| {
-                                const kv_pair = try next_cursor.readKeyValuePair();
-                                const path = try kv_pair.key_cursor.readBytesAlloc(ctx.allocator, MAX_READ_BYTES);
-                                defer ctx.allocator.free(path);
+                    // remove items no longer in the index
+                    var iter = try index_map.cursor.iter();
+                    defer iter.deinit();
+                    while (try iter.next()) |*next_cursor| {
+                        const kv_pair = try next_cursor.readKeyValuePair();
+                        const path = try kv_pair.key_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
+                        defer allocator.free(path);
 
-                                if (!ctx.index.entries.contains(path)) {
-                                    _ = try cursor.writePath(void, &.{
-                                        .{ .hash_map_remove = hash.hashBuffer(path) },
-                                    });
-                                }
-                            }
+                        if (!self.entries.contains(path)) {
+                            try index_map.remove(hash.hashBuffer(path));
+                        }
+                    }
 
-                            for (ctx.index.entries.keys(), ctx.index.entries.values()) |path, *entries_for_path| {
-                                var entry_buffer = std.ArrayList(u8).init(ctx.allocator);
-                                defer entry_buffer.deinit();
-                                const writer = entry_buffer.writer();
+                    for (self.entries.keys(), self.entries.values()) |path, *entries_for_path| {
+                        var entry_buffer = std.ArrayList(u8).init(allocator);
+                        defer entry_buffer.deinit();
+                        const writer = entry_buffer.writer();
 
-                                for (entries_for_path) |entry_maybe| {
-                                    if (entry_maybe) |entry| {
-                                        try writer.writeInt(u32, entry.ctime_secs, .big);
-                                        try writer.writeInt(u32, entry.ctime_nsecs, .big);
-                                        try writer.writeInt(u32, entry.mtime_secs, .big);
-                                        try writer.writeInt(u32, entry.mtime_nsecs, .big);
-                                        try writer.writeInt(u32, entry.dev, .big);
-                                        try writer.writeInt(u32, entry.ino, .big);
-                                        try writer.writeInt(u32, @as(u32, @bitCast(entry.mode)), .big);
-                                        try writer.writeInt(u32, entry.uid, .big);
-                                        try writer.writeInt(u32, entry.gid, .big);
-                                        try writer.writeInt(u32, entry.file_size, .big);
-                                        try writer.writeAll(&entry.oid);
-                                        try writer.writeInt(u16, @as(u16, @bitCast(entry.flags)), .big);
-                                    }
-                                }
-
-                                const path_hash = hash.hashBuffer(path);
-                                if (try cursor.readPath(void, &.{
-                                    .{ .hash_map_get = .{ .value = path_hash } },
-                                })) |existing_entry_cursor| {
-                                    const existing_entry = try existing_entry_cursor.readBytesAlloc(ctx.allocator, MAX_READ_BYTES);
-                                    defer ctx.allocator.free(existing_entry);
-                                    if (std.mem.eql(u8, entry_buffer.items, existing_entry)) {
-                                        continue;
-                                    }
-                                }
-
-                                var path_cursor = try ctx.state.moment.cursor.writePath(void, &.{
-                                    .{ .hash_map_get = .{ .value = hash.hashBuffer("path-set") } },
-                                    .hash_map_init,
-                                    .{ .hash_map_get = .{ .key = path_hash } },
-                                });
-                                try path_cursor.writeBytes(path, .once);
-                                _ = try cursor.writePath(void, &.{
-                                    .{ .hash_map_get = .{ .key = path_hash } },
-                                    .{ .write = .{ .slot = path_cursor.slot_ptr.slot } },
-                                });
-
-                                var entry_buffer_cursor = try ctx.state.moment.cursor.writePath(void, &.{
-                                    .{ .hash_map_get = .{ .value = hash.hashBuffer("entry-buffer-set") } },
-                                    .hash_map_init,
-                                    .{ .hash_map_get = .{ .key = hash.hashBuffer(entry_buffer.items) } },
-                                });
-                                try entry_buffer_cursor.writeBytes(entry_buffer.items, .once);
-                                _ = try cursor.writePath(void, &.{
-                                    .{ .hash_map_get = .{ .value = path_hash } },
-                                    .{ .write = .{ .slot = entry_buffer_cursor.slot_ptr.slot } },
-                                });
+                        for (entries_for_path) |entry_maybe| {
+                            if (entry_maybe) |entry| {
+                                try writer.writeInt(u32, entry.ctime_secs, .big);
+                                try writer.writeInt(u32, entry.ctime_nsecs, .big);
+                                try writer.writeInt(u32, entry.mtime_secs, .big);
+                                try writer.writeInt(u32, entry.mtime_nsecs, .big);
+                                try writer.writeInt(u32, entry.dev, .big);
+                                try writer.writeInt(u32, entry.ino, .big);
+                                try writer.writeInt(u32, @as(u32, @bitCast(entry.mode)), .big);
+                                try writer.writeInt(u32, entry.uid, .big);
+                                try writer.writeInt(u32, entry.gid, .big);
+                                try writer.writeInt(u32, entry.file_size, .big);
+                                try writer.writeAll(&entry.oid);
+                                try writer.writeInt(u16, @as(u16, @bitCast(entry.flags)), .big);
                             }
                         }
-                    };
-                    _ = try state.moment.cursor.writePath(Ctx, &.{
-                        .{ .hash_map_get = .{ .value = hash.hashBuffer("index") } },
-                        .hash_map_init,
-                        .{ .ctx = Ctx{ .state = state, .allocator = allocator, .index = self } },
-                    });
+
+                        const path_hash = hash.hashBuffer(path);
+                        if (try index_map.get(path_hash)) |existing_entry_cursor| {
+                            const existing_entry = try existing_entry_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
+                            defer allocator.free(existing_entry);
+                            if (std.mem.eql(u8, entry_buffer.items, existing_entry)) {
+                                continue;
+                            }
+                        }
+
+                        const path_set_cursor = try state.moment.put(hash.hashBuffer("path-set"));
+                        const path_set = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(path_set_cursor);
+                        var path_cursor = try path_set.putKey(path_hash);
+                        try path_cursor.writeBytes(path, .once);
+                        try index_map.putKeyData(path_hash, .{ .slot = path_cursor.slot_ptr.slot });
+
+                        const entry_buffer_set_cursor = try state.moment.put(hash.hashBuffer("entry-buffer-set"));
+                        const entry_buffer_set = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(entry_buffer_set_cursor);
+                        var entry_buffer_cursor = try entry_buffer_set.putKey(hash.hashBuffer(entry_buffer.items));
+                        try entry_buffer_cursor.writeBytes(entry_buffer.items, .once);
+                        try index_map.putData(path_hash, .{ .slot = entry_buffer_cursor.slot_ptr.slot });
+                    }
                 },
             }
         }
