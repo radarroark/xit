@@ -1257,13 +1257,16 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
 
         pub fn init(
             allocator: std.mem.Allocator,
-            core: *rp.Repo(repo_kind).Core,
+            state: rp.Repo(repo_kind).State,
             diff_opts: DiffOptions(repo_kind),
         ) !FileIterator(repo_kind) {
             return .{
                 .allocator = allocator,
-                .core = core,
-                .moment = try core.latestMoment(),
+                .core = state.core,
+                .moment = switch (repo_kind) {
+                    .git => {},
+                    .xit => state.moment.*,
+                },
                 .diff_opts = diff_opts,
                 .next_index = 0,
             };

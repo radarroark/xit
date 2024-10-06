@@ -916,14 +916,17 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime load_kind: Objec
 
         pub fn init(
             allocator: std.mem.Allocator,
-            core: *rp.Repo(repo_kind).Core,
+            state: rp.Repo(repo_kind).State,
             start_oids: []const [hash.SHA1_HEX_LEN]u8,
             options: Options,
         ) !ObjectIterator(repo_kind, load_kind) {
             var self = ObjectIterator(repo_kind, load_kind){
                 .allocator = allocator,
-                .core = core,
-                .moment = try core.latestMoment(),
+                .core = state.core,
+                .moment = switch (repo_kind) {
+                    .git => {},
+                    .xit => state.moment.*,
+                },
                 .oid_queue = std.DoublyLinkedList([hash.SHA1_HEX_LEN]u8){},
                 .oid_excludes = std.AutoHashMap([hash.SHA1_HEX_LEN]u8, void).init(allocator),
                 .object = undefined,
