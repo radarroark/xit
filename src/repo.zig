@@ -42,9 +42,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 db: DB,
 
                 pub fn latestCursor(self: *@This()) !DB.Cursor(.read_write) {
-                    return try self.db.rootCursor().writePath(void, &.{
-                        .{ .array_list_get = .{ .index = -1 } },
-                    });
+                    const history = try DB.ArrayList(.read_write).init(self.db.rootCursor());
+                    return try history.put(-1);
                 }
             },
         };
@@ -208,16 +207,15 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         allocator: std.mem.Allocator,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
-                            try ref.writeHead(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, "master", null);
+                            var map = try DB.HashMap(.read_write).init(cursor.*);
+                            try ref.writeHead(repo_kind, .{ .core = ctx.core, .cursor = &map.cursor }, ctx.allocator, "master", null);
                         }
                     };
-                    _ = try self.core.db.rootCursor().writePath(Ctx, &.{
-                        .array_list_init,
-                        .{ .array_list_get = .append },
-                        .{ .write = .{ .slot = try self.core.db.rootCursor().readPathSlot(void, &.{.{ .array_list_get = .{ .index = -1 } }}) } },
-                        .hash_map_init,
-                        .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator } },
-                    });
+                    const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
+                    try history.appendDataContext(
+                        .{ .slot = try history.getSlot(-1) },
+                        Ctx{ .core = &self.core, .allocator = self.allocator },
+                    );
 
                     return self;
                 },
@@ -546,6 +544,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     const pch = @import("./patch.zig");
 
                     var result: [hash.SHA1_HEX_LEN]u8 = undefined;
+
                     const Ctx = struct {
                         core: *Repo(repo_kind).Core,
                         allocator: std.mem.Allocator,
@@ -554,17 +553,18 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         result: *[hash.SHA1_HEX_LEN]u8,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
-                            try pch.writePatch(.{ .core = ctx.core, .cursor = cursor }, ctx.allocator);
-                            ctx.result.* = try obj.writeCommit(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, ctx.parent_oids_maybe, ctx.metadata);
+                            var map = try DB.HashMap(.read_write).init(cursor.*);
+                            try pch.writePatch(.{ .core = ctx.core, .cursor = &map.cursor }, ctx.allocator);
+                            ctx.result.* = try obj.writeCommit(repo_kind, .{ .core = ctx.core, .cursor = &map.cursor }, ctx.allocator, ctx.parent_oids_maybe, ctx.metadata);
                         }
                     };
-                    _ = try self.core.db.rootCursor().writePath(Ctx, &.{
-                        .array_list_init,
-                        .{ .array_list_get = .append },
-                        .{ .write = .{ .slot = try self.core.db.rootCursor().readPathSlot(void, &.{.{ .array_list_get = .{ .index = -1 } }}) } },
-                        .hash_map_init,
-                        .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .parent_oids_maybe = parent_oids_maybe, .metadata = metadata, .result = &result } },
-                    });
+
+                    const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
+                    try history.appendDataContext(
+                        .{ .slot = try history.getSlot(-1) },
+                        Ctx{ .core = &self.core, .allocator = self.allocator, .parent_oids_maybe = parent_oids_maybe, .metadata = metadata, .result = &result },
+                    );
+
                     return result;
                 },
             }
@@ -594,23 +594,24 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         paths: []const []const u8,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
-                            var index = try idx.Index(repo_kind).init(ctx.allocator, .{ .core = ctx.core, .cursor = cursor });
+                            var map = try DB.HashMap(.read_write).init(cursor.*);
+
+                            var index = try idx.Index(repo_kind).init(ctx.allocator, .{ .core = ctx.core, .cursor = &map.cursor });
                             defer index.deinit();
 
                             for (ctx.paths) |path| {
-                                try index.addOrRemovePath(.{ .core = ctx.core, .cursor = cursor }, path, .add);
+                                try index.addOrRemovePath(.{ .core = ctx.core, .cursor = &map.cursor }, path, .add);
                             }
 
-                            try index.write(ctx.allocator, .{ .core = ctx.core, .cursor = cursor });
+                            try index.write(ctx.allocator, .{ .core = ctx.core, .cursor = &map.cursor });
                         }
                     };
-                    _ = try self.core.db.rootCursor().writePath(Ctx, &.{
-                        .array_list_init,
-                        .{ .array_list_get = .append },
-                        .{ .write = .{ .slot = try self.core.db.rootCursor().readPathSlot(void, &.{.{ .array_list_get = .{ .index = -1 } }}) } },
-                        .hash_map_init,
-                        .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .paths = paths } },
-                    });
+
+                    const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
+                    try history.appendDataContext(
+                        .{ .slot = try history.getSlot(-1) },
+                        Ctx{ .core = &self.core, .allocator = self.allocator, .paths = paths },
+                    );
                 },
             }
         }
@@ -677,10 +678,12 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         opts: idx.IndexRemoveOptions,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
-                            var index = try idx.Index(repo_kind).init(ctx.allocator, .{ .core = ctx.core, .cursor = cursor });
+                            var map = try DB.HashMap(.read_write).init(cursor.*);
+
+                            var index = try idx.Index(repo_kind).init(ctx.allocator, .{ .core = ctx.core, .cursor = &map.cursor });
                             defer index.deinit();
 
-                            var head_tree = try st.HeadTree(repo_kind).init(ctx.allocator, .{ .core = ctx.core, .cursor = cursor });
+                            var head_tree = try st.HeadTree(repo_kind).init(ctx.allocator, .{ .core = ctx.core, .cursor = &map.cursor });
                             defer head_tree.deinit();
 
                             for (ctx.paths) |path| {
@@ -697,7 +700,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                                                 return error.CannotRemoveFileWithUnstagedChanges;
                                             }
                                         }
-                                        try index.addOrRemovePath(.{ .core = ctx.core, .cursor = cursor }, path, .rm);
+                                        try index.addOrRemovePath(.{ .core = ctx.core, .cursor = &map.cursor }, path, .rm);
                                     },
                                     else => return error.UnexpectedPathType,
                                 }
@@ -714,16 +717,15 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                                 }
                             }
 
-                            try index.write(ctx.allocator, .{ .core = ctx.core, .cursor = cursor });
+                            try index.write(ctx.allocator, .{ .core = ctx.core, .cursor = &map.cursor });
                         }
                     };
-                    _ = try self.core.db.rootCursor().writePath(Ctx, &.{
-                        .array_list_init,
-                        .{ .array_list_get = .append },
-                        .{ .write = .{ .slot = try self.core.db.rootCursor().readPathSlot(void, &.{.{ .array_list_get = .{ .index = -1 } }}) } },
-                        .hash_map_init,
-                        .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .paths = paths, .opts = opts } },
-                    });
+
+                    const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
+                    try history.appendDataContext(
+                        .{ .slot = try history.getSlot(-1) },
+                        Ctx{ .core = &self.core, .allocator = self.allocator, .paths = paths, .opts = opts },
+                    );
                 },
             }
         }
@@ -844,16 +846,16 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         input: bch.AddBranchInput,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
-                            try bch.add(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, ctx.input);
+                            var map = try DB.HashMap(.read_write).init(cursor.*);
+                            try bch.add(repo_kind, .{ .core = ctx.core, .cursor = &map.cursor }, ctx.allocator, ctx.input);
                         }
                     };
-                    _ = try self.core.db.rootCursor().writePath(Ctx, &.{
-                        .array_list_init,
-                        .{ .array_list_get = .append },
-                        .{ .write = .{ .slot = try self.core.db.rootCursor().readPathSlot(void, &.{.{ .array_list_get = .{ .index = -1 } }}) } },
-                        .hash_map_init,
-                        .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .input = input } },
-                    });
+
+                    const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
+                    try history.appendDataContext(
+                        .{ .slot = try history.getSlot(-1) },
+                        Ctx{ .core = &self.core, .allocator = self.allocator, .input = input },
+                    );
                 },
             }
         }
@@ -868,16 +870,16 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         input: bch.RemoveBranchInput,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
-                            try bch.remove(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, ctx.input);
+                            var map = try DB.HashMap(.read_write).init(cursor.*);
+                            try bch.remove(repo_kind, .{ .core = ctx.core, .cursor = &map.cursor }, ctx.allocator, ctx.input);
                         }
                     };
-                    _ = try self.core.db.rootCursor().writePath(Ctx, &.{
-                        .array_list_init,
-                        .{ .array_list_get = .append },
-                        .{ .write = .{ .slot = try self.core.db.rootCursor().readPathSlot(void, &.{.{ .array_list_get = .{ .index = -1 } }}) } },
-                        .hash_map_init,
-                        .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .input = input } },
-                    });
+
+                    const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
+                    try history.appendDataContext(
+                        .{ .slot = try history.getSlot(-1) },
+                        Ctx{ .core = &self.core, .allocator = self.allocator, .input = input },
+                    );
                 },
             }
         }
@@ -887,6 +889,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 .git => return try chk.Switch.init(repo_kind, .{ .core = &self.core }, self.allocator, target, options),
                 .xit => {
                     var result: chk.Switch = undefined;
+
                     const Ctx = struct {
                         core: *Repo(repo_kind).Core,
                         allocator: std.mem.Allocator,
@@ -895,16 +898,17 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         result: *chk.Switch,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
-                            ctx.result.* = try chk.Switch.init(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, ctx.target, ctx.options);
+                            var map = try DB.HashMap(.read_write).init(cursor.*);
+                            ctx.result.* = try chk.Switch.init(repo_kind, .{ .core = ctx.core, .cursor = &map.cursor }, ctx.allocator, ctx.target, ctx.options);
                         }
                     };
-                    _ = try self.core.db.rootCursor().writePath(Ctx, &.{
-                        .array_list_init,
-                        .{ .array_list_get = .append },
-                        .{ .write = .{ .slot = try self.core.db.rootCursor().readPathSlot(void, &.{.{ .array_list_get = .{ .index = -1 } }}) } },
-                        .hash_map_init,
-                        .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .target = target, .options = options, .result = &result } },
-                    });
+
+                    const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
+                    try history.appendDataContext(
+                        .{ .slot = try history.getSlot(-1) },
+                        Ctx{ .core = &self.core, .allocator = self.allocator, .target = target, .options = options, .result = &result },
+                    );
+
                     return result;
                 },
             }
@@ -939,6 +943,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 .git => return try mrg.Merge.init(repo_kind, .{ .core = &self.core }, self.allocator, .merge, input),
                 .xit => {
                     var result: mrg.Merge = undefined;
+
                     const Ctx = struct {
                         core: *Repo(repo_kind).Core,
                         allocator: std.mem.Allocator,
@@ -946,23 +951,24 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         result: *mrg.Merge,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
-                            ctx.result.* = try mrg.Merge.init(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, .merge, ctx.input);
+                            var map = try DB.HashMap(.read_write).init(cursor.*);
+                            ctx.result.* = try mrg.Merge.init(repo_kind, .{ .core = ctx.core, .cursor = &map.cursor }, ctx.allocator, .merge, ctx.input);
                             // no need to make a new transaction if nothing was done
                             if (.nothing == ctx.result.data) {
                                 return error.CancelTransaction;
                             }
                         }
                     };
-                    _ = self.core.db.rootCursor().writePath(Ctx, &.{
-                        .array_list_init,
-                        .{ .array_list_get = .append },
-                        .{ .write = .{ .slot = try self.core.db.rootCursor().readPathSlot(void, &.{.{ .array_list_get = .{ .index = -1 } }}) } },
-                        .hash_map_init,
-                        .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .input = input, .result = &result } },
-                    }) catch |err| switch (err) {
+
+                    const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
+                    history.appendDataContext(
+                        .{ .slot = try history.getSlot(-1) },
+                        Ctx{ .core = &self.core, .allocator = self.allocator, .input = input, .result = &result },
+                    ) catch |err| switch (err) {
                         error.CancelTransaction => {},
                         else => return err,
                     };
+
                     return result;
                 },
             }
@@ -973,6 +979,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 .git => return try mrg.Merge.init(repo_kind, .{ .core = &self.core }, self.allocator, .cherry_pick, input),
                 .xit => {
                     var result: mrg.Merge = undefined;
+
                     const Ctx = struct {
                         core: *Repo(repo_kind).Core,
                         allocator: std.mem.Allocator,
@@ -980,23 +987,24 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         result: *mrg.Merge,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
-                            ctx.result.* = try mrg.Merge.init(repo_kind, .{ .core = ctx.core, .cursor = cursor }, ctx.allocator, .cherry_pick, ctx.input);
+                            var map = try DB.HashMap(.read_write).init(cursor.*);
+                            ctx.result.* = try mrg.Merge.init(repo_kind, .{ .core = ctx.core, .cursor = &map.cursor }, ctx.allocator, .cherry_pick, ctx.input);
                             // no need to make a new transaction if nothing was done
                             if (.nothing == ctx.result.data) {
                                 return error.CancelTransaction;
                             }
                         }
                     };
-                    _ = self.core.db.rootCursor().writePath(Ctx, &.{
-                        .array_list_init,
-                        .{ .array_list_get = .append },
-                        .{ .write = .{ .slot = try self.core.db.rootCursor().readPathSlot(void, &.{.{ .array_list_get = .{ .index = -1 } }}) } },
-                        .hash_map_init,
-                        .{ .ctx = Ctx{ .core = &self.core, .allocator = self.allocator, .input = input, .result = &result } },
-                    }) catch |err| switch (err) {
+
+                    const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
+                    history.appendDataContext(
+                        .{ .slot = try history.getSlot(-1) },
+                        Ctx{ .core = &self.core, .allocator = self.allocator, .input = input, .result = &result },
+                    ) catch |err| switch (err) {
                         error.CancelTransaction => {},
                         else => return err,
                     };
+
                     return result;
                 },
             }
@@ -1030,16 +1038,16 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         input: cfg.AddConfigInput,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
-                            try ctx.conf.add(.{ .core = ctx.core, .cursor = cursor }, ctx.input);
+                            var map = try DB.HashMap(.read_write).init(cursor.*);
+                            try ctx.conf.add(.{ .core = ctx.core, .cursor = &map.cursor }, ctx.input);
                         }
                     };
-                    _ = try self.core.db.rootCursor().writePath(Ctx, &.{
-                        .array_list_init,
-                        .{ .array_list_get = .append },
-                        .{ .write = .{ .slot = try self.core.db.rootCursor().readPathSlot(void, &.{.{ .array_list_get = .{ .index = -1 } }}) } },
-                        .hash_map_init,
-                        .{ .ctx = Ctx{ .core = &self.core, .conf = &conf, .input = input } },
-                    });
+
+                    const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
+                    try history.appendDataContext(
+                        .{ .slot = try history.getSlot(-1) },
+                        Ctx{ .core = &self.core, .conf = &conf, .input = input },
+                    );
                 },
             }
         }
@@ -1063,16 +1071,16 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         input: cfg.RemoveConfigInput,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
-                            try ctx.conf.remove(.{ .core = ctx.core, .cursor = cursor }, ctx.input);
+                            var map = try DB.HashMap(.read_write).init(cursor.*);
+                            try ctx.conf.remove(.{ .core = ctx.core, .cursor = &map.cursor }, ctx.input);
                         }
                     };
-                    _ = try self.core.db.rootCursor().writePath(Ctx, &.{
-                        .array_list_init,
-                        .{ .array_list_get = .append },
-                        .{ .write = .{ .slot = try self.core.db.rootCursor().readPathSlot(void, &.{.{ .array_list_get = .{ .index = -1 } }}) } },
-                        .hash_map_init,
-                        .{ .ctx = Ctx{ .core = &self.core, .conf = &conf, .input = input } },
-                    });
+
+                    const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
+                    try history.appendDataContext(
+                        .{ .slot = try history.getSlot(-1) },
+                        Ctx{ .core = &self.core, .conf = &conf, .input = input },
+                    );
                 },
             }
         }
@@ -1109,16 +1117,16 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         input: cfg.AddConfigInput,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
-                            try ctx.conf.add(.{ .core = ctx.core, .cursor = cursor }, ctx.input);
+                            var map = try DB.HashMap(.read_write).init(cursor.*);
+                            try ctx.conf.add(.{ .core = ctx.core, .cursor = &map.cursor }, ctx.input);
                         }
                     };
-                    _ = try self.core.db.rootCursor().writePath(Ctx, &.{
-                        .array_list_init,
-                        .{ .array_list_get = .append },
-                        .{ .write = .{ .slot = try self.core.db.rootCursor().readPathSlot(void, &.{.{ .array_list_get = .{ .index = -1 } }}) } },
-                        .hash_map_init,
-                        .{ .ctx = Ctx{ .core = &self.core, .conf = &conf, .input = new_input } },
-                    });
+
+                    const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
+                    try history.appendDataContext(
+                        .{ .slot = try history.getSlot(-1) },
+                        Ctx{ .core = &self.core, .conf = &conf, .input = new_input },
+                    );
                 },
             }
         }
@@ -1148,16 +1156,16 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         input: cfg.RemoveConfigInput,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
-                            try ctx.conf.remove(.{ .core = ctx.core, .cursor = cursor }, ctx.input);
+                            var map = try DB.HashMap(.read_write).init(cursor.*);
+                            try ctx.conf.remove(.{ .core = ctx.core, .cursor = &map.cursor }, ctx.input);
                         }
                     };
-                    _ = try self.core.db.rootCursor().writePath(Ctx, &.{
-                        .array_list_init,
-                        .{ .array_list_get = .append },
-                        .{ .write = .{ .slot = try self.core.db.rootCursor().readPathSlot(void, &.{.{ .array_list_get = .{ .index = -1 } }}) } },
-                        .hash_map_init,
-                        .{ .ctx = Ctx{ .core = &self.core, .conf = &conf, .input = new_input } },
-                    });
+
+                    const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
+                    try history.appendDataContext(
+                        .{ .slot = try history.getSlot(-1) },
+                        Ctx{ .core = &self.core, .conf = &conf, .input = new_input },
+                    );
                 },
             }
         }
