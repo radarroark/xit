@@ -297,7 +297,7 @@ fn applyPatchForFile(
     const path_to_node_id_list_cursor = try branch.put(hash.hashBuffer("path->node-id-list"));
     const path_to_node_id_list = try rp.Repo(.xit).DB.HashMap(.read_write).init(path_to_node_id_list_cursor);
     try path_to_node_id_list.putKeyData(path_hash, .{ .slot = path_cursor.slot() });
-    try path_to_node_id_list.putData(path_hash, .none); // create a new array list every time for now
+    try path_to_node_id_list.putData(path_hash, .{ .slot = null }); // create a new array list every time for now
     const node_id_list_cursor = try path_to_node_id_list.put(path_hash);
     const node_id_list = try rp.Repo(.xit).DB.ArrayList(.read_write).init(node_id_list_cursor);
 
@@ -316,7 +316,7 @@ fn applyPatchForFile(
                 // because there is a conflict, and thus the node map
                 // cannot be "flattened" into a list
                 if (try child_node_id_iter.next() != null) {
-                    try path_to_node_id_list.putData(path_hash, .none);
+                    try path_to_node_id_list.putData(path_hash, .{ .slot = null });
                     break;
                 }
                 // append child to the node list
