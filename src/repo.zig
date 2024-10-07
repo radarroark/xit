@@ -299,7 +299,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     }
 
                     for (stat.conflicts.keys(), stat.conflicts.values()) |path, conflict| {
-                        if (conflict.common) {
+                        if (conflict.base) {
                             if (conflict.current) {
                                 if (conflict.source) {
                                     try writers.out.print("UU {s}\n", .{path}); // both modified
@@ -489,7 +489,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                                         try writers.out.print("Auto-merging {s}\n", .{path});
                                     }
                                     if (conflict.current != null and conflict.source != null) {
-                                        const conflict_type = if (conflict.common != null)
+                                        const conflict_type = if (conflict.base != null)
                                             "content"
                                         else
                                             "add/add";

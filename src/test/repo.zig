@@ -300,7 +300,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
                 \\y
                 \\>>>>>>> foo
                 \\c
-            , .{result.common_oid});
+            , .{result.base_oid});
             defer allocator.free(expected_f_txt_content);
             try std.testing.expectEqualStrings(expected_f_txt_content, f_txt_content);
         }
@@ -1046,7 +1046,7 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind) !void {
             \\=======
             \\d
             \\>>>>>>> {s}
-        , .{ result.common_oid, commit_d });
+        , .{ result.base_oid, commit_d });
         defer allocator.free(expected_readme_md_content);
         try std.testing.expectEqualStrings(expected_readme_md_content, readme_md_content);
     }

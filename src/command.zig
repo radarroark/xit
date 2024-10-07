@@ -220,7 +220,7 @@ pub const Command = union(enum) {
                 .index
             else
                 (if (map_args.contains("--base"))
-                    .{ .workspace = .{ .conflict_diff_kind = .common } }
+                    .{ .workspace = .{ .conflict_diff_kind = .base } }
                 else if (map_args.contains("--ours"))
                     .{ .workspace = .{ .conflict_diff_kind = .current } }
                 else if (map_args.contains("--theirs"))
