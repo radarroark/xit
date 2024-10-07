@@ -206,10 +206,19 @@ fn writeBlobWithConflict(
     else
         try df.LineIterator(repo_kind).initFromNothing(allocator, "");
     defer common_iter.deinit();
+
     var current_iter = try df.LineIterator(repo_kind).initFromOid(state, allocator, "", current_oid, null);
     defer current_iter.deinit();
+
     var source_iter = try df.LineIterator(repo_kind).initFromOid(state, allocator, "", source_oid, null);
     defer source_iter.deinit();
+
+    // if any file is binary, just return the source oid because there is no point in trying to merge them
+    if (common_iter.source == .binary or current_iter.source == .binary or source_iter.source == .binary) {
+        has_conflict.* = true;
+        return source_oid;
+    }
+
     var diff3_iter = try df.Diff3Iterator(repo_kind).init(allocator, &common_iter, &current_iter, &source_iter);
     defer diff3_iter.deinit();
 
