@@ -340,6 +340,27 @@ fn applyPatchForFile(
     }
 }
 
+fn removePatch(branch: *rp.Repo(.xit).DB.HashMap(.read_write), path: []const u8) !void {
+    const path_hash = hash.hashBuffer(path);
+
+    if (try branch.cursor.readPath(void, &.{
+        .{ .hash_map_get = .{ .value = hash.hashBuffer("path->node-id-list") } },
+        .{ .hash_map_get = .{ .key = path_hash } },
+    })) |_| {
+        const path_to_parent_to_children_cursor = try branch.put(hash.hashBuffer("path->parent->children"));
+        const path_to_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_write).init(path_to_parent_to_children_cursor);
+        try path_to_parent_to_children.remove(path_hash);
+
+        const path_to_child_to_parent_cursor = try branch.put(hash.hashBuffer("path->child->parent"));
+        const path_to_child_to_parent = try rp.Repo(.xit).DB.HashMap(.read_write).init(path_to_child_to_parent_cursor);
+        try path_to_child_to_parent.remove(path_hash);
+
+        const path_to_node_id_list_cursor = try branch.put(hash.hashBuffer("path->node-id-list"));
+        const path_to_node_id_list = try rp.Repo(.xit).DB.HashMap(.read_write).init(path_to_node_id_list_cursor);
+        try path_to_node_id_list.remove(path_hash);
+    }
+}
+
 pub fn writePatch(state: rp.Repo(.xit).State, allocator: std.mem.Allocator) !void {
     // get current branch name
     const current_branch_name = try ref.readHeadName(.xit, state, allocator);
@@ -369,7 +390,13 @@ pub fn writePatch(state: rp.Repo(.xit).State, allocator: std.mem.Allocator) !voi
     while (try file_iter.next()) |*line_iter_pair_ptr| {
         var line_iter_pair = line_iter_pair_ptr.*;
         defer line_iter_pair.deinit();
-        const patch_hash = try writePatchForFile(state.moment, &branch, allocator, &line_iter_pair);
-        try applyPatchForFile(state.moment, &branch, allocator, patch_hash, line_iter_pair.path);
+        if (line_iter_pair.a.source == .binary or line_iter_pair.b.source == .binary) {
+            // the file is or was binary, so we can't create a patch for it.
+            // remove existing patch data if there is any.
+            try removePatch(&branch, line_iter_pair.path);
+        } else {
+            const patch_hash = try writePatchForFile(state.moment, &branch, allocator, &line_iter_pair);
+            try applyPatchForFile(state.moment, &branch, allocator, patch_hash, line_iter_pair.path);
+        }
     }
 }
