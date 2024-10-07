@@ -30,6 +30,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                 iter: std.mem.SplitIterator(u8, .scalar),
             },
             nothing,
+            binary,
         },
 
         pub fn initFromIndex(state: rp.Repo(repo_kind).State, allocator: std.mem.Allocator, entry: idx.Index(repo_kind).Entry) !LineIterator(repo_kind) {
@@ -50,7 +51,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                     },
                 },
             };
-            try iter.initLineOffsets();
+            try iter.validateLines();
             return iter;
         }
 
@@ -79,7 +80,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                     },
                 },
             };
-            try iter.initLineOffsets();
+            try iter.validateLines();
             return iter;
         }
 
@@ -93,7 +94,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                 .line_offsets = undefined,
                 .source = .nothing,
             };
-            try iter.initLineOffsets();
+            try iter.validateLines();
             return iter;
         }
 
@@ -115,7 +116,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                     },
                 },
             };
-            try iter.initLineOffsets();
+            try iter.validateLines();
             return iter;
         }
 
@@ -137,7 +138,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                     },
                 },
             };
-            try iter.initLineOffsets();
+            try iter.validateLines();
             return iter;
         }
 
@@ -155,7 +156,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                     },
                 },
             };
-            try iter.initLineOffsets();
+            try iter.validateLines();
             return iter;
         }
 
@@ -196,7 +197,6 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                     };
                     return try line_arr.toOwnedSlice();
                 },
-                .nothing => return null,
                 .buffer => |*buffer| {
                     if (buffer.iter.next()) |line| {
                         const line_copy = try self.allocator.alloc(u8, line.len);
@@ -207,6 +207,8 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                         return null;
                     }
                 },
+                .nothing => return null,
+                .binary => return null,
             }
         }
 
@@ -225,8 +227,9 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                     workspace.eof = false;
                     try workspace.file.seekTo(0);
                 },
-                .nothing => {},
                 .buffer => |*buffer| buffer.iter.reset(),
+                .nothing => {},
+                .binary => {},
             }
         }
 
@@ -238,8 +241,9 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
             switch (self.source) {
                 .object => |*object| object.object_reader.deinit(),
                 .workspace => |*workspace| workspace.file.close(),
-                .nothing => {},
                 .buffer => {},
+                .nothing => {},
+                .binary => {},
             }
             self.allocator.free(self.line_offsets);
         }
@@ -249,7 +253,6 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
             switch (self.source) {
                 .object => |*object| try object.object_reader.seekTo(position),
                 .workspace => |*workspace| try workspace.file.seekTo(position),
-                .nothing => {},
                 .buffer => {
                     var line_count: usize = 0;
                     while (self.line_offsets[line_count] < position) {
@@ -259,15 +262,34 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                         }
                     }
                 },
+                .nothing => {},
+                .binary => {},
             }
         }
 
-        fn initLineOffsets(self: *LineIterator(repo_kind)) !void {
+        /// reads each line to populate line_offsets and ensure
+        /// that there is no binary data.
+        fn validateLines(self: *LineIterator(repo_kind)) !void {
             var offsets = std.ArrayList(usize).init(self.allocator);
             errdefer offsets.deinit();
             var last_pos: usize = 0;
             while (try self.next()) |line| {
                 defer self.allocator.free(line);
+
+                // if line doesn't contain valid unicode, consider it binary
+                if (!std.unicode.utf8ValidateSlice(line)) {
+                    switch (self.source) {
+                        .object => |*object| object.object_reader.deinit(),
+                        .workspace => |*workspace| workspace.file.close(),
+                        .buffer => {},
+                        .nothing => {},
+                        .binary => {},
+                    }
+                    self.source = .binary;
+                    offsets.clearAndFree();
+                    break;
+                }
+
                 try offsets.append(last_pos);
                 last_pos += line.len + 1;
             }

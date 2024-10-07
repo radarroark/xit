@@ -659,6 +659,100 @@ test "merge conflict" {
     try testMergeConflict(.xit);
 }
 
+/// creates a merge conflict with binary files, asserting that
+/// it will not attempt to insert conflict markers or auto-resolve.
+pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind) !void {
+    const allocator = std.testing.allocator;
+    const temp_dir_name = "temp-test-repo-merge-conflict-binary";
+
+    // create the temp dir
+    const cwd = std.fs.cwd();
+    var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
+    if (temp_dir_or_err) |*temp_dir| {
+        temp_dir.close();
+        try cwd.deleteTree(temp_dir_name);
+    } else |_| {}
+    var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
+    defer cwd.deleteTree(temp_dir_name) catch {};
+    defer temp_dir.close();
+
+    const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
+
+    var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, writers);
+    defer repo.deinit();
+
+    // A --- B --------- D [master]
+    //  \               /
+    //   \             /
+    //    C ---------- [foo]
+
+    var bin = [_]u8{0} ** 256;
+    for (&bin, 0..) |*byte, i| {
+        if (i % 2 == 1) {
+            byte.* = '\n';
+        } else {
+            byte.* = @intCast(i % 255);
+        }
+    }
+
+    try addFile(repo_kind, &repo, "bin", &bin);
+    _ = try repo.commit(null, .{ .message = "a" });
+
+    try repo.addBranch(.{ .name = "foo" });
+
+    {
+        var result = try repo.switchHead("foo", .{ .force = false });
+        defer result.deinit();
+    }
+
+    bin[0] = 1;
+
+    try addFile(repo_kind, &repo, "bin", &bin);
+    _ = try repo.commit(null, .{ .message = "c" });
+
+    {
+        var result = try repo.switchHead("master", .{ .force = false });
+        defer result.deinit();
+    }
+
+    bin[0] = 2;
+
+    try addFile(repo_kind, &repo, "bin", &bin);
+    _ = try repo.commit(null, .{ .message = "b" });
+
+    {
+        var result = try repo.merge(.{ .new = .{ .source_name = "foo" } });
+        defer result.deinit();
+        try std.testing.expect(.conflict == result.data);
+    }
+
+    // verify no lines are longer than one byte
+    // so we know that conflict markers haven't been added
+    {
+        const bin_file = try repo.core.repo_dir.openFile("bin", .{ .mode = .read_only });
+        defer bin_file.close();
+        const bin_file_content = try bin_file.readToEndAlloc(allocator, 1024);
+        defer allocator.free(bin_file_content);
+        var iter = std.mem.splitScalar(u8, bin_file_content, '\n');
+        while (iter.next()) |line| {
+            try std.testing.expect(line.len <= 1);
+        }
+    }
+
+    // resolve conflict
+    try repo.add(&.{"bin"});
+    {
+        var result = try repo.merge(.cont);
+        defer result.deinit();
+        try std.testing.expect(.success == result.data);
+    }
+}
+
+test "merge conflict binary" {
+    try testMergeConflictBinary(.git);
+    try testMergeConflictBinary(.xit);
+}
+
 /// demonstrates an example of git shuffling lines unexpectedly
 /// when auto-resolving a merge conflict
 fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind) !void {
