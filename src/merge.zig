@@ -137,13 +137,13 @@ pub fn commonAncestor(comptime repo_kind: rp.RepoKind, allocator: std.mem.Alloca
             },
         }
 
-        const is_common_ancestor = parents_of_both.contains(&node.data.oid);
+        const is_base_ancestor = parents_of_both.contains(&node.data.oid);
 
         // TODO: instead of appending to the end, append it in descending order of timestamp
         // so we prioritize more recent commits and avoid wasteful traversal deep in the history.
         const object = try obj.Object(repo_kind, .full).init(arena.allocator(), state, node.data.oid);
         for (object.content.commit.parents.items) |parent_oid| {
-            const is_stale = is_common_ancestor or stale_oids.contains(&parent_oid);
+            const is_stale = is_base_ancestor or stale_oids.contains(&parent_oid);
             var new_node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
             new_node.data = .{ .oid = parent_oid, .kind = if (is_stale) .stale else node.data.kind };
             queue.append(new_node);
@@ -164,14 +164,14 @@ pub fn commonAncestor(comptime repo_kind: rp.RepoKind, allocator: std.mem.Alloca
         }
     }
 
-    const common_ancestor_count = parents_of_both.count();
-    if (common_ancestor_count > 1) {
+    const base_ancestor_count = parents_of_both.count();
+    if (base_ancestor_count > 1) {
         var oid = parents_of_both.keys()[0][0..hash.SHA1_HEX_LEN].*;
         for (parents_of_both.keys()[1..]) |next_oid| {
             oid = try getDescendent(repo_kind, allocator, state, oid[0..hash.SHA1_HEX_LEN], next_oid[0..hash.SHA1_HEX_LEN]);
         }
         return oid;
-    } else if (common_ancestor_count == 1) {
+    } else if (base_ancestor_count == 1) {
         return parents_of_both.keys()[0][0..hash.SHA1_HEX_LEN].*;
     } else {
         return error.NoCommonAncestor;
@@ -183,7 +183,7 @@ pub const RenamedEntry = struct {
     tree_entry: obj.TreeEntry,
 };
 pub const MergeConflict = struct {
-    common: ?obj.TreeEntry,
+    base: ?obj.TreeEntry,
     current: ?obj.TreeEntry,
     source: ?obj.TreeEntry,
     renamed: ?RenamedEntry,
@@ -193,19 +193,19 @@ fn writeBlobWithConflict(
     comptime repo_kind: rp.RepoKind,
     state: rp.Repo(repo_kind).State,
     allocator: std.mem.Allocator,
-    common_oid_maybe: ?[hash.SHA1_BYTES_LEN]u8,
+    base_oid_maybe: ?[hash.SHA1_BYTES_LEN]u8,
     current_oid: [hash.SHA1_BYTES_LEN]u8,
     source_oid: [hash.SHA1_BYTES_LEN]u8,
-    common_name: []const u8,
+    base_name: []const u8,
     current_name: []const u8,
     source_name: []const u8,
     has_conflict: *bool,
 ) ![hash.SHA1_BYTES_LEN]u8 {
-    var common_iter = if (common_oid_maybe) |common_oid|
-        try df.LineIterator(repo_kind).initFromOid(state, allocator, "", common_oid, null)
+    var base_iter = if (base_oid_maybe) |base_oid|
+        try df.LineIterator(repo_kind).initFromOid(state, allocator, "", base_oid, null)
     else
         try df.LineIterator(repo_kind).initFromNothing(allocator, "");
-    defer common_iter.deinit();
+    defer base_iter.deinit();
 
     var current_iter = try df.LineIterator(repo_kind).initFromOid(state, allocator, "", current_oid, null);
     defer current_iter.deinit();
@@ -214,12 +214,12 @@ fn writeBlobWithConflict(
     defer source_iter.deinit();
 
     // if any file is binary, just return the source oid because there is no point in trying to merge them
-    if (common_iter.source == .binary or current_iter.source == .binary or source_iter.source == .binary) {
+    if (base_iter.source == .binary or current_iter.source == .binary or source_iter.source == .binary) {
         has_conflict.* = true;
         return source_oid;
     }
 
-    var diff3_iter = try df.Diff3Iterator(repo_kind).init(allocator, &common_iter, &current_iter, &source_iter);
+    var diff3_iter = try df.Diff3Iterator(repo_kind).init(allocator, &base_iter, &current_iter, &source_iter);
     defer diff3_iter.deinit();
 
     var line_buffer = std.ArrayList([]const u8).init(allocator);
@@ -278,10 +278,10 @@ fn writeBlobWithConflict(
     const Stream = struct {
         allocator: std.mem.Allocator,
         current_marker: []u8,
-        common_marker: []u8,
+        base_marker: []u8,
         separate_marker: []u8,
         source_marker: []u8,
-        common_iter: *df.LineIterator(repo_kind),
+        base_iter: *df.LineIterator(repo_kind),
         current_iter: *df.LineIterator(repo_kind),
         source_iter: *df.LineIterator(repo_kind),
         diff3_iter: *df.Diff3Iterator(repo_kind),
@@ -331,16 +331,16 @@ fn writeBlobWithConflict(
                     switch (chunk) {
                         .clean => |clean| {
                             for (clean.begin..clean.end) |line_num| {
-                                const common_line = try self.parent.common_iter.get(line_num);
+                                const base_line = try self.parent.base_iter.get(line_num);
                                 {
-                                    errdefer self.parent.allocator.free(common_line);
-                                    try self.parent.line_buffer.append(common_line);
+                                    errdefer self.parent.allocator.free(base_line);
+                                    try self.parent.line_buffer.append(base_line);
                                 }
                                 self.parent.current_line = self.parent.line_buffer.items[0];
                             }
                         },
                         .conflict => |conflict| {
-                            var o_lines = try LineRange.init(self.parent.allocator, self.parent.common_iter, conflict.o_range);
+                            var o_lines = try LineRange.init(self.parent.allocator, self.parent.base_iter, conflict.o_range);
                             defer o_lines.deinit();
                             var a_lines = try LineRange.init(self.parent.allocator, self.parent.current_iter, conflict.a_range);
                             defer a_lines.deinit();
@@ -376,10 +376,10 @@ fn writeBlobWithConflict(
                             try self.parent.line_buffer.appendSlice(a_lines.lines.items);
                             a_lines.lines.clearAndFree();
 
-                            const common_marker = try self.parent.allocator.dupe(u8, self.parent.common_marker);
+                            const base_marker = try self.parent.allocator.dupe(u8, self.parent.base_marker);
                             {
-                                errdefer self.parent.allocator.free(common_marker);
-                                try self.parent.line_buffer.append(common_marker);
+                                errdefer self.parent.allocator.free(base_marker);
+                                try self.parent.line_buffer.append(base_marker);
                             }
                             try self.parent.line_buffer.appendSlice(o_lines.lines.items);
                             o_lines.lines.clearAndFree();
@@ -411,7 +411,7 @@ fn writeBlobWithConflict(
 
         pub fn seekTo(self: *@This(), offset: usize) !void {
             if (offset == 0) {
-                try self.common_iter.reset();
+                try self.base_iter.reset();
                 try self.current_iter.reset();
                 try self.source_iter.reset();
                 try self.diff3_iter.reset();
@@ -445,8 +445,8 @@ fn writeBlobWithConflict(
 
     const current_marker = try std.fmt.allocPrint(allocator, "<<<<<<< {s}", .{current_name});
     defer allocator.free(current_marker);
-    const common_marker = try std.fmt.allocPrint(allocator, "||||||| original ({s})", .{common_name});
-    defer allocator.free(common_marker);
+    const base_marker = try std.fmt.allocPrint(allocator, "||||||| original ({s})", .{base_name});
+    defer allocator.free(base_marker);
     const separate_marker = try std.fmt.allocPrint(allocator, "=======", .{});
     defer allocator.free(separate_marker);
     const source_marker = try std.fmt.allocPrint(allocator, ">>>>>>> {s}", .{source_name});
@@ -454,10 +454,10 @@ fn writeBlobWithConflict(
     var stream = Stream{
         .allocator = allocator,
         .current_marker = current_marker,
-        .common_marker = common_marker,
+        .base_marker = base_marker,
         .separate_marker = separate_marker,
         .source_marker = source_marker,
-        .common_iter = &common_iter,
+        .base_iter = &base_iter,
         .current_iter = &current_iter,
         .source_iter = &source_iter,
         .diff3_iter = &diff3_iter,
@@ -481,14 +481,14 @@ fn samePathConflict(
     comptime repo_kind: rp.RepoKind,
     state: rp.Repo(repo_kind).State,
     allocator: std.mem.Allocator,
-    common_name: []const u8,
+    base_name: []const u8,
     current_name: []const u8,
     source_name: []const u8,
     current_change_maybe: ?obj.Change,
     source_change: obj.Change,
 ) !SamePathConflictResult {
     if (current_change_maybe) |current_change| {
-        const common_entry_maybe = source_change.old;
+        const base_entry_maybe = source_change.old;
 
         if (current_change.new) |current_entry| {
             if (source_change.new) |source_entry| {
@@ -502,10 +502,10 @@ fn samePathConflict(
                 const oid_maybe = blk: {
                     if (std.mem.eql(u8, &current_entry.oid, &source_entry.oid)) {
                         break :blk current_entry.oid;
-                    } else if (common_entry_maybe) |common_entry| {
-                        if (std.mem.eql(u8, &common_entry.oid, &current_entry.oid)) {
+                    } else if (base_entry_maybe) |base_entry| {
+                        if (std.mem.eql(u8, &base_entry.oid, &current_entry.oid)) {
                             break :blk source_entry.oid;
-                        } else if (std.mem.eql(u8, &common_entry.oid, &source_entry.oid)) {
+                        } else if (std.mem.eql(u8, &base_entry.oid, &source_entry.oid)) {
                             break :blk current_entry.oid;
                         }
                     }
@@ -516,10 +516,10 @@ fn samePathConflict(
                 const mode_maybe = blk: {
                     if (current_entry.mode.eql(source_entry.mode)) {
                         break :blk current_entry.mode;
-                    } else if (common_entry_maybe) |common_entry| {
-                        if (common_entry.mode.eql(current_entry.mode)) {
+                    } else if (base_entry_maybe) |base_entry| {
+                        if (base_entry.mode.eql(current_entry.mode)) {
                             break :blk source_entry.mode;
-                        } else if (common_entry.mode.eql(source_entry.mode)) {
+                        } else if (base_entry.mode.eql(source_entry.mode)) {
                             break :blk current_entry.mode;
                         }
                     }
@@ -528,8 +528,8 @@ fn samePathConflict(
 
                 var has_conflict = oid_maybe == null or mode_maybe == null;
 
-                const common_oid_maybe = if (common_entry_maybe) |common_entry| common_entry.oid else null;
-                const oid = oid_maybe orelse try writeBlobWithConflict(repo_kind, state, allocator, common_oid_maybe, current_entry.oid, source_entry.oid, common_name, current_name, source_name, &has_conflict);
+                const base_oid_maybe = if (base_entry_maybe) |base_entry| base_entry.oid else null;
+                const oid = oid_maybe orelse try writeBlobWithConflict(repo_kind, state, allocator, base_oid_maybe, current_entry.oid, source_entry.oid, base_name, current_name, source_name, &has_conflict);
                 const mode = mode_maybe orelse current_entry.mode;
 
                 return .{
@@ -539,7 +539,7 @@ fn samePathConflict(
                     },
                     .conflict = if (has_conflict)
                         .{
-                            .common = common_entry_maybe,
+                            .base = base_entry_maybe,
                             .current = current_entry,
                             .source = source_entry,
                             .renamed = null,
@@ -555,7 +555,7 @@ fn samePathConflict(
                         .new = .{ .oid = current_entry.oid, .mode = current_entry.mode },
                     },
                     .conflict = .{
-                        .common = common_entry_maybe,
+                        .base = base_entry_maybe,
                         .current = current_entry,
                         .source = null,
                         .renamed = null,
@@ -571,7 +571,7 @@ fn samePathConflict(
                         .new = .{ .oid = source_entry.oid, .mode = source_entry.mode },
                     },
                     .conflict = .{
-                        .common = common_entry_maybe,
+                        .base = base_entry_maybe,
                         .current = null,
                         .source = source_entry,
                         .renamed = null,
@@ -608,7 +608,7 @@ fn fileDirConflict(
                     .current => {
                         // add the conflict
                         try conflicts.put(parent_path, .{
-                            .common = change.old,
+                            .base = change.old,
                             .current = new,
                             .source = null,
                             .renamed = .{
@@ -622,7 +622,7 @@ fn fileDirConflict(
                     .source => {
                         // add the conflict
                         try conflicts.put(parent_path, .{
-                            .common = change.old,
+                            .base = change.old,
                             .current = null,
                             .source = new,
                             .renamed = .{
@@ -657,7 +657,7 @@ pub const Merge = struct {
     allocator: std.mem.Allocator,
     changes: std.StringArrayHashMap(obj.Change),
     auto_resolved_conflicts: std.StringArrayHashMap(void),
-    common_oid: [hash.SHA1_HEX_LEN]u8,
+    base_oid: [hash.SHA1_HEX_LEN]u8,
     current_name: []const u8,
     source_name: []const u8,
     data: union(enum) {
@@ -729,45 +729,45 @@ pub const Merge = struct {
 
                 // get the oids for the three-way merge
                 const source_oid = try ref.resolve(repo_kind, state, source_name) orelse return error.InvalidTarget;
-                var common_oid: [hash.SHA1_HEX_LEN]u8 = undefined;
+                var base_oid: [hash.SHA1_HEX_LEN]u8 = undefined;
                 switch (merge_kind) {
-                    .merge => common_oid = try commonAncestor(repo_kind, allocator, state, &current_oid, &source_oid),
+                    .merge => base_oid = try commonAncestor(repo_kind, allocator, state, &current_oid, &source_oid),
                     .cherry_pick => {
                         var object = try obj.Object(repo_kind, .full).init(allocator, state, source_oid);
                         defer object.deinit();
                         const parent_oid = if (object.content.commit.parents.items.len == 1) object.content.commit.parents.items[0] else return error.CommitMustHaveOneParent;
                         switch (object.content) {
-                            .commit => common_oid = parent_oid,
+                            .commit => base_oid = parent_oid,
                             else => return error.NotACommitObject,
                         }
                     },
                 }
 
-                // if the common ancestor is the source oid, do nothing
-                if (std.mem.eql(u8, &source_oid, &common_oid)) {
+                // if the base ancestor is the source oid, do nothing
+                if (std.mem.eql(u8, &source_oid, &base_oid)) {
                     return .{
                         .arena = arena,
                         .allocator = allocator,
                         .changes = clean_diff.changes,
                         .auto_resolved_conflicts = auto_resolved_conflicts,
-                        .common_oid = common_oid,
+                        .base_oid = base_oid,
                         .current_name = current_name,
                         .source_name = source_name,
                         .data = .nothing,
                     };
                 }
 
-                // diff the common ancestor with the current oid
+                // diff the base ancestor with the current oid
                 var current_diff = obj.TreeDiff(repo_kind).init(arena.allocator());
-                try current_diff.compare(state, common_oid, current_oid, null);
+                try current_diff.compare(state, base_oid, current_oid, null);
 
-                // diff the common ancestor with the source oid
+                // diff the base ancestor with the source oid
                 var source_diff = obj.TreeDiff(repo_kind).init(arena.allocator());
-                try source_diff.compare(state, common_oid, source_oid, null);
+                try source_diff.compare(state, base_oid, source_oid, null);
 
                 // look for same path conflicts while populating the clean diff
                 for (source_diff.changes.keys(), source_diff.changes.values()) |path, source_change| {
-                    const same_path_result = try samePathConflict(repo_kind, state, allocator, &common_oid, current_name, source_name, current_diff.changes.get(path), source_change);
+                    const same_path_result = try samePathConflict(repo_kind, state, allocator, &base_oid, current_name, source_name, current_diff.changes.get(path), source_change);
                     if (same_path_result.change) |change| {
                         try clean_diff.changes.put(path, change);
                     }
@@ -819,7 +819,7 @@ pub const Merge = struct {
 
                         for (conflicts.keys(), conflicts.values()) |path, conflict| {
                             // add conflict to index
-                            try index.addConflictEntries(path, .{ conflict.common, conflict.current, conflict.source });
+                            try index.addConflictEntries(path, .{ conflict.base, conflict.current, conflict.source });
                             // write renamed file if necessary
                             if (conflict.renamed) |renamed| {
                                 try chk.objectToFile(repo_kind, state, allocator, renamed.path, renamed.tree_entry);
@@ -847,7 +847,7 @@ pub const Merge = struct {
                                 .allocator = allocator,
                                 .changes = clean_diff.changes,
                                 .auto_resolved_conflicts = auto_resolved_conflicts,
-                                .common_oid = common_oid,
+                                .base_oid = base_oid,
                                 .current_name = current_name,
                                 .source_name = source_name,
                                 .data = .{ .conflict = .{ .conflicts = conflicts } },
@@ -864,7 +864,7 @@ pub const Merge = struct {
 
                         for (conflicts.keys(), conflicts.values()) |path, conflict| {
                             // add conflict to index
-                            try index.addConflictEntries(path, .{ conflict.common, conflict.current, conflict.source });
+                            try index.addConflictEntries(path, .{ conflict.base, conflict.current, conflict.source });
                             // write renamed file if necessary
                             if (conflict.renamed) |renamed| {
                                 try chk.objectToFile(repo_kind, state, allocator, renamed.path, renamed.tree_entry);
@@ -873,7 +873,7 @@ pub const Merge = struct {
 
                         // add conflicts to index
                         for (conflicts.keys(), conflicts.values()) |path, conflict| {
-                            try index.addConflictEntries(path, .{ conflict.common, conflict.current, conflict.source });
+                            try index.addConflictEntries(path, .{ conflict.base, conflict.current, conflict.source });
                         }
 
                         // update the index
@@ -892,7 +892,7 @@ pub const Merge = struct {
                                 .allocator = allocator,
                                 .changes = clean_diff.changes,
                                 .auto_resolved_conflicts = auto_resolved_conflicts,
-                                .common_oid = common_oid,
+                                .base_oid = base_oid,
                                 .current_name = current_name,
                                 .source_name = source_name,
                                 .data = .{ .conflict = .{ .conflicts = conflicts } },
@@ -901,15 +901,15 @@ pub const Merge = struct {
                     },
                 }
 
-                if (std.mem.eql(u8, &current_oid, &common_oid)) {
-                    // the common ancestor is the current oid, so just update HEAD
+                if (std.mem.eql(u8, &current_oid, &base_oid)) {
+                    // the base ancestor is the current oid, so just update HEAD
                     try ref.updateRecur(repo_kind, state, allocator, &.{"HEAD"}, &source_oid);
                     return .{
                         .arena = arena,
                         .allocator = allocator,
                         .changes = clean_diff.changes,
                         .auto_resolved_conflicts = auto_resolved_conflicts,
-                        .common_oid = common_oid,
+                        .base_oid = base_oid,
                         .current_name = current_name,
                         .source_name = source_name,
                         .data = .fast_forward,
@@ -919,7 +919,7 @@ pub const Merge = struct {
                 // commit the change
                 const parent_oids = switch (merge_kind) {
                     .merge => &.{ current_oid, source_oid },
-                    .cherry_pick => &.{common_oid},
+                    .cherry_pick => &.{base_oid},
                 };
                 const commit_oid = try obj.writeCommit(repo_kind, state, allocator, parent_oids, commit_metadata);
 
@@ -928,7 +928,7 @@ pub const Merge = struct {
                     .allocator = allocator,
                     .changes = clean_diff.changes,
                     .auto_resolved_conflicts = auto_resolved_conflicts,
-                    .common_oid = common_oid,
+                    .base_oid = base_oid,
                     .current_name = current_name,
                     .source_name = source_name,
                     .data = .{ .success = .{ .oid = commit_oid } },
@@ -987,16 +987,16 @@ pub const Merge = struct {
                 const source_name = try arena.allocator().alloc(u8, source_oid.len);
                 @memcpy(source_name, &source_oid);
 
-                // get the common oid
-                var common_oid: [hash.SHA1_HEX_LEN]u8 = undefined;
+                // get the base oid
+                var base_oid: [hash.SHA1_HEX_LEN]u8 = undefined;
                 switch (merge_kind) {
-                    .merge => common_oid = try commonAncestor(repo_kind, allocator, state, &current_oid, &source_oid),
+                    .merge => base_oid = try commonAncestor(repo_kind, allocator, state, &current_oid, &source_oid),
                     .cherry_pick => {
                         var object = try obj.Object(repo_kind, .full).init(allocator, state, source_oid);
                         defer object.deinit();
                         const parent_oid = if (object.content.commit.parents.items.len == 1) object.content.commit.parents.items[0] else return error.CommitMustHaveOneParent;
                         switch (object.content) {
-                            .commit => common_oid = parent_oid,
+                            .commit => base_oid = parent_oid,
                             else => return error.NotACommitObject,
                         }
                     },
@@ -1005,7 +1005,7 @@ pub const Merge = struct {
                 // commit the change
                 const parent_oids = switch (merge_kind) {
                     .merge => &.{ current_oid, source_oid },
-                    .cherry_pick => &.{common_oid},
+                    .cherry_pick => &.{base_oid},
                 };
                 const commit_oid = try obj.writeCommit(repo_kind, state, allocator, parent_oids, commit_metadata);
 
@@ -1026,7 +1026,7 @@ pub const Merge = struct {
                     .allocator = allocator,
                     .changes = clean_diff.changes,
                     .auto_resolved_conflicts = auto_resolved_conflicts,
-                    .common_oid = common_oid,
+                    .base_oid = base_oid,
                     .current_name = current_name,
                     .source_name = source_name,
                     .data = .{ .success = .{ .oid = commit_oid } },
