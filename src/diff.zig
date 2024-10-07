@@ -8,6 +8,8 @@ const obj = @import("./object.zig");
 const chk = @import("./checkout.zig");
 
 const MAX_READ_BYTES = 1024; // FIXME: this is arbitrary...
+pub const MAX_LINE_BYTES = 10_000;
+pub const MAX_LINE_COUNT = 10_000_000;
 
 pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
     return struct {
@@ -177,7 +179,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                         } else if (buffer[0] == '\n') {
                             break;
                         } else {
-                            if (line_arr.items.len == MAX_READ_BYTES) {
+                            if (line_arr.items.len == MAX_LINE_BYTES) {
                                 return error.StreamTooLong;
                             }
                             try line_arr.append(buffer[0]);
@@ -191,7 +193,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                     }
                     var line_arr = std.ArrayList(u8).init(self.allocator);
                     errdefer line_arr.deinit();
-                    workspace.file.reader().streamUntilDelimiter(line_arr.writer(), '\n', MAX_READ_BYTES) catch |err| switch (err) {
+                    workspace.file.reader().streamUntilDelimiter(line_arr.writer(), '\n', MAX_LINE_BYTES) catch |err| switch (err) {
                         error.EndOfStream => workspace.eof = true,
                         else => return err,
                     };
@@ -273,26 +275,41 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
             var offsets = std.ArrayList(usize).init(self.allocator);
             errdefer offsets.deinit();
             var last_pos: usize = 0;
-            while (try self.next()) |line| {
+            var is_binary = false;
+
+            while (self.next() catch |err| switch (err) {
+                error.StreamTooLong => blk: {
+                    // if the line exceeds the max length, consider this file binary
+                    is_binary = true;
+                    break :blk null;
+                },
+                else => return err,
+            }) |line| {
                 defer self.allocator.free(line);
 
-                // if line doesn't contain valid unicode, consider it binary
-                if (!std.unicode.utf8ValidateSlice(line)) {
-                    switch (self.source) {
-                        .object => |*object| object.object_reader.deinit(),
-                        .workspace => |*workspace| workspace.file.close(),
-                        .buffer => {},
-                        .nothing => {},
-                        .binary => {},
-                    }
-                    self.source = .binary;
-                    offsets.clearAndFree();
+                // if line doesn't contain valid unicode or the line count has been exceeded,
+                // consider this file binary
+                if (!std.unicode.utf8ValidateSlice(line) or offsets.items.len == MAX_LINE_COUNT) {
+                    is_binary = true;
                     break;
                 }
 
                 try offsets.append(last_pos);
                 last_pos += line.len + 1;
             }
+
+            if (is_binary) {
+                switch (self.source) {
+                    .object => |*object| object.object_reader.deinit(),
+                    .workspace => |*workspace| workspace.file.close(),
+                    .buffer => {},
+                    .nothing => {},
+                    .binary => {},
+                }
+                self.source = .binary;
+                offsets.clearAndFree();
+            }
+
             self.line_offsets = try offsets.toOwnedSlice();
         }
     };
