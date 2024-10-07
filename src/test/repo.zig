@@ -746,6 +746,32 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind) !void {
         defer result.deinit();
         try std.testing.expect(.success == result.data);
     }
+
+    // replace bin with a text file containing a single line that
+    // is too long, and assert that it is considered a binary file
+    {
+        const file = try repo.core.repo_dir.createFile("bin", .{ .truncate = true });
+        defer file.close();
+        while (try file.getPos() < df.MAX_LINE_BYTES) {
+            try file.writeAll(&[_]u8{' '} ** 256);
+        }
+
+        var status = try repo.status();
+        defer status.deinit();
+        var file_iter = try repo.filePairs(.{
+            .workspace = .{
+                .conflict_diff_kind = .current,
+                .status = &status,
+            },
+        });
+        if (try file_iter.next()) |*line_iter_pair_ptr| {
+            var line_iter_pair = line_iter_pair_ptr.*;
+            defer line_iter_pair.deinit();
+            try std.testing.expect(.binary == line_iter_pair.b.source);
+        } else {
+            return error.DiffResultExpected;
+        }
+    }
 }
 
 test "merge conflict binary" {
