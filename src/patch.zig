@@ -316,7 +316,7 @@ fn applyPatchForFile(
                 // because there is a conflict, and thus the node map
                 // cannot be "flattened" into a list
                 if (try child_node_id_iter.next() != null) {
-                    try path_to_node_id_list.putData(path_hash, .{ .slot = null });
+                    try path_to_node_id_list.remove(path_hash);
                     break;
                 }
                 // append child to the node list
