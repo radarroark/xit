@@ -143,7 +143,7 @@ pub fn writeBlob(
         .xit => {
             const file_hash = hash.bytesToHash(sha1_bytes_buffer);
 
-            const file_values_cursor = try state.moment.put(hash.hashBuffer("file-values"));
+            const file_values_cursor = try state.extra.moment.put(hash.hashBuffer("file-values"));
             const file_values = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(file_values_cursor);
             var file_value_cursor = try file_values.put(file_hash);
 
@@ -163,7 +163,7 @@ pub fn writeBlob(
 
                 try writer.finish();
 
-                const objects_cursor = try state.moment.put(hash.hashBuffer("objects"));
+                const objects_cursor = try state.extra.moment.put(hash.hashBuffer("objects"));
                 const objects = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(objects_cursor);
                 try objects.putData(try hash.hexToHash(&sha1_hex), .{ .slot = writer.slot });
             }
@@ -247,11 +247,11 @@ fn writeTree(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.r
         },
         .xit => {
             const object_hash = hash.bytesToHash(sha1_bytes_buffer);
-            const objects_cursor = try state.moment.put(hash.hashBuffer("objects"));
+            const objects_cursor = try state.extra.moment.put(hash.hashBuffer("objects"));
             const objects = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(objects_cursor);
 
             if (try objects.get(object_hash) == null) {
-                const object_values_cursor = try state.moment.put(hash.hashBuffer("object-values"));
+                const object_values_cursor = try state.extra.moment.put(hash.hashBuffer("object-values"));
                 const object_values = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(object_values_cursor);
                 var object_value_cursor = try object_values.put(object_hash);
                 try object_value_cursor.writeBytes(tree_bytes, .once);
@@ -444,13 +444,13 @@ pub fn writeCommit(
             const commit_hash = hash.bytesToHash(&commit_sha1_bytes_buffer);
 
             // write commit content
-            const object_values_cursor = try state.moment.put(hash.hashBuffer("object-values"));
+            const object_values_cursor = try state.extra.moment.put(hash.hashBuffer("object-values"));
             const object_values = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(object_values_cursor);
             var object_value_cursor = try object_values.put(commit_hash);
             try object_value_cursor.writeBytes(commit, .once);
 
             // write commit
-            const objects_cursor = try state.moment.put(hash.hashBuffer("objects"));
+            const objects_cursor = try state.extra.moment.put(hash.hashBuffer("objects"));
             const objects = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(objects_cursor);
             try objects.putData(commit_hash, .{ .slot = object_value_cursor.slot() });
 
@@ -606,7 +606,7 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
                     };
                 },
                 .xit => {
-                    if (try state.moment.cursor.readPath(void, &.{
+                    if (try state.extra.moment.cursor.readPath(void, &.{
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
                         .{ .hash_map_get = .{ .value = try hash.hexToHash(&oid) } },
                     })) |cursor| {
@@ -864,10 +864,7 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime load_kind: Objec
     return struct {
         allocator: std.mem.Allocator,
         core: *rp.Repo(repo_kind).Core,
-        moment: switch (repo_kind) {
-            .git => void,
-            .xit => rp.Repo(repo_kind).DB.HashMap(.read_only),
-        },
+        moment: rp.Repo(repo_kind).Moment(.read_only),
         oid_queue: std.DoublyLinkedList([hash.SHA1_HEX_LEN]u8),
         oid_excludes: std.AutoHashMap([hash.SHA1_HEX_LEN]u8, void),
         object: Object(repo_kind, load_kind),
@@ -886,10 +883,7 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime load_kind: Objec
             var self = ObjectIterator(repo_kind, load_kind){
                 .allocator = allocator,
                 .core = state.core,
-                .moment = switch (repo_kind) {
-                    .git => {},
-                    .xit => state.moment.*,
-                },
+                .moment = state.extra.moment.*,
                 .oid_queue = std.DoublyLinkedList([hash.SHA1_HEX_LEN]u8){},
                 .oid_excludes = std.AutoHashMap([hash.SHA1_HEX_LEN]u8, void).init(allocator),
                 .object = undefined,
@@ -915,10 +909,7 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime load_kind: Objec
         }
 
         pub fn next(self: *ObjectIterator(repo_kind, load_kind)) !?*Object(repo_kind, load_kind) {
-            const state = switch (repo_kind) {
-                .git => .{ .core = self.core },
-                .xit => .{ .core = self.core, .moment = &self.moment },
-            };
+            const state = .{ .core = self.core, .extra = .{ .moment = &self.moment } };
             while (self.oid_queue.popFirst()) |node| {
                 const next_oid = node.data;
                 self.allocator.destroy(node);
@@ -986,10 +977,7 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime load_kind: Objec
         pub fn exclude(self: *ObjectIterator(repo_kind, load_kind), oid: [hash.SHA1_HEX_LEN]u8) !void {
             try self.oid_excludes.put(oid, {});
 
-            const state = switch (repo_kind) {
-                .git => .{ .core = self.core },
-                .xit => .{ .core = self.core, .moment = &self.moment },
-            };
+            const state = .{ .core = self.core, .extra = .{ .moment = &self.moment } };
             var object = try Object(repo_kind, .full).init(self.allocator, state, oid);
             defer object.deinit();
             switch (object.content) {

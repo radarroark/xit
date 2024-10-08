@@ -142,7 +142,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     _ = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
                 },
                 .xit => {
-                    if (try state.moment.get(hash.hashBuffer("index"))) |index_cursor| {
+                    if (try state.extra.moment.get(hash.hashBuffer("index"))) |index_cursor| {
                         var iter = try index_cursor.iterator();
                         defer iter.deinit();
                         while (try iter.next()) |*next_cursor| {
@@ -442,7 +442,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                         }
                     }
 
-                    const lock_file = state.lock_file_maybe orelse return error.NoLockFile;
+                    const lock_file = state.extra.lock_file_maybe orelse return error.NoLockFile;
                     try lock_file.setEndPos(0); // truncate file in case this method is called multiple times
 
                     // write the header
@@ -493,7 +493,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     try lock_file.writeAll(&overall_sha1_buffer);
                 },
                 .xit => {
-                    const index_cursor = try state.moment.put(hash.hashBuffer("index"));
+                    const index_cursor = try state.extra.moment.put(hash.hashBuffer("index"));
                     var index = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(index_cursor);
 
                     // remove items no longer in the index
@@ -540,13 +540,13 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                             }
                         }
 
-                        const path_set_cursor = try state.moment.put(hash.hashBuffer("path-set"));
+                        const path_set_cursor = try state.extra.moment.put(hash.hashBuffer("path-set"));
                         const path_set = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(path_set_cursor);
                         var path_cursor = try path_set.putKey(path_hash);
                         try path_cursor.writeBytes(path, .once);
                         try index.putKeyData(path_hash, .{ .slot = path_cursor.slot() });
 
-                        const entry_buffer_set_cursor = try state.moment.put(hash.hashBuffer("entry-buffer-set"));
+                        const entry_buffer_set_cursor = try state.extra.moment.put(hash.hashBuffer("entry-buffer-set"));
                         const entry_buffer_set = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(entry_buffer_set_cursor);
                         var entry_buffer_cursor = try entry_buffer_set.putKey(hash.hashBuffer(entry_buffer.items));
                         try entry_buffer_cursor.writeBytes(entry_buffer.items, .once);
