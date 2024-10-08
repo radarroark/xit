@@ -361,9 +361,9 @@ fn removePatch(branch: *rp.Repo(.xit).DB.HashMap(.read_write), path: []const u8)
     }
 }
 
-pub fn writePatch(state: rp.Repo(.xit).State, allocator: std.mem.Allocator) !void {
+pub fn writePatch(state: rp.Repo(.xit).State(.read_write), allocator: std.mem.Allocator) !void {
     // get current branch name
-    const current_branch_name = try ref.readHeadName(.xit, state, allocator);
+    const current_branch_name = try ref.readHeadName(.xit, state.readOnly(), allocator);
     defer allocator.free(current_branch_name);
 
     const branch_name_hash = hash.hashBuffer(current_branch_name);
@@ -382,9 +382,9 @@ pub fn writePatch(state: rp.Repo(.xit).State, allocator: std.mem.Allocator) !voi
     var branch = try rp.Repo(.xit).DB.HashMap(.read_write).init(branch_cursor);
 
     // init file iterator for index diff
-    var status = try st.Status(.xit).init(allocator, state);
+    var status = try st.Status(.xit).init(allocator, state.readOnly());
     defer status.deinit();
-    var file_iter = try df.FileIterator(.xit).init(allocator, state, .{ .index = .{ .status = &status } });
+    var file_iter = try df.FileIterator(.xit).init(allocator, state.readOnly(), .{ .index = .{ .status = &status } });
 
     // iterate over each modified file and create/apply the patch
     while (try file_iter.next()) |*line_iter_pair_ptr| {

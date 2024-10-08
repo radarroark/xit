@@ -62,7 +62,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
             path: []const u8,
         };
 
-        pub fn init(allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State) !Index(repo_kind) {
+        pub fn init(allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State(.read_only)) !Index(repo_kind) {
             const arena = try allocator.create(std.heap.ArenaAllocator);
             arena.* = std.heap.ArenaAllocator.init(allocator);
             var index = Index(repo_kind){
@@ -204,7 +204,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
         /// if path is a file, adds it as an entry to the index struct.
         /// if path is a dir, adds its children recursively.
         /// ignoring symlinks for now but will add that later.
-        pub fn addPath(self: *Index(repo_kind), state: rp.Repo(repo_kind).State, path: []const u8) !void {
+        pub fn addPath(self: *Index(repo_kind), state: rp.Repo(repo_kind).State(.read_write), path: []const u8) !void {
             // remove entries that are parents of this path (directory replaces file)
             {
                 var parent_path_maybe = std.fs.path.dirname(path);
@@ -389,7 +389,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
             }
         }
 
-        pub fn addOrRemovePath(self: *Index(repo_kind), state: rp.Repo(repo_kind).State, path: []const u8, action: enum { add, rm }) !void {
+        pub fn addOrRemovePath(self: *Index(repo_kind), state: rp.Repo(repo_kind).State(.read_write), path: []const u8, action: enum { add, rm }) !void {
             if (state.core.repo_dir.openFile(path, .{ .mode = .read_only })) |file| {
                 file.close();
             } else |err| {
@@ -417,7 +417,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
             }
         }
 
-        pub fn write(self: *Index(repo_kind), allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State) !void {
+        pub fn write(self: *Index(repo_kind), allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State(.read_write)) !void {
             switch (repo_kind) {
                 .git => {
                     // sort the entries

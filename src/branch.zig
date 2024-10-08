@@ -18,7 +18,7 @@ pub const RemoveBranchInput = struct {
     name: []const u8,
 };
 
-pub fn add(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, allocator: std.mem.Allocator, input: AddBranchInput) !void {
+pub fn add(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_write), allocator: std.mem.Allocator, input: AddBranchInput) !void {
     const name = input.name;
     if (name.len == 0 or
         name[0] == '.' or
@@ -58,7 +58,7 @@ pub fn add(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, all
             defer lock.deinit();
 
             // get HEAD contents
-            const head_file_buffer = try ref.readHead(repo_kind, state);
+            const head_file_buffer = try ref.readHead(repo_kind, state.readOnly());
 
             // write to lock file
             try lock.lock_file.writeAll(&head_file_buffer);
@@ -77,7 +77,7 @@ pub fn add(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, all
             try ref_name_cursor.writeBytes(name, .once);
 
             // store ref content
-            const head_file_buffer = try ref.readHead(repo_kind, state);
+            const head_file_buffer = try ref.readHead(repo_kind, state.readOnly());
             const ref_content_set_cursor = try state.moment.put(hash.hashBuffer("ref-content-set"));
             const ref_content_set = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(ref_content_set_cursor);
             var ref_content_cursor = try ref_content_set.putKey(hash.hashBuffer(&head_file_buffer));
@@ -92,7 +92,7 @@ pub fn add(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, all
             try heads.putData(name_hash, .{ .slot = ref_content_cursor.slot() });
 
             // get current branch name
-            const current_branch_name = try ref.readHeadName(repo_kind, state, allocator);
+            const current_branch_name = try ref.readHeadName(repo_kind, state.readOnly(), allocator);
             defer allocator.free(current_branch_name);
 
             // if there is a branch map for the current branch,
@@ -107,7 +107,7 @@ pub fn add(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, all
     }
 }
 
-pub fn remove(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, allocator: std.mem.Allocator, input: RemoveBranchInput) !void {
+pub fn remove(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_write), allocator: std.mem.Allocator, input: RemoveBranchInput) !void {
     switch (repo_kind) {
         .git => {
             var refs_dir = try state.core.git_dir.openDir("refs", .{});
@@ -126,7 +126,7 @@ pub fn remove(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, 
             defer head_lock.deinit();
 
             // don't allow current branch to be deleted
-            var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, state, allocator, "HEAD");
+            var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, state.readOnly(), allocator, "HEAD");
             defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
             if (current_branch_maybe) |current_branch| {
                 if (std.mem.eql(u8, current_branch.name, input.name)) {
@@ -155,7 +155,7 @@ pub fn remove(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, 
         },
         .xit => {
             // don't allow current branch to be deleted
-            var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, state, allocator, "HEAD");
+            var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, state.readOnly(), allocator, "HEAD");
             defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
             if (current_branch_maybe) |current_branch| {
                 if (std.mem.eql(u8, current_branch.name, input.name)) {
