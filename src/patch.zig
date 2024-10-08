@@ -369,13 +369,13 @@ pub fn writePatch(state: rp.Repo(.xit).State(.read_write), allocator: std.mem.Al
     const branch_name_hash = hash.hashBuffer(current_branch_name);
 
     // store branch name
-    const ref_name_set_cursor = try state.moment.put(hash.hashBuffer("ref-name-set"));
+    const ref_name_set_cursor = try state.extra.moment.put(hash.hashBuffer("ref-name-set"));
     const ref_name_set = try rp.Repo(.xit).DB.HashMap(.read_write).init(ref_name_set_cursor);
     var branch_name_cursor = try ref_name_set.putKey(branch_name_hash);
     try branch_name_cursor.writeBytes(current_branch_name, .once);
 
     // init branch map
-    const branches_cursor = try state.moment.put(hash.hashBuffer("branches"));
+    const branches_cursor = try state.extra.moment.put(hash.hashBuffer("branches"));
     const branches = try rp.Repo(.xit).DB.HashMap(.read_write).init(branches_cursor);
     try branches.putKeyData(branch_name_hash, .{ .slot = branch_name_cursor.slot() });
     const branch_cursor = try branches.put(branch_name_hash);
@@ -395,8 +395,8 @@ pub fn writePatch(state: rp.Repo(.xit).State(.read_write), allocator: std.mem.Al
             // remove existing patch data if there is any.
             try removePatch(&branch, line_iter_pair.path);
         } else {
-            const patch_hash = try writePatchForFile(state.moment, &branch, allocator, &line_iter_pair);
-            try applyPatchForFile(state.moment, &branch, allocator, patch_hash, line_iter_pair.path);
+            const patch_hash = try writePatchForFile(state.extra.moment, &branch, allocator, &line_iter_pair);
+            try applyPatchForFile(state.extra.moment, &branch, allocator, patch_hash, line_iter_pair.path);
         }
     }
 }

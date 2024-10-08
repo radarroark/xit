@@ -379,7 +379,7 @@ pub const Switch = struct {
                 }
 
                 // update the index
-                try index.write(allocator, .{ .core = state.core, .lock_file_maybe = lock.lock_file });
+                try index.write(allocator, .{ .core = state.core, .extra = .{ .lock_file_maybe = lock.lock_file } });
 
                 // update HEAD
                 try ref.writeHead(repo_kind, state, allocator, target, target_oid);

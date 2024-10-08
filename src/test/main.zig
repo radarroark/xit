@@ -152,7 +152,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 {
                     var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                     defer repo.deinit();
-                    const head_file_buffer = try ref.readHead(repo_kind, .{ .core = &repo.core });
+                    const head_file_buffer = try ref.readHead(repo_kind, .{ .core = &repo.core, .extra = .{} });
                     var objects_dir = try test_state.git_dir.openDir("objects", .{});
                     defer objects_dir.close();
                     var hash_prefix_dir = try objects_dir.openDir(head_file_buffer[0..2], .{});
@@ -202,7 +202,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
                 var moment = try repo.core.latestMoment();
-                const state = rp.Repo(repo_kind).State(.read_only).init(&repo.core, &moment);
+                const state = .{ .core = &repo.core, .extra = .{ .moment = &moment } };
                 const head_file_buffer = try ref.readHead(repo_kind, state);
                 const bytes_cursor_maybe = try moment.cursor.readPath(void, &.{
                     .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
@@ -218,7 +218,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
-        const state = rp.Repo(repo_kind).State(.read_only).init(&repo.core, &moment);
+        const state = .{ .core = &repo.core, .extra = .{ .moment = &moment } };
         break :blk try ref.readHead(repo_kind, state);
     };
 
@@ -421,7 +421,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 {
                     var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                     defer repo.deinit();
-                    const head_file_buffer = try ref.readHead(repo_kind, .{ .core = &repo.core });
+                    const head_file_buffer = try ref.readHead(repo_kind, .{ .core = &repo.core, .extra = .{} });
                     var objects_dir = try test_state.git_dir.openDir("objects", .{});
                     defer objects_dir.close();
                     var hash_prefix_dir = try objects_dir.openDir(head_file_buffer[0..2], .{});
@@ -451,7 +451,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
                 var moment = try repo.core.latestMoment();
-                const state = rp.Repo(repo_kind).State(.read_only).init(&repo.core, &moment);
+                const state = .{ .core = &repo.core, .extra = .{ .moment = &moment } };
                 const head_file_buffer = try ref.readHead(repo_kind, state);
                 const bytes_cursor_maybe = try moment.cursor.readPath(void, &.{
                     .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
@@ -467,7 +467,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
-        const state = rp.Repo(repo_kind).State(.read_only).init(&repo.core, &moment);
+        const state = .{ .core = &repo.core, .extra = .{ .moment = &moment } };
         break :blk try ref.readHead(repo_kind, state);
     };
 
@@ -688,7 +688,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
             var moment = try repo.core.latestMoment();
-            const state = rp.Repo(repo_kind).State(.read_only).init(&repo.core, &moment);
+            const state = .{ .core = &repo.core, .extra = .{ .moment = &moment } };
             var index = try idx.Index(repo_kind).init(allocator, state);
             defer index.deinit();
             try std.testing.expectEqual(7, index.entries.count());
@@ -748,7 +748,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
             var moment = try repo.core.latestMoment();
-            const state = rp.Repo(repo_kind).State(.read_only).init(&repo.core, &moment);
+            const state = .{ .core = &repo.core, .extra = .{ .moment = &moment } };
             var index = try idx.Index(repo_kind).init(allocator, state);
             defer index.deinit();
             try std.testing.expectEqual(6, index.entries.count());
@@ -840,7 +840,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
             var moment = try repo.core.latestMoment();
-            const state = rp.Repo(repo_kind).State(.read_only).init(&repo.core, &moment);
+            const state = .{ .core = &repo.core, .extra = .{ .moment = &moment } };
             var index = try idx.Index(repo_kind).init(allocator, state);
             defer index.deinit();
 
@@ -1029,7 +1029,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
-        const state = rp.Repo(repo_kind).State(.read_only).init(&repo.core, &moment);
+        const state = .{ .core = &repo.core, .extra = .{ .moment = &moment } };
 
         // read commit
         var commit_object = try obj.Object(repo_kind, .full).init(allocator, state, commit2);
@@ -1053,7 +1053,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
-        const state = rp.Repo(repo_kind).State(.read_only).init(&repo.core, &moment);
+        const state = .{ .core = &repo.core, .extra = .{ .moment = &moment } };
         try std.testing.expectEqual(commit2, try ref.readHead(repo_kind, state));
         try std.testing.expectEqual(commit2, try ref.resolve(repo_kind, state, "stuff"));
     }
@@ -1063,7 +1063,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
-        const state = rp.Repo(repo_kind).State(.read_only).init(&repo.core, &moment);
+        const state = .{ .core = &repo.core, .extra = .{ .moment = &moment } };
         var ref_list = try ref.RefList.init(repo_kind, state, allocator, "heads");
         defer ref_list.deinit();
         try std.testing.expectEqual(2, ref_list.refs.items.len);
@@ -1074,7 +1074,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
-        const state = rp.Repo(repo_kind).State(.read_only).init(&repo.core, &moment);
+        const state = .{ .core = &repo.core, .extra = .{ .moment = &moment } };
         var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, state, allocator, "HEAD");
         defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
         try std.testing.expectEqualStrings("stuff", current_branch_maybe.?.name);
@@ -1130,7 +1130,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
-        const state = rp.Repo(repo_kind).State(.read_only).init(&repo.core, &moment);
+        const state = .{ .core = &repo.core, .extra = .{ .moment = &moment } };
         break :blk try ref.readHead(repo_kind, state);
     };
 
@@ -1148,7 +1148,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
-        const state = rp.Repo(repo_kind).State(.read_only).init(&repo.core, &moment);
+        const state = .{ .core = &repo.core, .extra = .{ .moment = &moment } };
         var ref_list = try ref.RefList.init(repo_kind, state, allocator, "heads");
         defer ref_list.deinit();
         try std.testing.expectEqual(3, ref_list.refs.items.len);
@@ -1193,7 +1193,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
-        const state = rp.Repo(repo_kind).State(.read_only).init(&repo.core, &moment);
+        const state = .{ .core = &repo.core, .extra = .{ .moment = &moment } };
         break :blk try ref.readHead(repo_kind, state);
     };
 
@@ -1202,7 +1202,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
-        const state = rp.Repo(repo_kind).State(.read_only).init(&repo.core, &moment);
+        const state = .{ .core = &repo.core, .extra = .{ .moment = &moment } };
         try std.testing.expectEqual(commit3, try ref.resolve(repo_kind, state, "master"));
     }
 
@@ -1233,7 +1233,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
-        const state = rp.Repo(repo_kind).State(.read_only).init(&repo.core, &moment);
+        const state = .{ .core = &repo.core, .extra = .{ .moment = &moment } };
         const ancestor_commit = try mrg.commonAncestor(repo_kind, allocator, state, &commit3, &commit4_stuff);
         try std.testing.expectEqualStrings(&commit2, &ancestor_commit);
     }
@@ -1266,7 +1266,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
-        const state = rp.Repo(repo_kind).State(.read_only).init(&repo.core, &moment);
+        const state = .{ .core = &repo.core, .extra = .{ .moment = &moment } };
         break :blk try ref.readHead(repo_kind, state);
     };
 

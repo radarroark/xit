@@ -219,7 +219,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                     }
                 },
                 .xit => {
-                    if (try state.moment.get(hash.hashBuffer("config"))) |config_cursor| {
+                    if (try state.extra.moment.get(hash.hashBuffer("config"))) |config_cursor| {
                         var config_iter = try config_cursor.iterator();
                         defer config_iter.deinit();
                         while (try config_iter.next()) |*section_cursor| {
@@ -285,7 +285,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                 switch (repo_kind) {
                     .git => try self.write(state),
                     .xit => {
-                        const config_name_set_cursor = try state.moment.put(hash.hashBuffer("config-name-set"));
+                        const config_name_set_cursor = try state.extra.moment.put(hash.hashBuffer("config-name-set"));
                         const config_name_set = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(config_name_set_cursor);
 
                         // store section name
@@ -294,7 +294,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                         try section_name_cursor.writeBytes(section_name, .once);
 
                         // add section name to config
-                        const config_cursor = try state.moment.put(hash.hashBuffer("config"));
+                        const config_cursor = try state.extra.moment.put(hash.hashBuffer("config"));
                         const config = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(config_cursor);
                         try config.putKeyData(section_name_hash, .{ .slot = section_name_cursor.slot() });
 
@@ -333,7 +333,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                 switch (repo_kind) {
                     .git => try self.write(state),
                     .xit => {
-                        const config_cursor = try state.moment.put(hash.hashBuffer("config"));
+                        const config_cursor = try state.extra.moment.put(hash.hashBuffer("config"));
                         const config = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(config_cursor);
                         if (!self.sections.contains(section_name)) {
                             try config.remove(hash.hashBuffer(section_name));
@@ -350,7 +350,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
         }
 
         fn write(self: *Config(repo_kind), state: rp.Repo(.git).State(.read_write)) !void {
-            const lock_file = state.lock_file_maybe orelse return error.NoLockFile;
+            const lock_file = state.extra.lock_file_maybe orelse return error.NoLockFile;
             try lock_file.setEndPos(0); // truncate file in case this method is called multiple times
 
             for (self.sections.keys(), self.sections.values()) |section_name, variables| {
