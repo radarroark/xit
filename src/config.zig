@@ -27,7 +27,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
 
         const Variables = std.StringArrayHashMap([]const u8);
 
-        pub fn init(state: rp.Repo(repo_kind).State, allocator: std.mem.Allocator) !Config(repo_kind) {
+        pub fn init(state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator) !Config(repo_kind) {
             var arena = try allocator.create(std.heap.ArenaAllocator);
             arena.* = std.heap.ArenaAllocator.init(allocator);
             errdefer {
@@ -255,7 +255,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
             self.allocator.destroy(self.arena);
         }
 
-        pub fn add(self: *Config(repo_kind), state: rp.Repo(repo_kind).State, input: AddConfigInput) !void {
+        pub fn add(self: *Config(repo_kind), state: rp.Repo(repo_kind).State(.read_write), input: AddConfigInput) !void {
             // validate the config name
             for (input.name, 0..) |char, i| {
                 switch (char) {
@@ -317,7 +317,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
             }
         }
 
-        pub fn remove(self: *Config(repo_kind), state: rp.Repo(repo_kind).State, input: RemoveConfigInput) !void {
+        pub fn remove(self: *Config(repo_kind), state: rp.Repo(repo_kind).State(.read_write), input: RemoveConfigInput) !void {
             if (std.mem.lastIndexOfScalar(u8, input.name, '.')) |index| {
                 const section_name = try self.arena.allocator().dupe(u8, input.name[0..index]);
                 const var_name = try self.arena.allocator().dupe(u8, input.name[index + 1 ..]);
@@ -349,7 +349,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
             }
         }
 
-        fn write(self: *Config(repo_kind), state: rp.Repo(.git).State) !void {
+        fn write(self: *Config(repo_kind), state: rp.Repo(.git).State(.read_write)) !void {
             const lock_file = state.lock_file_maybe orelse return error.NoLockFile;
             try lock_file.setEndPos(0); // truncate file in case this method is called multiple times
 

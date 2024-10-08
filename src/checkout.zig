@@ -21,7 +21,7 @@ const rp = @import("./repo.zig");
 
 const MAX_FILE_READ_BYTES = 1024; // FIXME: this is arbitrary...
 
-pub fn objectToFile(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, allocator: std.mem.Allocator, path: []const u8, tree_entry: obj.TreeEntry) !void {
+pub fn objectToFile(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator, path: []const u8, tree_entry: obj.TreeEntry) !void {
     const oid_hex = std.fmt.bytesToHex(tree_entry.oid, .lower);
 
     switch (tree_entry.mode.object_type) {
@@ -71,7 +71,7 @@ pub fn objectToFile(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).S
     }
 }
 
-fn pathToTreeEntry(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, allocator: std.mem.Allocator, parent: obj.Object(repo_kind, .full), path_parts: []const []const u8) !?obj.TreeEntry {
+fn pathToTreeEntry(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator, parent: obj.Object(repo_kind, .full), path_parts: []const []const u8) !?obj.TreeEntry {
     const path_part = path_parts[0];
     const tree_entry = parent.content.tree.entries.get(path_part) orelse return null;
 
@@ -182,7 +182,7 @@ fn untrackedFile(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
 
 pub fn migrate(
     comptime repo_kind: rp.RepoKind,
-    state: rp.Repo(repo_kind).State,
+    state: rp.Repo(repo_kind).State(.read_write),
     allocator: std.mem.Allocator,
     tree_diff: obj.TreeDiff(repo_kind),
     index: *idx.Index(repo_kind),
@@ -292,20 +292,20 @@ pub fn migrate(
 
     for (add_files.keys(), add_files.values()) |path, tree_entry| {
         // update working tree
-        try objectToFile(repo_kind, state, allocator, path, tree_entry);
+        try objectToFile(repo_kind, state.readOnly(), allocator, path, tree_entry);
         // update index
         try index.addPath(state, path);
     }
 
     for (edit_files.keys(), edit_files.values()) |path, tree_entry| {
         // update working tree
-        try objectToFile(repo_kind, state, allocator, path, tree_entry);
+        try objectToFile(repo_kind, state.readOnly(), allocator, path, tree_entry);
         // update index
         try index.addPath(state, path);
     }
 }
 
-pub fn restore(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, allocator: std.mem.Allocator, path: []const u8) !void {
+pub fn restore(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator, path: []const u8) !void {
     // get the current commit
     const current_oid = try ref.readHead(repo_kind, state);
     var commit_object = try obj.Object(repo_kind, .full).init(allocator, state, current_oid);
@@ -347,15 +347,15 @@ pub const Switch = struct {
         force: bool,
     };
 
-    pub fn init(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State, allocator: std.mem.Allocator, target: []const u8, options: Options) !Switch {
+    pub fn init(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_write), allocator: std.mem.Allocator, target: []const u8, options: Options) !Switch {
         // get the current commit and target oid
-        const current_oid = try ref.readHead(repo_kind, state);
-        const target_oid = try ref.resolve(repo_kind, state, target) orelse return error.InvalidTarget;
+        const current_oid = try ref.readHead(repo_kind, state.readOnly());
+        const target_oid = try ref.resolve(repo_kind, state.readOnly(), target) orelse return error.InvalidTarget;
 
         // compare the commits
         var tree_diff = obj.TreeDiff(repo_kind).init(allocator);
         defer tree_diff.deinit();
-        try tree_diff.compare(state, current_oid, target_oid, null);
+        try tree_diff.compare(state.readOnly(), current_oid, target_oid, null);
 
         var result = Switch{ .data = .{ .success = {} } };
         errdefer result.deinit();
@@ -367,7 +367,7 @@ pub const Switch = struct {
                 defer lock.deinit();
 
                 // read index
-                var index = try idx.Index(repo_kind).init(allocator, state);
+                var index = try idx.Index(repo_kind).init(allocator, state.readOnly());
                 defer index.deinit();
 
                 // update the working tree
@@ -389,7 +389,7 @@ pub const Switch = struct {
             },
             .xit => {
                 // read index
-                var index = try idx.Index(repo_kind).init(allocator, state);
+                var index = try idx.Index(repo_kind).init(allocator, state.readOnly());
                 defer index.deinit();
 
                 // update the working tree

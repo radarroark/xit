@@ -10,7 +10,7 @@ const df = @import("./diff.zig");
 
 const MAX_READ_BYTES = 1024; // FIXME: this is arbitrary...
 
-fn getDescendent(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State, oid1: *const [hash.SHA1_HEX_LEN]u8, oid2: *const [hash.SHA1_HEX_LEN]u8) ![hash.SHA1_HEX_LEN]u8 {
+fn getDescendent(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State(.read_only), oid1: *const [hash.SHA1_HEX_LEN]u8, oid2: *const [hash.SHA1_HEX_LEN]u8) ![hash.SHA1_HEX_LEN]u8 {
     if (std.mem.eql(u8, oid1, oid2)) {
         return oid1.*;
     }
@@ -77,7 +77,7 @@ fn getDescendent(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
     return error.DescendentNotFound;
 }
 
-pub fn commonAncestor(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State, oid1: *const [hash.SHA1_HEX_LEN]u8, oid2: *const [hash.SHA1_HEX_LEN]u8) ![hash.SHA1_HEX_LEN]u8 {
+pub fn commonAncestor(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State(.read_only), oid1: *const [hash.SHA1_HEX_LEN]u8, oid2: *const [hash.SHA1_HEX_LEN]u8) ![hash.SHA1_HEX_LEN]u8 {
     if (std.mem.eql(u8, oid1, oid2)) {
         return oid1.*;
     }
@@ -191,7 +191,7 @@ pub const MergeConflict = struct {
 
 fn writeBlobWithConflict(
     comptime repo_kind: rp.RepoKind,
-    state: rp.Repo(repo_kind).State,
+    state: rp.Repo(repo_kind).State(.read_write),
     allocator: std.mem.Allocator,
     base_oid_maybe: ?[hash.SHA1_BYTES_LEN]u8,
     current_oid: [hash.SHA1_BYTES_LEN]u8,
@@ -202,15 +202,15 @@ fn writeBlobWithConflict(
     has_conflict: *bool,
 ) ![hash.SHA1_BYTES_LEN]u8 {
     var base_iter = if (base_oid_maybe) |base_oid|
-        try df.LineIterator(repo_kind).initFromOid(state, allocator, "", base_oid, null)
+        try df.LineIterator(repo_kind).initFromOid(state.readOnly(), allocator, "", base_oid, null)
     else
         try df.LineIterator(repo_kind).initFromNothing(allocator, "");
     defer base_iter.deinit();
 
-    var current_iter = try df.LineIterator(repo_kind).initFromOid(state, allocator, "", current_oid, null);
+    var current_iter = try df.LineIterator(repo_kind).initFromOid(state.readOnly(), allocator, "", current_oid, null);
     defer current_iter.deinit();
 
-    var source_iter = try df.LineIterator(repo_kind).initFromOid(state, allocator, "", source_oid, null);
+    var source_iter = try df.LineIterator(repo_kind).initFromOid(state.readOnly(), allocator, "", source_oid, null);
     defer source_iter.deinit();
 
     // if any file is binary, just return the source oid because there is no point in trying to merge them
@@ -479,7 +479,7 @@ pub const SamePathConflictResult = struct {
 
 fn samePathConflict(
     comptime repo_kind: rp.RepoKind,
-    state: rp.Repo(repo_kind).State,
+    state: rp.Repo(repo_kind).State(.read_write),
     allocator: std.mem.Allocator,
     base_name: []const u8,
     current_name: []const u8,
@@ -673,7 +673,7 @@ pub const Merge = struct {
 
     pub fn init(
         comptime repo_kind: rp.RepoKind,
-        state: rp.Repo(repo_kind).State,
+        state: rp.Repo(repo_kind).State(.read_write),
         allocator: std.mem.Allocator,
         merge_kind: MergeKind,
         merge_input: MergeInput,
@@ -688,8 +688,8 @@ pub const Merge = struct {
         }
 
         // get the current branch name and oid
-        const current_name = try ref.readHeadName(repo_kind, state, arena.allocator());
-        const current_oid = try ref.readHead(repo_kind, state);
+        const current_name = try ref.readHeadName(repo_kind, state.readOnly(), arena.allocator());
+        const current_oid = try ref.readHead(repo_kind, state.readOnly());
 
         // init the diff that we will use for the migration and the conflicts maps.
         // they're using the arena because they'll be included in the result.
@@ -728,12 +728,12 @@ pub const Merge = struct {
                 @memcpy(source_name, new.source_name);
 
                 // get the oids for the three-way merge
-                const source_oid = try ref.resolve(repo_kind, state, source_name) orelse return error.InvalidTarget;
+                const source_oid = try ref.resolve(repo_kind, state.readOnly(), source_name) orelse return error.InvalidTarget;
                 var base_oid: [hash.SHA1_HEX_LEN]u8 = undefined;
                 switch (merge_kind) {
-                    .merge => base_oid = try commonAncestor(repo_kind, allocator, state, &current_oid, &source_oid),
+                    .merge => base_oid = try commonAncestor(repo_kind, allocator, state.readOnly(), &current_oid, &source_oid),
                     .cherry_pick => {
-                        var object = try obj.Object(repo_kind, .full).init(allocator, state, source_oid);
+                        var object = try obj.Object(repo_kind, .full).init(allocator, state.readOnly(), source_oid);
                         defer object.deinit();
                         const parent_oid = if (object.content.commit.parents.items.len == 1) object.content.commit.parents.items[0] else return error.CommitMustHaveOneParent;
                         switch (object.content) {
@@ -759,11 +759,11 @@ pub const Merge = struct {
 
                 // diff the base ancestor with the current oid
                 var current_diff = obj.TreeDiff(repo_kind).init(arena.allocator());
-                try current_diff.compare(state, base_oid, current_oid, null);
+                try current_diff.compare(state.readOnly(), base_oid, current_oid, null);
 
                 // diff the base ancestor with the source oid
                 var source_diff = obj.TreeDiff(repo_kind).init(arena.allocator());
-                try source_diff.compare(state, base_oid, source_oid, null);
+                try source_diff.compare(state.readOnly(), base_oid, source_oid, null);
 
                 // look for same path conflicts while populating the clean diff
                 for (source_diff.changes.keys(), source_diff.changes.values()) |path, source_change| {
@@ -796,7 +796,7 @@ pub const Merge = struct {
                         .message = try std.fmt.allocPrint(arena.allocator(), "merge from {s}", .{source_name}),
                     },
                     .cherry_pick => blk: {
-                        const object = try obj.Object(repo_kind, .full).init(arena.allocator(), state, source_oid);
+                        const object = try obj.Object(repo_kind, .full).init(arena.allocator(), state.readOnly(), source_oid);
                         switch (object.content) {
                             .commit => break :blk object.content.commit.metadata,
                             else => return error.NotACommitObject,
@@ -811,7 +811,7 @@ pub const Merge = struct {
                         defer lock.deinit();
 
                         // read index
-                        var index = try idx.Index(repo_kind).init(allocator, state);
+                        var index = try idx.Index(repo_kind).init(allocator, state.readOnly());
                         defer index.deinit();
 
                         // update the working tree
@@ -822,7 +822,7 @@ pub const Merge = struct {
                             try index.addConflictEntries(path, .{ conflict.base, conflict.current, conflict.source });
                             // write renamed file if necessary
                             if (conflict.renamed) |renamed| {
-                                try chk.objectToFile(repo_kind, state, allocator, renamed.path, renamed.tree_entry);
+                                try chk.objectToFile(repo_kind, state.readOnly(), allocator, renamed.path, renamed.tree_entry);
                             }
                         }
 
@@ -856,7 +856,7 @@ pub const Merge = struct {
                     },
                     .xit => {
                         // read index
-                        var index = try idx.Index(repo_kind).init(allocator, state);
+                        var index = try idx.Index(repo_kind).init(allocator, state.readOnly());
                         defer index.deinit();
 
                         // update the working tree
@@ -867,7 +867,7 @@ pub const Merge = struct {
                             try index.addConflictEntries(path, .{ conflict.base, conflict.current, conflict.source });
                             // write renamed file if necessary
                             if (conflict.renamed) |renamed| {
-                                try chk.objectToFile(repo_kind, state, allocator, renamed.path, renamed.tree_entry);
+                                try chk.objectToFile(repo_kind, state.readOnly(), allocator, renamed.path, renamed.tree_entry);
                             }
                         }
 
@@ -937,7 +937,7 @@ pub const Merge = struct {
             .cont => {
                 // ensure there are no conflict entries in the index
                 {
-                    var index = try idx.Index(repo_kind).init(allocator, state);
+                    var index = try idx.Index(repo_kind).init(allocator, state.readOnly());
                     defer index.deinit();
 
                     for (index.entries.values()) |*entries_for_path| {
@@ -990,9 +990,9 @@ pub const Merge = struct {
                 // get the base oid
                 var base_oid: [hash.SHA1_HEX_LEN]u8 = undefined;
                 switch (merge_kind) {
-                    .merge => base_oid = try commonAncestor(repo_kind, allocator, state, &current_oid, &source_oid),
+                    .merge => base_oid = try commonAncestor(repo_kind, allocator, state.readOnly(), &current_oid, &source_oid),
                     .cherry_pick => {
-                        var object = try obj.Object(repo_kind, .full).init(allocator, state, source_oid);
+                        var object = try obj.Object(repo_kind, .full).init(allocator, state.readOnly(), source_oid);
                         defer object.deinit();
                         const parent_oid = if (object.content.commit.parents.items.len == 1) object.content.commit.parents.items[0] else return error.CommitMustHaveOneParent;
                         switch (object.content) {

@@ -46,8 +46,8 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     var repo_dir = try temp_dir.openDir("repo", .{});
     defer repo_dir.close();
 
-    // init repo_kind-specific state
-    const State = switch (repo_kind) {
+    // init repo-specific state
+    const TestState = switch (repo_kind) {
         .git => struct {
             git_dir: std.fs.Dir,
         },
@@ -56,7 +56,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             db_file: std.fs.File,
         },
     };
-    var state: State = switch (repo_kind) {
+    var test_state: TestState = switch (repo_kind) {
         .git => .{
             .git_dir = try repo_dir.openDir(".git", .{}),
         },
@@ -69,10 +69,10 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         },
     };
     defer switch (repo_kind) {
-        .git => state.git_dir.close(),
+        .git => test_state.git_dir.close(),
         .xit => {
-            state.db_file.close();
-            state.xit_dir.close();
+            test_state.db_file.close();
+            test_state.xit_dir.close();
         },
     };
 
@@ -153,7 +153,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                     var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                     defer repo.deinit();
                     const head_file_buffer = try ref.readHead(repo_kind, .{ .core = &repo.core });
-                    var objects_dir = try state.git_dir.openDir("objects", .{});
+                    var objects_dir = try test_state.git_dir.openDir("objects", .{});
                     defer objects_dir.close();
                     var hash_prefix_dir = try objects_dir.openDir(head_file_buffer[0..2], .{});
                     defer hash_prefix_dir.close();
@@ -202,7 +202,8 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
                 var moment = try repo.core.latestMoment();
-                const head_file_buffer = try ref.readHead(repo_kind, .{ .core = &repo.core, .moment = &moment });
+                const state = rp.Repo(repo_kind).State(.read_only).init(&repo.core, &moment);
+                const head_file_buffer = try ref.readHead(repo_kind, state);
                 const bytes_cursor_maybe = try moment.cursor.readPath(void, &.{
                     .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
                     .{ .hash_map_get = .{ .value = try hash.hexToHash(&head_file_buffer) } },
@@ -217,11 +218,8 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
-        const core_cursor = switch (repo_kind) {
-            .git => .{ .core = &repo.core },
-            .xit => .{ .core = &repo.core, .moment = &moment },
-        };
-        break :blk try ref.readHead(repo_kind, core_cursor);
+        const state = rp.Repo(repo_kind).State(.read_only).init(&repo.core, &moment);
+        break :blk try ref.readHead(repo_kind, state);
     };
 
     const new_hello_txt_content =
@@ -424,7 +422,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                     var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                     defer repo.deinit();
                     const head_file_buffer = try ref.readHead(repo_kind, .{ .core = &repo.core });
-                    var objects_dir = try state.git_dir.openDir("objects", .{});
+                    var objects_dir = try test_state.git_dir.openDir("objects", .{});
                     defer objects_dir.close();
                     var hash_prefix_dir = try objects_dir.openDir(head_file_buffer[0..2], .{});
                     defer hash_prefix_dir.close();
@@ -453,7 +451,8 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
                 var moment = try repo.core.latestMoment();
-                const head_file_buffer = try ref.readHead(repo_kind, .{ .core = &repo.core, .moment = &moment });
+                const state = rp.Repo(repo_kind).State(.read_only).init(&repo.core, &moment);
+                const head_file_buffer = try ref.readHead(repo_kind, state);
                 const bytes_cursor_maybe = try moment.cursor.readPath(void, &.{
                     .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
                     .{ .hash_map_get = .{ .value = try hash.hexToHash(&head_file_buffer) } },
@@ -468,11 +467,8 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
-        const core_cursor = switch (repo_kind) {
-            .git => .{ .core = &repo.core },
-            .xit => .{ .core = &repo.core, .moment = &moment },
-        };
-        break :blk try ref.readHead(repo_kind, core_cursor);
+        const state = rp.Repo(repo_kind).State(.read_only).init(&repo.core, &moment);
+        break :blk try ref.readHead(repo_kind, state);
     };
 
     // tree diff
@@ -692,11 +688,8 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
             var moment = try repo.core.latestMoment();
-            const core_cursor = switch (repo_kind) {
-                .git => .{ .core = &repo.core },
-                .xit => .{ .core = &repo.core, .moment = &moment },
-            };
-            var index = try idx.Index(repo_kind).init(allocator, core_cursor);
+            const state = rp.Repo(repo_kind).State(.read_only).init(&repo.core, &moment);
+            var index = try idx.Index(repo_kind).init(allocator, state);
             defer index.deinit();
             try std.testing.expectEqual(7, index.entries.count());
             try std.testing.expect(index.entries.contains("README"));
@@ -755,11 +748,8 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
             var moment = try repo.core.latestMoment();
-            const core_cursor = switch (repo_kind) {
-                .git => .{ .core = &repo.core },
-                .xit => .{ .core = &repo.core, .moment = &moment },
-            };
-            var index = try idx.Index(repo_kind).init(allocator, core_cursor);
+            const state = rp.Repo(repo_kind).State(.read_only).init(&repo.core, &moment);
+            var index = try idx.Index(repo_kind).init(allocator, state);
             defer index.deinit();
             try std.testing.expectEqual(6, index.entries.count());
             try std.testing.expect(index.entries.contains("README"));
@@ -800,7 +790,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
 
         // a stale index lock file isn't hanging around
         if (repo_kind == .git) {
-            const lock_file_or_err = state.git_dir.openFile("index.lock", .{ .mode = .read_only });
+            const lock_file_or_err = test_state.git_dir.openFile("index.lock", .{ .mode = .read_only });
             try std.testing.expectEqual(error.FileNotFound, lock_file_or_err);
         }
     }
@@ -850,11 +840,8 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
             var moment = try repo.core.latestMoment();
-            const core_cursor = switch (repo_kind) {
-                .git => .{ .core = &repo.core },
-                .xit => .{ .core = &repo.core, .moment = &moment },
-            };
-            var index = try idx.Index(repo_kind).init(allocator, core_cursor);
+            const state = rp.Repo(repo_kind).State(.read_only).init(&repo.core, &moment);
+            var index = try idx.Index(repo_kind).init(allocator, state);
             defer index.deinit();
 
             try std.testing.expect(!index.entries.contains("new-file.txt"));
@@ -1042,18 +1029,15 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
-        const core_cursor = switch (repo_kind) {
-            .git => .{ .core = &repo.core },
-            .xit => .{ .core = &repo.core, .moment = &moment },
-        };
+        const state = rp.Repo(repo_kind).State(.read_only).init(&repo.core, &moment);
 
         // read commit
-        var commit_object = try obj.Object(repo_kind, .full).init(allocator, core_cursor, commit2);
+        var commit_object = try obj.Object(repo_kind, .full).init(allocator, state, commit2);
         defer commit_object.deinit();
         try std.testing.expectEqualStrings("second commit", commit_object.content.commit.metadata.message);
 
         // read tree
-        var tree_object = try obj.Object(repo_kind, .full).init(allocator, core_cursor, commit_object.content.commit.tree);
+        var tree_object = try obj.Object(repo_kind, .full).init(allocator, state, commit_object.content.commit.tree);
         defer tree_object.deinit();
         try std.testing.expectEqual(6, tree_object.content.tree.entries.count());
     }
@@ -1069,12 +1053,9 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
-        const core_cursor = switch (repo_kind) {
-            .git => .{ .core = &repo.core },
-            .xit => .{ .core = &repo.core, .moment = &moment },
-        };
-        try std.testing.expectEqual(commit2, try ref.readHead(repo_kind, core_cursor));
-        try std.testing.expectEqual(commit2, try ref.resolve(repo_kind, core_cursor, "stuff"));
+        const state = rp.Repo(repo_kind).State(.read_only).init(&repo.core, &moment);
+        try std.testing.expectEqual(commit2, try ref.readHead(repo_kind, state));
+        try std.testing.expectEqual(commit2, try ref.resolve(repo_kind, state, "stuff"));
     }
 
     // list all branches
@@ -1082,11 +1063,8 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
-        const core_cursor = switch (repo_kind) {
-            .git => .{ .core = &repo.core },
-            .xit => .{ .core = &repo.core, .moment = &moment },
-        };
-        var ref_list = try ref.RefList.init(repo_kind, core_cursor, allocator, "heads");
+        const state = rp.Repo(repo_kind).State(.read_only).init(&repo.core, &moment);
+        var ref_list = try ref.RefList.init(repo_kind, state, allocator, "heads");
         defer ref_list.deinit();
         try std.testing.expectEqual(2, ref_list.refs.items.len);
     }
@@ -1096,11 +1074,8 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
-        const core_cursor = switch (repo_kind) {
-            .git => .{ .core = &repo.core },
-            .xit => .{ .core = &repo.core, .moment = &moment },
-        };
-        var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, core_cursor, allocator, "HEAD");
+        const state = rp.Repo(repo_kind).State(.read_only).init(&repo.core, &moment);
+        var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, state, allocator, "HEAD");
         defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
         try std.testing.expectEqualStrings("stuff", current_branch_maybe.?.name);
     }
@@ -1155,11 +1130,8 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
-        const core_cursor = switch (repo_kind) {
-            .git => .{ .core = &repo.core },
-            .xit => .{ .core = &repo.core, .moment = &moment },
-        };
-        break :blk try ref.readHead(repo_kind, core_cursor);
+        const state = rp.Repo(repo_kind).State(.read_only).init(&repo.core, &moment);
+        break :blk try ref.readHead(repo_kind, state);
     };
 
     // create a branch with slashes
@@ -1167,7 +1139,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
 
     // make sure the ref is created with subdirs
     if (repo_kind == .git) {
-        const ref_file = try state.git_dir.openFile("refs/heads/a/b/c", .{});
+        const ref_file = try test_state.git_dir.openFile("refs/heads/a/b/c", .{});
         defer ref_file.close();
     }
 
@@ -1176,11 +1148,8 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
-        const core_cursor = switch (repo_kind) {
-            .git => .{ .core = &repo.core },
-            .xit => .{ .core = &repo.core, .moment = &moment },
-        };
-        var ref_list = try ref.RefList.init(repo_kind, core_cursor, allocator, "heads");
+        const state = rp.Repo(repo_kind).State(.read_only).init(&repo.core, &moment);
+        var ref_list = try ref.RefList.init(repo_kind, state, allocator, "heads");
         defer ref_list.deinit();
         try std.testing.expectEqual(3, ref_list.refs.items.len);
         var ref_map = std.StringHashMap(void).init(allocator);
@@ -1198,9 +1167,9 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
 
     // make sure the subdirs are deleted
     if (repo_kind == .git) {
-        try std.testing.expectEqual(error.FileNotFound, state.git_dir.openFile("refs/heads/a/b/c", .{}));
-        try std.testing.expectEqual(error.FileNotFound, state.git_dir.openDir("refs/heads/a/b", .{}));
-        try std.testing.expectEqual(error.FileNotFound, state.git_dir.openDir("refs/heads/a", .{}));
+        try std.testing.expectEqual(error.FileNotFound, test_state.git_dir.openFile("refs/heads/a/b/c", .{}));
+        try std.testing.expectEqual(error.FileNotFound, test_state.git_dir.openDir("refs/heads/a/b", .{}));
+        try std.testing.expectEqual(error.FileNotFound, test_state.git_dir.openDir("refs/heads/a", .{}));
     }
 
     // switch to master
@@ -1224,11 +1193,8 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
-        const core_cursor = switch (repo_kind) {
-            .git => .{ .core = &repo.core },
-            .xit => .{ .core = &repo.core, .moment = &moment },
-        };
-        break :blk try ref.readHead(repo_kind, core_cursor);
+        const state = rp.Repo(repo_kind).State(.read_only).init(&repo.core, &moment);
+        break :blk try ref.readHead(repo_kind, state);
     };
 
     // make sure the most recent branch name points to the most recent commit
@@ -1236,11 +1202,8 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
-        const core_cursor = switch (repo_kind) {
-            .git => .{ .core = &repo.core },
-            .xit => .{ .core = &repo.core, .moment = &moment },
-        };
-        try std.testing.expectEqual(commit3, try ref.resolve(repo_kind, core_cursor, "master"));
+        const state = rp.Repo(repo_kind).State(.read_only).init(&repo.core, &moment);
+        try std.testing.expectEqual(commit3, try ref.resolve(repo_kind, state, "master"));
     }
 
     // log
@@ -1270,11 +1233,8 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
-        const core_cursor = switch (repo_kind) {
-            .git => .{ .core = &repo.core },
-            .xit => .{ .core = &repo.core, .moment = &moment },
-        };
-        const ancestor_commit = try mrg.commonAncestor(repo_kind, allocator, core_cursor, &commit3, &commit4_stuff);
+        const state = rp.Repo(repo_kind).State(.read_only).init(&repo.core, &moment);
+        const ancestor_commit = try mrg.commonAncestor(repo_kind, allocator, state, &commit3, &commit4_stuff);
         try std.testing.expectEqualStrings(&commit2, &ancestor_commit);
     }
 
@@ -1306,11 +1266,8 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
-        const core_cursor = switch (repo_kind) {
-            .git => .{ .core = &repo.core },
-            .xit => .{ .core = &repo.core, .moment = &moment },
-        };
-        break :blk try ref.readHead(repo_kind, core_cursor);
+        const state = rp.Repo(repo_kind).State(.read_only).init(&repo.core, &moment);
+        break :blk try ref.readHead(repo_kind, state);
     };
 
     // config

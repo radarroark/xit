@@ -57,7 +57,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind) type {
             meta: std.fs.File.Metadata,
         };
 
-        pub fn init(allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State) !Status(repo_kind) {
+        pub fn init(allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State(.read_only)) !Status(repo_kind) {
             var untracked = std.StringArrayHashMap(Entry).init(allocator);
             errdefer untracked.deinit();
 
@@ -249,7 +249,7 @@ pub fn HeadTree(comptime repo_kind: rp.RepoKind) type {
         arena: *std.heap.ArenaAllocator,
         allocator: std.mem.Allocator,
 
-        pub fn init(allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State) !HeadTree(repo_kind) {
+        pub fn init(allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State(.read_only)) !HeadTree(repo_kind) {
             const arena = try allocator.create(std.heap.ArenaAllocator);
             arena.* = std.heap.ArenaAllocator.init(allocator);
             var tree = HeadTree(repo_kind){
@@ -275,7 +275,7 @@ pub fn HeadTree(comptime repo_kind: rp.RepoKind) type {
             self.allocator.destroy(self.arena);
         }
 
-        fn read(self: *HeadTree(repo_kind), state: rp.Repo(repo_kind).State, prefix: []const u8, oid: [hash.SHA1_HEX_LEN]u8) !void {
+        fn read(self: *HeadTree(repo_kind), state: rp.Repo(repo_kind).State(.read_only), prefix: []const u8, oid: [hash.SHA1_HEX_LEN]u8) !void {
             const object = try obj.Object(repo_kind, .full).init(self.arena.allocator(), state, oid);
 
             switch (object.content) {
