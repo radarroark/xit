@@ -271,20 +271,20 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).Stat
                 var write_buffer = [_]u8{0} ** MAX_READ_BYTES;
                 const content = try std.fmt.bufPrint(&write_buffer, "ref: refs/heads/{s}", .{target});
                 var ref_content_cursor = try ref_content_set.putKey(hash.hashBuffer(content));
-                try ref_content_cursor.writeBytes(content, .once);
+                try ref_content_cursor.writeDataIfEmpty(.{ .bytes = content });
                 try state.extra.moment.putData(hash.hashBuffer("HEAD"), .{ .slot = ref_content_cursor.slot() });
             } else {
                 if (oid_hex_maybe) |oid_hex| {
                     // the HEAD is detached, so just update it with the oid
                     var ref_content_cursor = try ref_content_set.putKey(try hash.hexToHash(&oid_hex));
-                    try ref_content_cursor.writeBytes(&oid_hex, .once);
+                    try ref_content_cursor.writeDataIfEmpty(.{ .bytes = &oid_hex });
                     try state.extra.moment.putData(hash.hashBuffer("HEAD"), .{ .slot = ref_content_cursor.slot() });
                 } else {
                     // point HEAD at the ref, even though the ref doesn't exist
                     var write_buffer = [_]u8{0} ** MAX_READ_BYTES;
                     const content = try std.fmt.bufPrint(&write_buffer, "ref: refs/heads/{s}", .{target});
                     var ref_content_cursor = try ref_content_set.putKey(hash.hashBuffer(content));
-                    try ref_content_cursor.writeBytes(content, .once);
+                    try ref_content_cursor.writeDataIfEmpty(.{ .bytes = content });
                     try state.extra.moment.putData(hash.hashBuffer("HEAD"), .{ .slot = ref_content_cursor.slot() });
                 }
             }
@@ -364,12 +364,12 @@ pub fn updateRecur(
             const ref_name_set_cursor = try state.extra.moment.put(hash.hashBuffer("ref-name-set"));
             const ref_name_set = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(ref_name_set_cursor);
             var ref_name_cursor = try ref_name_set.putKey(file_name_hash);
-            try ref_name_cursor.writeBytes(file_name, .once);
+            try ref_name_cursor.writeDataIfEmpty(.{ .bytes = file_name });
             try butlast.putKeyData(file_name_hash, .{ .slot = ref_name_cursor.slot() });
             const ref_content_set_cursor = try state.extra.moment.put(hash.hashBuffer("ref-content-set"));
             const ref_content_set = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(ref_content_set_cursor);
             var ref_content_cursor = try ref_content_set.putKey(try hash.hexToHash(oid_hex));
-            try ref_content_cursor.writeBytes(oid_hex, .once);
+            try ref_content_cursor.writeDataIfEmpty(.{ .bytes = oid_hex });
             try butlast.putData(file_name_hash, .{ .slot = ref_content_cursor.slot() });
         },
     }

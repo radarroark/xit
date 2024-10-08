@@ -43,7 +43,7 @@ fn createPatchEntries(
     const path_set_cursor = try moment.put(hash.hashBuffer("path-set"));
     const path_set = try rp.Repo(.xit).DB.HashMap(.read_write).init(path_set_cursor);
     var path_cursor = try path_set.putKey(path_hash);
-    try path_cursor.writeBytes(line_iter_pair.path, .once);
+    try path_cursor.writeDataIfEmpty(.{ .bytes = line_iter_pair.path });
 
     // init node list
     const path_to_node_id_list_cursor = try branch.put(hash.hashBuffer("path->node-id-list"));
@@ -224,7 +224,7 @@ fn applyPatchForFile(
     const path_set_cursor = try moment.put(hash.hashBuffer("path-set"));
     const path_set = try rp.Repo(.xit).DB.HashMap(.read_write).init(path_set_cursor);
     var path_cursor = try path_set.putKey(path_hash);
-    try path_cursor.writeBytes(path, .once);
+    try path_cursor.writeDataIfEmpty(.{ .bytes = path });
 
     // init parent->children node map
     const path_to_parent_to_children_cursor = try branch.put(hash.hashBuffer("path->parent->children"));
@@ -439,7 +439,7 @@ pub fn writePatch(state: rp.Repo(.xit).State(.read_write), allocator: std.mem.Al
     const ref_name_set_cursor = try state.extra.moment.put(hash.hashBuffer("ref-name-set"));
     const ref_name_set = try rp.Repo(.xit).DB.HashMap(.read_write).init(ref_name_set_cursor);
     var branch_name_cursor = try ref_name_set.putKey(branch_name_hash);
-    try branch_name_cursor.writeBytes(current_branch_name, .once);
+    try branch_name_cursor.writeDataIfEmpty(.{ .bytes = current_branch_name });
 
     // init branch map
     const branches_cursor = try state.extra.moment.put(hash.hashBuffer("branches"));
