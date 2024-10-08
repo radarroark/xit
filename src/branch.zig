@@ -74,14 +74,14 @@ pub fn add(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.rea
             const ref_name_set_cursor = try state.extra.moment.put(hash.hashBuffer("ref-name-set"));
             const ref_name_set = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(ref_name_set_cursor);
             var ref_name_cursor = try ref_name_set.putKey(name_hash);
-            try ref_name_cursor.writeBytes(name, .once);
+            try ref_name_cursor.writeDataIfEmpty(.{ .bytes = name });
 
             // store ref content
             const head_file_buffer = try ref.readHead(repo_kind, state.readOnly());
             const ref_content_set_cursor = try state.extra.moment.put(hash.hashBuffer("ref-content-set"));
             const ref_content_set = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(ref_content_set_cursor);
             var ref_content_cursor = try ref_content_set.putKey(hash.hashBuffer(&head_file_buffer));
-            try ref_content_cursor.writeBytes(&head_file_buffer, .once);
+            try ref_content_cursor.writeDataIfEmpty(.{ .bytes = &head_file_buffer });
 
             // add ref name and content to refs/heads/{refname}
             const refs_cursor = try state.extra.moment.put(hash.hashBuffer("refs"));

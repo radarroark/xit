@@ -291,7 +291,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                         // store section name
                         const section_name_hash = hash.hashBuffer(section_name);
                         var section_name_cursor = try config_name_set.putKey(section_name_hash);
-                        try section_name_cursor.writeBytes(section_name, .once);
+                        try section_name_cursor.writeDataIfEmpty(.{ .bytes = section_name });
 
                         // add section name to config
                         const config_cursor = try state.extra.moment.put(hash.hashBuffer("config"));
@@ -301,7 +301,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                         // store variable name
                         const var_name_hash = hash.hashBuffer(var_name);
                         var var_name_cursor = try config_name_set.putKey(var_name_hash);
-                        try var_name_cursor.writeBytes(var_name, .once);
+                        try var_name_cursor.writeDataIfEmpty(.{ .bytes = var_name });
 
                         // add var name to config
                         const section_cursor = try config.put(section_name_hash);

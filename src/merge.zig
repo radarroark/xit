@@ -882,10 +882,10 @@ pub const Merge = struct {
                         // exit early if there were conflicts
                         if (conflicts.count() > 0) {
                             var merge_head_cursor = try state.extra.moment.put(hash.hashBuffer(merge_head_name));
-                            try merge_head_cursor.writeBytes(&source_oid, .replace);
+                            try merge_head_cursor.writeData(.{ .bytes = &source_oid });
 
                             var merge_msg_cursor = try state.extra.moment.put(hash.hashBuffer("MERGE_MSG"));
-                            try merge_msg_cursor.writeBytes(commit_metadata.message, .replace);
+                            try merge_msg_cursor.writeData(.{ .bytes = commit_metadata.message });
 
                             return .{
                                 .arena = arena,

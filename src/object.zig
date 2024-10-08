@@ -254,7 +254,7 @@ fn writeTree(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.r
                 const object_values_cursor = try state.extra.moment.put(hash.hashBuffer("object-values"));
                 const object_values = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(object_values_cursor);
                 var object_value_cursor = try object_values.put(object_hash);
-                try object_value_cursor.writeBytes(tree_bytes, .once);
+                try object_value_cursor.writeDataIfEmpty(.{ .bytes = tree_bytes });
                 try objects.putData(object_hash, .{ .slot = object_value_cursor.slot() });
             }
         },
@@ -447,7 +447,7 @@ pub fn writeCommit(
             const object_values_cursor = try state.extra.moment.put(hash.hashBuffer("object-values"));
             const object_values = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(object_values_cursor);
             var object_value_cursor = try object_values.put(commit_hash);
-            try object_value_cursor.writeBytes(commit, .once);
+            try object_value_cursor.writeDataIfEmpty(.{ .bytes = commit });
 
             // write commit
             const objects_cursor = try state.extra.moment.put(hash.hashBuffer("objects"));
