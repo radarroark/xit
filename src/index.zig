@@ -143,7 +143,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                 },
                 .xit => {
                     if (try state.moment.get(hash.hashBuffer("index"))) |index_cursor| {
-                        var iter = try index_cursor.iter();
+                        var iter = try index_cursor.iterator();
                         defer iter.deinit();
                         while (try iter.next()) |*next_cursor| {
                             const kv_pair = try next_cursor.readKeyValuePair();
@@ -497,7 +497,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     var index = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(index_cursor);
 
                     // remove items no longer in the index
-                    var iter = try index.cursor.iter();
+                    var iter = try index.cursor.iterator();
                     defer iter.deinit();
                     while (try iter.next()) |*next_cursor| {
                         const kv_pair = try next_cursor.readKeyValuePair();

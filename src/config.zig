@@ -220,7 +220,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                 },
                 .xit => {
                     if (try state.moment.get(hash.hashBuffer("config"))) |config_cursor| {
-                        var config_iter = try config_cursor.iter();
+                        var config_iter = try config_cursor.iterator();
                         defer config_iter.deinit();
                         while (try config_iter.next()) |*section_cursor| {
                             const section_kv_pair = try section_cursor.readKeyValuePair();
@@ -228,7 +228,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
 
                             var variables = Variables.init(arena.allocator());
 
-                            var var_iter = try section_kv_pair.value_cursor.iter();
+                            var var_iter = try section_kv_pair.value_cursor.iterator();
                             defer var_iter.deinit();
                             while (try var_iter.next()) |*var_cursor| {
                                 const var_kv_pair = try var_cursor.readKeyValuePair();

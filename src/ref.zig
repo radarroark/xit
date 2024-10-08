@@ -80,7 +80,7 @@ pub const RefList = struct {
                     .{ .hash_map_get = .{ .value = hash.hashBuffer("refs") } },
                     .{ .hash_map_get = .{ .value = hash.hashBuffer("heads") } },
                 })) |heads_cursor| {
-                    var iter = try heads_cursor.iter();
+                    var iter = try heads_cursor.iterator();
                     defer iter.deinit();
                     while (try iter.next()) |*next_cursor| {
                         const kv_pair = try next_cursor.readKeyValuePair();

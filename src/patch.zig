@@ -238,7 +238,7 @@ fn applyPatchForFile(
     const child_to_parent_cursor = try path_to_child_to_parent.put(path_hash);
     const child_to_parent = try rp.Repo(.xit).DB.HashMap(.read_write).init(child_to_parent_cursor);
 
-    var iter = try change_list_cursor.iter();
+    var iter = try change_list_cursor.iterator();
     defer iter.deinit();
     while (try iter.next()) |*next_cursor| {
         const change_buffer = try next_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
@@ -308,7 +308,7 @@ fn applyPatchForFile(
         const current_node_id_hash = hash.hashBuffer(&current_node_id_bytes);
 
         if (try parent_to_children.get(current_node_id_hash)) |child_node_id_set| {
-            var child_node_id_iter = try child_node_id_set.iter();
+            var child_node_id_iter = try child_node_id_set.iterator();
             defer child_node_id_iter.deinit();
 
             if (try child_node_id_iter.next()) |node_id_cursor| {
