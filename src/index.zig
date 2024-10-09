@@ -493,7 +493,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     try lock_file.writeAll(&overall_sha1_buffer);
                 },
                 .xit => {
-                    const index_cursor = try state.extra.moment.put(hash.hashBuffer("index"));
+                    const index_cursor = try state.extra.moment.putCursor(hash.hashBuffer("index"));
                     var index = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(index_cursor);
 
                     // remove items no longer in the index
@@ -532,7 +532,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                         }
 
                         const path_hash = hash.hashBuffer(path);
-                        if (try index.get(path_hash)) |existing_entry_cursor| {
+                        if (try index.getKeyCursor(path_hash)) |existing_entry_cursor| {
                             const existing_entry = try existing_entry_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
                             defer allocator.free(existing_entry);
                             if (std.mem.eql(u8, entry_buffer.items, existing_entry)) {
@@ -540,17 +540,17 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                             }
                         }
 
-                        const path_set_cursor = try state.extra.moment.put(hash.hashBuffer("path-set"));
+                        const path_set_cursor = try state.extra.moment.putCursor(hash.hashBuffer("path-set"));
                         const path_set = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(path_set_cursor);
-                        var path_cursor = try path_set.putKey(path_hash);
-                        try path_cursor.writeDataIfEmpty(.{ .bytes = path });
-                        try index.putKeyData(path_hash, .{ .slot = path_cursor.slot() });
+                        var path_cursor = try path_set.putKeyCursor(path_hash);
+                        try path_cursor.writeIfEmpty(.{ .bytes = path });
+                        try index.putKey(path_hash, .{ .slot = path_cursor.slot() });
 
-                        const entry_buffer_set_cursor = try state.extra.moment.put(hash.hashBuffer("entry-buffer-set"));
+                        const entry_buffer_set_cursor = try state.extra.moment.putCursor(hash.hashBuffer("entry-buffer-set"));
                         const entry_buffer_set = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(entry_buffer_set_cursor);
-                        var entry_buffer_cursor = try entry_buffer_set.putKey(hash.hashBuffer(entry_buffer.items));
-                        try entry_buffer_cursor.writeDataIfEmpty(.{ .bytes = entry_buffer.items });
-                        try index.putData(path_hash, .{ .slot = entry_buffer_cursor.slot() });
+                        var entry_buffer_cursor = try entry_buffer_set.putKeyCursor(hash.hashBuffer(entry_buffer.items));
+                        try entry_buffer_cursor.writeIfEmpty(.{ .bytes = entry_buffer.items });
+                        try index.put(path_hash, .{ .slot = entry_buffer_cursor.slot() });
                     }
                 },
             }

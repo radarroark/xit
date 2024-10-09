@@ -143,9 +143,9 @@ pub fn writeBlob(
         .xit => {
             const file_hash = hash.bytesToHash(sha1_bytes_buffer);
 
-            const file_values_cursor = try state.extra.moment.put(hash.hashBuffer("file-values"));
+            const file_values_cursor = try state.extra.moment.putCursor(hash.hashBuffer("file-values"));
             const file_values = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(file_values_cursor);
-            var file_value_cursor = try file_values.put(file_hash);
+            var file_value_cursor = try file_values.putCursor(file_hash);
 
             if (file_value_cursor.slot() == null) {
                 var writer = try file_value_cursor.writer();
@@ -163,9 +163,9 @@ pub fn writeBlob(
 
                 try writer.finish();
 
-                const objects_cursor = try state.extra.moment.put(hash.hashBuffer("objects"));
+                const objects_cursor = try state.extra.moment.putCursor(hash.hashBuffer("objects"));
                 const objects = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(objects_cursor);
-                try objects.putData(try hash.hexToHash(&sha1_hex), .{ .slot = writer.slot });
+                try objects.put(try hash.hexToHash(&sha1_hex), .{ .slot = writer.slot });
             }
         },
     }
@@ -247,15 +247,15 @@ fn writeTree(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.r
         },
         .xit => {
             const object_hash = hash.bytesToHash(sha1_bytes_buffer);
-            const objects_cursor = try state.extra.moment.put(hash.hashBuffer("objects"));
+            const objects_cursor = try state.extra.moment.putCursor(hash.hashBuffer("objects"));
             const objects = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(objects_cursor);
 
-            if (try objects.get(object_hash) == null) {
-                const object_values_cursor = try state.extra.moment.put(hash.hashBuffer("object-values"));
+            if (try objects.getCursor(object_hash) == null) {
+                const object_values_cursor = try state.extra.moment.putCursor(hash.hashBuffer("object-values"));
                 const object_values = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(object_values_cursor);
-                var object_value_cursor = try object_values.put(object_hash);
-                try object_value_cursor.writeDataIfEmpty(.{ .bytes = tree_bytes });
-                try objects.putData(object_hash, .{ .slot = object_value_cursor.slot() });
+                var object_value_cursor = try object_values.putCursor(object_hash);
+                try object_value_cursor.writeIfEmpty(.{ .bytes = tree_bytes });
+                try objects.put(object_hash, .{ .slot = object_value_cursor.slot() });
             }
         },
     }
@@ -444,15 +444,15 @@ pub fn writeCommit(
             const commit_hash = hash.bytesToHash(&commit_sha1_bytes_buffer);
 
             // write commit content
-            const object_values_cursor = try state.extra.moment.put(hash.hashBuffer("object-values"));
+            const object_values_cursor = try state.extra.moment.putCursor(hash.hashBuffer("object-values"));
             const object_values = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(object_values_cursor);
-            var object_value_cursor = try object_values.put(commit_hash);
-            try object_value_cursor.writeDataIfEmpty(.{ .bytes = commit });
+            var object_value_cursor = try object_values.putCursor(commit_hash);
+            try object_value_cursor.writeIfEmpty(.{ .bytes = commit });
 
             // write commit
-            const objects_cursor = try state.extra.moment.put(hash.hashBuffer("objects"));
+            const objects_cursor = try state.extra.moment.putCursor(hash.hashBuffer("objects"));
             const objects = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(objects_cursor);
-            try objects.putData(commit_hash, .{ .slot = object_value_cursor.slot() });
+            try objects.put(commit_hash, .{ .slot = object_value_cursor.slot() });
 
             // write commit id to HEAD
             try ref.updateRecur(repo_kind, state, allocator, &.{"HEAD"}, &commit_sha1_hex);

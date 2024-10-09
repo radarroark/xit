@@ -40,7 +40,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 pub fn latestMoment(self: *@This()) !DB.HashMap(.read_only) {
                     if (self.db.tx_start != null) return error.NotMeantToRunInTransaction;
                     const history = try DB.ArrayList(.read_only).init(self.db.rootCursor().readOnly());
-                    if (try history.get(-1)) |cursor| {
+                    if (try history.getCursor(-1)) |cursor| {
                         return try DB.HashMap(.read_only).init(cursor);
                     } else {
                         return error.DatabaseIsEmpty;
@@ -252,7 +252,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         }
                     };
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
-                    try history.appendDataContext(
+                    try history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
                         Ctx{ .core = &self.core, .allocator = self.allocator },
                     );
@@ -598,7 +598,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     };
 
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
-                    try history.appendDataContext(
+                    try history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
                         Ctx{ .core = &self.core, .allocator = self.allocator, .parent_oids_maybe = parent_oids_maybe, .metadata = metadata, .result = &result },
                     );
@@ -647,7 +647,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     };
 
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
-                    try history.appendDataContext(
+                    try history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
                         Ctx{ .core = &self.core, .allocator = self.allocator, .paths = paths },
                     );
@@ -762,7 +762,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     };
 
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
-                    try history.appendDataContext(
+                    try history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
                         Ctx{ .core = &self.core, .allocator = self.allocator, .paths = paths, .opts = opts },
                     );
@@ -886,7 +886,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     };
 
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
-                    try history.appendDataContext(
+                    try history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
                         Ctx{ .core = &self.core, .allocator = self.allocator, .input = input },
                     );
@@ -911,7 +911,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     };
 
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
-                    try history.appendDataContext(
+                    try history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
                         Ctx{ .core = &self.core, .allocator = self.allocator, .input = input },
                     );
@@ -940,7 +940,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     };
 
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
-                    try history.appendDataContext(
+                    try history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
                         Ctx{ .core = &self.core, .allocator = self.allocator, .target = target, .options = options, .result = &result },
                     );
@@ -992,7 +992,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     };
 
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
-                    history.appendDataContext(
+                    history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
                         Ctx{ .core = &self.core, .allocator = self.allocator, .input = input, .result = &result },
                     ) catch |err| switch (err) {
@@ -1029,7 +1029,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     };
 
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
-                    history.appendDataContext(
+                    history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
                         Ctx{ .core = &self.core, .allocator = self.allocator, .input = input, .result = &result },
                     ) catch |err| switch (err) {
@@ -1074,7 +1074,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     };
 
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
-                    try history.appendDataContext(
+                    try history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
                         Ctx{ .core = &self.core, .conf = &conf, .input = input },
                     );
@@ -1108,7 +1108,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     };
 
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
-                    try history.appendDataContext(
+                    try history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
                         Ctx{ .core = &self.core, .conf = &conf, .input = input },
                     );
@@ -1155,7 +1155,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     };
 
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
-                    try history.appendDataContext(
+                    try history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
                         Ctx{ .core = &self.core, .conf = &conf, .input = new_input },
                     );
@@ -1195,7 +1195,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     };
 
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
-                    try history.appendDataContext(
+                    try history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
                         Ctx{ .core = &self.core, .conf = &conf, .input = new_input },
                     );
