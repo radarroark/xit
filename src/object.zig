@@ -147,7 +147,7 @@ pub fn writeBlob(
             const file_values = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(file_values_cursor);
             var file_value_cursor = try file_values.putCursor(file_hash);
 
-            if (file_value_cursor.slot() == null) {
+            if (file_value_cursor.slot().tag == .none) {
                 var writer = try file_value_cursor.writer();
                 try writer.writeAll(header);
 
