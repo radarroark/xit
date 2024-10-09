@@ -64,7 +64,7 @@ fn createPatchEntries(
         switch (edit) {
             .eql => |eql| {
                 const node_id_list_cursor = node_id_list_cursor_maybe orelse return error.NodeListNotFound;
-                const node_id_list = try rp.Repo(.xit).DB.ArrayList(.read_only).init(node_id_list_cursor);
+                const node_id_list = try rp.Repo(.xit).DB.LinkedArrayList(.read_only).init(node_id_list_cursor);
                 const node_id_cursor = (try node_id_list.get(eql.old_line.num - 1)) orelse return error.ExpectedNode;
 
                 const node_id_bytes = try node_id_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
@@ -108,7 +108,7 @@ fn createPatchEntries(
                 try buffer.writer().writeInt(u8, @intFromEnum(ChangeKind.delete_node), .big);
 
                 const node_id_list_cursor = node_id_list_cursor_maybe orelse return error.NodeListNotFound;
-                const node_id_list = try rp.Repo(.xit).DB.ArrayList(.read_only).init(node_id_list_cursor);
+                const node_id_list = try rp.Repo(.xit).DB.LinkedArrayList(.read_only).init(node_id_list_cursor);
                 const node_id_cursor = (try node_id_list.get(del.old_line.num - 1)) orelse return error.ExpectedNode;
 
                 const node_id_bytes = try node_id_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
@@ -376,11 +376,11 @@ fn applyPatchForFile(
     const path_to_node_id_list_cursor = try branch.put(hash.hashBuffer("path->node-id-list"));
     const path_to_node_id_list = try rp.Repo(.xit).DB.HashMap(.read_write).init(path_to_node_id_list_cursor);
     try path_to_node_id_list.putKeyData(path_hash, .{ .slot = path_cursor.slot() });
-    try path_to_node_id_list.putData(path_hash, .{ .slot = null }); // create a new array list every time for now
     const node_id_list_cursor = try path_to_node_id_list.put(path_hash);
-    const node_id_list = try rp.Repo(.xit).DB.ArrayList(.read_write).init(node_id_list_cursor);
+    var node_id_list = try rp.Repo(.xit).DB.LinkedArrayList(.read_write).init(node_id_list_cursor);
 
     var current_node_id_int = FIRST_NODE_ID_INT;
+    var current_index_maybe: ?usize = 0;
 
     while (true) {
         const current_node_id_bytes = try hash.numToBytes(NodeIdInt, current_node_id_int);
@@ -394,7 +394,30 @@ fn applyPatchForFile(
             const child_count = children.len / NODE_ID_SIZE;
 
             if (child_count == 1) {
-                try node_id_list.appendData(.{ .bytes = children });
+                if (current_index_maybe) |*current_index| {
+                    if (try node_id_list.get(current_index.*)) |existing_node_id_cursor| {
+                        const existing_node_id = try existing_node_id_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
+                        defer allocator.free(existing_node_id);
+                        if (std.mem.eql(u8, existing_node_id, children)) {
+                            // node id hasn't changed, so just continue without changing the data
+                            current_index.* += 1;
+                        } else {
+                            // node id is different, so slice the list and begin appending the node ids from here
+                            const new_node_id_list_cursor = try node_id_list.slice(0, current_index.*);
+                            try path_to_node_id_list.putData(path_hash, .{ .slot = new_node_id_list_cursor.slot() });
+                            node_id_list = try rp.Repo(.xit).DB.LinkedArrayList(.read_write).init(try path_to_node_id_list.put(path_hash));
+                            current_index_maybe = null;
+                        }
+                    } else {
+                        // we've reached the end of the existing list so begin appending the node ids from here
+                        current_index_maybe = null;
+                    }
+                }
+
+                if (current_index_maybe == null) {
+                    try node_id_list.appendData(.{ .bytes = children });
+                }
+
                 var stream = std.io.fixedBufferStream(children);
                 var reader = stream.reader();
                 current_node_id_int = try reader.readInt(NodeIdInt, .big);
@@ -409,6 +432,16 @@ fn applyPatchForFile(
             }
         } else {
             break;
+        }
+    }
+
+    // if the current index is less than the size of the node id list,
+    // that means the only change was that lines were deleted at the end
+    // of the file. we just need to slice the node id list in that case.
+    if (current_index_maybe) |current_index| {
+        if (current_index < try node_id_list.count()) {
+            const new_node_id_list_cursor = try node_id_list.slice(0, current_index);
+            try path_to_node_id_list.put(path_hash, .{ .slot = new_node_id_list_cursor.slot() });
         }
     }
 }
