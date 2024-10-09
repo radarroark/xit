@@ -716,7 +716,7 @@ pub const Merge = struct {
                         }
                     },
                     .xit => {
-                        if (try state.extra.moment.get(hash.hashBuffer(merge_head_name))) |_| {
+                        if (try state.extra.moment.getCursor(hash.hashBuffer(merge_head_name))) |_| {
                             return error.UnfinishedMergeAlreadyInProgress;
                         }
                     },
@@ -881,11 +881,11 @@ pub const Merge = struct {
 
                         // exit early if there were conflicts
                         if (conflicts.count() > 0) {
-                            var merge_head_cursor = try state.extra.moment.put(hash.hashBuffer(merge_head_name));
-                            try merge_head_cursor.writeData(.{ .bytes = &source_oid });
+                            var merge_head_cursor = try state.extra.moment.putCursor(hash.hashBuffer(merge_head_name));
+                            try merge_head_cursor.write(.{ .bytes = &source_oid });
 
-                            var merge_msg_cursor = try state.extra.moment.put(hash.hashBuffer("MERGE_MSG"));
-                            try merge_msg_cursor.writeData(.{ .bytes = commit_metadata.message });
+                            var merge_msg_cursor = try state.extra.moment.putCursor(hash.hashBuffer("MERGE_MSG"));
+                            try merge_msg_cursor.write(.{ .bytes = commit_metadata.message });
 
                             return .{
                                 .arena = arena,
@@ -971,13 +971,13 @@ pub const Merge = struct {
                         commit_metadata.message = try merge_msg.readToEndAlloc(arena.allocator(), MAX_READ_BYTES);
                     },
                     .xit => {
-                        const source_oid_cursor = (try state.extra.moment.get(hash.hashBuffer(merge_head_name))) orelse return error.MergeHeadNotFound;
+                        const source_oid_cursor = (try state.extra.moment.getCursor(hash.hashBuffer(merge_head_name))) orelse return error.MergeHeadNotFound;
                         const source_oid_slice = try source_oid_cursor.readBytes(&source_oid);
                         if (source_oid_slice.len != source_oid.len) {
                             return error.InvalidMergeHead;
                         }
 
-                        const merge_msg_cursor = (try state.extra.moment.get(hash.hashBuffer("MERGE_MSG"))) orelse return error.MergeMessageNotFound;
+                        const merge_msg_cursor = (try state.extra.moment.getCursor(hash.hashBuffer("MERGE_MSG"))) orelse return error.MergeMessageNotFound;
                         commit_metadata.message = try merge_msg_cursor.readBytesAlloc(arena.allocator(), MAX_READ_BYTES);
                     },
                 }

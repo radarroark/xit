@@ -40,16 +40,16 @@ fn createPatchEntries(
 
     // store path
     const path_hash = hash.hashBuffer(line_iter_pair.path);
-    const path_set_cursor = try moment.put(hash.hashBuffer("path-set"));
+    const path_set_cursor = try moment.putCursor(hash.hashBuffer("path-set"));
     const path_set = try rp.Repo(.xit).DB.HashMap(.read_write).init(path_set_cursor);
-    var path_cursor = try path_set.putKey(path_hash);
-    try path_cursor.writeDataIfEmpty(.{ .bytes = line_iter_pair.path });
+    var path_cursor = try path_set.putKeyCursor(path_hash);
+    try path_cursor.writeIfEmpty(.{ .bytes = line_iter_pair.path });
 
     // init node list
-    const path_to_node_id_list_cursor = try branch.put(hash.hashBuffer("path->node-id-list"));
+    const path_to_node_id_list_cursor = try branch.putCursor(hash.hashBuffer("path->node-id-list"));
     const path_to_node_id_list = try rp.Repo(.xit).DB.HashMap(.read_write).init(path_to_node_id_list_cursor);
-    try path_to_node_id_list.putKeyData(path_hash, .{ .slot = path_cursor.slot() });
-    const node_id_list_cursor_maybe = try path_to_node_id_list.get(path_hash);
+    try path_to_node_id_list.putKey(path_hash, .{ .slot = path_cursor.slot() });
+    const node_id_list_cursor_maybe = try path_to_node_id_list.getCursor(path_hash);
 
     var new_node_count: u64 = 0;
     const LastNodeId = struct {
@@ -65,7 +65,7 @@ fn createPatchEntries(
             .eql => |eql| {
                 const node_id_list_cursor = node_id_list_cursor_maybe orelse return error.NodeListNotFound;
                 const node_id_list = try rp.Repo(.xit).DB.LinkedArrayList(.read_only).init(node_id_list_cursor);
-                const node_id_cursor = (try node_id_list.get(eql.old_line.num - 1)) orelse return error.ExpectedNode;
+                const node_id_cursor = (try node_id_list.getCursor(eql.old_line.num - 1)) orelse return error.ExpectedNode;
 
                 const node_id_bytes = try node_id_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
                 defer allocator.free(node_id_bytes);
@@ -109,7 +109,7 @@ fn createPatchEntries(
 
                 const node_id_list_cursor = node_id_list_cursor_maybe orelse return error.NodeListNotFound;
                 const node_id_list = try rp.Repo(.xit).DB.LinkedArrayList(.read_only).init(node_id_list_cursor);
-                const node_id_cursor = (try node_id_list.get(del.old_line.num - 1)) orelse return error.ExpectedNode;
+                const node_id_cursor = (try node_id_list.getCursor(del.old_line.num - 1)) orelse return error.ExpectedNode;
 
                 const node_id_bytes = try node_id_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
                 defer allocator.free(node_id_bytes);
@@ -176,13 +176,13 @@ fn writePatchForFile(
         return patch_hash;
     }
 
-    const patch_id_to_change_list_cursor = try moment.put(hash.hashBuffer("patch-id->change-list"));
+    const patch_id_to_change_list_cursor = try moment.putCursor(hash.hashBuffer("patch-id->change-list"));
     const patch_id_to_change_list = try rp.Repo(.xit).DB.HashMap(.read_write).init(patch_id_to_change_list_cursor);
 
     // init change list
-    const change_list_cursor = try patch_id_to_change_list.putKey(patch_hash);
+    const change_list_cursor = try patch_id_to_change_list.putKeyCursor(patch_hash);
     const change_list = try rp.Repo(.xit).DB.ArrayList(.read_write).init(change_list_cursor);
-    const change_content_list_cursor = try patch_id_to_change_list.put(patch_hash);
+    const change_content_list_cursor = try patch_id_to_change_list.putCursor(patch_hash);
     const change_content_list = try rp.Repo(.xit).DB.ArrayList(.read_write).init(change_content_list_cursor);
 
     var patch_entries = std.ArrayList([]const u8).init(allocator);
@@ -197,11 +197,11 @@ fn writePatchForFile(
     try createPatchEntries(moment, branch, allocator, &arena, line_iter_pair, &patch_entries, &patch_content_entries, patch_hash);
 
     for (patch_entries.items) |patch_entry| {
-        try change_list.appendData(.{ .bytes = patch_entry });
+        try change_list.append(.{ .bytes = patch_entry });
     }
 
     for (patch_content_entries.items) |patch_content_entry| {
-        try change_content_list.appendData(.{ .bytes = patch_content_entry });
+        try change_content_list.append(.{ .bytes = patch_content_entry });
     }
 
     return patch_hash;
@@ -221,23 +221,23 @@ fn applyPatchForFile(
 
     // store path
     const path_hash = hash.hashBuffer(path);
-    const path_set_cursor = try moment.put(hash.hashBuffer("path-set"));
+    const path_set_cursor = try moment.putCursor(hash.hashBuffer("path-set"));
     const path_set = try rp.Repo(.xit).DB.HashMap(.read_write).init(path_set_cursor);
-    var path_cursor = try path_set.putKey(path_hash);
-    try path_cursor.writeDataIfEmpty(.{ .bytes = path });
+    var path_cursor = try path_set.putKeyCursor(path_hash);
+    try path_cursor.writeIfEmpty(.{ .bytes = path });
 
     // init parent->children node map
-    const path_to_parent_to_children_cursor = try branch.put(hash.hashBuffer("path->parent->children"));
+    const path_to_parent_to_children_cursor = try branch.putCursor(hash.hashBuffer("path->parent->children"));
     const path_to_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_write).init(path_to_parent_to_children_cursor);
-    try path_to_parent_to_children.putKeyData(path_hash, .{ .slot = path_cursor.slot() });
-    const parent_to_children_cursor = try path_to_parent_to_children.put(path_hash);
+    try path_to_parent_to_children.putKey(path_hash, .{ .slot = path_cursor.slot() });
+    const parent_to_children_cursor = try path_to_parent_to_children.putCursor(path_hash);
     const parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_write).init(parent_to_children_cursor);
 
     // init child->parent node map
-    const path_to_child_to_parent_cursor = try branch.put(hash.hashBuffer("path->child->parent"));
+    const path_to_child_to_parent_cursor = try branch.putCursor(hash.hashBuffer("path->child->parent"));
     const path_to_child_to_parent = try rp.Repo(.xit).DB.HashMap(.read_write).init(path_to_child_to_parent_cursor);
-    try path_to_child_to_parent.putKeyData(path_hash, .{ .slot = path_cursor.slot() });
-    const child_to_parent_cursor = try path_to_child_to_parent.put(path_hash);
+    try path_to_child_to_parent.putKey(path_hash, .{ .slot = path_cursor.slot() });
+    const child_to_parent_cursor = try path_to_child_to_parent.putCursor(path_hash);
     const child_to_parent = try rp.Repo(.xit).DB.HashMap(.read_write).init(child_to_parent_cursor);
 
     var iter = try change_list_cursor.iterator();
@@ -261,12 +261,12 @@ fn applyPatchForFile(
                 const parent_node_id_hash = hash.hashBuffer(&parent_node_id_bytes);
 
                 // if child has an existing parent, remove it
-                if (try child_to_parent.get(node_id_hash)) |*existing_parent_cursor| {
+                if (try child_to_parent.getCursor(node_id_hash)) |*existing_parent_cursor| {
                     const existing_parent_node_id_bytes = try existing_parent_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
                     defer allocator.free(existing_parent_node_id_bytes);
 
                     const existing_parent_node_id_hash = hash.hashBuffer(existing_parent_node_id_bytes);
-                    var old_children_cursor = try parent_to_children.put(existing_parent_node_id_hash);
+                    var old_children_cursor = try parent_to_children.putCursor(existing_parent_node_id_hash);
                     const old_children = try old_children_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
                     defer allocator.free(old_children);
 
@@ -292,13 +292,13 @@ fn applyPatchForFile(
                                 try new_children.appendSlice(child_node_id_bytes);
                             }
                         }
-                        try old_children_cursor.writeData(.{ .bytes = new_children.items });
+                        try old_children_cursor.write(.{ .bytes = new_children.items });
                     }
                 }
 
                 // add child to the new parent
                 {
-                    var children_cursor = try parent_to_children.put(parent_node_id_hash);
+                    var children_cursor = try parent_to_children.putCursor(parent_node_id_hash);
                     const children = try children_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
                     defer allocator.free(children);
 
@@ -306,7 +306,7 @@ fn applyPatchForFile(
                     const child_count = children.len / NODE_ID_SIZE;
 
                     if (child_count == 0) {
-                        try children_cursor.writeData(.{ .bytes = &node_id_bytes });
+                        try children_cursor.write(.{ .bytes = &node_id_bytes });
                     } else {
                         var new_children = std.ArrayList(u8).init(allocator);
                         defer new_children.deinit();
@@ -318,18 +318,18 @@ fn applyPatchForFile(
                             }
                         }
                         try new_children.appendSlice(&node_id_bytes);
-                        try children_cursor.writeData(.{ .bytes = new_children.items });
+                        try children_cursor.write(.{ .bytes = new_children.items });
                     }
                 }
 
-                try child_to_parent.putData(node_id_hash, .{ .bytes = &parent_node_id_bytes });
+                try child_to_parent.put(node_id_hash, .{ .bytes = &parent_node_id_bytes });
             },
             .delete_node => {
                 const node_id_int = try reader.readInt(NodeIdInt, .big);
                 const node_id_bytes = try hash.numToBytes(NodeIdInt, node_id_int);
                 const node_id_hash = hash.hashBuffer(&node_id_bytes);
 
-                var parent_cursor = (try child_to_parent.get(node_id_hash)) orelse return error.ExpectedParentNode;
+                var parent_cursor = (try child_to_parent.getCursor(node_id_hash)) orelse return error.ExpectedParentNode;
 
                 const parent_node_id_bytes = try parent_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
                 defer allocator.free(parent_node_id_bytes);
@@ -337,7 +337,7 @@ fn applyPatchForFile(
 
                 // remove child from its parent
                 {
-                    var children_cursor = try parent_to_children.put(parent_node_id_hash);
+                    var children_cursor = try parent_to_children.putCursor(parent_node_id_hash);
                     const children = try children_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
                     defer allocator.free(children);
 
@@ -363,7 +363,7 @@ fn applyPatchForFile(
                                 try new_children.appendSlice(child_node_id_bytes);
                             }
                         }
-                        try children_cursor.writeData(.{ .bytes = new_children.items });
+                        try children_cursor.write(.{ .bytes = new_children.items });
                     }
                 }
 
@@ -373,10 +373,10 @@ fn applyPatchForFile(
     }
 
     // init node list
-    const path_to_node_id_list_cursor = try branch.put(hash.hashBuffer("path->node-id-list"));
+    const path_to_node_id_list_cursor = try branch.putCursor(hash.hashBuffer("path->node-id-list"));
     const path_to_node_id_list = try rp.Repo(.xit).DB.HashMap(.read_write).init(path_to_node_id_list_cursor);
-    try path_to_node_id_list.putKeyData(path_hash, .{ .slot = path_cursor.slot() });
-    const node_id_list_cursor = try path_to_node_id_list.put(path_hash);
+    try path_to_node_id_list.putKey(path_hash, .{ .slot = path_cursor.slot() });
+    const node_id_list_cursor = try path_to_node_id_list.putCursor(path_hash);
     var node_id_list = try rp.Repo(.xit).DB.LinkedArrayList(.read_write).init(node_id_list_cursor);
 
     var current_node_id_int = FIRST_NODE_ID_INT;
@@ -386,7 +386,7 @@ fn applyPatchForFile(
         const current_node_id_bytes = try hash.numToBytes(NodeIdInt, current_node_id_int);
         const current_node_id_hash = hash.hashBuffer(&current_node_id_bytes);
 
-        if (try parent_to_children.get(current_node_id_hash)) |children_cursor| {
+        if (try parent_to_children.getCursor(current_node_id_hash)) |children_cursor| {
             const children = try children_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
             defer allocator.free(children);
 
@@ -395,7 +395,7 @@ fn applyPatchForFile(
 
             if (child_count == 1) {
                 if (current_index_maybe) |*current_index| {
-                    if (try node_id_list.get(current_index.*)) |existing_node_id_cursor| {
+                    if (try node_id_list.getCursor(current_index.*)) |existing_node_id_cursor| {
                         const existing_node_id = try existing_node_id_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
                         defer allocator.free(existing_node_id);
                         if (std.mem.eql(u8, existing_node_id, children)) {
@@ -404,8 +404,8 @@ fn applyPatchForFile(
                         } else {
                             // node id is different, so slice the list and begin appending the node ids from here
                             const new_node_id_list_cursor = try node_id_list.slice(0, current_index.*);
-                            try path_to_node_id_list.putData(path_hash, .{ .slot = new_node_id_list_cursor.slot() });
-                            node_id_list = try rp.Repo(.xit).DB.LinkedArrayList(.read_write).init(try path_to_node_id_list.put(path_hash));
+                            try path_to_node_id_list.put(path_hash, .{ .slot = new_node_id_list_cursor.slot() });
+                            node_id_list = try rp.Repo(.xit).DB.LinkedArrayList(.read_write).init(try path_to_node_id_list.putCursor(path_hash));
                             current_index_maybe = null;
                         }
                     } else {
@@ -415,7 +415,7 @@ fn applyPatchForFile(
                 }
 
                 if (current_index_maybe == null) {
-                    try node_id_list.appendData(.{ .bytes = children });
+                    try node_id_list.append(.{ .bytes = children });
                 }
 
                 var stream = std.io.fixedBufferStream(children);
@@ -453,15 +453,15 @@ fn removePatch(branch: *rp.Repo(.xit).DB.HashMap(.read_write), path: []const u8)
         .{ .hash_map_get = .{ .value = hash.hashBuffer("path->node-id-list") } },
         .{ .hash_map_get = .{ .key = path_hash } },
     })) |_| {
-        const path_to_parent_to_children_cursor = try branch.put(hash.hashBuffer("path->parent->children"));
+        const path_to_parent_to_children_cursor = try branch.putCursor(hash.hashBuffer("path->parent->children"));
         const path_to_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_write).init(path_to_parent_to_children_cursor);
         try path_to_parent_to_children.remove(path_hash);
 
-        const path_to_child_to_parent_cursor = try branch.put(hash.hashBuffer("path->child->parent"));
+        const path_to_child_to_parent_cursor = try branch.putCursor(hash.hashBuffer("path->child->parent"));
         const path_to_child_to_parent = try rp.Repo(.xit).DB.HashMap(.read_write).init(path_to_child_to_parent_cursor);
         try path_to_child_to_parent.remove(path_hash);
 
-        const path_to_node_id_list_cursor = try branch.put(hash.hashBuffer("path->node-id-list"));
+        const path_to_node_id_list_cursor = try branch.putCursor(hash.hashBuffer("path->node-id-list"));
         const path_to_node_id_list = try rp.Repo(.xit).DB.HashMap(.read_write).init(path_to_node_id_list_cursor);
         try path_to_node_id_list.remove(path_hash);
     }
@@ -475,16 +475,16 @@ pub fn writePatch(state: rp.Repo(.xit).State(.read_write), allocator: std.mem.Al
     const branch_name_hash = hash.hashBuffer(current_branch_name);
 
     // store branch name
-    const ref_name_set_cursor = try state.extra.moment.put(hash.hashBuffer("ref-name-set"));
+    const ref_name_set_cursor = try state.extra.moment.putCursor(hash.hashBuffer("ref-name-set"));
     const ref_name_set = try rp.Repo(.xit).DB.HashMap(.read_write).init(ref_name_set_cursor);
-    var branch_name_cursor = try ref_name_set.putKey(branch_name_hash);
-    try branch_name_cursor.writeDataIfEmpty(.{ .bytes = current_branch_name });
+    var branch_name_cursor = try ref_name_set.putKeyCursor(branch_name_hash);
+    try branch_name_cursor.writeIfEmpty(.{ .bytes = current_branch_name });
 
     // init branch map
-    const branches_cursor = try state.extra.moment.put(hash.hashBuffer("branches"));
+    const branches_cursor = try state.extra.moment.putCursor(hash.hashBuffer("branches"));
     const branches = try rp.Repo(.xit).DB.HashMap(.read_write).init(branches_cursor);
-    try branches.putKeyData(branch_name_hash, .{ .slot = branch_name_cursor.slot() });
-    const branch_cursor = try branches.put(branch_name_hash);
+    try branches.putKey(branch_name_hash, .{ .slot = branch_name_cursor.slot() });
+    const branch_cursor = try branches.putCursor(branch_name_hash);
     var branch = try rp.Repo(.xit).DB.HashMap(.read_write).init(branch_cursor);
 
     // init file iterator for index diff
