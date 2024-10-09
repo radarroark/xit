@@ -65,7 +65,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
         pub fn init(allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State(.read_only)) !Index(repo_kind) {
             const arena = try allocator.create(std.heap.ArenaAllocator);
             arena.* = std.heap.ArenaAllocator.init(allocator);
-            var index = Index(repo_kind){
+            var self = Index(repo_kind){
                 .version = 2,
                 .entries = std.StringArrayHashMap([4]?Entry).init(allocator),
                 .dir_to_paths = std.StringArrayHashMap(std.StringArrayHashMap(void)).init(allocator),
@@ -74,13 +74,13 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                 .allocator = allocator,
                 .arena = arena,
             };
-            errdefer index.deinit();
+            errdefer self.deinit();
 
             switch (repo_kind) {
                 .git => {
                     // open index
                     const index_file = state.core.git_dir.openFile("index", .{ .mode = .read_only }) catch |err| switch (err) {
-                        error.FileNotFound => return index,
+                        error.FileNotFound => return self,
                         else => return err,
                     };
                     defer index_file.close();
@@ -93,8 +93,8 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     }
 
                     // ignoring version 3 and 4 for now
-                    index.version = try reader.readInt(u32, .big);
-                    if (index.version != 2) {
+                    self.version = try reader.readInt(u32, .big);
+                    if (self.version != 2) {
                         return error.InvalidVersion;
                     }
 
@@ -117,7 +117,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                             .oid = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN),
                             .flags = @bitCast(try reader.readInt(u16, .big)),
                             .extended_flags = null, // TODO: read this if necessary
-                            .path = try reader.readUntilDelimiterAlloc(index.arena.allocator(), 0, std.fs.MAX_PATH_BYTES),
+                            .path = try reader.readUntilDelimiterAlloc(self.arena.allocator(), 0, std.fs.MAX_PATH_BYTES),
                         };
                         if (entry.mode.unix_permission != 0o755) { // ensure mode is valid
                             entry.mode.unix_permission = 0o644;
@@ -132,7 +132,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                 return error.InvalidNullPadding;
                             }
                         }
-                        try index.addEntry(entry);
+                        try self.addEntry(entry);
                     }
 
                     // TODO: check the checksum
@@ -142,14 +142,14 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     _ = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
                 },
                 .xit => {
-                    if (try state.extra.moment.get(hash.hashBuffer("index"))) |index_cursor| {
+                    if (try state.extra.moment.getCursor(hash.hashBuffer("index"))) |index_cursor| {
                         var iter = try index_cursor.iterator();
                         defer iter.deinit();
                         while (try iter.next()) |*next_cursor| {
                             const kv_pair = try next_cursor.readKeyValuePair();
-                            const path = try kv_pair.key_cursor.readBytesAlloc(index.arena.allocator(), MAX_READ_BYTES);
-                            const buffer = try kv_pair.value_cursor.readBytesAlloc(index.allocator, MAX_READ_BYTES);
-                            defer index.allocator.free(buffer);
+                            const path = try kv_pair.key_cursor.readBytesAlloc(self.arena.allocator(), MAX_READ_BYTES);
+                            const buffer = try kv_pair.value_cursor.readBytesAlloc(self.allocator, MAX_READ_BYTES);
+                            defer self.allocator.free(buffer);
 
                             var stream = std.io.fixedBufferStream(buffer);
                             var reader = stream.reader();
@@ -176,14 +176,14 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                 if (entry.path.len != entry.flags.name_length) {
                                     return error.InvalidPathSize;
                                 }
-                                try index.addEntry(entry);
+                                try self.addEntry(entry);
                             }
                         }
                     }
                 },
             }
 
-            return index;
+            return self;
         }
 
         pub fn deinit(self: *Index(repo_kind)) void {
