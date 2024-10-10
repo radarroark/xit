@@ -403,9 +403,7 @@ fn applyPatchForFile(
                             current_index.* += 1;
                         } else {
                             // node id is different, so slice the list and begin appending the node ids from here
-                            const new_node_id_list_cursor = try node_id_list.slice(0, current_index.*);
-                            try path_to_node_id_list.put(path_hash, .{ .slot = new_node_id_list_cursor.slot() });
-                            node_id_list = try rp.Repo(.xit).DB.LinkedArrayList(.read_write).init(try path_to_node_id_list.putCursor(path_hash));
+                            try node_id_list.slice(0, current_index.*);
                             current_index_maybe = null;
                         }
                     } else {
@@ -440,8 +438,7 @@ fn applyPatchForFile(
     // of the file. we just need to slice the node id list in that case.
     if (current_index_maybe) |current_index| {
         if (current_index < try node_id_list.count()) {
-            const new_node_id_list_cursor = try node_id_list.slice(0, current_index);
-            try path_to_node_id_list.put(path_hash, .{ .slot = new_node_id_list_cursor.slot() });
+            try node_id_list.slice(0, current_index);
         }
     }
 }
