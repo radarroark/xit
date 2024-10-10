@@ -315,7 +315,7 @@ pub const CommitMetadata = struct {
     message: []const u8 = "",
 };
 
-fn createCommitContents(allocator: std.mem.Allocator, tree_sha1_hex: [hash.SHA1_HEX_LEN]u8, parent_oids: []const [hash.SHA1_HEX_LEN]u8, metadata: CommitMetadata) ![]const u8 {
+fn createCommitContents(allocator: std.mem.Allocator, tree_sha1_hex: *const [hash.SHA1_HEX_LEN]u8, parent_oids: []const [hash.SHA1_HEX_LEN]u8, metadata: CommitMetadata) ![]const u8 {
     var metadata_lines = std.ArrayList([]const u8).init(allocator);
     defer {
         for (metadata_lines.items) |line| {
@@ -324,7 +324,7 @@ fn createCommitContents(allocator: std.mem.Allocator, tree_sha1_hex: [hash.SHA1_
         metadata_lines.deinit();
     }
 
-    try metadata_lines.append(try std.fmt.allocPrint(allocator, "tree {s}", .{tree_sha1_hex}));
+    try metadata_lines.append(try std.fmt.allocPrint(allocator, "tree {s}", .{tree_sha1_hex.*}));
 
     for (parent_oids) |parent_oid| {
         try metadata_lines.append(try std.fmt.allocPrint(allocator, "parent {s}", .{parent_oid}));
@@ -374,7 +374,7 @@ pub fn writeCommit(
             const tree_sha1_hex = std.fmt.bytesToHex(tree_sha1_bytes_buffer, .lower);
 
             // create commit contents
-            const commit_contents = try createCommitContents(allocator, tree_sha1_hex, parent_oids, metadata);
+            const commit_contents = try createCommitContents(allocator, &tree_sha1_hex, parent_oids, metadata);
             defer allocator.free(commit_contents);
 
             // create commit
@@ -431,7 +431,7 @@ pub fn writeCommit(
             const tree_sha1_hex = std.fmt.bytesToHex(tree_sha1_bytes_buffer, .lower);
 
             // create commit contents
-            const commit_contents = try createCommitContents(allocator, tree_sha1_hex, parent_oids, metadata);
+            const commit_contents = try createCommitContents(allocator, &tree_sha1_hex, parent_oids, metadata);
             defer allocator.free(commit_contents);
 
             // create commit
@@ -539,7 +539,7 @@ pub fn TreeDiff(comptime repo_kind: rp.RepoKind) type {
 
         fn loadTree(self: *TreeDiff(repo_kind), state: rp.Repo(repo_kind).State(.read_only), oid_maybe: ?[hash.SHA1_HEX_LEN]u8) !std.StringArrayHashMap(TreeEntry) {
             if (oid_maybe) |oid| {
-                const obj = try Object(repo_kind, .full).init(self.arena.allocator(), state, oid);
+                const obj = try Object(repo_kind, .full).init(self.arena.allocator(), state, &oid);
                 return switch (obj.content) {
                     .blob => std.StringArrayHashMap(TreeEntry).init(self.arena.allocator()),
                     .tree => |tree| tree.entries,
@@ -594,7 +594,7 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
             .xit => rp.Repo(repo_kind).DB.Cursor(.read_only).Reader,
         };
 
-        pub fn init(allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State(.read_only), oid: [hash.SHA1_HEX_LEN]u8) !@This() {
+        pub fn init(allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State(.read_only), oid: *const [hash.SHA1_HEX_LEN]u8) !@This() {
             switch (repo_kind) {
                 .git => {
                     const reader = try pack.LooseOrPackObjectReader.init(allocator, state.core, oid);
@@ -608,7 +608,7 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
                 .xit => {
                     if (try state.extra.moment.cursor.readPath(void, &.{
                         .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
-                        .{ .hash_map_get = .{ .value = try hash.hexToHash(&oid) } },
+                        .{ .hash_map_get = .{ .value = try hash.hexToHash(oid) } },
                     })) |cursor| {
                         // put cursor on the heap so the pointer is stable (the reader uses it internally)
                         const cursor_ptr = try allocator.create(rp.Repo(repo_kind).DB.Cursor(.read_only));
@@ -716,7 +716,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime load_kind: ObjectLoadKin
         len: u64,
         object_reader: ObjectReader(repo_kind),
 
-        pub fn init(allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State(.read_only), oid: [hash.SHA1_HEX_LEN]u8) !Object(repo_kind, load_kind) {
+        pub fn init(allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State(.read_only), oid: *const [hash.SHA1_HEX_LEN]u8) !Object(repo_kind, load_kind) {
             var obj_rdr = try ObjectReader(repo_kind).init(allocator, state, oid);
             errdefer obj_rdr.deinit();
 
@@ -735,7 +735,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime load_kind: ObjectLoadKin
                         .raw => .blob,
                         .full => .{ .blob = {} },
                     },
-                    .oid = oid,
+                    .oid = oid.*,
                     .len = obj_rdr.header.size,
                     .object_reader = obj_rdr,
                 },
@@ -745,7 +745,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime load_kind: ObjectLoadKin
                             .allocator = allocator,
                             .arena = arena,
                             .content = .tree,
-                            .oid = oid,
+                            .oid = oid.*,
                             .len = obj_rdr.header.size,
                             .object_reader = obj_rdr,
                         },
@@ -768,7 +768,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime load_kind: ObjectLoadKin
                                 .allocator = allocator,
                                 .arena = arena,
                                 .content = ObjectContent{ .tree = .{ .entries = entries } },
-                                .oid = oid,
+                                .oid = oid.*,
                                 .len = obj_rdr.header.size,
                                 .object_reader = obj_rdr,
                             };
@@ -781,7 +781,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime load_kind: ObjectLoadKin
                             .allocator = allocator,
                             .arena = arena,
                             .content = .commit,
-                            .oid = oid,
+                            .oid = oid.*,
                             .len = obj_rdr.header.size,
                             .object_reader = obj_rdr,
                         },
@@ -842,7 +842,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime load_kind: ObjectLoadKin
                                 .allocator = allocator,
                                 .arena = arena,
                                 .content = content,
-                                .oid = oid,
+                                .oid = oid.*,
                                 .len = obj_rdr.header.size,
                                 .object_reader = obj_rdr,
                             };
@@ -917,17 +917,17 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime load_kind: Objec
                     try self.oid_excludes.put(next_oid, {});
                     switch (load_kind) {
                         .raw => {
-                            var object = try Object(repo_kind, .full).init(self.allocator, state, next_oid);
+                            var object = try Object(repo_kind, .full).init(self.allocator, state, &next_oid);
                             defer object.deinit();
                             try self.addToQueue(object.content);
 
-                            var raw_object = try Object(repo_kind, .raw).init(self.allocator, state, next_oid);
+                            var raw_object = try Object(repo_kind, .raw).init(self.allocator, state, &next_oid);
                             errdefer raw_object.deinit();
                             self.object = raw_object;
                             return &self.object;
                         },
                         .full => {
-                            var object = try Object(repo_kind, .full).init(self.allocator, state, next_oid);
+                            var object = try Object(repo_kind, .full).init(self.allocator, state, &next_oid);
                             errdefer object.deinit();
                             try self.addToQueue(object.content);
                             self.object = object;
@@ -974,8 +974,8 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime load_kind: Objec
             }
         }
 
-        pub fn exclude(self: *ObjectIterator(repo_kind, load_kind), oid: [hash.SHA1_HEX_LEN]u8) !void {
-            try self.oid_excludes.put(oid, {});
+        pub fn exclude(self: *ObjectIterator(repo_kind, load_kind), oid: *const [hash.SHA1_HEX_LEN]u8) !void {
+            try self.oid_excludes.put(oid.*, {});
 
             const state = .{ .core = self.core, .extra = .{ .moment = &self.moment } };
             var object = try Object(repo_kind, .full).init(self.allocator, state, oid);
@@ -985,7 +985,7 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime load_kind: Objec
                 .tree => |tree| {
                     if (self.options.recursive) {
                         for (tree.entries.values()) |entry| {
-                            try self.exclude(std.fmt.bytesToHex(entry.oid, .lower));
+                            try self.exclude(&std.fmt.bytesToHex(entry.oid, .lower));
                         }
                     }
                 },
@@ -994,7 +994,7 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime load_kind: Objec
                         try self.oid_excludes.put(parent_oid, {});
                     }
                     if (self.options.recursive) {
-                        try self.exclude(commit.tree);
+                        try self.exclude(&commit.tree);
                     }
                 },
             }

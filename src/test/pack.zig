@@ -200,7 +200,7 @@ test "pack" {
         var r = try rp.Repo(.git).init(allocator, .{ .cwd = repo_dir });
         defer r.deinit();
 
-        var object = try obj.Object(.git, .full).init(allocator, .{ .core = &r.core, .extra = .{} }, commit_oid_hex);
+        var object = try obj.Object(.git, .full).init(allocator, .{ .core = &r.core, .extra = .{} }, &commit_oid_hex);
         defer object.deinit();
         try std.testing.expectEqualStrings(message, object.content.commit.metadata.message);
     }
@@ -237,7 +237,7 @@ test "pack" {
             var commit_oid_hex = [_]u8{0} ** hash.SHA1_HEX_LEN;
             try std.testing.expectEqual(0, c.git_oid_fmt(@ptrCast(&commit_oid_hex), commit_oid));
 
-            var pack_reader = try pack.PackObjectReader.initWithPath(allocator, pack_file_path, commit_oid_hex);
+            var pack_reader = try pack.PackObjectReader.initWithPath(allocator, pack_file_path, &commit_oid_hex);
             defer pack_reader.deinit();
         }
     }

@@ -98,8 +98,8 @@ const PackOffset = struct {
     value: u64,
 };
 
-fn searchPackIndexes(pack_dir: std.fs.Dir, oid_hex: [hash.SHA1_HEX_LEN]u8) !PackOffset {
-    const oid_bytes = try hash.hexToBytes(oid_hex);
+fn searchPackIndexes(pack_dir: std.fs.Dir, oid_hex: *const [hash.SHA1_HEX_LEN]u8) !PackOffset {
+    const oid_bytes = try hash.hexToBytes(oid_hex.*);
 
     const prefix = "pack-";
     const suffix = ".idx";
@@ -194,7 +194,7 @@ pub const PackObjectReader = struct {
 
     pub const Error = compress.ZlibStream.Reader.Error || error{ Unseekable, UnexpectedEndOfStream, InvalidDeltaCache };
 
-    pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(.git).Core, oid_hex: [hash.SHA1_HEX_LEN]u8) !PackObjectReader {
+    pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(.git).Core, oid_hex: *const [hash.SHA1_HEX_LEN]u8) !PackObjectReader {
         var pack_reader = try PackObjectReader.initWithIndex(allocator, core, oid_hex);
 
         // make a list of the chain of deltified objects,
@@ -225,7 +225,7 @@ pub const PackObjectReader = struct {
         return pack_reader;
     }
 
-    pub fn initWithPath(allocator: std.mem.Allocator, pack_file_path: []const u8, oid_hex: [hash.SHA1_HEX_LEN]u8) !PackObjectReader {
+    pub fn initWithPath(allocator: std.mem.Allocator, pack_file_path: []const u8, oid_hex: *const [hash.SHA1_HEX_LEN]u8) !PackObjectReader {
         var pack_file = try std.fs.openFileAbsolute(pack_file_path, .{ .mode = .read_only });
         defer pack_file.close();
         const reader = pack_file.reader();
@@ -259,7 +259,7 @@ pub const PackObjectReader = struct {
             var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
             try hash.sha1Reader(&pack_reader, header_str, &oid);
 
-            if (std.mem.eql(u8, &oid_hex, &std.fmt.bytesToHex(oid, .lower))) {
+            if (std.mem.eql(u8, oid_hex, &std.fmt.bytesToHex(oid, .lower))) {
                 return try PackObjectReader.initAtPosition(allocator, pack_file_path, start_position);
             }
 
@@ -272,7 +272,7 @@ pub const PackObjectReader = struct {
         return error.ObjectNotFound;
     }
 
-    fn initWithIndex(allocator: std.mem.Allocator, core: *rp.Repo(.git).Core, oid_hex: [hash.SHA1_HEX_LEN]u8) !PackObjectReader {
+    fn initWithIndex(allocator: std.mem.Allocator, core: *rp.Repo(.git).Core, oid_hex: *const [hash.SHA1_HEX_LEN]u8) !PackObjectReader {
         var pack_dir = try core.git_dir.openDir("objects/pack", .{ .iterate = true });
         defer pack_dir.close();
 
@@ -449,7 +449,7 @@ pub const PackObjectReader = struct {
         errdefer allocator.destroy(base_reader);
         base_reader.* = switch (self.internal.delta.init) {
             .ofs => |ofs| try PackObjectReader.initAtPosition(allocator, ofs.pack_file_path, ofs.position),
-            .ref => |ref| try PackObjectReader.initWithIndex(allocator, core, ref.oid_hex),
+            .ref => |ref| try PackObjectReader.initWithIndex(allocator, core, &ref.oid_hex),
         };
         errdefer base_reader.deinit();
 
@@ -804,7 +804,7 @@ pub const LooseOrPackObjectReader = union(enum) {
 
     pub const Error = PackObjectReader.Error;
 
-    pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(.git).Core, oid_hex: [hash.SHA1_HEX_LEN]u8) !LooseOrPackObjectReader {
+    pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(.git).Core, oid_hex: *const [hash.SHA1_HEX_LEN]u8) !LooseOrPackObjectReader {
         // open the objects dir
         var objects_dir = try core.git_dir.openDir("objects", .{});
         defer objects_dir.close();

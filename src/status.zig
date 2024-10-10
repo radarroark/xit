@@ -261,9 +261,9 @@ pub fn HeadTree(comptime repo_kind: rp.RepoKind) type {
 
             // if head points to a valid object, read it
             if (try ref.readHeadMaybe(repo_kind, state)) |head_file_buffer| {
-                var commit_object = try obj.Object(repo_kind, .full).init(allocator, state, head_file_buffer);
+                var commit_object = try obj.Object(repo_kind, .full).init(allocator, state, &head_file_buffer);
                 defer commit_object.deinit();
-                try tree.read(state, "", commit_object.content.commit.tree);
+                try tree.read(state, "", &commit_object.content.commit.tree);
             }
 
             return tree;
@@ -275,7 +275,7 @@ pub fn HeadTree(comptime repo_kind: rp.RepoKind) type {
             self.allocator.destroy(self.arena);
         }
 
-        fn read(self: *HeadTree(repo_kind), state: rp.Repo(repo_kind).State(.read_only), prefix: []const u8, oid: [hash.SHA1_HEX_LEN]u8) !void {
+        fn read(self: *HeadTree(repo_kind), state: rp.Repo(repo_kind).State(.read_only), prefix: []const u8, oid: *const [hash.SHA1_HEX_LEN]u8) !void {
             const object = try obj.Object(repo_kind, .full).init(self.arena.allocator(), state, oid);
 
             switch (object.content) {
@@ -287,7 +287,7 @@ pub fn HeadTree(comptime repo_kind: rp.RepoKind) type {
                         const path = try io.joinPath(self.arena.allocator(), &.{ prefix, name });
                         if (obj.isTree(entry.value_ptr.*)) {
                             const oid_hex = std.fmt.bytesToHex(entry.value_ptr.*.oid[0..hash.SHA1_BYTES_LEN], .lower);
-                            try self.read(state, path, oid_hex);
+                            try self.read(state, path, &oid_hex);
                         } else {
                             try self.entries.put(path, entry.value_ptr.*);
                         }
