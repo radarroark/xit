@@ -11,7 +11,7 @@ fn findOid(idx_file: std.fs.File, oid_list_pos: u64, index: usize) ![hash.SHA1_B
     return try reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
 }
 
-fn findObjectIndex(idx_file: std.fs.File, fanout_table: [256]u32, oid_list_pos: u64, oid_bytes: [hash.SHA1_BYTES_LEN]u8) !?usize {
+fn findObjectIndex(idx_file: std.fs.File, fanout_table: [256]u32, oid_list_pos: u64, oid_bytes: *const [hash.SHA1_BYTES_LEN]u8) !?usize {
     var left: u32 = 0;
     var right = fanout_table[oid_bytes[0]];
 
@@ -19,9 +19,9 @@ fn findObjectIndex(idx_file: std.fs.File, fanout_table: [256]u32, oid_list_pos: 
     while (left < right) {
         const mid = left + ((right - left) / 2);
         const mid_oid_bytes = try findOid(idx_file, oid_list_pos, mid);
-        if (std.mem.eql(u8, &oid_bytes, &mid_oid_bytes)) {
+        if (std.mem.eql(u8, oid_bytes, &mid_oid_bytes)) {
             return mid;
-        } else if (std.mem.lessThan(u8, &oid_bytes, &mid_oid_bytes)) {
+        } else if (std.mem.lessThan(u8, oid_bytes, &mid_oid_bytes)) {
             if (mid == 0) {
                 break;
             } else {
@@ -37,7 +37,7 @@ fn findObjectIndex(idx_file: std.fs.File, fanout_table: [256]u32, oid_list_pos: 
     }
 
     const right_oid_bytes = try findOid(idx_file, oid_list_pos, right);
-    if (std.mem.eql(u8, &oid_bytes, &right_oid_bytes)) {
+    if (std.mem.eql(u8, oid_bytes, &right_oid_bytes)) {
         return right;
     }
 
@@ -71,7 +71,7 @@ fn findOffset(idx_file: std.fs.File, fanout_table: [256]u32, oid_list_pos: u64, 
     return try reader.readInt(u64, .big);
 }
 
-fn searchPackIndex(idx_file: std.fs.File, oid_bytes: [hash.SHA1_BYTES_LEN]u8) !?u64 {
+fn searchPackIndex(idx_file: std.fs.File, oid_bytes: *const [hash.SHA1_BYTES_LEN]u8) !?u64 {
     const reader = idx_file.reader();
 
     const header = try reader.readBytesNoEof(4);
@@ -115,7 +115,7 @@ fn searchPackIndexes(pack_dir: std.fs.Dir, oid_hex: *const [hash.SHA1_HEX_LEN]u8
                         var idx_file = try pack_dir.openFile(entry.name, .{ .mode = .read_only });
                         defer idx_file.close();
 
-                        if (try searchPackIndex(idx_file, oid_bytes)) |offset| {
+                        if (try searchPackIndex(idx_file, &oid_bytes)) |offset| {
                             return .{
                                 .pack_id = pack_id[0..hash.SHA1_HEX_LEN].*,
                                 .value = offset,
