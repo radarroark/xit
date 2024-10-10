@@ -377,7 +377,7 @@ fn applyPatchForFile(
     const path_to_node_id_list = try rp.Repo(.xit).DB.HashMap(.read_write).init(path_to_node_id_list_cursor);
     try path_to_node_id_list.putKey(path_hash, .{ .slot = path_cursor.slot() });
     const node_id_list_cursor = try path_to_node_id_list.putCursor(path_hash);
-    var node_id_list = try rp.Repo(.xit).DB.LinkedArrayList(.read_write).init(node_id_list_cursor);
+    const node_id_list = try rp.Repo(.xit).DB.LinkedArrayList(.read_write).init(node_id_list_cursor);
 
     var current_node_id_int = FIRST_NODE_ID_INT;
     var current_index_maybe: ?usize = 0;
