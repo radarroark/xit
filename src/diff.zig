@@ -37,7 +37,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
 
         pub fn initFromIndex(state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator, entry: idx.Index(repo_kind).Entry) !LineIterator(repo_kind) {
             const oid_hex = std.fmt.bytesToHex(&entry.oid, .lower);
-            var object_reader = try obj.ObjectReader(repo_kind).init(allocator, state, oid_hex);
+            var object_reader = try obj.ObjectReader(repo_kind).init(allocator, state, &oid_hex);
             errdefer object_reader.deinit();
             var iter = LineIterator(repo_kind){
                 .allocator = allocator,
@@ -102,7 +102,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
 
         pub fn initFromHead(state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator, path: []const u8, entry: obj.TreeEntry) !LineIterator(repo_kind) {
             const oid_hex = std.fmt.bytesToHex(&entry.oid, .lower);
-            var object_reader = try obj.ObjectReader(repo_kind).init(allocator, state, oid_hex);
+            var object_reader = try obj.ObjectReader(repo_kind).init(allocator, state, &oid_hex);
             errdefer object_reader.deinit();
             var iter = LineIterator(repo_kind){
                 .allocator = allocator,
@@ -122,14 +122,14 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
             return iter;
         }
 
-        pub fn initFromOid(state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator, path: []const u8, oid: [hash.SHA1_BYTES_LEN]u8, mode_maybe: ?io.Mode) !LineIterator(repo_kind) {
-            const oid_hex = std.fmt.bytesToHex(&oid, .lower);
-            var object_reader = try obj.ObjectReader(repo_kind).init(allocator, state, oid_hex);
+        pub fn initFromOid(state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator, path: []const u8, oid: *const [hash.SHA1_BYTES_LEN]u8, mode_maybe: ?io.Mode) !LineIterator(repo_kind) {
+            const oid_hex = std.fmt.bytesToHex(oid, .lower);
+            var object_reader = try obj.ObjectReader(repo_kind).init(allocator, state, &oid_hex);
             errdefer object_reader.deinit();
             var iter = LineIterator(repo_kind){
                 .allocator = allocator,
                 .path = path,
-                .oid = oid,
+                .oid = oid.*,
                 .oid_hex = oid_hex,
                 .mode = mode_maybe,
                 .line_offsets = undefined,
@@ -1407,12 +1407,12 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
                         const path = tree.tree_diff.changes.keys()[next_index];
                         const change = tree.tree_diff.changes.values()[next_index];
                         var a = if (change.old) |old|
-                            try LineIterator(repo_kind).initFromOid(state, self.allocator, path, old.oid, old.mode)
+                            try LineIterator(repo_kind).initFromOid(state, self.allocator, path, &old.oid, old.mode)
                         else
                             try LineIterator(repo_kind).initFromNothing(self.allocator, path);
                         errdefer a.deinit();
                         var b = if (change.new) |new|
-                            try LineIterator(repo_kind).initFromOid(state, self.allocator, path, new.oid, new.mode)
+                            try LineIterator(repo_kind).initFromOid(state, self.allocator, path, &new.oid, new.mode)
                         else
                             try LineIterator(repo_kind).initFromNothing(self.allocator, path);
                         errdefer b.deinit();

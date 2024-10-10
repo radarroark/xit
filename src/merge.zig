@@ -29,7 +29,7 @@ fn getDescendent(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
     var queue = std.DoublyLinkedList(Parent){};
 
     {
-        const object = try obj.Object(repo_kind, .full).init(arena.allocator(), state, oid1.*);
+        const object = try obj.Object(repo_kind, .full).init(arena.allocator(), state, oid1);
         for (object.content.commit.parents.items) |parent_oid| {
             var node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
             node.data = .{ .oid = parent_oid, .kind = .one };
@@ -38,7 +38,7 @@ fn getDescendent(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
     }
 
     {
-        const object = try obj.Object(repo_kind, .full).init(arena.allocator(), state, oid2.*);
+        const object = try obj.Object(repo_kind, .full).init(arena.allocator(), state, oid2);
         for (object.content.commit.parents.items) |parent_oid| {
             var node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
             node.data = .{ .oid = parent_oid, .kind = .two };
@@ -66,7 +66,7 @@ fn getDescendent(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
 
         // TODO: instead of appending to the end, append it in descending order of timestamp
         // so we prioritize more recent commits and avoid wasteful traversal deep in the history.
-        const object = try obj.Object(repo_kind, .full).init(arena.allocator(), state, node.data.oid);
+        const object = try obj.Object(repo_kind, .full).init(arena.allocator(), state, &node.data.oid);
         for (object.content.commit.parents.items) |parent_oid| {
             var new_node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
             new_node.data = .{ .oid = parent_oid, .kind = node.data.kind };
@@ -141,7 +141,7 @@ pub fn commonAncestor(comptime repo_kind: rp.RepoKind, allocator: std.mem.Alloca
 
         // TODO: instead of appending to the end, append it in descending order of timestamp
         // so we prioritize more recent commits and avoid wasteful traversal deep in the history.
-        const object = try obj.Object(repo_kind, .full).init(arena.allocator(), state, node.data.oid);
+        const object = try obj.Object(repo_kind, .full).init(arena.allocator(), state, &node.data.oid);
         for (object.content.commit.parents.items) |parent_oid| {
             const is_stale = is_base_ancestor or stale_oids.contains(&parent_oid);
             var new_node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
@@ -193,9 +193,9 @@ fn writeBlobWithConflict(
     comptime repo_kind: rp.RepoKind,
     state: rp.Repo(repo_kind).State(.read_write),
     allocator: std.mem.Allocator,
-    base_oid_maybe: ?[hash.SHA1_BYTES_LEN]u8,
-    current_oid: [hash.SHA1_BYTES_LEN]u8,
-    source_oid: [hash.SHA1_BYTES_LEN]u8,
+    base_oid_maybe: ?*const [hash.SHA1_BYTES_LEN]u8,
+    current_oid: *const [hash.SHA1_BYTES_LEN]u8,
+    source_oid: *const [hash.SHA1_BYTES_LEN]u8,
     base_name: []const u8,
     current_name: []const u8,
     source_name: []const u8,
@@ -216,7 +216,7 @@ fn writeBlobWithConflict(
     // if any file is binary, just return the source oid because there is no point in trying to merge them
     if (base_iter.source == .binary or current_iter.source == .binary or source_iter.source == .binary) {
         has_conflict.* = true;
-        return source_oid;
+        return source_oid.*;
     }
 
     var diff3_iter = try df.Diff3Iterator(repo_kind).init(allocator, &base_iter, &current_iter, &source_iter);
@@ -528,8 +528,8 @@ fn samePathConflict(
 
                 var has_conflict = oid_maybe == null or mode_maybe == null;
 
-                const base_oid_maybe = if (base_entry_maybe) |base_entry| base_entry.oid else null;
-                const oid = oid_maybe orelse try writeBlobWithConflict(repo_kind, state, allocator, base_oid_maybe, current_entry.oid, source_entry.oid, base_name, current_name, source_name, &has_conflict);
+                const base_oid_maybe = if (base_entry_maybe) |base_entry| &base_entry.oid else null;
+                const oid = oid_maybe orelse try writeBlobWithConflict(repo_kind, state, allocator, base_oid_maybe, &current_entry.oid, &source_entry.oid, base_name, current_name, source_name, &has_conflict);
                 const mode = mode_maybe orelse current_entry.mode;
 
                 return .{
@@ -733,7 +733,7 @@ pub const Merge = struct {
                 switch (merge_kind) {
                     .merge => base_oid = try commonAncestor(repo_kind, allocator, state.readOnly(), &current_oid, &source_oid),
                     .cherry_pick => {
-                        var object = try obj.Object(repo_kind, .full).init(allocator, state.readOnly(), source_oid);
+                        var object = try obj.Object(repo_kind, .full).init(allocator, state.readOnly(), &source_oid);
                         defer object.deinit();
                         const parent_oid = if (object.content.commit.parents.items.len == 1) object.content.commit.parents.items[0] else return error.CommitMustHaveOneParent;
                         switch (object.content) {
@@ -796,7 +796,7 @@ pub const Merge = struct {
                         .message = try std.fmt.allocPrint(arena.allocator(), "merge from {s}", .{source_name}),
                     },
                     .cherry_pick => blk: {
-                        const object = try obj.Object(repo_kind, .full).init(arena.allocator(), state.readOnly(), source_oid);
+                        const object = try obj.Object(repo_kind, .full).init(arena.allocator(), state.readOnly(), &source_oid);
                         switch (object.content) {
                             .commit => break :blk object.content.commit.metadata,
                             else => return error.NotACommitObject,
@@ -992,7 +992,7 @@ pub const Merge = struct {
                 switch (merge_kind) {
                     .merge => base_oid = try commonAncestor(repo_kind, allocator, state.readOnly(), &current_oid, &source_oid),
                     .cherry_pick => {
-                        var object = try obj.Object(repo_kind, .full).init(allocator, state.readOnly(), source_oid);
+                        var object = try obj.Object(repo_kind, .full).init(allocator, state.readOnly(), &source_oid);
                         defer object.deinit();
                         const parent_oid = if (object.content.commit.parents.items.len == 1) object.content.commit.parents.items[0] else return error.CommitMustHaveOneParent;
                         switch (object.content) {

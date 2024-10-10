@@ -27,7 +27,7 @@ pub fn objectToFile(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).S
     switch (tree_entry.mode.object_type) {
         .regular_file => {
             // open the reader
-            var obj_rdr = try obj.ObjectReader(repo_kind).init(allocator, state, oid_hex);
+            var obj_rdr = try obj.ObjectReader(repo_kind).init(allocator, state, &oid_hex);
             defer obj_rdr.deinit();
 
             // create parent dir(s)
@@ -56,7 +56,7 @@ pub fn objectToFile(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).S
         },
         .tree => {
             // load the tree
-            var tree_object = try obj.Object(repo_kind, .full).init(allocator, state, oid_hex);
+            var tree_object = try obj.Object(repo_kind, .full).init(allocator, state, &oid_hex);
             defer tree_object.deinit();
 
             // update each entry recursively
@@ -80,7 +80,7 @@ fn pathToTreeEntry(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).St
     }
 
     const oid_hex = std.fmt.bytesToHex(tree_entry.oid, .lower);
-    var tree_object = try obj.Object(repo_kind, .full).init(allocator, state, oid_hex);
+    var tree_object = try obj.Object(repo_kind, .full).init(allocator, state, &oid_hex);
     defer tree_object.deinit();
 
     switch (tree_object.content) {
@@ -308,11 +308,11 @@ pub fn migrate(
 pub fn restore(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator, path: []const u8) !void {
     // get the current commit
     const current_oid = try ref.readHead(repo_kind, state);
-    var commit_object = try obj.Object(repo_kind, .full).init(allocator, state, current_oid);
+    var commit_object = try obj.Object(repo_kind, .full).init(allocator, state, &current_oid);
     defer commit_object.deinit();
 
     // get the tree of the current commit
-    var tree_object = try obj.Object(repo_kind, .full).init(allocator, state, commit_object.content.commit.tree);
+    var tree_object = try obj.Object(repo_kind, .full).init(allocator, state, &commit_object.content.commit.tree);
     defer tree_object.deinit();
 
     // get the entry for the given path
