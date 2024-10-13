@@ -14,8 +14,6 @@ const NodeId = packed struct {
     patch_id: hash.Hash,
 };
 
-const NODE_ID_SIZE = @bitSizeOf(NodeId) / 8;
-
 // reordering is a breaking change
 const ChangeKind = enum(u8) {
     new_edge,
@@ -267,63 +265,15 @@ fn applyPatchForFile(
                 if (try child_to_parent.getCursor(node_id_hash)) |*existing_parent_cursor| {
                     const existing_parent_node_id_bytes = try existing_parent_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
                     defer allocator.free(existing_parent_node_id_bytes);
-
-                    const existing_parent_node_id_hash = hash.hashBuffer(existing_parent_node_id_bytes);
-                    var old_children_cursor = try parent_to_children.putCursor(existing_parent_node_id_hash);
-                    const old_children = try old_children_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
-                    defer allocator.free(old_children);
-
-                    if (old_children.len % NODE_ID_SIZE != 0) return error.InvalidSizeOfChildNodeIds;
-                    const child_count = old_children.len / NODE_ID_SIZE;
-
-                    // remove the node id from the children, which is a byte array of node ids
-                    if (child_count == 1) {
-                        // if there is only one node id and it's the one we're removing,
-                        // just remove the entire byte array from the map
-                        if (std.mem.eql(u8, &node_id_bytes, old_children)) {
-                            try parent_to_children.remove(existing_parent_node_id_hash);
-                        }
-                    } else if (child_count > 1) {
-                        // there is more than one node id, so filter out the one we're removing
-                        // and write the rest back to the db
-                        var new_children = std.ArrayList(u8).init(allocator);
-                        defer new_children.deinit();
-                        for (0..child_count) |i| {
-                            const start = i * NODE_ID_SIZE;
-                            const child_node_id_bytes = old_children[start .. start + NODE_ID_SIZE];
-                            if (!std.mem.eql(u8, &node_id_bytes, child_node_id_bytes)) {
-                                try new_children.appendSlice(child_node_id_bytes);
-                            }
-                        }
-                        try old_children_cursor.write(.{ .bytes = new_children.items });
-                    }
+                    const old_children_cursor = try parent_to_children.putCursor(hash.hashBuffer(existing_parent_node_id_bytes));
+                    const old_children = try rp.Repo(.xit).DB.HashMap(.read_write).init(old_children_cursor);
+                    try old_children.remove(node_id_hash);
                 }
 
                 // add child to the new parent
-                {
-                    var children_cursor = try parent_to_children.putCursor(parent_node_id_hash);
-                    const children = try children_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
-                    defer allocator.free(children);
-
-                    if (children.len % NODE_ID_SIZE != 0) return error.InvalidSizeOfChildNodeIds;
-                    const child_count = children.len / NODE_ID_SIZE;
-
-                    if (child_count == 0) {
-                        try children_cursor.write(.{ .bytes = &node_id_bytes });
-                    } else {
-                        var new_children = std.ArrayList(u8).init(allocator);
-                        defer new_children.deinit();
-                        for (0..child_count) |i| {
-                            const start = i * NODE_ID_SIZE;
-                            const child_node_id_bytes = children[start .. start + NODE_ID_SIZE];
-                            if (!std.mem.eql(u8, &node_id_bytes, child_node_id_bytes)) {
-                                try new_children.appendSlice(child_node_id_bytes);
-                            }
-                        }
-                        try new_children.appendSlice(&node_id_bytes);
-                        try children_cursor.write(.{ .bytes = new_children.items });
-                    }
-                }
+                const children_cursor = try parent_to_children.putCursor(parent_node_id_hash);
+                const children = try rp.Repo(.xit).DB.HashMap(.read_write).init(children_cursor);
+                try children.putKey(node_id_hash, .{ .bytes = &node_id_bytes });
 
                 try child_to_parent.put(node_id_hash, .{ .bytes = &parent_node_id_bytes });
             },
@@ -339,36 +289,9 @@ fn applyPatchForFile(
                 const parent_node_id_hash = hash.hashBuffer(parent_node_id_bytes);
 
                 // remove child from its parent
-                {
-                    var children_cursor = try parent_to_children.putCursor(parent_node_id_hash);
-                    const children = try children_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
-                    defer allocator.free(children);
-
-                    if (children.len % NODE_ID_SIZE != 0) return error.InvalidSizeOfChildNodeIds;
-                    const child_count = children.len / NODE_ID_SIZE;
-
-                    // remove the node id from the children, which is a byte array of node ids
-                    if (child_count == 1) {
-                        // if there is only one node id and it's the one we're removing,
-                        // just remove the entire byte array from the map
-                        if (std.mem.eql(u8, &node_id_bytes, children)) {
-                            try parent_to_children.remove(parent_node_id_hash);
-                        }
-                    } else if (child_count > 1) {
-                        // there is more than one node id, so filter out the one we're removing
-                        // and write the rest back to the db
-                        var new_children = std.ArrayList(u8).init(allocator);
-                        defer new_children.deinit();
-                        for (0..child_count) |i| {
-                            const start = i * NODE_ID_SIZE;
-                            const child_node_id_bytes = children[start .. start + NODE_ID_SIZE];
-                            if (!std.mem.eql(u8, &node_id_bytes, child_node_id_bytes)) {
-                                try new_children.appendSlice(child_node_id_bytes);
-                            }
-                        }
-                        try children_cursor.write(.{ .bytes = new_children.items });
-                    }
-                }
+                const children_cursor = try parent_to_children.putCursor(parent_node_id_hash);
+                const children = try rp.Repo(.xit).DB.HashMap(.read_write).init(children_cursor);
+                try children.remove(node_id_hash);
 
                 try child_to_parent.remove(node_id_hash);
             },
@@ -390,44 +313,49 @@ fn applyPatchForFile(
         const current_node_id_hash = hash.hashBuffer(&current_node_id_bytes);
 
         if (try parent_to_children.getCursor(current_node_id_hash)) |children_cursor| {
-            const children = try children_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
-            defer allocator.free(children);
+            var children_iter = try children_cursor.iterator();
+            defer children_iter.deinit();
 
-            if (children.len % NODE_ID_SIZE != 0) return error.InvalidSizeOfChildNodeIds;
-            const child_count = children.len / NODE_ID_SIZE;
-
-            if (child_count == 1) {
-                if (current_index_maybe) |*current_index| {
-                    if (try node_id_list.getCursor(current_index.*)) |existing_node_id_cursor| {
-                        const existing_node_id = try existing_node_id_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
-                        defer allocator.free(existing_node_id);
-                        if (std.mem.eql(u8, existing_node_id, children)) {
-                            // node id hasn't changed, so just continue without changing the data
-                            current_index.* += 1;
-                        } else {
-                            // node id is different, so slice the list and begin appending the node ids from here
-                            try node_id_list.slice(0, current_index.*);
-                            current_index_maybe = null;
-                        }
-                    } else {
-                        // we've reached the end of the existing list so begin appending the node ids from here
-                        current_index_maybe = null;
-                    }
-                }
-
-                if (current_index_maybe == null) {
-                    try node_id_list.append(.{ .bytes = children });
-                }
-
-                var stream = std.io.fixedBufferStream(children);
-                var reader = stream.reader();
-                current_node_id_int = try reader.readInt(NodeIdInt, .big);
-            } else if (child_count > 1) {
+            if (try children_iter.next()) |child_cursor| {
                 // if there are any other children, remove the node list
                 // because there is a conflict, and thus the node map
                 // cannot be "flattened" into a list
-                try path_to_node_id_list.remove(path_hash);
-                break;
+                if (try children_iter.next() != null) {
+                    try path_to_node_id_list.remove(path_hash);
+                    break;
+                }
+                // append child to the node list
+                else {
+                    const kv_pair = try child_cursor.readKeyValuePair();
+                    const child = try kv_pair.key_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
+                    defer allocator.free(child);
+
+                    if (current_index_maybe) |*current_index| {
+                        if (try node_id_list.getCursor(current_index.*)) |existing_node_id_cursor| {
+                            const existing_node_id = try existing_node_id_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
+                            defer allocator.free(existing_node_id);
+                            if (std.mem.eql(u8, existing_node_id, child)) {
+                                // node id hasn't changed, so just continue without changing the data
+                                current_index.* += 1;
+                            } else {
+                                // node id is different, so slice the list and begin appending the node ids from here
+                                try node_id_list.slice(0, current_index.*);
+                                current_index_maybe = null;
+                            }
+                        } else {
+                            // we've reached the end of the existing list so begin appending the node ids from here
+                            current_index_maybe = null;
+                        }
+                    }
+
+                    if (current_index_maybe == null) {
+                        try node_id_list.append(.{ .bytes = child });
+                    }
+
+                    var stream = std.io.fixedBufferStream(child);
+                    var reader = stream.reader();
+                    current_node_id_int = try reader.readInt(NodeIdInt, .big);
+                }
             } else {
                 break;
             }
