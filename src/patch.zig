@@ -171,18 +171,21 @@ fn writePatchForFile(
     // exit early if patch already exists
     if (try moment.cursor.readPath(void, &.{
         .{ .hash_map_get = .{ .value = hash.hashBuffer("patch-id->change-list") } },
-        .{ .hash_map_get = .{ .key = patch_hash } },
+        .{ .hash_map_get = .{ .value = patch_hash } },
     })) |_| {
         return patch_hash;
     }
 
+    // init change list
     const patch_id_to_change_list_cursor = try moment.putCursor(hash.hashBuffer("patch-id->change-list"));
     const patch_id_to_change_list = try rp.Repo(.xit).DB.HashMap(.read_write).init(patch_id_to_change_list_cursor);
-
-    // init change list
-    const change_list_cursor = try patch_id_to_change_list.putKeyCursor(patch_hash);
+    const change_list_cursor = try patch_id_to_change_list.putCursor(patch_hash);
     const change_list = try rp.Repo(.xit).DB.ArrayList(.read_write).init(change_list_cursor);
-    const change_content_list_cursor = try patch_id_to_change_list.putCursor(patch_hash);
+
+    // init change content list
+    const patch_id_to_change_content_list_cursor = try moment.putCursor(hash.hashBuffer("patch-id->change-content-list"));
+    const patch_id_to_change_content_list = try rp.Repo(.xit).DB.HashMap(.read_write).init(patch_id_to_change_content_list_cursor);
+    const change_content_list_cursor = try patch_id_to_change_content_list.putCursor(patch_hash);
     const change_content_list = try rp.Repo(.xit).DB.ArrayList(.read_write).init(change_content_list_cursor);
 
     var patch_entries = std.ArrayList([]const u8).init(allocator);
@@ -216,7 +219,7 @@ fn applyPatchForFile(
 ) !void {
     var change_list_cursor = (try moment.cursor.readPath(void, &.{
         .{ .hash_map_get = .{ .value = hash.hashBuffer("patch-id->change-list") } },
-        .{ .hash_map_get = .{ .key = patch_hash } },
+        .{ .hash_map_get = .{ .value = patch_hash } },
     })) orelse return error.PatchNotFound;
 
     // store path
