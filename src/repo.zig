@@ -332,7 +332,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
                     for (stat.conflicts.keys(), stat.conflicts.values()) |path, conflict| {
                         if (conflict.base) {
-                            if (conflict.current) {
+                            if (conflict.target) {
                                 if (conflict.source) {
                                     try writers.out.print("UU {s}\n", .{path}); // both modified
                                 } else {
@@ -346,7 +346,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                                 }
                             }
                         } else {
-                            if (conflict.current) {
+                            if (conflict.target) {
                                 if (conflict.source) {
                                     try writers.out.print("AA {s}\n", .{path}); // both added
                                 } else {
@@ -504,34 +504,34 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         .conflict => |result_conflict| {
                             for (result_conflict.conflicts.keys(), result_conflict.conflicts.values()) |path, conflict| {
                                 if (conflict.renamed) |renamed| {
-                                    const conflict_type = if (conflict.current != null)
+                                    const conflict_type = if (conflict.target != null)
                                         "file/directory"
                                     else
                                         "directory/file";
-                                    const dir_branch_name = if (conflict.current != null)
+                                    const dir_branch_name = if (conflict.target != null)
                                         result.source_name
                                     else
-                                        result.current_name;
+                                        result.target_name;
                                     try writers.err.print("CONFLICT ({s}): There is a directory with name {s} in {s}. Adding {s} as {s}\n", .{ conflict_type, path, dir_branch_name, path, renamed.path });
                                 } else {
                                     if (result.changes.contains(path)) {
                                         try writers.out.print("Auto-merging {s}\n", .{path});
                                     }
-                                    if (conflict.current != null and conflict.source != null) {
+                                    if (conflict.target != null and conflict.source != null) {
                                         const conflict_type = if (conflict.base != null)
                                             "content"
                                         else
                                             "add/add";
                                         try writers.err.print("CONFLICT ({s}): Merge conflict in {s}\n", .{ conflict_type, path });
                                     } else {
-                                        const conflict_type = if (conflict.current != null)
+                                        const conflict_type = if (conflict.target != null)
                                             "modify/delete"
                                         else
                                             "delete/modify";
-                                        const deleted_branch_name, const modified_branch_name = if (conflict.current != null)
-                                            .{ result.source_name, result.current_name }
+                                        const deleted_branch_name, const modified_branch_name = if (conflict.target != null)
+                                            .{ result.source_name, result.target_name }
                                         else
-                                            .{ result.current_name, result.source_name };
+                                            .{ result.target_name, result.source_name };
                                         try writers.err.print("CONFLICT ({s}): {s} deleted in {s} and modified in {s}\n", .{ conflict_type, path, deleted_branch_name, modified_branch_name });
                                     }
                                 }

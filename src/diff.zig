@@ -1234,7 +1234,7 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind) type {
 
 pub const ConflictDiffKind = enum {
     base,
-    current, // ours
+    target, // ours
     source, // theirs
 };
 
@@ -1315,7 +1315,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
                         const meta = try io.getMetadata(self.core.repo_dir, path);
                         const stage: usize = switch (workspace.conflict_diff_kind) {
                             .base => 1,
-                            .current => 2,
+                            .target => 2,
                             .source => 3,
                         };
                         const index_entries_for_path = workspace.status.index.entries.get(path) orelse return error.EntryNotFound;

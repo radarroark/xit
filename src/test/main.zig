@@ -288,7 +288,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             defer status.deinit();
             var file_iter = try repo.filePairs(.{
                 .workspace = .{
-                    .conflict_diff_kind = .current,
+                    .conflict_diff_kind = .target,
                     .status = &status,
                 },
             });

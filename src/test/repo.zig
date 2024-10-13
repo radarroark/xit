@@ -307,7 +307,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         defer status.deinit();
         var file_iter = try repo.filePairs(.{
             .workspace = .{
-                .conflict_diff_kind = .current,
+                .conflict_diff_kind = .target,
                 .status = &status,
             },
         });
@@ -395,7 +395,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         defer status.deinit();
         var file_iter = try repo.filePairs(.{
             .workspace = .{
-                .conflict_diff_kind = .current,
+                .conflict_diff_kind = .target,
                 .status = &status,
             },
         });
@@ -406,7 +406,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         }
     }
 
-    // modify/delete conflict (current modifies, source deletes)
+    // modify/delete conflict (target modifies, source deletes)
     {
         var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "modify-delete-conflict" } }, writers);
         defer repo.deinit();
@@ -442,7 +442,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         defer status.deinit();
         var file_iter = try repo.filePairs(.{
             .workspace = .{
-                .conflict_diff_kind = .current,
+                .conflict_diff_kind = .target,
                 .status = &status,
             },
         });
@@ -466,7 +466,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         }
     }
 
-    // delete/modify conflict (current deletes, source modifies)
+    // delete/modify conflict (target deletes, source modifies)
     {
         var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "delete-modify-conflict" } }, writers);
         defer repo.deinit();
@@ -502,7 +502,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         defer status.deinit();
         var file_iter = try repo.filePairs(.{
             .workspace = .{
-                .conflict_diff_kind = .current,
+                .conflict_diff_kind = .target,
                 .status = &status,
             },
         });
@@ -524,7 +524,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         }
     }
 
-    // file/dir conflict (current has file, source has dir)
+    // file/dir conflict (target has file, source has dir)
     {
         var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "file-dir-conflict" } }, writers);
         defer repo.deinit();
@@ -560,7 +560,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         defer status.deinit();
         var file_iter = try repo.filePairs(.{
             .workspace = .{
-                .conflict_diff_kind = .current,
+                .conflict_diff_kind = .target,
                 .status = &status,
             },
         });
@@ -588,7 +588,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         }
     }
 
-    // dir/file conflict (current has dir, source has file)
+    // dir/file conflict (target has dir, source has file)
     {
         var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "dir-file-conflict" } }, writers);
         defer repo.deinit();
@@ -628,7 +628,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         defer status.deinit();
         var file_iter = try repo.filePairs(.{
             .workspace = .{
-                .conflict_diff_kind = .current,
+                .conflict_diff_kind = .target,
                 .status = &status,
             },
         });
@@ -757,7 +757,7 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind) !void {
         defer status.deinit();
         var file_iter = try repo.filePairs(.{
             .workspace = .{
-                .conflict_diff_kind = .current,
+                .conflict_diff_kind = .target,
                 .status = &status,
             },
         });
@@ -864,7 +864,7 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind) !void {
     defer status.deinit();
     var file_iter = try repo.filePairs(.{
         .workspace = .{
-            .conflict_diff_kind = .current,
+            .conflict_diff_kind = .target,
             .status = &status,
         },
     });
@@ -1053,7 +1053,7 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind) !void {
     defer status.deinit();
     var file_iter = try repo.filePairs(.{
         .workspace = .{
-            .conflict_diff_kind = .current,
+            .conflict_diff_kind = .target,
             .status = &status,
         },
     });
