@@ -697,16 +697,15 @@ pub const Merge = struct {
         var auto_resolved_conflicts = std.StringArrayHashMap(void).init(arena.allocator());
         var conflicts = std.StringArrayHashMap(MergeConflict).init(arena.allocator());
 
-        const merge_head_name = switch (merge_kind) {
-            .merge => "MERGE_HEAD",
-            .cherry_pick => "CHERRY_PICK_HEAD",
-        };
-
         switch (merge_input) {
             .new => |new| {
                 // make sure there is no stored merge state
                 switch (repo_kind) {
                     .git => {
+                        const merge_head_name = switch (merge_kind) {
+                            .merge => "MERGE_HEAD",
+                            .cherry_pick => "CHERRY_PICK_HEAD",
+                        };
                         if (state.core.git_dir.openFile(merge_head_name, .{ .mode = .read_only })) |merge_head| {
                             defer merge_head.close();
                             return error.UnfinishedMergeAlreadyInProgress;
@@ -716,7 +715,7 @@ pub const Merge = struct {
                         }
                     },
                     .xit => {
-                        if (try state.extra.moment.getCursor(hash.hashBuffer(merge_head_name))) |_| {
+                        if (try state.extra.moment.getCursor(hash.hashBuffer("merge-in-progress"))) |_| {
                             return error.UnfinishedMergeAlreadyInProgress;
                         }
                     },
@@ -834,6 +833,10 @@ pub const Merge = struct {
 
                         // exit early if there were conflicts
                         if (conflicts.count() > 0) {
+                            const merge_head_name = switch (merge_kind) {
+                                .merge => "MERGE_HEAD",
+                                .cherry_pick => "CHERRY_PICK_HEAD",
+                            };
                             const merge_head = try state.core.git_dir.createFile(merge_head_name, .{ .truncate = true, .lock = .exclusive });
                             defer merge_head.close();
                             try merge_head.writeAll(&source_oid);
@@ -881,11 +884,14 @@ pub const Merge = struct {
 
                         // exit early if there were conflicts
                         if (conflicts.count() > 0) {
-                            var merge_head_cursor = try state.extra.moment.putCursor(hash.hashBuffer(merge_head_name));
+                            const merge_in_progress_cursor = try state.extra.moment.putCursor(hash.hashBuffer("merge-in-progress"));
+                            const merge_in_progress = try rp.Repo(.xit).DB.HashMap(.read_write).init(merge_in_progress_cursor);
+
+                            var merge_head_cursor = try merge_in_progress.putCursor(hash.hashBuffer("source-oid"));
                             try merge_head_cursor.write(.{ .bytes = &source_oid });
 
-                            var merge_msg_cursor = try state.extra.moment.putCursor(hash.hashBuffer("MERGE_MSG"));
-                            try merge_msg_cursor.write(.{ .bytes = commit_metadata.message });
+                            var message_cursor = try merge_in_progress.putCursor(hash.hashBuffer("message"));
+                            try message_cursor.write(.{ .bytes = commit_metadata.message });
 
                             return .{
                                 .arena = arena,
@@ -953,6 +959,10 @@ pub const Merge = struct {
                 // read the stored merge state
                 switch (repo_kind) {
                     .git => {
+                        const merge_head_name = switch (merge_kind) {
+                            .merge => "MERGE_HEAD",
+                            .cherry_pick => "CHERRY_PICK_HEAD",
+                        };
                         const merge_head = state.core.git_dir.openFile(merge_head_name, .{ .mode = .read_only }) catch |err| switch (err) {
                             error.FileNotFound => return error.MergeHeadNotFound,
                             else => return err,
@@ -971,14 +981,17 @@ pub const Merge = struct {
                         commit_metadata.message = try merge_msg.readToEndAlloc(arena.allocator(), MAX_READ_BYTES);
                     },
                     .xit => {
-                        const source_oid_cursor = (try state.extra.moment.getCursor(hash.hashBuffer(merge_head_name))) orelse return error.MergeHeadNotFound;
+                        const merge_in_progress_cursor = try state.extra.moment.putCursor(hash.hashBuffer("merge-in-progress"));
+                        const merge_in_progress = try rp.Repo(.xit).DB.HashMap(.read_write).init(merge_in_progress_cursor);
+
+                        const source_oid_cursor = (try merge_in_progress.getCursor(hash.hashBuffer("source-oid"))) orelse return error.MergeHeadNotFound;
                         const source_oid_slice = try source_oid_cursor.readBytes(&source_oid);
                         if (source_oid_slice.len != source_oid.len) {
                             return error.InvalidMergeHead;
                         }
 
-                        const merge_msg_cursor = (try state.extra.moment.getCursor(hash.hashBuffer("MERGE_MSG"))) orelse return error.MergeMessageNotFound;
-                        commit_metadata.message = try merge_msg_cursor.readBytesAlloc(arena.allocator(), MAX_READ_BYTES);
+                        const message_cursor = (try merge_in_progress.getCursor(hash.hashBuffer("message"))) orelse return error.MergeMessageNotFound;
+                        commit_metadata.message = try message_cursor.readBytesAlloc(arena.allocator(), MAX_READ_BYTES);
                     },
                 }
 
@@ -1012,12 +1025,15 @@ pub const Merge = struct {
                 // clean up the stored merge state
                 switch (repo_kind) {
                     .git => {
+                        const merge_head_name = switch (merge_kind) {
+                            .merge => "MERGE_HEAD",
+                            .cherry_pick => "CHERRY_PICK_HEAD",
+                        };
                         try state.core.git_dir.deleteFile(merge_head_name);
                         try state.core.git_dir.deleteFile("MERGE_MSG");
                     },
                     .xit => {
-                        _ = try state.extra.moment.remove(hash.hashBuffer(merge_head_name));
-                        _ = try state.extra.moment.remove(hash.hashBuffer("MERGE_MSG"));
+                        _ = try state.extra.moment.remove(hash.hashBuffer("merge-in-progress"));
                     },
                 }
 
