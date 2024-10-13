@@ -189,7 +189,7 @@ pub const MergeConflict = struct {
     renamed: ?RenamedEntry,
 };
 
-fn writeBlobWithConflict(
+fn writeBlobWithDiff3(
     comptime repo_kind: rp.RepoKind,
     state: rp.Repo(repo_kind).State(.read_write),
     allocator: std.mem.Allocator,
@@ -486,6 +486,7 @@ fn samePathConflict(
     source_name: []const u8,
     target_change_maybe: ?obj.Change,
     source_change: obj.Change,
+    comptime merge_algo: MergeAlgorithm,
 ) !SamePathConflictResult {
     if (target_change_maybe) |target_change| {
         const base_entry_maybe = source_change.old;
@@ -529,7 +530,10 @@ fn samePathConflict(
                 var has_conflict = oid_maybe == null or mode_maybe == null;
 
                 const base_oid_maybe = if (base_entry_maybe) |base_entry| &base_entry.oid else null;
-                const oid = oid_maybe orelse try writeBlobWithConflict(repo_kind, state, allocator, base_oid_maybe, &target_entry.oid, &source_entry.oid, base_name, target_name, source_name, &has_conflict);
+                const oid = oid_maybe orelse switch (merge_algo) {
+                    .diff3 => try writeBlobWithDiff3(repo_kind, state, allocator, base_oid_maybe, &target_entry.oid, &source_entry.oid, base_name, target_name, source_name, &has_conflict),
+                    .patch => return error.NotImplemented,
+                };
                 const mode = mode_maybe orelse target_entry.mode;
 
                 return .{
@@ -652,6 +656,11 @@ pub const MergeInput = union(enum) {
     cont,
 };
 
+pub const MergeAlgorithm = enum {
+    diff3, // three-way merge
+    patch, // patch-based (xit only)
+};
+
 pub const Merge = struct {
     arena: *std.heap.ArenaAllocator,
     allocator: std.mem.Allocator,
@@ -677,6 +686,7 @@ pub const Merge = struct {
         allocator: std.mem.Allocator,
         merge_kind: MergeKind,
         merge_input: MergeInput,
+        comptime merge_algo: MergeAlgorithm,
     ) !Merge {
         // TODO: exit early if working tree is dirty
 
@@ -766,7 +776,7 @@ pub const Merge = struct {
 
                 // look for same path conflicts while populating the clean diff
                 for (source_diff.changes.keys(), source_diff.changes.values()) |path, source_change| {
-                    const same_path_result = try samePathConflict(repo_kind, state, allocator, &base_oid, target_name, source_name, target_diff.changes.get(path), source_change);
+                    const same_path_result = try samePathConflict(repo_kind, state, allocator, &base_oid, target_name, source_name, target_diff.changes.get(path), source_change, merge_algo);
                     if (same_path_result.change) |change| {
                         try clean_diff.changes.put(path, change);
                     }
