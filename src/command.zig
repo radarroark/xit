@@ -222,11 +222,11 @@ pub const Command = union(enum) {
                 (if (map_args.contains("--base"))
                     .{ .workspace = .{ .conflict_diff_kind = .base } }
                 else if (map_args.contains("--ours"))
-                    .{ .workspace = .{ .conflict_diff_kind = .current } }
+                    .{ .workspace = .{ .conflict_diff_kind = .target } }
                 else if (map_args.contains("--theirs"))
                     .{ .workspace = .{ .conflict_diff_kind = .source } }
                 else
-                    .{ .workspace = .{ .conflict_diff_kind = .current } });
+                    .{ .workspace = .{ .conflict_diff_kind = .target } });
             return .{ .cli = .{ .diff = .{ .diff_opts = diff_opts } } };
         } else if (std.mem.eql(u8, sub_command, "branch")) {
             const cmd_name = extra_args[0];

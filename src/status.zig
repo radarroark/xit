@@ -34,7 +34,7 @@ pub const StatusKind = union(IndexKind) {
 
 pub const MergeConflictStatus = struct {
     base: bool,
-    current: bool,
+    target: bool,
     source: bool,
 };
 
@@ -116,7 +116,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind) type {
                 else {
                     try conflicts.put(path, .{
                         .base = index_entries_for_path[1] != null,
-                        .current = index_entries_for_path[2] != null,
+                        .target = index_entries_for_path[2] != null,
                         .source = index_entries_for_path[3] != null,
                     });
                 }
