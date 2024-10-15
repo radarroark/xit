@@ -211,7 +211,7 @@ fn writePatchForFile(
 }
 
 pub fn applyPatchForFile(
-    moment: *const rp.Repo(.xit).DB.HashMap(.read_write),
+    moment: *const rp.Repo(.xit).DB.HashMap(.read_only),
     branch: *const rp.Repo(.xit).DB.HashMap(.read_write),
     allocator: std.mem.Allocator,
     path_hash: hash.Hash,
@@ -473,7 +473,7 @@ pub fn writePatch(
             try path_to_patch_id.put(path_hash, .{ .bytes = &patch_hash_bytes });
 
             // apply patch
-            try applyPatchForFile(state.extra.moment, &branch, allocator, path_hash, patch_hash);
+            try applyPatchForFile(state.readOnly().extra.moment, &branch, allocator, path_hash, patch_hash);
         }
     }
 }
