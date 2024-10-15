@@ -193,30 +193,30 @@ fn writeBlobWithDiff3(
     comptime repo_kind: rp.RepoKind,
     state: rp.Repo(repo_kind).State(.read_write),
     allocator: std.mem.Allocator,
-    base_oid_maybe: ?*const [hash.SHA1_BYTES_LEN]u8,
-    target_oid: *const [hash.SHA1_BYTES_LEN]u8,
-    source_oid: *const [hash.SHA1_BYTES_LEN]u8,
-    base_name: []const u8,
+    base_file_oid_maybe: ?*const [hash.SHA1_BYTES_LEN]u8,
+    target_file_oid: *const [hash.SHA1_BYTES_LEN]u8,
+    source_file_oid: *const [hash.SHA1_BYTES_LEN]u8,
+    base_oid: *const [hash.SHA1_HEX_LEN]u8,
     target_name: []const u8,
     source_name: []const u8,
     has_conflict: *bool,
 ) ![hash.SHA1_BYTES_LEN]u8 {
-    var base_iter = if (base_oid_maybe) |base_oid|
-        try df.LineIterator(repo_kind).initFromOid(state.readOnly(), allocator, "", base_oid, null)
+    var base_iter = if (base_file_oid_maybe) |base_file_oid|
+        try df.LineIterator(repo_kind).initFromOid(state.readOnly(), allocator, "", base_file_oid, null)
     else
         try df.LineIterator(repo_kind).initFromNothing(allocator, "");
     defer base_iter.deinit();
 
-    var target_iter = try df.LineIterator(repo_kind).initFromOid(state.readOnly(), allocator, "", target_oid, null);
+    var target_iter = try df.LineIterator(repo_kind).initFromOid(state.readOnly(), allocator, "", target_file_oid, null);
     defer target_iter.deinit();
 
-    var source_iter = try df.LineIterator(repo_kind).initFromOid(state.readOnly(), allocator, "", source_oid, null);
+    var source_iter = try df.LineIterator(repo_kind).initFromOid(state.readOnly(), allocator, "", source_file_oid, null);
     defer source_iter.deinit();
 
     // if any file is binary, just return the source oid because there is no point in trying to merge them
     if (base_iter.source == .binary or target_iter.source == .binary or source_iter.source == .binary) {
         has_conflict.* = true;
-        return source_oid.*;
+        return source_file_oid.*;
     }
 
     var diff3_iter = try df.Diff3Iterator(repo_kind).init(allocator, &base_iter, &target_iter, &source_iter);
@@ -445,7 +445,7 @@ fn writeBlobWithDiff3(
 
     const target_marker = try std.fmt.allocPrint(allocator, "<<<<<<< {s}", .{target_name});
     defer allocator.free(target_marker);
-    const base_marker = try std.fmt.allocPrint(allocator, "||||||| original ({s})", .{base_name});
+    const base_marker = try std.fmt.allocPrint(allocator, "||||||| original ({s})", .{base_oid});
     defer allocator.free(base_marker);
     const separate_marker = try std.fmt.allocPrint(allocator, "=======", .{});
     defer allocator.free(separate_marker);
@@ -481,7 +481,7 @@ fn samePathConflict(
     comptime repo_kind: rp.RepoKind,
     state: rp.Repo(repo_kind).State(.read_write),
     allocator: std.mem.Allocator,
-    base_name: []const u8,
+    base_oid: *const [hash.SHA1_HEX_LEN]u8,
     target_name: []const u8,
     source_name: []const u8,
     target_change_maybe: ?obj.Change,
@@ -529,9 +529,9 @@ fn samePathConflict(
 
                 var has_conflict = oid_maybe == null or mode_maybe == null;
 
-                const base_oid_maybe = if (base_entry_maybe) |base_entry| &base_entry.oid else null;
+                const base_file_oid_maybe = if (base_entry_maybe) |base_entry| &base_entry.oid else null;
                 const oid = oid_maybe orelse switch (merge_algo) {
-                    .diff3 => try writeBlobWithDiff3(repo_kind, state, allocator, base_oid_maybe, &target_entry.oid, &source_entry.oid, base_name, target_name, source_name, &has_conflict),
+                    .diff3 => try writeBlobWithDiff3(repo_kind, state, allocator, base_file_oid_maybe, &target_entry.oid, &source_entry.oid, base_oid, target_name, source_name, &has_conflict),
                     .patch => return error.NotImplemented,
                 };
                 const mode = mode_maybe orelse target_entry.mode;
