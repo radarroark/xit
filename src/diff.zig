@@ -503,27 +503,25 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
                 const box_size: f64 = @floatFromInt(self.size());
                 const max: usize = @intFromFloat(std.math.ceil(box_size / 2));
 
-                var vf = try std.ArrayList(isize).initCapacity(allocator, 2 * max + 1);
-                defer vf.deinit();
-                vf.expandToCapacity();
-                for (vf.items) |*item| {
+                var vf = try allocator.alloc(isize, 2 * max + 1);
+                defer allocator.free(vf);
+                for (vf) |*item| {
                     item.* = 0;
                 }
-                vf.items[1] = @intCast(self.left);
+                vf[1] = @intCast(self.left);
 
-                var vb = try std.ArrayList(isize).initCapacity(allocator, 2 * max + 1);
-                defer vb.deinit();
-                vb.expandToCapacity();
-                for (vb.items) |*item| {
+                var vb = try allocator.alloc(isize, 2 * max + 1);
+                defer allocator.free(vb);
+                for (vb) |*item| {
                     item.* = 0;
                 }
-                vb.items[1] = @intCast(self.bottom);
+                vb[1] = @intCast(self.bottom);
 
                 for (0..max + 1) |d| {
-                    if (try self.forward(vf.items, vb.items, d, line_iter_a, line_iter_b)) |snake| {
+                    if (try self.forward(vf, vb, d, line_iter_a, line_iter_b)) |snake| {
                         return snake;
                     }
-                    if (try self.backward(vf.items, vb.items, d, line_iter_a, line_iter_b)) |snake| {
+                    if (try self.backward(vf, vb, d, line_iter_a, line_iter_b)) |snake| {
                         return snake;
                     }
                 }
