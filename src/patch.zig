@@ -210,7 +210,7 @@ fn writePatchForFile(
     return patch_hash_bytes;
 }
 
-fn applyPatchForFile(
+pub fn applyPatchForFile(
     moment: *const rp.Repo(.xit).DB.HashMap(.read_write),
     branch: *const rp.Repo(.xit).DB.HashMap(.read_write),
     allocator: std.mem.Allocator,
