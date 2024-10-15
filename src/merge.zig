@@ -758,8 +758,8 @@ pub const Merge = struct {
         comptime repo_kind: rp.RepoKind,
         state: rp.Repo(repo_kind).State(.read_write),
         allocator: std.mem.Allocator,
-        merge_kind: MergeKind,
         merge_input: MergeInput,
+        comptime merge_kind: MergeKind,
         comptime merge_algo: MergeAlgorithm,
     ) !Merge {
         // TODO: exit early if working tree is dirty

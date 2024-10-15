@@ -972,7 +972,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
         pub fn merge(self: *Repo(repo_kind), input: mrg.MergeInput) !mrg.Merge {
             switch (repo_kind) {
-                .git => return try mrg.Merge.init(repo_kind, .{ .core = &self.core, .extra = .{} }, self.allocator, .merge, input, .diff3),
+                .git => return try mrg.Merge.init(repo_kind, .{ .core = &self.core, .extra = .{} }, self.allocator, input, .merge, .diff3),
                 .xit => {
                     var result: mrg.Merge = undefined;
 
@@ -985,7 +985,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            ctx.result.* = try mrg.Merge.init(repo_kind, state, ctx.allocator, .merge, ctx.input, .diff3);
+                            ctx.result.* = try mrg.Merge.init(repo_kind, state, ctx.allocator, ctx.input, .merge, .diff3);
                             // no need to make a new transaction if nothing was done
                             if (.nothing == ctx.result.data) {
                                 return error.CancelTransaction;
@@ -1009,7 +1009,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
         pub fn cherryPick(self: *Repo(repo_kind), input: mrg.MergeInput) !mrg.Merge {
             switch (repo_kind) {
-                .git => return try mrg.Merge.init(repo_kind, .{ .core = &self.core, .extra = .{} }, self.allocator, .cherry_pick, input, .diff3),
+                .git => return try mrg.Merge.init(repo_kind, .{ .core = &self.core, .extra = .{} }, self.allocator, input, .cherry_pick, .diff3),
                 .xit => {
                     var result: mrg.Merge = undefined;
 
@@ -1022,7 +1022,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            ctx.result.* = try mrg.Merge.init(repo_kind, state, ctx.allocator, .cherry_pick, ctx.input, .diff3);
+                            ctx.result.* = try mrg.Merge.init(repo_kind, state, ctx.allocator, ctx.input, .cherry_pick, .diff3);
                             // no need to make a new transaction if nothing was done
                             if (.nothing == ctx.result.data) {
                                 return error.CancelTransaction;
