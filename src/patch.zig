@@ -25,8 +25,8 @@ const FIRST_NODE_ID_BYTES = [_]u8{0} ** (@bitSizeOf(NodeId) / 8);
 
 /// TODO: turn this into an iterator all entries don't need to be in memory at the same time
 fn createPatchEntries(
-    moment: *rp.Repo(.xit).DB.HashMap(.read_write),
-    branch: *rp.Repo(.xit).DB.HashMap(.read_write),
+    moment: *const rp.Repo(.xit).DB.HashMap(.read_write),
+    branch: *const rp.Repo(.xit).DB.HashMap(.read_write),
     allocator: std.mem.Allocator,
     arena: *std.heap.ArenaAllocator,
     line_iter_pair: *df.LineIteratorPair(.xit),
@@ -128,8 +128,8 @@ fn createPatchEntries(
 }
 
 fn patchHash(
-    moment: *rp.Repo(.xit).DB.HashMap(.read_write),
-    branch: *rp.Repo(.xit).DB.HashMap(.read_write),
+    moment: *const rp.Repo(.xit).DB.HashMap(.read_write),
+    branch: *const rp.Repo(.xit).DB.HashMap(.read_write),
     allocator: std.mem.Allocator,
     line_iter_pair: *df.LineIteratorPair(.xit),
 ) ![hash.SHA1_BYTES_LEN]u8 {
@@ -160,8 +160,8 @@ fn patchHash(
 }
 
 fn writePatchForFile(
-    moment: *rp.Repo(.xit).DB.HashMap(.read_write),
-    branch: *rp.Repo(.xit).DB.HashMap(.read_write),
+    moment: *const rp.Repo(.xit).DB.HashMap(.read_write),
+    branch: *const rp.Repo(.xit).DB.HashMap(.read_write),
     allocator: std.mem.Allocator,
     line_iter_pair: *df.LineIteratorPair(.xit),
 ) ![hash.SHA1_BYTES_LEN]u8 {
@@ -211,8 +211,8 @@ fn writePatchForFile(
 }
 
 fn applyPatchForFile(
-    moment: *rp.Repo(.xit).DB.HashMap(.read_write),
-    branch: *rp.Repo(.xit).DB.HashMap(.read_write),
+    moment: *const rp.Repo(.xit).DB.HashMap(.read_write),
+    branch: *const rp.Repo(.xit).DB.HashMap(.read_write),
     allocator: std.mem.Allocator,
     path_hash: hash.Hash,
     patch_hash: hash.Hash,
@@ -395,7 +395,7 @@ fn applyPatchForFile(
     }
 }
 
-fn removePatch(branch: *rp.Repo(.xit).DB.HashMap(.read_write), path: []const u8) !void {
+fn removePatch(branch: *const rp.Repo(.xit).DB.HashMap(.read_write), path: []const u8) !void {
     const path_hash = hash.hashBuffer(path);
 
     if (try branch.cursor.readPath(void, &.{
@@ -439,7 +439,7 @@ pub fn writePatch(
     const branches = try rp.Repo(.xit).DB.HashMap(.read_write).init(branches_cursor);
     try branches.putKey(branch_name_hash, .{ .slot = branch_name_cursor.slot() });
     const branch_cursor = try branches.putCursor(branch_name_hash);
-    var branch = try rp.Repo(.xit).DB.HashMap(.read_write).init(branch_cursor);
+    const branch = try rp.Repo(.xit).DB.HashMap(.read_write).init(branch_cursor);
 
     // init file iterator for index diff
     var file_iter = try df.FileIterator(.xit).init(allocator, state.readOnly(), .{ .index = .{ .status = status } });
