@@ -592,8 +592,10 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            try pch.writePatch(state, ctx.allocator);
+                            var stat = try st.Status(.xit).init(ctx.allocator, state.readOnly());
+                            defer stat.deinit();
                             ctx.result.* = try obj.writeCommit(repo_kind, state, ctx.allocator, ctx.parent_oids_maybe, ctx.metadata);
+                            try pch.writePatch(state, ctx.allocator, &stat, ctx.result);
                         }
                     };
 
