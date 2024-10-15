@@ -166,7 +166,7 @@ fn writePatchForFile(
     line_iter_pair: *df.LineIteratorPair(.xit),
 ) ![hash.SHA1_BYTES_LEN]u8 {
     const patch_hash_bytes = try patchHash(moment, branch, allocator, line_iter_pair);
-    const patch_hash = hash.hashBuffer(&patch_hash_bytes);
+    const patch_hash = hash.bytesToHash(&patch_hash_bytes);
 
     // exit early if patch already exists
     if (try moment.cursor.readPath(void, &.{
@@ -462,7 +462,7 @@ pub fn writePatch(
 
             // create patch
             const patch_hash_bytes = try writePatchForFile(state.extra.moment, &branch, allocator, &line_iter_pair);
-            const patch_hash = hash.hashBuffer(&patch_hash_bytes);
+            const patch_hash = hash.bytesToHash(&patch_hash_bytes);
 
             // associate patch hash with path/commit
             const commit_id_to_path_to_patch_id_cursor = try state.extra.moment.putCursor(hash.hashBuffer("commit-id->path->patch-id"));
