@@ -164,8 +164,7 @@ fn writePatchForFile(
     branch: *rp.Repo(.xit).DB.HashMap(.read_write),
     allocator: std.mem.Allocator,
     line_iter_pair: *df.LineIteratorPair(.xit),
-    commit_oid: *const [hash.SHA1_HEX_LEN]u8,
-) !hash.Hash {
+) ![hash.SHA1_BYTES_LEN]u8 {
     const patch_hash_bytes = try patchHash(moment, branch, allocator, line_iter_pair);
     const patch_hash = hash.hashBuffer(&patch_hash_bytes);
 
@@ -174,23 +173,8 @@ fn writePatchForFile(
         .{ .hash_map_get = .{ .value = hash.hashBuffer("patch-id->change-list") } },
         .{ .hash_map_get = .{ .value = patch_hash } },
     })) |_| {
-        return patch_hash;
+        return patch_hash_bytes;
     }
-
-    // store path
-    const path_hash = hash.hashBuffer(line_iter_pair.path);
-    const path_set_cursor = try moment.putCursor(hash.hashBuffer("path-set"));
-    const path_set = try rp.Repo(.xit).DB.HashMap(.read_write).init(path_set_cursor);
-    var path_cursor = try path_set.putKeyCursor(path_hash);
-    try path_cursor.writeIfEmpty(.{ .bytes = line_iter_pair.path });
-
-    // associate patch hash with path/commit
-    const commit_id_to_path_to_patch_id_cursor = try moment.putCursor(hash.hashBuffer("commit-id->path->patch-id"));
-    const commit_id_to_path_to_patch_id = try rp.Repo(.xit).DB.HashMap(.read_write).init(commit_id_to_path_to_patch_id_cursor);
-    const path_to_patch_id_cursor = try commit_id_to_path_to_patch_id.putCursor(try hash.hexToHash(commit_oid));
-    const path_to_patch_id = try rp.Repo(.xit).DB.HashMap(.read_write).init(path_to_patch_id_cursor);
-    try path_to_patch_id.putKey(path_hash, .{ .slot = path_cursor.slot() });
-    try path_to_patch_id.put(path_hash, .{ .bytes = &patch_hash_bytes });
 
     // init change list
     const patch_id_to_change_list_cursor = try moment.putCursor(hash.hashBuffer("patch-id->change-list"));
@@ -223,39 +207,37 @@ fn writePatchForFile(
         try change_content_list.append(.{ .bytes = patch_content_entry });
     }
 
-    return patch_hash;
+    return patch_hash_bytes;
 }
 
 fn applyPatchForFile(
     moment: *rp.Repo(.xit).DB.HashMap(.read_write),
     branch: *rp.Repo(.xit).DB.HashMap(.read_write),
     allocator: std.mem.Allocator,
+    path_hash: hash.Hash,
     patch_hash: hash.Hash,
-    path: []const u8,
 ) !void {
     var change_list_cursor = (try moment.cursor.readPath(void, &.{
         .{ .hash_map_get = .{ .value = hash.hashBuffer("patch-id->change-list") } },
         .{ .hash_map_get = .{ .value = patch_hash } },
     })) orelse return error.PatchNotFound;
 
-    // store path
-    const path_hash = hash.hashBuffer(path);
-    const path_set_cursor = try moment.putCursor(hash.hashBuffer("path-set"));
-    const path_set = try rp.Repo(.xit).DB.HashMap(.read_write).init(path_set_cursor);
-    var path_cursor = try path_set.putKeyCursor(path_hash);
-    try path_cursor.writeIfEmpty(.{ .bytes = path });
+    // get path slot
+    const path_set_cursor = (try moment.getCursor(hash.hashBuffer("path-set"))) orelse return error.KeyNotFound;
+    const path_set = try rp.Repo(.xit).DB.HashMap(.read_only).init(path_set_cursor);
+    const path_slot = try path_set.getSlot(path_hash);
 
     // init live-parent->children node map
     const path_to_live_parent_to_children_cursor = try branch.putCursor(hash.hashBuffer("path->live-parent->children"));
     const path_to_live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_write).init(path_to_live_parent_to_children_cursor);
-    try path_to_live_parent_to_children.putKey(path_hash, .{ .slot = path_cursor.slot() });
+    try path_to_live_parent_to_children.putKey(path_hash, .{ .slot = path_slot });
     const live_parent_to_children_cursor = try path_to_live_parent_to_children.putCursor(path_hash);
     const live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_write).init(live_parent_to_children_cursor);
 
     // init child->parent node map
     const path_to_child_to_parent_cursor = try branch.putCursor(hash.hashBuffer("path->child->parent"));
     const path_to_child_to_parent = try rp.Repo(.xit).DB.HashMap(.read_write).init(path_to_child_to_parent_cursor);
-    try path_to_child_to_parent.putKey(path_hash, .{ .slot = path_cursor.slot() });
+    try path_to_child_to_parent.putKey(path_hash, .{ .slot = path_slot });
     const child_to_parent_cursor = try path_to_child_to_parent.putCursor(path_hash);
     const child_to_parent = try rp.Repo(.xit).DB.HashMap(.read_write).init(child_to_parent_cursor);
 
@@ -340,7 +322,7 @@ fn applyPatchForFile(
     // init node list
     const path_to_node_id_list_cursor = try branch.putCursor(hash.hashBuffer("path->node-id-list"));
     const path_to_node_id_list = try rp.Repo(.xit).DB.HashMap(.read_write).init(path_to_node_id_list_cursor);
-    try path_to_node_id_list.putKey(path_hash, .{ .slot = path_cursor.slot() });
+    try path_to_node_id_list.putKey(path_hash, .{ .slot = path_slot });
     const node_id_list_cursor = try path_to_node_id_list.putCursor(path_hash);
     const node_id_list = try rp.Repo(.xit).DB.LinkedArrayList(.read_write).init(node_id_list_cursor);
 
@@ -471,8 +453,27 @@ pub fn writePatch(
             // remove existing patch data if there is any.
             try removePatch(&branch, line_iter_pair.path);
         } else {
-            const patch_hash = try writePatchForFile(state.extra.moment, &branch, allocator, &line_iter_pair, commit_oid);
-            try applyPatchForFile(state.extra.moment, &branch, allocator, patch_hash, line_iter_pair.path);
+            // store path
+            const path_hash = hash.hashBuffer(line_iter_pair.path);
+            const path_set_cursor = try state.extra.moment.putCursor(hash.hashBuffer("path-set"));
+            const path_set = try rp.Repo(.xit).DB.HashMap(.read_write).init(path_set_cursor);
+            var path_cursor = try path_set.putKeyCursor(path_hash);
+            try path_cursor.writeIfEmpty(.{ .bytes = line_iter_pair.path });
+
+            // create patch
+            const patch_hash_bytes = try writePatchForFile(state.extra.moment, &branch, allocator, &line_iter_pair);
+            const patch_hash = hash.hashBuffer(&patch_hash_bytes);
+
+            // associate patch hash with path/commit
+            const commit_id_to_path_to_patch_id_cursor = try state.extra.moment.putCursor(hash.hashBuffer("commit-id->path->patch-id"));
+            const commit_id_to_path_to_patch_id = try rp.Repo(.xit).DB.HashMap(.read_write).init(commit_id_to_path_to_patch_id_cursor);
+            const path_to_patch_id_cursor = try commit_id_to_path_to_patch_id.putCursor(try hash.hexToHash(commit_oid));
+            const path_to_patch_id = try rp.Repo(.xit).DB.HashMap(.read_write).init(path_to_patch_id_cursor);
+            try path_to_patch_id.putKey(path_hash, .{ .slot = path_cursor.slot() });
+            try path_to_patch_id.put(path_hash, .{ .bytes = &patch_hash_bytes });
+
+            // apply patch
+            try applyPatchForFile(state.extra.moment, &branch, allocator, path_hash, patch_hash);
         }
     }
 }
