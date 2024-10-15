@@ -132,7 +132,7 @@ fn patchHash(
     branch: *rp.Repo(.xit).DB.HashMap(.read_write),
     allocator: std.mem.Allocator,
     line_iter_pair: *df.LineIteratorPair(.xit),
-) !hash.Hash {
+) ![hash.SHA1_BYTES_LEN]u8 {
     var patch_entries = std.ArrayList([]const u8).init(allocator);
     defer patch_entries.deinit();
 
@@ -156,7 +156,7 @@ fn patchHash(
 
     var patch_hash = [_]u8{0} ** hash.SHA1_BYTES_LEN;
     h.final(&patch_hash);
-    return hash.hashBuffer(&patch_hash);
+    return patch_hash;
 }
 
 fn writePatchForFile(
@@ -164,8 +164,10 @@ fn writePatchForFile(
     branch: *rp.Repo(.xit).DB.HashMap(.read_write),
     allocator: std.mem.Allocator,
     line_iter_pair: *df.LineIteratorPair(.xit),
+    commit_oid: *const [hash.SHA1_HEX_LEN]u8,
 ) !hash.Hash {
-    const patch_hash = try patchHash(moment, branch, allocator, line_iter_pair);
+    const patch_hash_bytes = try patchHash(moment, branch, allocator, line_iter_pair);
+    const patch_hash = hash.hashBuffer(&patch_hash_bytes);
 
     // exit early if patch already exists
     if (try moment.cursor.readPath(void, &.{
@@ -174,6 +176,21 @@ fn writePatchForFile(
     })) |_| {
         return patch_hash;
     }
+
+    // store path
+    const path_hash = hash.hashBuffer(line_iter_pair.path);
+    const path_set_cursor = try moment.putCursor(hash.hashBuffer("path-set"));
+    const path_set = try rp.Repo(.xit).DB.HashMap(.read_write).init(path_set_cursor);
+    var path_cursor = try path_set.putKeyCursor(path_hash);
+    try path_cursor.writeIfEmpty(.{ .bytes = line_iter_pair.path });
+
+    // associate patch hash with path/commit
+    const commit_id_to_path_to_patch_id_cursor = try moment.putCursor(hash.hashBuffer("commit-id->path->patch-id"));
+    const commit_id_to_path_to_patch_id = try rp.Repo(.xit).DB.HashMap(.read_write).init(commit_id_to_path_to_patch_id_cursor);
+    const path_to_patch_id_cursor = try commit_id_to_path_to_patch_id.putCursor(try hash.hexToHash(commit_oid));
+    const path_to_patch_id = try rp.Repo(.xit).DB.HashMap(.read_write).init(path_to_patch_id_cursor);
+    try path_to_patch_id.putKey(path_hash, .{ .slot = path_cursor.slot() });
+    try path_to_patch_id.put(path_hash, .{ .bytes = &patch_hash_bytes });
 
     // init change list
     const patch_id_to_change_list_cursor = try moment.putCursor(hash.hashBuffer("patch-id->change-list"));
@@ -417,7 +434,12 @@ fn removePatch(branch: *rp.Repo(.xit).DB.HashMap(.read_write), path: []const u8)
     }
 }
 
-pub fn writePatch(state: rp.Repo(.xit).State(.read_write), allocator: std.mem.Allocator) !void {
+pub fn writePatch(
+    state: rp.Repo(.xit).State(.read_write),
+    allocator: std.mem.Allocator,
+    status: *st.Status(.xit),
+    commit_oid: *const [hash.SHA1_HEX_LEN]u8,
+) !void {
     // get current branch name
     const current_branch_name = try ref.readHeadName(.xit, state.readOnly(), allocator);
     defer allocator.free(current_branch_name);
@@ -438,9 +460,7 @@ pub fn writePatch(state: rp.Repo(.xit).State(.read_write), allocator: std.mem.Al
     var branch = try rp.Repo(.xit).DB.HashMap(.read_write).init(branch_cursor);
 
     // init file iterator for index diff
-    var status = try st.Status(.xit).init(allocator, state.readOnly());
-    defer status.deinit();
-    var file_iter = try df.FileIterator(.xit).init(allocator, state.readOnly(), .{ .index = .{ .status = &status } });
+    var file_iter = try df.FileIterator(.xit).init(allocator, state.readOnly(), .{ .index = .{ .status = status } });
 
     // iterate over each modified file and create/apply the patch
     while (try file_iter.next()) |*line_iter_pair_ptr| {
@@ -451,7 +471,7 @@ pub fn writePatch(state: rp.Repo(.xit).State(.read_write), allocator: std.mem.Al
             // remove existing patch data if there is any.
             try removePatch(&branch, line_iter_pair.path);
         } else {
-            const patch_hash = try writePatchForFile(state.extra.moment, &branch, allocator, &line_iter_pair);
+            const patch_hash = try writePatchForFile(state.extra.moment, &branch, allocator, &line_iter_pair, commit_oid);
             try applyPatchForFile(state.extra.moment, &branch, allocator, patch_hash, line_iter_pair.path);
         }
     }
