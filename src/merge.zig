@@ -472,6 +472,77 @@ fn writeBlobWithDiff3(
     return oid;
 }
 
+fn writeBlobWithPatches(
+    state: rp.Repo(.xit).State(.read_write),
+    allocator: std.mem.Allocator,
+    base_oid: *const [hash.SHA1_HEX_LEN]u8,
+    target_oid: *const [hash.SHA1_HEX_LEN]u8,
+    source_oid: *const [hash.SHA1_HEX_LEN]u8,
+    target_name: []const u8,
+    source_name: []const u8,
+    has_conflict: *bool,
+    path: []const u8,
+) ![hash.SHA1_BYTES_LEN]u8 {
+    _ = target_oid;
+    _ = source_name;
+    _ = has_conflict;
+
+    const commit_id_to_path_to_patch_id_cursor = (try state.extra.moment.getCursor(hash.hashBuffer("commit-id->path->patch-id"))) orelse return error.KeyNotFound;
+    const commit_id_to_path_to_patch_id = try rp.Repo(.xit).DB.HashMap(.read_only).init(commit_id_to_path_to_patch_id_cursor);
+
+    var patch_ids = std.ArrayList(hash.Hash).init(allocator);
+    defer patch_ids.deinit();
+
+    var iter = try obj.ObjectIterator(.xit, .full).init(allocator, state.readOnly(), &.{source_oid.*}, .{ .recursive = false });
+    defer iter.deinit();
+
+    const path_hash = hash.hashBuffer(path);
+
+    while (try iter.next()) |object| {
+        defer object.deinit();
+
+        if (std.mem.eql(u8, base_oid, &object.oid)) {
+            break;
+        }
+
+        const path_to_patch_id_cursor = (try commit_id_to_path_to_patch_id.getCursor(try hash.hexToHash(&object.oid))) orelse return error.KeyNotFound;
+        const path_to_patch_id = try rp.Repo(.xit).DB.HashMap(.read_only).init(path_to_patch_id_cursor);
+
+        if (try path_to_patch_id.getCursor(path_hash)) |patch_id_cursor| {
+            const patch_id_bytes = try patch_id_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
+            defer allocator.free(patch_id_bytes);
+            const patch_id = hash.bytesToHash(patch_id_bytes[0..hash.SHA1_BYTES_LEN]);
+            try patch_ids.append(patch_id);
+        }
+    }
+
+    if (patch_ids.items.len == 0) {
+        return error.ExpectedAtLeastOnePatch;
+    }
+
+    // get branch map
+    const branch_name_hash = hash.hashBuffer(target_name);
+    const branches_cursor = (try state.extra.moment.getCursor(hash.hashBuffer("branches"))) orelse return error.KeyNotFound;
+    const branches = try rp.Repo(.xit).DB.HashMap(.read_only).init(branches_cursor);
+    const branch_cursor = (try branches.getCursor(branch_name_hash)) orelse return error.KeyNotFound;
+
+    // put branch in temp location
+    const merge_in_progress_cursor = try state.extra.moment.putCursor(hash.hashBuffer("merge-in-progress"));
+    const merge_in_progress = try rp.Repo(.xit).DB.HashMap(.read_write).init(merge_in_progress_cursor);
+    var temp_branch_cursor = try merge_in_progress.putCursor(branch_name_hash);
+    try temp_branch_cursor.write(.{ .slot = branch_cursor.slot() });
+    const temp_branch = try rp.Repo(.xit).DB.HashMap(.read_write).init(temp_branch_cursor);
+
+    const pch = @import("./patch.zig");
+
+    for (0..patch_ids.items.len) |i| {
+        const patch_id = patch_ids.items[patch_ids.items.len - i - 1];
+        try pch.applyPatchForFile(state.extra.moment, &temp_branch, allocator, path_hash, patch_id);
+    }
+
+    return [_]u8{0} ** hash.SHA1_BYTES_LEN;
+}
+
 pub const SamePathConflictResult = struct {
     change: ?obj.Change,
     conflict: ?MergeConflict,
@@ -482,10 +553,13 @@ fn samePathConflict(
     state: rp.Repo(repo_kind).State(.read_write),
     allocator: std.mem.Allocator,
     base_oid: *const [hash.SHA1_HEX_LEN]u8,
+    target_oid: *const [hash.SHA1_HEX_LEN]u8,
+    source_oid: *const [hash.SHA1_HEX_LEN]u8,
     target_name: []const u8,
     source_name: []const u8,
     target_change_maybe: ?obj.Change,
     source_change: obj.Change,
+    path: []const u8,
     comptime merge_algo: MergeAlgorithm,
 ) !SamePathConflictResult {
     if (target_change_maybe) |target_change| {
@@ -532,7 +606,7 @@ fn samePathConflict(
                 const base_file_oid_maybe = if (base_entry_maybe) |base_entry| &base_entry.oid else null;
                 const oid = oid_maybe orelse switch (merge_algo) {
                     .diff3 => try writeBlobWithDiff3(repo_kind, state, allocator, base_file_oid_maybe, &target_entry.oid, &source_entry.oid, base_oid, target_name, source_name, &has_conflict),
-                    .patch => return error.NotImplemented,
+                    .patch => try writeBlobWithPatches(state, allocator, base_oid, target_oid, source_oid, target_name, source_name, &has_conflict, path),
                 };
                 const mode = mode_maybe orelse target_entry.mode;
 
@@ -776,7 +850,7 @@ pub const Merge = struct {
 
                 // look for same path conflicts while populating the clean diff
                 for (source_diff.changes.keys(), source_diff.changes.values()) |path, source_change| {
-                    const same_path_result = try samePathConflict(repo_kind, state, allocator, &base_oid, target_name, source_name, target_diff.changes.get(path), source_change, merge_algo);
+                    const same_path_result = try samePathConflict(repo_kind, state, allocator, &base_oid, &target_oid, &source_oid, target_name, source_name, target_diff.changes.get(path), source_change, path, merge_algo);
                     if (same_path_result.change) |change| {
                         try clean_diff.changes.put(path, change);
                     }
