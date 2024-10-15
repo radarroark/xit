@@ -537,7 +537,7 @@ fn writeBlobWithPatches(
 
     for (0..patch_ids.items.len) |i| {
         const patch_id = patch_ids.items[patch_ids.items.len - i - 1];
-        try pch.applyPatchForFile(state.extra.moment, &temp_branch, allocator, path_hash, patch_id);
+        try pch.applyPatchForFile(state.readOnly().extra.moment, &temp_branch, allocator, path_hash, patch_id);
     }
 
     return [_]u8{0} ** hash.SHA1_BYTES_LEN;
