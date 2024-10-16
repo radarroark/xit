@@ -30,24 +30,23 @@ fn createPatchEntries(
     allocator: std.mem.Allocator,
     arena: *std.heap.ArenaAllocator,
     line_iter_pair: *df.LineIteratorPair(.xit),
+    path_hash: hash.Hash,
+    patch_hash: hash.Hash,
     patch_entries: *std.ArrayList([]const u8),
     patch_content_entries: *std.ArrayList([]const u8),
-    patch_hash: hash.Hash,
 ) !void {
     var myers_diff_iter = try df.MyersDiffIterator(.xit).init(allocator, &line_iter_pair.a, &line_iter_pair.b);
     defer myers_diff_iter.deinit();
 
-    // store path
-    const path_hash = hash.hashBuffer(line_iter_pair.path);
-    const path_set_cursor = try moment.putCursor(hash.hashBuffer("path-set"));
-    const path_set = try rp.Repo(.xit).DB.HashMap(.read_write).init(path_set_cursor);
-    var path_cursor = try path_set.putKeyCursor(path_hash);
-    try path_cursor.writeIfEmpty(.{ .bytes = line_iter_pair.path });
+    // get path slot
+    const path_set_cursor = (try moment.getCursor(hash.hashBuffer("path-set"))) orelse return error.KeyNotFound;
+    const path_set = try rp.Repo(.xit).DB.HashMap(.read_only).init(path_set_cursor);
+    const path_slot = try path_set.getSlot(path_hash);
 
     // init node list
     const path_to_node_id_list_cursor = try branch.putCursor(hash.hashBuffer("path->node-id-list"));
     const path_to_node_id_list = try rp.Repo(.xit).DB.HashMap(.read_write).init(path_to_node_id_list_cursor);
-    try path_to_node_id_list.putKey(path_hash, .{ .slot = path_cursor.slot() });
+    try path_to_node_id_list.putKey(path_hash, .{ .slot = path_slot });
     const node_id_list_cursor_maybe = try path_to_node_id_list.getCursor(path_hash);
 
     var new_node_count: u64 = 0;
@@ -132,6 +131,7 @@ fn patchHash(
     branch: *const rp.Repo(.xit).DB.HashMap(.read_write),
     allocator: std.mem.Allocator,
     line_iter_pair: *df.LineIteratorPair(.xit),
+    path_hash: hash.Hash,
 ) ![hash.SHA1_BYTES_LEN]u8 {
     var patch_entries = std.ArrayList([]const u8).init(allocator);
     defer patch_entries.deinit();
@@ -142,7 +142,7 @@ fn patchHash(
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    try createPatchEntries(moment, branch, allocator, &arena, line_iter_pair, &patch_entries, &patch_content_entries, 0);
+    try createPatchEntries(moment, branch, allocator, &arena, line_iter_pair, path_hash, 0, &patch_entries, &patch_content_entries);
 
     var h = std.crypto.hash.Sha1.init(.{});
 
@@ -164,8 +164,9 @@ fn writePatchForFile(
     branch: *const rp.Repo(.xit).DB.HashMap(.read_write),
     allocator: std.mem.Allocator,
     line_iter_pair: *df.LineIteratorPair(.xit),
+    path_hash: hash.Hash,
 ) ![hash.SHA1_BYTES_LEN]u8 {
-    const patch_hash_bytes = try patchHash(moment, branch, allocator, line_iter_pair);
+    const patch_hash_bytes = try patchHash(moment, branch, allocator, line_iter_pair, path_hash);
     const patch_hash = hash.bytesToHash(&patch_hash_bytes);
 
     // exit early if patch already exists
@@ -197,7 +198,7 @@ fn writePatchForFile(
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    try createPatchEntries(moment, branch, allocator, &arena, line_iter_pair, &patch_entries, &patch_content_entries, patch_hash);
+    try createPatchEntries(moment, branch, allocator, &arena, line_iter_pair, path_hash, patch_hash, &patch_entries, &patch_content_entries);
 
     for (patch_entries.items) |patch_entry| {
         try change_list.append(.{ .bytes = patch_entry });
@@ -461,7 +462,7 @@ pub fn writePatch(
             try path_cursor.writeIfEmpty(.{ .bytes = line_iter_pair.path });
 
             // create patch
-            const patch_hash_bytes = try writePatchForFile(state.extra.moment, &branch, allocator, &line_iter_pair);
+            const patch_hash_bytes = try writePatchForFile(state.extra.moment, &branch, allocator, &line_iter_pair, path_hash);
             const patch_hash = hash.bytesToHash(&patch_hash_bytes);
 
             // associate patch hash with path/commit
