@@ -465,6 +465,9 @@ pub fn writePatch(
             const patch_hash_bytes = try writePatchForFile(state.extra.moment, &branch, allocator, &line_iter_pair, path_hash);
             const patch_hash = hash.bytesToHash(&patch_hash_bytes);
 
+            // apply patch
+            try applyPatchForFile(state.readOnly().extra.moment, &branch, allocator, path_hash, patch_hash);
+
             // associate patch hash with path/commit
             const commit_id_to_path_to_patch_id_cursor = try state.extra.moment.putCursor(hash.hashBuffer("commit-id->path->patch-id"));
             const commit_id_to_path_to_patch_id = try rp.Repo(.xit).DB.HashMap(.read_write).init(commit_id_to_path_to_patch_id_cursor);
@@ -472,9 +475,6 @@ pub fn writePatch(
             const path_to_patch_id = try rp.Repo(.xit).DB.HashMap(.read_write).init(path_to_patch_id_cursor);
             try path_to_patch_id.putKey(path_hash, .{ .slot = path_cursor.slot() });
             try path_to_patch_id.put(path_hash, .{ .bytes = &patch_hash_bytes });
-
-            // apply patch
-            try applyPatchForFile(state.readOnly().extra.moment, &branch, allocator, path_hash, patch_hash);
         }
     }
 }
