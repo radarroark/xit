@@ -265,7 +265,7 @@ pub fn applyPatchForFile(
                     defer allocator.free(existing_parent_node_id_bytes);
                     const old_live_children_cursor = try live_parent_to_children.putCursor(hash.hashBuffer(existing_parent_node_id_bytes));
                     const old_live_children = try rp.Repo(.xit).DB.HashMap(.read_write).init(old_live_children_cursor);
-                    try old_live_children.remove(node_id_hash);
+                    _ = try old_live_children.remove(node_id_hash);
                 }
 
                 // add to live-parent->children with empty children
@@ -308,13 +308,13 @@ pub fn applyPatchForFile(
                 const parent_node_id_hash = hash.hashBuffer(parent_node_id_bytes);
 
                 // remove from live-parent->children
-                try live_parent_to_children.remove(node_id_hash);
+                _ = try live_parent_to_children.remove(node_id_hash);
 
                 // remove from parent's children
                 {
                     const live_children_cursor = try live_parent_to_children.putCursor(parent_node_id_hash);
                     const live_children = try rp.Repo(.xit).DB.HashMap(.read_write).init(live_children_cursor);
-                    try live_children.remove(node_id_hash);
+                    _ = try live_children.remove(node_id_hash);
                 }
             },
         }
@@ -343,7 +343,7 @@ pub fn applyPatchForFile(
                 // because there is a conflict, and thus the node map
                 // cannot be "flattened" into a list
                 if (try children_iter.next() != null) {
-                    try path_to_node_id_list.remove(path_hash);
+                    _ = try path_to_node_id_list.remove(path_hash);
                     break;
                 }
                 // append child to the node list
@@ -405,15 +405,15 @@ fn removePatch(branch: *const rp.Repo(.xit).DB.HashMap(.read_write), path: []con
     })) |_| {
         const path_to_live_parent_to_children_cursor = try branch.putCursor(hash.hashBuffer("path->live-parent->children"));
         const path_to_live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_write).init(path_to_live_parent_to_children_cursor);
-        try path_to_live_parent_to_children.remove(path_hash);
+        _ = try path_to_live_parent_to_children.remove(path_hash);
 
         const path_to_child_to_parent_cursor = try branch.putCursor(hash.hashBuffer("path->child->parent"));
         const path_to_child_to_parent = try rp.Repo(.xit).DB.HashMap(.read_write).init(path_to_child_to_parent_cursor);
-        try path_to_child_to_parent.remove(path_hash);
+        _ = try path_to_child_to_parent.remove(path_hash);
 
         const path_to_node_id_list_cursor = try branch.putCursor(hash.hashBuffer("path->node-id-list"));
         const path_to_node_id_list = try rp.Repo(.xit).DB.HashMap(.read_write).init(path_to_node_id_list_cursor);
-        try path_to_node_id_list.remove(path_hash);
+        _ = try path_to_node_id_list.remove(path_hash);
     }
 }
 

@@ -505,7 +505,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                         defer allocator.free(path);
 
                         if (!self.entries.contains(path)) {
-                            try index.remove(hash.hashBuffer(path));
+                            _ = try index.remove(hash.hashBuffer(path));
                         }
                     }
 

@@ -170,12 +170,12 @@ pub fn remove(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.
             const refs = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(refs_cursor);
             const heads_cursor = try refs.putCursor(hash.hashBuffer("heads"));
             const heads = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(heads_cursor);
-            try heads.remove(name_hash);
+            _ = try heads.remove(name_hash);
 
             // remove branch map
             const branches_cursor = try state.extra.moment.putCursor(hash.hashBuffer("branches"));
             const branches = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(branches_cursor);
-            try branches.remove(name_hash);
+            _ = try branches.remove(name_hash);
         },
     }
 }

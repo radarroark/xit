@@ -336,11 +336,11 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                         const config_cursor = try state.extra.moment.putCursor(hash.hashBuffer("config"));
                         const config = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(config_cursor);
                         if (!self.sections.contains(section_name)) {
-                            try config.remove(hash.hashBuffer(section_name));
+                            _ = try config.remove(hash.hashBuffer(section_name));
                         } else {
                             const section_cursor = try config.putCursor(hash.hashBuffer(section_name));
                             const section = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(section_cursor);
-                            try section.remove(hash.hashBuffer(var_name));
+                            _ = try section.remove(hash.hashBuffer(var_name));
                         }
                     },
                 }
