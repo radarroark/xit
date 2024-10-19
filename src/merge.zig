@@ -529,7 +529,7 @@ fn writeBlobWithPatches(
     // put branch in temp location
     const merge_in_progress_cursor = try state.extra.moment.putCursor(hash.hashBuffer("merge-in-progress"));
     const merge_in_progress = try rp.Repo(.xit).DB.HashMap(.read_write).init(merge_in_progress_cursor);
-    var temp_branch_cursor = try merge_in_progress.putCursor(branch_name_hash);
+    var temp_branch_cursor = try merge_in_progress.putCursor(hash.hashBuffer("branch"));
     try temp_branch_cursor.write(.{ .slot = branch_cursor.slot() });
     const temp_branch = try rp.Repo(.xit).DB.HashMap(.read_write).init(temp_branch_cursor);
 
