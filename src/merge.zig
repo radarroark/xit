@@ -482,7 +482,6 @@ fn writeBlobWithPatches(
     has_conflict: *bool,
     path: []const u8,
 ) ![hash.SHA1_BYTES_LEN]u8 {
-    _ = target_oid;
     _ = source_name;
     _ = has_conflict;
 
@@ -528,16 +527,44 @@ fn writeBlobWithPatches(
     // put branch in temp location
     const merge_in_progress_cursor = try state.extra.moment.putCursor(hash.hashBuffer("merge-in-progress"));
     const merge_in_progress = try rp.Repo(.xit).DB.HashMap(.read_write).init(merge_in_progress_cursor);
-    var temp_branch_cursor = try merge_in_progress.putCursor(hash.hashBuffer("branch"));
-    try temp_branch_cursor.write(.{ .slot = branch_cursor.slot() });
-    const temp_branch = try rp.Repo(.xit).DB.HashMap(.read_write).init(temp_branch_cursor);
+    var merge_branch_cursor = try merge_in_progress.putCursor(hash.hashBuffer("branch"));
+    try merge_branch_cursor.write(.{ .slot = branch_cursor.slot() });
+    const merge_branch = try rp.Repo(.xit).DB.HashMap(.read_write).init(merge_branch_cursor);
 
     const pch = @import("./patch.zig");
 
     for (0..patch_ids.items.len) |i| {
         const patch_id = patch_ids.items[patch_ids.items.len - i - 1];
-        try pch.applyPatchForFile(state.readOnly().extra.moment, &temp_branch, allocator, path_hash, patch_id);
+        try pch.applyPatchForFile(state.readOnly().extra.moment, &merge_branch, allocator, path_hash, patch_id);
     }
+
+    const merge_path_to_live_parent_to_children_cursor = (try merge_branch.getCursor(hash.hashBuffer("path->live-parent->children"))) orelse return error.KeyNotFound;
+    const merge_path_to_live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_only).init(merge_path_to_live_parent_to_children_cursor);
+    const merge_live_parent_to_children_cursor = (try merge_path_to_live_parent_to_children.getCursor(path_hash)) orelse return error.KeyNotFound;
+    const merge_live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_only).init(merge_live_parent_to_children_cursor);
+
+    const commit_id_to_path_to_live_parent_to_children_cursor = (try state.extra.moment.getCursor(hash.hashBuffer("commit-id->path->live-parent->children"))) orelse return error.KeyNotFound;
+    const commit_id_to_path_to_live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_only).init(commit_id_to_path_to_live_parent_to_children_cursor);
+
+    const base_path_to_live_parent_to_children_cursor = (try commit_id_to_path_to_live_parent_to_children.getCursor(try hash.hexToHash(base_oid))) orelse return error.KeyNotFound;
+    const base_path_to_live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_only).init(base_path_to_live_parent_to_children_cursor);
+    const base_live_parent_to_children_cursor = (try base_path_to_live_parent_to_children.getCursor(path_hash)) orelse return error.KeyNotFound;
+    const base_live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_only).init(base_live_parent_to_children_cursor);
+
+    const target_path_to_live_parent_to_children_cursor = (try commit_id_to_path_to_live_parent_to_children.getCursor(try hash.hexToHash(target_oid))) orelse return error.KeyNotFound;
+    const target_path_to_live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_only).init(target_path_to_live_parent_to_children_cursor);
+    const target_live_parent_to_children_cursor = (try target_path_to_live_parent_to_children.getCursor(path_hash)) orelse return error.KeyNotFound;
+    const target_live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_only).init(target_live_parent_to_children_cursor);
+
+    const source_path_to_live_parent_to_children_cursor = (try commit_id_to_path_to_live_parent_to_children.getCursor(try hash.hexToHash(source_oid))) orelse return error.KeyNotFound;
+    const source_path_to_live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_only).init(source_path_to_live_parent_to_children_cursor);
+    const source_live_parent_to_children_cursor = (try source_path_to_live_parent_to_children.getCursor(path_hash)) orelse return error.KeyNotFound;
+    const source_live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_only).init(source_live_parent_to_children_cursor);
+
+    _ = merge_live_parent_to_children;
+    _ = base_live_parent_to_children;
+    _ = target_live_parent_to_children;
+    _ = source_live_parent_to_children;
 
     return [_]u8{0} ** hash.SHA1_BYTES_LEN;
 }
