@@ -218,6 +218,18 @@ pub fn applyPatchForFile(
     path_hash: hash.Hash,
     patch_hash: hash.Hash,
 ) !void {
+    // exit early if patch has already been applied
+    if (try branch.cursor.readPath(void, &.{
+        .{ .hash_map_get = .{ .value = hash.hashBuffer("patch-id-set") } },
+        .{ .hash_map_get = .{ .value = patch_hash } },
+    })) |_| {
+        return;
+    } else {
+        const patch_id_set_cursor = try branch.putCursor(hash.hashBuffer("patch-id-set"));
+        const patch_id_set = try rp.Repo(.xit).DB.HashMap(.read_write).init(patch_id_set_cursor);
+        try patch_id_set.putKey(patch_hash, .{ .slot = .{ .tag = .none } });
+    }
+
     var change_list_cursor = (try moment.cursor.readPath(void, &.{
         .{ .hash_map_get = .{ .value = hash.hashBuffer("patch-id->change-list") } },
         .{ .hash_map_get = .{ .value = patch_hash } },
