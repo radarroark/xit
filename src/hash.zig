@@ -19,7 +19,6 @@ const HASH_SIZE = @bitSizeOf(Hash) / 8;
 
 pub fn sha1Reader(reader: anytype, header_maybe: ?[]const u8, out: *[SHA1_BYTES_LEN]u8) !void {
     var h = std.crypto.hash.Sha1.init(.{});
-    // TODO: use buffered io
     var buffer = [_]u8{0} ** MAX_READ_BYTES;
     if (header_maybe) |header| {
         h.update(header);
