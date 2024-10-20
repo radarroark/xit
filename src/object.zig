@@ -118,7 +118,6 @@ pub fn writeBlob(
             try tmp_file.writeAll(header);
 
             // copy file into temp file
-            // TODO: use buffered io
             var read_buffer = [_]u8{0} ** MAX_READ_BYTES;
             while (true) {
                 const size = try reader.read(&read_buffer);
@@ -151,7 +150,6 @@ pub fn writeBlob(
                 var writer = try file_value_cursor.writer();
                 try writer.writeAll(header);
 
-                // TODO: use buffered io
                 var read_buffer = [_]u8{0} ** MAX_READ_BYTES;
                 while (true) {
                     const size = try reader.read(&read_buffer);
