@@ -8,8 +8,8 @@ const ref = @import("./ref.zig");
 
 const MAX_READ_BYTES = 1024; // FIXME: this is arbitrary...
 
-const NodeIdInt = u224;
-const NodeId = packed struct {
+pub const NodeIdInt = u224;
+pub const NodeId = packed struct {
     node: u64,
     patch_id: hash.Hash,
 };
@@ -20,8 +20,9 @@ const ChangeKind = enum(u8) {
     delete_node,
 };
 
-const FIRST_NODE_ID_INT: NodeIdInt = 0;
-const FIRST_NODE_ID_BYTES = [_]u8{0} ** (@bitSizeOf(NodeId) / 8);
+pub const NODE_ID_SIZE = @bitSizeOf(NodeId) / 8;
+pub const FIRST_NODE_ID_INT: NodeIdInt = 0;
+pub const FIRST_NODE_ID_BYTES = [_]u8{0} ** NODE_ID_SIZE;
 
 /// TODO: turn this into an iterator all entries don't need to be in memory at the same time
 fn createPatchEntries(
@@ -361,14 +362,14 @@ pub fn applyPatchForFile(
                 // append child to the node list
                 else {
                     const kv_pair = try child_cursor.readKeyValuePair();
-                    const child = try kv_pair.key_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
-                    defer allocator.free(child);
+                    var child_bytes = [_]u8{0} ** NODE_ID_SIZE;
+                    const child_slice = try kv_pair.key_cursor.readBytes(&child_bytes);
 
                     if (current_index_maybe) |*current_index| {
                         if (try node_id_list.getCursor(current_index.*)) |existing_node_id_cursor| {
                             const existing_node_id = try existing_node_id_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
                             defer allocator.free(existing_node_id);
-                            if (std.mem.eql(u8, existing_node_id, child)) {
+                            if (std.mem.eql(u8, existing_node_id, child_slice)) {
                                 // node id hasn't changed, so just continue without changing the data
                                 current_index.* += 1;
                             } else {
@@ -383,10 +384,10 @@ pub fn applyPatchForFile(
                     }
 
                     if (current_index_maybe == null) {
-                        try node_id_list.append(.{ .bytes = child });
+                        try node_id_list.append(.{ .bytes = child_slice });
                     }
 
-                    var stream = std.io.fixedBufferStream(child);
+                    var stream = std.io.fixedBufferStream(child_slice);
                     var reader = stream.reader();
                     current_node_id_int = try reader.readInt(NodeIdInt, .big);
                 }
