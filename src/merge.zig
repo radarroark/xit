@@ -628,22 +628,126 @@ fn writeBlobWithPatches(
                     var children_iter = try children_cursor.iterator();
                     defer children_iter.deinit();
 
-                    const child_cursor = (try children_iter.next()) orelse return error.ExpectedChild;
-                    if (try children_iter.next() != null) {
+                    const first_child_cursor = (try children_iter.next()) orelse return error.ExpectedChild;
+                    const first_kv_pair = try first_child_cursor.readKeyValuePair();
+                    var first_child_bytes = [_]u8{0} ** pch.NODE_ID_SIZE;
+                    const first_child_slice = try first_kv_pair.key_cursor.readBytes(&first_child_bytes);
+                    const first_node_id: pch.NodeId = blk: {
+                        var stream = std.io.fixedBufferStream(first_child_slice);
+                        var node_id_reader = stream.reader();
+                        break :blk @bitCast(try node_id_reader.readInt(pch.NodeIdInt, .big));
+                    };
+                    const first_node_id_hash = hash.hashBuffer(first_child_slice);
+
+                    if (try children_iter.next()) |second_child_cursor| {
+                        if (try children_iter.next() != null) return error.MoreThanTwoChildrenFound;
+
+                        const second_kv_pair = try second_child_cursor.readKeyValuePair();
+                        var second_child_bytes = [_]u8{0} ** pch.NODE_ID_SIZE;
+                        const second_child_slice = try second_kv_pair.key_cursor.readBytes(&second_child_bytes);
+                        const second_node_id: pch.NodeId = blk: {
+                            var stream = std.io.fixedBufferStream(second_child_slice);
+                            var node_id_reader = stream.reader();
+                            break :blk @bitCast(try node_id_reader.readInt(pch.NodeIdInt, .big));
+                        };
+                        const second_node_id_hash = hash.hashBuffer(second_child_slice);
+
+                        const target_node_id, const target_node_id_hash, const source_node_id, const source_node_id_hash =
+                            if (try self.parent.target_live_parent_to_children.getCursor(first_node_id_hash) != null)
+                            .{ first_node_id, first_node_id_hash, second_node_id, second_node_id_hash }
+                        else
+                            .{ second_node_id, second_node_id_hash, first_node_id, first_node_id_hash };
+
+                        var target_node_ids = std.ArrayList(pch.NodeId).init(self.parent.allocator);
+                        defer target_node_ids.deinit();
+
+                        var next_node_id = target_node_id;
+                        var next_node_id_hash = target_node_id_hash;
+                        while (try self.parent.target_live_parent_to_children.getCursor(next_node_id_hash)) |next_children_cursor| {
+                            if (null == try self.parent.source_live_parent_to_children.getCursor(next_node_id_hash)) {
+                                try target_node_ids.append(next_node_id);
+                            } else {
+                                break;
+                            }
+                            var next_children_iter = try next_children_cursor.iterator();
+                            defer next_children_iter.deinit();
+                            const next_child_cursor = (try next_children_iter.next()) orelse return error.ExpectedChild;
+                            if (try next_children_iter.next() != null) return error.ExpectedOneChild;
+                            const next_kv_pair = try next_child_cursor.readKeyValuePair();
+                            var next_child_bytes = [_]u8{0} ** pch.NODE_ID_SIZE;
+                            const next_child_slice = try next_kv_pair.key_cursor.readBytes(&next_child_bytes);
+                            next_node_id = blk: {
+                                var stream = std.io.fixedBufferStream(next_child_slice);
+                                var node_id_reader = stream.reader();
+                                break :blk @bitCast(try node_id_reader.readInt(pch.NodeIdInt, .big));
+                            };
+                            next_node_id_hash = hash.hashBuffer(next_child_slice);
+                        }
+
+                        var source_node_ids = std.ArrayList(pch.NodeId).init(self.parent.allocator);
+                        defer source_node_ids.deinit();
+
+                        next_node_id = source_node_id;
+                        next_node_id_hash = source_node_id_hash;
+                        while (try self.parent.source_live_parent_to_children.getCursor(next_node_id_hash)) |next_children_cursor| {
+                            if (null == try self.parent.target_live_parent_to_children.getCursor(next_node_id_hash)) {
+                                try source_node_ids.append(next_node_id);
+                            } else {
+                                break;
+                            }
+                            var next_children_iter = try next_children_cursor.iterator();
+                            defer next_children_iter.deinit();
+                            const next_child_cursor = (try next_children_iter.next()) orelse return error.ExpectedChild;
+                            if (try next_children_iter.next() != null) return error.ExpectedOneChild;
+                            const next_kv_pair = try next_child_cursor.readKeyValuePair();
+                            var next_child_bytes = [_]u8{0} ** pch.NODE_ID_SIZE;
+                            const next_child_slice = try next_kv_pair.key_cursor.readBytes(&next_child_bytes);
+                            next_node_id = blk: {
+                                var stream = std.io.fixedBufferStream(next_child_slice);
+                                var node_id_reader = stream.reader();
+                                break :blk @bitCast(try node_id_reader.readInt(pch.NodeIdInt, .big));
+                            };
+                            next_node_id_hash = hash.hashBuffer(next_child_slice);
+                        }
+
+                        const common_node_id_hash = next_node_id_hash;
+                        // TODO: this technically isn't always going to be true,
+                        // because it's possible for the source and target branch
+                        // to both create the exact same patch, which means the
+                        // node would not be in the base.
+                        if (null == try self.parent.base_live_parent_to_children.getCursor(common_node_id_hash)) return error.ExpectedBaseToContainCommonNode;
+
+                        var base_node_ids = std.ArrayList(pch.NodeId).init(self.parent.allocator);
+                        defer base_node_ids.deinit();
+
+                        next_node_id_hash = current_node_id_hash;
+                        while (try self.parent.base_live_parent_to_children.getCursor(next_node_id_hash)) |next_children_cursor| {
+                            var next_children_iter = try next_children_cursor.iterator();
+                            defer next_children_iter.deinit();
+                            const next_child_cursor = (try next_children_iter.next()) orelse return error.ExpectedChild;
+                            if (try next_children_iter.next() != null) return error.ExpectedOneChild;
+                            const next_kv_pair = try next_child_cursor.readKeyValuePair();
+                            var next_child_bytes = [_]u8{0} ** pch.NODE_ID_SIZE;
+                            const next_child_slice = try next_kv_pair.key_cursor.readBytes(&next_child_bytes);
+                            next_node_id = blk: {
+                                var stream = std.io.fixedBufferStream(next_child_slice);
+                                var node_id_reader = stream.reader();
+                                break :blk @bitCast(try node_id_reader.readInt(pch.NodeIdInt, .big));
+                            };
+                            next_node_id_hash = hash.hashBuffer(next_child_slice);
+                            if (next_node_id_hash != common_node_id_hash) {
+                                try base_node_ids.append(next_node_id);
+                            } else {
+                                break;
+                            }
+                        }
+
                         return error.NotImplemented;
                     } else {
-                        const kv_pair = try child_cursor.readKeyValuePair();
-                        var child_bytes = [_]u8{0} ** pch.NODE_ID_SIZE;
-                        const child_slice = try kv_pair.key_cursor.readBytes(&child_bytes);
-
-                        var stream = std.io.fixedBufferStream(child_slice);
-                        var node_id_reader = stream.reader();
-                        const node_id: pch.NodeId = @bitCast(try node_id_reader.readInt(pch.NodeIdInt, .big));
-
-                        const change_content_list_cursor = (try self.parent.patch_id_to_change_content_list.getCursor(node_id.patch_id)) orelse return error.KeyNotFound;
+                        const change_content_list_cursor = (try self.parent.patch_id_to_change_content_list.getCursor(first_node_id.patch_id)) orelse return error.KeyNotFound;
                         const change_content_list = try rp.Repo(.xit).DB.ArrayList(.read_only).init(change_content_list_cursor);
 
-                        const change_content_cursor = (try change_content_list.getCursor(node_id.node)) orelse return error.KeyNotFound;
+                        const change_content_cursor = (try change_content_list.getCursor(first_node_id.node)) orelse return error.KeyNotFound;
                         const change_content = try change_content_cursor.readBytesAlloc(self.parent.allocator, MAX_READ_BYTES);
                         {
                             errdefer self.parent.allocator.free(change_content);
@@ -651,12 +755,11 @@ fn writeBlobWithPatches(
                         }
                         self.parent.current_line = self.parent.line_buffer.items[0];
 
-                        const node_id_hash = hash.hashBuffer(child_slice);
-                        const next_children_cursor = (try self.parent.merge_live_parent_to_children.getCursor(node_id_hash)) orelse return error.KeyNotFound;
+                        const next_children_cursor = (try self.parent.merge_live_parent_to_children.getCursor(first_node_id_hash)) orelse return error.KeyNotFound;
                         var next_children_iter = try next_children_cursor.iterator();
                         defer next_children_iter.deinit();
                         if (try next_children_iter.next()) |_| {
-                            self.parent.current_node_id_hash = node_id_hash;
+                            self.parent.current_node_id_hash = first_node_id_hash;
                         } else {
                             self.parent.current_node_id_hash = null;
                         }
