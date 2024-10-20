@@ -482,9 +482,6 @@ fn writeBlobWithPatches(
     has_conflict: *bool,
     path: []const u8,
 ) ![hash.SHA1_BYTES_LEN]u8 {
-    _ = source_name;
-    _ = has_conflict;
-
     const commit_id_to_path_to_patch_id_cursor = (try state.extra.moment.getCursor(hash.hashBuffer("commit-id->path->patch-id"))) orelse return error.KeyNotFound;
     const commit_id_to_path_to_patch_id = try rp.Repo(.xit).DB.HashMap(.read_only).init(commit_id_to_path_to_patch_id_cursor);
 
@@ -561,12 +558,175 @@ fn writeBlobWithPatches(
     const source_live_parent_to_children_cursor = (try source_path_to_live_parent_to_children.getCursor(path_hash)) orelse return error.KeyNotFound;
     const source_live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_only).init(source_live_parent_to_children_cursor);
 
-    _ = merge_live_parent_to_children;
-    _ = base_live_parent_to_children;
-    _ = target_live_parent_to_children;
-    _ = source_live_parent_to_children;
+    const patch_id_to_change_content_list_cursor = (try state.extra.moment.getCursor(hash.hashBuffer("patch-id->change-content-list"))) orelse return error.KeyNotFound;
+    const patch_id_to_change_content_list = try rp.Repo(.xit).DB.HashMap(.read_only).init(patch_id_to_change_content_list_cursor);
 
-    return [_]u8{0} ** hash.SHA1_BYTES_LEN;
+    var line_buffer = std.ArrayList([]const u8).init(allocator);
+    defer {
+        for (line_buffer.items) |buffer| {
+            allocator.free(buffer);
+        }
+        line_buffer.deinit();
+    }
+
+    const Stream = struct {
+        allocator: std.mem.Allocator,
+        target_marker: []u8,
+        base_marker: []u8,
+        separate_marker: []u8,
+        source_marker: []u8,
+        merge_live_parent_to_children: *const rp.Repo(.xit).DB.HashMap(.read_only),
+        base_live_parent_to_children: *const rp.Repo(.xit).DB.HashMap(.read_only),
+        target_live_parent_to_children: *const rp.Repo(.xit).DB.HashMap(.read_only),
+        source_live_parent_to_children: *const rp.Repo(.xit).DB.HashMap(.read_only),
+        patch_id_to_change_content_list: *const rp.Repo(.xit).DB.HashMap(.read_only),
+        line_buffer: *std.ArrayList([]const u8),
+        current_line: ?[]const u8,
+        current_node_id_hash: ?hash.Hash,
+        has_conflict: bool,
+
+        const Parent = @This();
+
+        pub const Reader = struct {
+            parent: *Parent,
+
+            pub fn read(self: @This(), buf: []u8) !usize {
+                if (self.parent.current_line) |current_line| {
+                    const size = @min(buf.len, current_line.len);
+                    var line_finished = current_line.len == 0;
+                    if (size > 0) {
+                        // copy as much from the current line as we can
+                        @memcpy(buf[0..size], current_line[0..size]);
+                        const new_current_line = current_line[size..];
+                        line_finished = new_current_line.len == 0;
+                        self.parent.current_line = new_current_line;
+                    }
+                    // if we have copied the entire line
+                    if (line_finished) {
+                        // if there is room for the newline character
+                        if (buf.len > size) {
+                            // remove the line from the line buffer
+                            const line = self.parent.line_buffer.orderedRemove(0);
+                            self.parent.allocator.free(line);
+                            if (self.parent.line_buffer.items.len > 0) {
+                                self.parent.current_line = self.parent.line_buffer.items[0];
+                            } else {
+                                self.parent.current_line = null;
+                            }
+                            // if we aren't at the very last line, add a newline character
+                            if (self.parent.current_line != null or self.parent.current_node_id_hash != null) {
+                                buf[size] = '\n';
+                                return size + 1;
+                            }
+                        }
+                    }
+                    return size;
+                }
+
+                if (self.parent.current_node_id_hash) |current_node_id_hash| {
+                    const children_cursor = (try self.parent.merge_live_parent_to_children.getCursor(current_node_id_hash)) orelse return error.KeyNotFound;
+                    var children_iter = try children_cursor.iterator();
+                    defer children_iter.deinit();
+
+                    const child_cursor = (try children_iter.next()) orelse return error.ExpectedChild;
+                    if (try children_iter.next() != null) {
+                        return error.NotImplemented;
+                    } else {
+                        const kv_pair = try child_cursor.readKeyValuePair();
+                        var child_bytes = [_]u8{0} ** pch.NODE_ID_SIZE;
+                        const child_slice = try kv_pair.key_cursor.readBytes(&child_bytes);
+
+                        var stream = std.io.fixedBufferStream(child_slice);
+                        var node_id_reader = stream.reader();
+                        const node_id: pch.NodeId = @bitCast(try node_id_reader.readInt(pch.NodeIdInt, .big));
+
+                        const change_content_list_cursor = (try self.parent.patch_id_to_change_content_list.getCursor(node_id.patch_id)) orelse return error.KeyNotFound;
+                        const change_content_list = try rp.Repo(.xit).DB.ArrayList(.read_only).init(change_content_list_cursor);
+
+                        const change_content_cursor = (try change_content_list.getCursor(node_id.node)) orelse return error.KeyNotFound;
+                        const change_content = try change_content_cursor.readBytesAlloc(self.parent.allocator, MAX_READ_BYTES);
+                        {
+                            errdefer self.parent.allocator.free(change_content);
+                            try self.parent.line_buffer.append(change_content);
+                        }
+                        self.parent.current_line = self.parent.line_buffer.items[0];
+
+                        const node_id_hash = hash.hashBuffer(child_slice);
+                        const next_children_cursor = (try self.parent.merge_live_parent_to_children.getCursor(node_id_hash)) orelse return error.KeyNotFound;
+                        var next_children_iter = try next_children_cursor.iterator();
+                        defer next_children_iter.deinit();
+                        if (try next_children_iter.next()) |_| {
+                            self.parent.current_node_id_hash = node_id_hash;
+                        } else {
+                            self.parent.current_node_id_hash = null;
+                        }
+                    }
+                    return self.read(buf);
+                } else {
+                    return 0;
+                }
+            }
+        };
+
+        pub fn seekTo(self: *@This(), offset: usize) !void {
+            if (offset == 0) {
+                self.current_node_id_hash = hash.hashBuffer(&pch.FIRST_NODE_ID_BYTES);
+            } else {
+                return error.InvalidOffset;
+            }
+        }
+
+        pub fn reader(self: *@This()) Reader {
+            return Reader{
+                .parent = self,
+            };
+        }
+
+        pub fn count(self: *@This()) !usize {
+            var n: usize = 0;
+            var read_buffer = [_]u8{0} ** MAX_READ_BYTES;
+            try self.seekTo(0);
+            while (true) {
+                const size = try self.reader().read(&read_buffer);
+                if (size == 0) {
+                    break;
+                }
+                n += size;
+            }
+            try self.seekTo(0);
+            return n;
+        }
+    };
+
+    const target_marker = try std.fmt.allocPrint(allocator, "<<<<<<< {s}", .{target_name});
+    defer allocator.free(target_marker);
+    const base_marker = try std.fmt.allocPrint(allocator, "||||||| original ({s})", .{base_oid});
+    defer allocator.free(base_marker);
+    const separate_marker = try std.fmt.allocPrint(allocator, "=======", .{});
+    defer allocator.free(separate_marker);
+    const source_marker = try std.fmt.allocPrint(allocator, ">>>>>>> {s}", .{source_name});
+    defer allocator.free(source_marker);
+    var stream = Stream{
+        .allocator = allocator,
+        .target_marker = target_marker,
+        .base_marker = base_marker,
+        .separate_marker = separate_marker,
+        .source_marker = source_marker,
+        .merge_live_parent_to_children = &merge_live_parent_to_children,
+        .base_live_parent_to_children = &base_live_parent_to_children,
+        .target_live_parent_to_children = &target_live_parent_to_children,
+        .source_live_parent_to_children = &source_live_parent_to_children,
+        .patch_id_to_change_content_list = &patch_id_to_change_content_list,
+        .line_buffer = &line_buffer,
+        .current_line = null,
+        .current_node_id_hash = hash.hashBuffer(&pch.FIRST_NODE_ID_BYTES),
+        .has_conflict = false,
+    };
+
+    var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+    try obj.writeBlob(.xit, state, allocator, &stream, try stream.count(), &oid);
+    has_conflict.* = stream.has_conflict;
+    return oid;
 }
 
 pub const SamePathConflictResult = struct {
