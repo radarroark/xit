@@ -1018,7 +1018,7 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind) !void {
     // A --- B ------------ D' [master]
     //        \
     //         \
-    //          D --- D --- E [foo]
+    //          D --------- E [foo]
 
     try addFile(repo_kind, &repo, "readme.md", "a");
     _ = try repo.commit(null, .{ .message = "a" });
