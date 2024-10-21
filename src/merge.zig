@@ -531,7 +531,7 @@ fn writeBlobWithPatches(
     const merge_in_progress_cursor = try state.extra.moment.putCursor(hash.hashBuffer("merge-in-progress"));
     const merge_in_progress = try rp.Repo(.xit).DB.HashMap(.read_write).init(merge_in_progress_cursor);
     var merge_branch_cursor = try merge_in_progress.putCursor(hash.hashBuffer("branch"));
-    try merge_branch_cursor.write(.{ .slot = branch_cursor.slot() });
+    try merge_branch_cursor.writeIfEmpty(.{ .slot = branch_cursor.slot() });
     const merge_branch = try rp.Repo(.xit).DB.HashMap(.read_write).init(merge_branch_cursor);
 
     const pch = @import("./patch.zig");
@@ -1426,6 +1426,9 @@ pub const Merge = struct {
                                 .source_name = source_name,
                                 .data = .{ .conflict = .{ .conflicts = conflicts } },
                             };
+                        } else {
+                            // if any file conflicts were auto-resolved, there will be temporary state that must be cleaned up
+                            _ = try state.extra.moment.remove(hash.hashBuffer("merge-in-progress"));
                         }
                     },
                 }
