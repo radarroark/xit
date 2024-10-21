@@ -540,6 +540,11 @@ fn writeBlobWithPatches(
     const merge_live_parent_to_children_cursor = (try merge_path_to_live_parent_to_children.getCursor(path_hash)) orelse return error.KeyNotFound;
     const merge_live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_only).init(merge_live_parent_to_children_cursor);
 
+    const merge_path_to_child_to_parent_cursor = (try merge_branch.getCursor(hash.hashBuffer("path->child->parent"))) orelse return error.KeyNotFound;
+    const merge_path_to_child_to_parent = try rp.Repo(.xit).DB.HashMap(.read_only).init(merge_path_to_child_to_parent_cursor);
+    const merge_child_to_parent_cursor = (try merge_path_to_child_to_parent.getCursor(path_hash)) orelse return error.KeyNotFound;
+    const merge_child_to_parent = try rp.Repo(.xit).DB.HashMap(.read_only).init(merge_child_to_parent_cursor);
+
     const commit_id_to_path_to_live_parent_to_children_cursor = (try state.extra.moment.getCursor(hash.hashBuffer("commit-id->path->live-parent->children"))) orelse return error.KeyNotFound;
     const commit_id_to_path_to_live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_only).init(commit_id_to_path_to_live_parent_to_children_cursor);
 
@@ -623,6 +628,7 @@ fn writeBlobWithPatches(
         base_marker: []u8,
         separate_marker: []u8,
         source_marker: []u8,
+        merge_child_to_parent: *const rp.Repo(.xit).DB.HashMap(.read_only),
         merge_live_parent_to_children: *const rp.Repo(.xit).DB.HashMap(.read_only),
         base_live_parent_to_children: *const rp.Repo(.xit).DB.HashMap(.read_only),
         target_live_parent_to_children: *const rp.Repo(.xit).DB.HashMap(.read_only),
@@ -732,6 +738,8 @@ fn writeBlobWithPatches(
                             next_node_id_hash = hash.hashBuffer(next_child_slice);
                         }
 
+                        const common_node_id_hash = next_node_id_hash;
+
                         var source_node_ids = std.ArrayList(pch.NodeId).init(self.parent.allocator);
                         defer source_node_ids.deinit();
 
@@ -758,7 +766,8 @@ fn writeBlobWithPatches(
                             next_node_id_hash = hash.hashBuffer(next_child_slice);
                         }
 
-                        const common_node_id_hash = next_node_id_hash;
+                        if (next_node_id_hash != common_node_id_hash) return error.UnexpectedNodeId;
+
                         // TODO: this technically isn't always going to be true,
                         // because it's possible for the source and target branch
                         // to both create the exact same patch, which means the
@@ -790,14 +799,11 @@ fn writeBlobWithPatches(
                             }
                         }
 
-                        const next_children_cursor = (try self.parent.merge_live_parent_to_children.getCursor(common_node_id_hash)) orelse return error.KeyNotFound;
-                        var next_children_iter = try next_children_cursor.iterator();
-                        defer next_children_iter.deinit();
-                        if (try next_children_iter.next()) |_| {
-                            self.parent.current_node_id_hash = common_node_id_hash;
-                        } else {
-                            self.parent.current_node_id_hash = null;
-                        }
+                        const common_parent_cursor = (try self.parent.merge_child_to_parent.getCursor(common_node_id_hash)) orelse return error.KeyNotFound;
+                        var common_parent_bytes = [_]u8{0} ** pch.NODE_ID_SIZE;
+                        const common_parent_slice = try common_parent_cursor.readBytes(&common_parent_bytes);
+                        const common_parent_node_id_hash = hash.hashBuffer(common_parent_slice);
+                        self.parent.current_node_id_hash = common_parent_node_id_hash;
 
                         var base_lines = try LineRange.init(self.parent.allocator, self.parent.patch_id_to_change_content_list, base_node_ids.items);
                         defer base_lines.deinit();
@@ -825,7 +831,40 @@ fn writeBlobWithPatches(
                             return self.read(buf);
                         }
 
-                        return error.NotImplemented;
+                        // return conflict
+
+                        const target_marker = try self.parent.allocator.dupe(u8, self.parent.target_marker);
+                        {
+                            errdefer self.parent.allocator.free(target_marker);
+                            try self.parent.line_buffer.append(target_marker);
+                        }
+                        try self.parent.line_buffer.appendSlice(target_lines.lines.items);
+                        target_lines.lines.clearAndFree();
+
+                        const base_marker = try self.parent.allocator.dupe(u8, self.parent.base_marker);
+                        {
+                            errdefer self.parent.allocator.free(base_marker);
+                            try self.parent.line_buffer.append(base_marker);
+                        }
+                        try self.parent.line_buffer.appendSlice(base_lines.lines.items);
+                        base_lines.lines.clearAndFree();
+
+                        const separate_marker = try self.parent.allocator.dupe(u8, self.parent.separate_marker);
+                        {
+                            errdefer self.parent.allocator.free(separate_marker);
+                            try self.parent.line_buffer.append(separate_marker);
+                        }
+
+                        try self.parent.line_buffer.appendSlice(source_lines.lines.items);
+                        source_lines.lines.clearAndFree();
+                        const source_marker = try self.parent.allocator.dupe(u8, self.parent.source_marker);
+                        {
+                            errdefer self.parent.allocator.free(source_marker);
+                            try self.parent.line_buffer.append(source_marker);
+                        }
+
+                        self.parent.current_line = self.parent.line_buffer.items[0];
+                        self.parent.has_conflict = true;
                     } else {
                         const change_content_list_cursor = (try self.parent.patch_id_to_change_content_list.getCursor(first_node_id.patch_id)) orelse return error.KeyNotFound;
                         const change_content_list = try rp.Repo(.xit).DB.ArrayList(.read_only).init(change_content_list_cursor);
@@ -898,6 +937,7 @@ fn writeBlobWithPatches(
         .base_marker = base_marker,
         .separate_marker = separate_marker,
         .source_marker = source_marker,
+        .merge_child_to_parent = &merge_child_to_parent,
         .merge_live_parent_to_children = &merge_live_parent_to_children,
         .base_live_parent_to_children = &base_live_parent_to_children,
         .target_live_parent_to_children = &target_live_parent_to_children,
