@@ -332,6 +332,13 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             defer result.deinit();
             try std.testing.expect(.success == result.data);
         }
+
+        // if we try merging foo again, it does nothing
+        {
+            var merge_result = try repo.merge(.{ .new = .{ .source_name = "foo" } });
+            defer merge_result.deinit();
+            try std.testing.expect(.nothing == merge_result.data);
+        }
     }
 
     // same file conflict (autoresolved)
@@ -404,6 +411,13 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             defer line_iter_pair.deinit();
             return error.DiffResultNotExpected;
         }
+
+        // if we try merging foo again, it does nothing
+        {
+            var merge_result = try repo.merge(.{ .new = .{ .source_name = "foo" } });
+            defer merge_result.deinit();
+            try std.testing.expect(.nothing == merge_result.data);
+        }
     }
 
     // modify/delete conflict (target modifies, source deletes)
@@ -464,6 +478,13 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             defer result.deinit();
             try std.testing.expect(.success == result.data);
         }
+
+        // if we try merging foo again, it does nothing
+        {
+            var merge_result = try repo.merge(.{ .new = .{ .source_name = "foo" } });
+            defer merge_result.deinit();
+            try std.testing.expect(.nothing == merge_result.data);
+        }
     }
 
     // delete/modify conflict (target deletes, source modifies)
@@ -521,6 +542,13 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             var result = try repo.merge(.cont);
             defer result.deinit();
             try std.testing.expect(.success == result.data);
+        }
+
+        // if we try merging foo again, it does nothing
+        {
+            var merge_result = try repo.merge(.{ .new = .{ .source_name = "foo" } });
+            defer merge_result.deinit();
+            try std.testing.expect(.nothing == merge_result.data);
         }
     }
 
@@ -586,6 +614,13 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             defer result.deinit();
             try std.testing.expect(.success == result.data);
         }
+
+        // if we try merging foo again, it does nothing
+        {
+            var merge_result = try repo.merge(.{ .new = .{ .source_name = "foo" } });
+            defer merge_result.deinit();
+            try std.testing.expect(.nothing == merge_result.data);
+        }
     }
 
     // dir/file conflict (target has dir, source has file)
@@ -647,6 +682,13 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             var result = try repo.merge(.cont);
             defer result.deinit();
             try std.testing.expect(.success == result.data);
+        }
+
+        // if we try merging foo again, it does nothing
+        {
+            var merge_result = try repo.merge(.{ .new = .{ .source_name = "foo" } });
+            defer merge_result.deinit();
+            try std.testing.expect(.nothing == merge_result.data);
         }
     }
 }
@@ -742,6 +784,13 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind) !void {
         var result = try repo.merge(.cont);
         defer result.deinit();
         try std.testing.expect(.success == result.data);
+    }
+
+    // if we try merging foo again, it does nothing
+    {
+        var merge_result = try repo.merge(.{ .new = .{ .source_name = "foo" } });
+        defer merge_result.deinit();
+        try std.testing.expect(.nothing == merge_result.data);
     }
 
     // replace bin with a text file containing a single line that
@@ -887,6 +936,13 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind) !void {
         defer line_iter_pair.deinit();
         return error.DiffResultNotExpected;
     }
+
+    // if we try merging foo again, it does nothing
+    {
+        var merge_result = try repo.merge(.{ .new = .{ .source_name = "foo" } });
+        defer merge_result.deinit();
+        try std.testing.expect(.nothing == merge_result.data);
+    }
 }
 
 test "merge conflict shuffle" {
@@ -954,7 +1010,7 @@ fn testCherryPick(comptime repo_kind: rp.RepoKind) !void {
         return error.UnexpectedFile;
     } else |_| {}
 
-    // if we try cherry-picking the same commit again, it does succeeds again
+    // if we try cherry-picking the same commit again, it succeeds again
     {
         var merge_result = try repo.cherryPick(.{ .new = .{ .source_name = &commit_d } });
         defer merge_result.deinit();
