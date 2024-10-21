@@ -492,9 +492,13 @@ pub fn writePatch(
     }
 
     // associate the path->live-parent->children map with commit
+    const commit_id_to_path_to_live_parent_to_children_cursor = try state.extra.moment.putCursor(hash.hashBuffer("commit-id->path->live-parent->children"));
+    const commit_id_to_path_to_live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_write).init(commit_id_to_path_to_live_parent_to_children_cursor);
+    const commit_hash = try hash.hexToHash(commit_oid);
     if (try branch.getCursor(hash.hashBuffer("path->live-parent->children"))) |path_to_live_parent_to_children_cursor| {
-        const commit_id_to_path_to_live_parent_to_children_cursor = try state.extra.moment.putCursor(hash.hashBuffer("commit-id->path->live-parent->children"));
-        const commit_id_to_path_to_live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_write).init(commit_id_to_path_to_live_parent_to_children_cursor);
-        try commit_id_to_path_to_live_parent_to_children.put(try hash.hexToHash(commit_oid), .{ .slot = path_to_live_parent_to_children_cursor.slot() });
+        try commit_id_to_path_to_live_parent_to_children.put(commit_hash, .{ .slot = path_to_live_parent_to_children_cursor.slot() });
+    } else {
+        const path_to_live_parent_to_children_cursor = try commit_id_to_path_to_live_parent_to_children.putCursor(commit_hash);
+        _ = try rp.Repo(.xit).DB.HashMap(.read_write).init(path_to_live_parent_to_children_cursor);
     }
 }

@@ -985,7 +985,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            ctx.result.* = try mrg.Merge.init(repo_kind, state, ctx.allocator, ctx.input, .merge, .diff3);
+                            ctx.result.* = try mrg.Merge.init(repo_kind, state, ctx.allocator, ctx.input, .merge, .patch);
                             // no need to make a new transaction if nothing was done
                             if (.nothing == ctx.result.data) {
                                 return error.CancelTransaction;
@@ -1022,7 +1022,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            ctx.result.* = try mrg.Merge.init(repo_kind, state, ctx.allocator, ctx.input, .cherry_pick, .diff3);
+                            ctx.result.* = try mrg.Merge.init(repo_kind, state, ctx.allocator, ctx.input, .cherry_pick, .patch);
                             // no need to make a new transaction if nothing was done
                             if (.nothing == ctx.result.data) {
                                 return error.CancelTransaction;
