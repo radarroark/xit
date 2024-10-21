@@ -847,16 +847,30 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind) !void {
         defer f_txt.close();
         const f_txt_content = try f_txt.readToEndAlloc(allocator, 1024);
         defer allocator.free(f_txt_content);
-        try std.testing.expectEqualStrings(
-            \\a
-            \\x
-            \\b
-            \\g
-            \\a
-            \\b
-        ,
-            f_txt_content,
-        );
+        switch (repo_kind) {
+            // git shuffles lines
+            .git => try std.testing.expectEqualStrings(
+                \\a
+                \\x
+                \\b
+                \\g
+                \\a
+                \\b
+            ,
+                f_txt_content,
+            ),
+            // xit does not!
+            .xit => try std.testing.expectEqualStrings(
+                \\a
+                \\b
+                \\g
+                \\a
+                \\x
+                \\b
+            ,
+                f_txt_content,
+            ),
+        }
     }
 
     // generate diff

@@ -474,6 +474,7 @@ fn writeBlobWithDiff3(
 fn writeBlobWithPatches(
     state: rp.Repo(.xit).State(.read_write),
     allocator: std.mem.Allocator,
+    source_file_oid: *const [hash.SHA1_BYTES_LEN]u8,
     base_oid: *const [hash.SHA1_HEX_LEN]u8,
     target_oid: *const [hash.SHA1_HEX_LEN]u8,
     source_oid: *const [hash.SHA1_HEX_LEN]u8,
@@ -482,8 +483,7 @@ fn writeBlobWithPatches(
     has_conflict: *bool,
     path: []const u8,
 ) ![hash.SHA1_BYTES_LEN]u8 {
-    const commit_id_to_path_to_patch_id_cursor = (try state.extra.moment.getCursor(hash.hashBuffer("commit-id->path->patch-id"))) orelse return error.KeyNotFound;
-    const commit_id_to_path_to_patch_id = try rp.Repo(.xit).DB.HashMap(.read_only).init(commit_id_to_path_to_patch_id_cursor);
+    const commit_id_to_path_to_patch_id_cursor_maybe = try state.extra.moment.getCursor(hash.hashBuffer("commit-id->path->patch-id"));
 
     var patch_ids = std.ArrayList(hash.Hash).init(allocator);
     defer patch_ids.deinit();
@@ -500,19 +500,25 @@ fn writeBlobWithPatches(
             break;
         }
 
-        const path_to_patch_id_cursor = (try commit_id_to_path_to_patch_id.getCursor(try hash.hexToHash(&object.oid))) orelse return error.KeyNotFound;
-        const path_to_patch_id = try rp.Repo(.xit).DB.HashMap(.read_only).init(path_to_patch_id_cursor);
-
-        if (try path_to_patch_id.getCursor(path_hash)) |patch_id_cursor| {
-            const patch_id_bytes = try patch_id_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
-            defer allocator.free(patch_id_bytes);
-            const patch_id = hash.bytesToHash(patch_id_bytes[0..hash.SHA1_BYTES_LEN]);
-            try patch_ids.append(patch_id);
+        if (commit_id_to_path_to_patch_id_cursor_maybe) |commit_id_to_path_to_patch_id_cursor| {
+            const commit_id_to_path_to_patch_id = try rp.Repo(.xit).DB.HashMap(.read_only).init(commit_id_to_path_to_patch_id_cursor);
+            if (try commit_id_to_path_to_patch_id.getCursor(try hash.hexToHash(&object.oid))) |path_to_patch_id_cursor| {
+                const path_to_patch_id = try rp.Repo(.xit).DB.HashMap(.read_only).init(path_to_patch_id_cursor);
+                if (try path_to_patch_id.getCursor(path_hash)) |patch_id_cursor| {
+                    const patch_id_bytes = try patch_id_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
+                    defer allocator.free(patch_id_bytes);
+                    const patch_id = hash.bytesToHash(patch_id_bytes[0..hash.SHA1_BYTES_LEN]);
+                    try patch_ids.append(patch_id);
+                }
+            }
         }
     }
 
+    // if there are no patches, it is most likely because the file was determined to be binary,
+    // so just return the source oid because there is no point in trying to merge them
     if (patch_ids.items.len == 0) {
-        return error.ExpectedAtLeastOnePatch;
+        has_conflict.* = true;
+        return source_file_oid.*;
     }
 
     // get branch map
@@ -1018,7 +1024,7 @@ fn samePathConflict(
                 const base_file_oid_maybe = if (base_entry_maybe) |base_entry| &base_entry.oid else null;
                 const oid = oid_maybe orelse switch (merge_algo) {
                     .diff3 => try writeBlobWithDiff3(repo_kind, state, allocator, base_file_oid_maybe, &target_entry.oid, &source_entry.oid, base_oid, target_name, source_name, &has_conflict),
-                    .patch => try writeBlobWithPatches(state, allocator, base_oid, target_oid, source_oid, target_name, source_name, &has_conflict, path),
+                    .patch => try writeBlobWithPatches(state, allocator, &source_entry.oid, base_oid, target_oid, source_oid, target_name, source_name, &has_conflict, path),
                 };
                 const mode = mode_maybe orelse target_entry.mode;
 
