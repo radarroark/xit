@@ -340,28 +340,28 @@ fn writeBlobWithDiff3(
                             }
                         },
                         .conflict => |conflict| {
-                            var o_lines = try LineRange.init(self.parent.allocator, self.parent.base_iter, conflict.o_range);
-                            defer o_lines.deinit();
-                            var a_lines = try LineRange.init(self.parent.allocator, self.parent.target_iter, conflict.a_range);
-                            defer a_lines.deinit();
-                            var b_lines = try LineRange.init(self.parent.allocator, self.parent.source_iter, conflict.b_range);
-                            defer b_lines.deinit();
+                            var base_lines = try LineRange.init(self.parent.allocator, self.parent.base_iter, conflict.o_range);
+                            defer base_lines.deinit();
+                            var target_lines = try LineRange.init(self.parent.allocator, self.parent.target_iter, conflict.a_range);
+                            defer target_lines.deinit();
+                            var source_lines = try LineRange.init(self.parent.allocator, self.parent.source_iter, conflict.b_range);
+                            defer source_lines.deinit();
 
-                            // if o == a or a == b, return b to autoresolve conflict
-                            if (o_lines.eql(a_lines) or a_lines.eql(b_lines)) {
-                                if (b_lines.lines.items.len > 0) {
-                                    try self.parent.line_buffer.appendSlice(b_lines.lines.items);
+                            // if base == target or target == source, return source to autoresolve conflict
+                            if (base_lines.eql(target_lines) or target_lines.eql(source_lines)) {
+                                if (source_lines.lines.items.len > 0) {
+                                    try self.parent.line_buffer.appendSlice(source_lines.lines.items);
                                     self.parent.current_line = self.parent.line_buffer.items[0];
-                                    b_lines.lines.clearAndFree();
+                                    source_lines.lines.clearAndFree();
                                 }
                                 return self.read(buf);
                             }
-                            // if o == b, return a to autoresolve conflict
-                            else if (o_lines.eql(b_lines)) {
-                                if (a_lines.lines.items.len > 0) {
-                                    try self.parent.line_buffer.appendSlice(a_lines.lines.items);
+                            // if base == source, return target to autoresolve conflict
+                            else if (base_lines.eql(source_lines)) {
+                                if (target_lines.lines.items.len > 0) {
+                                    try self.parent.line_buffer.appendSlice(target_lines.lines.items);
                                     self.parent.current_line = self.parent.line_buffer.items[0];
-                                    a_lines.lines.clearAndFree();
+                                    target_lines.lines.clearAndFree();
                                 }
                                 return self.read(buf);
                             }
@@ -373,16 +373,16 @@ fn writeBlobWithDiff3(
                                 errdefer self.parent.allocator.free(target_marker);
                                 try self.parent.line_buffer.append(target_marker);
                             }
-                            try self.parent.line_buffer.appendSlice(a_lines.lines.items);
-                            a_lines.lines.clearAndFree();
+                            try self.parent.line_buffer.appendSlice(target_lines.lines.items);
+                            target_lines.lines.clearAndFree();
 
                             const base_marker = try self.parent.allocator.dupe(u8, self.parent.base_marker);
                             {
                                 errdefer self.parent.allocator.free(base_marker);
                                 try self.parent.line_buffer.append(base_marker);
                             }
-                            try self.parent.line_buffer.appendSlice(o_lines.lines.items);
-                            o_lines.lines.clearAndFree();
+                            try self.parent.line_buffer.appendSlice(base_lines.lines.items);
+                            base_lines.lines.clearAndFree();
 
                             const separate_marker = try self.parent.allocator.dupe(u8, self.parent.separate_marker);
                             {
@@ -390,8 +390,8 @@ fn writeBlobWithDiff3(
                                 try self.parent.line_buffer.append(separate_marker);
                             }
 
-                            try self.parent.line_buffer.appendSlice(b_lines.lines.items);
-                            b_lines.lines.clearAndFree();
+                            try self.parent.line_buffer.appendSlice(source_lines.lines.items);
+                            source_lines.lines.clearAndFree();
                             const source_marker = try self.parent.allocator.dupe(u8, self.parent.source_marker);
                             {
                                 errdefer self.parent.allocator.free(source_marker);
