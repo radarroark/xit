@@ -546,11 +546,6 @@ fn writeBlobWithPatches(
     const merge_live_parent_to_children_cursor = (try merge_path_to_live_parent_to_children.getCursor(path_hash)) orelse return error.KeyNotFound;
     const merge_live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_only).init(merge_live_parent_to_children_cursor);
 
-    const merge_path_to_child_to_parent_cursor = (try merge_branch.getCursor(hash.hashBuffer("path->child->parent"))) orelse return error.KeyNotFound;
-    const merge_path_to_child_to_parent = try rp.Repo(.xit).DB.HashMap(.read_only).init(merge_path_to_child_to_parent_cursor);
-    const merge_child_to_parent_cursor = (try merge_path_to_child_to_parent.getCursor(path_hash)) orelse return error.KeyNotFound;
-    const merge_child_to_parent = try rp.Repo(.xit).DB.HashMap(.read_only).init(merge_child_to_parent_cursor);
-
     const commit_id_to_path_to_live_parent_to_children_cursor = (try state.extra.moment.getCursor(hash.hashBuffer("commit-id->path->live-parent->children"))) orelse return error.KeyNotFound;
     const commit_id_to_path_to_live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_only).init(commit_id_to_path_to_live_parent_to_children_cursor);
 
@@ -634,7 +629,6 @@ fn writeBlobWithPatches(
         base_marker: []u8,
         separate_marker: []u8,
         source_marker: []u8,
-        merge_child_to_parent: *const rp.Repo(.xit).DB.HashMap(.read_only),
         merge_live_parent_to_children: *const rp.Repo(.xit).DB.HashMap(.read_only),
         base_live_parent_to_children: *const rp.Repo(.xit).DB.HashMap(.read_only),
         target_live_parent_to_children: *const rp.Repo(.xit).DB.HashMap(.read_only),
@@ -721,7 +715,7 @@ fn writeBlobWithPatches(
                         var target_node_ids = std.ArrayList(pch.NodeId).init(self.parent.allocator);
                         defer target_node_ids.deinit();
 
-                        var common_node_id_hash_maybe: ?hash.Hash = null;
+                        var join_node_id_hash_maybe: ?hash.Hash = null;
 
                         // find the target node ids that aren't in source
                         var next_node_id = target_node_id;
@@ -730,7 +724,7 @@ fn writeBlobWithPatches(
                             if (null == try self.parent.source_live_parent_to_children.getCursor(next_node_id_hash)) {
                                 try target_node_ids.append(next_node_id);
                             } else {
-                                common_node_id_hash_maybe = next_node_id_hash;
+                                join_node_id_hash_maybe = next_node_id_hash;
                                 break;
                             }
                             var next_children_iter = try next_children_cursor.iterator();
@@ -761,7 +755,7 @@ fn writeBlobWithPatches(
                             if (null == try self.parent.target_live_parent_to_children.getCursor(next_node_id_hash)) {
                                 try source_node_ids.append(next_node_id);
                             } else {
-                                if (next_node_id_hash != common_node_id_hash_maybe) return error.ExpectedCommonNode;
+                                if (next_node_id_hash != join_node_id_hash_maybe) return error.ExpectedJoinNode;
                                 break;
                             }
                             var next_children_iter = try next_children_cursor.iterator();
@@ -785,7 +779,7 @@ fn writeBlobWithPatches(
                         var base_node_ids = std.ArrayList(pch.NodeId).init(self.parent.allocator);
                         defer base_node_ids.deinit();
 
-                        // find the base node ids up to (but not including) the common node id if it exists,
+                        // find the base node ids up to (but not including) the join node id if it exists,
                         // or until the end of the file
                         next_node_id_hash = current_node_id_hash;
                         while (try self.parent.base_live_parent_to_children.getCursor(next_node_id_hash)) |next_children_cursor| {
@@ -802,8 +796,8 @@ fn writeBlobWithPatches(
                                     break :blk @bitCast(try node_id_reader.readInt(pch.NodeIdInt, .big));
                                 };
                                 next_node_id_hash = hash.hashBuffer(next_child_slice);
-                                if (common_node_id_hash_maybe) |common_node_id_hash| {
-                                    if (next_node_id_hash != common_node_id_hash) {
+                                if (join_node_id_hash_maybe) |join_node_id_hash| {
+                                    if (next_node_id_hash != join_node_id_hash) {
                                         try base_node_ids.append(next_node_id);
                                     } else {
                                         break;
@@ -816,20 +810,25 @@ fn writeBlobWithPatches(
                             }
                         }
 
-                        // set the current node id to be the parent of the common node id if it exists,
+                        // set the current node id to be the parent of the join node id if it exists,
                         // otherwise we're at the end of the file
-                        if (common_node_id_hash_maybe) |common_node_id_hash| {
-                            const common_parent_cursor = (try self.parent.merge_child_to_parent.getCursor(common_node_id_hash)) orelse return error.KeyNotFound;
-                            var common_parent_bytes = [_]u8{0} ** pch.NODE_ID_SIZE;
-                            const common_parent_slice = try common_parent_cursor.readBytes(&common_parent_bytes);
-                            const common_parent_node_id_hash = hash.hashBuffer(common_parent_slice);
-                            self.parent.current_node_id_hash = common_parent_node_id_hash;
+                        if (join_node_id_hash_maybe) |join_node_id_hash| {
+                            if (source_node_ids.items.len == 0) return error.ExpectedAtLeastOneSourceNodeId;
+                            const join_parent_node_id = source_node_ids.items[source_node_ids.items.len - 1];
+                            var join_parent_bytes = [_]u8{0} ** pch.NODE_ID_SIZE;
+                            {
+                                var stream = std.io.fixedBufferStream(&join_parent_bytes);
+                                var node_id_writer = stream.writer();
+                                try node_id_writer.writeInt(pch.NodeIdInt, @bitCast(join_parent_node_id), .big);
+                            }
+                            const join_parent_node_id_hash = hash.hashBuffer(&join_parent_bytes);
+                            self.parent.current_node_id_hash = join_parent_node_id_hash;
 
                             // TODO: this technically isn't always going to be true,
                             // because it's possible for the source and target branch
                             // to both create the exact same patch, which means the
                             // node would not be in the base.
-                            if (null == try self.parent.base_live_parent_to_children.getCursor(common_node_id_hash)) return error.ExpectedBaseToContainCommonNode;
+                            if (null == try self.parent.base_live_parent_to_children.getCursor(join_node_id_hash)) return error.ExpectedBaseToContainJoinNode;
                         } else {
                             self.parent.current_node_id_hash = null;
                         }
@@ -966,7 +965,6 @@ fn writeBlobWithPatches(
         .base_marker = base_marker,
         .separate_marker = separate_marker,
         .source_marker = source_marker,
-        .merge_child_to_parent = &merge_child_to_parent,
         .merge_live_parent_to_children = &merge_live_parent_to_children,
         .base_live_parent_to_children = &base_live_parent_to_children,
         .target_live_parent_to_children = &target_live_parent_to_children,
