@@ -569,6 +569,54 @@ fn writeBlobWithPatches(
         line_buffer.deinit();
     }
 
+    const LineRange = struct {
+        allocator: std.mem.Allocator,
+        lines: std.ArrayList([]const u8),
+
+        fn init(alctr: std.mem.Allocator, patch_id_to_change_content_list_ptr: *const rp.Repo(.xit).DB.HashMap(.read_only), node_ids: []pch.NodeId) !@This() {
+            var lines = std.ArrayList([]const u8).init(alctr);
+            errdefer {
+                for (lines.items) |line| {
+                    alctr.free(line);
+                }
+                lines.deinit();
+            }
+            for (node_ids) |node_id| {
+                const change_content_list_cursor = (try patch_id_to_change_content_list_ptr.getCursor(node_id.patch_id)) orelse return error.KeyNotFound;
+                const change_content_list = try rp.Repo(.xit).DB.ArrayList(.read_only).init(change_content_list_cursor);
+                const change_content_cursor = (try change_content_list.getCursor(node_id.node)) orelse return error.KeyNotFound;
+                const change_content = try change_content_cursor.readBytesAlloc(alctr, MAX_READ_BYTES);
+                {
+                    errdefer alctr.free(change_content);
+                    try lines.append(change_content);
+                }
+            }
+            return .{
+                .allocator = alctr,
+                .lines = lines,
+            };
+        }
+
+        fn deinit(self: *@This()) void {
+            for (self.lines.items) |line| {
+                self.allocator.free(line);
+            }
+            self.lines.deinit();
+        }
+
+        fn eql(self: @This(), other: @This()) bool {
+            if (self.lines.items.len != other.lines.items.len) {
+                return false;
+            }
+            for (self.lines.items, other.lines.items) |our_line, their_line| {
+                if (!std.mem.eql(u8, our_line, their_line)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+    };
+
     const Stream = struct {
         allocator: std.mem.Allocator,
         target_marker: []u8,
@@ -740,6 +788,41 @@ fn writeBlobWithPatches(
                             } else {
                                 break;
                             }
+                        }
+
+                        const next_children_cursor = (try self.parent.merge_live_parent_to_children.getCursor(common_node_id_hash)) orelse return error.KeyNotFound;
+                        var next_children_iter = try next_children_cursor.iterator();
+                        defer next_children_iter.deinit();
+                        if (try next_children_iter.next()) |_| {
+                            self.parent.current_node_id_hash = common_node_id_hash;
+                        } else {
+                            self.parent.current_node_id_hash = null;
+                        }
+
+                        var base_lines = try LineRange.init(self.parent.allocator, self.parent.patch_id_to_change_content_list, base_node_ids.items);
+                        defer base_lines.deinit();
+                        var target_lines = try LineRange.init(self.parent.allocator, self.parent.patch_id_to_change_content_list, target_node_ids.items);
+                        defer target_lines.deinit();
+                        var source_lines = try LineRange.init(self.parent.allocator, self.parent.patch_id_to_change_content_list, source_node_ids.items);
+                        defer source_lines.deinit();
+
+                        // if base == target or target == source, return source to autoresolve conflict
+                        if (base_lines.eql(target_lines) or target_lines.eql(source_lines)) {
+                            if (source_lines.lines.items.len > 0) {
+                                try self.parent.line_buffer.appendSlice(source_lines.lines.items);
+                                self.parent.current_line = self.parent.line_buffer.items[0];
+                                source_lines.lines.clearAndFree();
+                            }
+                            return self.read(buf);
+                        }
+                        // if base == source, return target to autoresolve conflict
+                        else if (base_lines.eql(source_lines)) {
+                            if (target_lines.lines.items.len > 0) {
+                                try self.parent.line_buffer.appendSlice(target_lines.lines.items);
+                                self.parent.current_line = self.parent.line_buffer.items[0];
+                                target_lines.lines.clearAndFree();
+                            }
+                            return self.read(buf);
                         }
 
                         return error.NotImplemented;
