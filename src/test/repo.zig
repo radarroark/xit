@@ -984,7 +984,7 @@ fn testCherryPick(comptime repo_kind: rp.RepoKind) !void {
         var result = try repo.switchHead("foo", .{ .force = false });
         defer result.deinit();
     }
-    // commit d will be the parent of the cherry-picked commit,
+    // commit c will be the parent of the cherry-picked commit,
     // and it is modifying a different file, so it shouldn't
     // cause a conflict.
     try addFile(repo_kind, &repo, "stuff.md", "c");
