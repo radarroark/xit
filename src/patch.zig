@@ -316,6 +316,10 @@ pub fn applyPatchForFile(
                 const node_id_bytes = try hash.numToBytes(NodeIdInt, node_id_int);
                 const node_id_hash = hash.hashBuffer(&node_id_bytes);
 
+                // remove from live-parent->children
+                _ = try live_parent_to_children.remove(node_id_hash);
+
+                // remove from parent's children
                 // normally the parent should be in here, but if we are cherry-picking
                 // without bringing along dependent patches, it may not
                 if (try child_to_parent.getCursor(node_id_hash)) |parent_cursor| {
@@ -323,15 +327,9 @@ pub fn applyPatchForFile(
                     defer allocator.free(parent_node_id_bytes);
                     const parent_node_id_hash = hash.hashBuffer(parent_node_id_bytes);
 
-                    // remove from live-parent->children
-                    _ = try live_parent_to_children.remove(node_id_hash);
-
-                    // remove from parent's children
-                    {
-                        const live_children_cursor = try live_parent_to_children.putCursor(parent_node_id_hash);
-                        const live_children = try rp.Repo(.xit).DB.HashMap(.read_write).init(live_children_cursor);
-                        _ = try live_children.remove(node_id_hash);
-                    }
+                    const live_children_cursor = try live_parent_to_children.putCursor(parent_node_id_hash);
+                    const live_children = try rp.Repo(.xit).DB.HashMap(.read_write).init(live_children_cursor);
+                    _ = try live_children.remove(node_id_hash);
                 }
             },
         }
