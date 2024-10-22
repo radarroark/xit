@@ -844,104 +844,275 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind) !void {
 
     const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
 
-    var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, writers);
-    defer repo.deinit();
-
-    // A --- B --- C --- E [master]
-    //  \               /
-    //   \             /
-    //    `---------- D [foo]
-
-    try addFile(repo_kind, &repo, "f.txt",
-        \\a
-        \\b
-    );
-    _ = try repo.commit(null, .{ .message = "a" });
-    try repo.addBranch(.{ .name = "foo" });
-    try addFile(repo_kind, &repo, "f.txt",
-        \\g
-        \\a
-        \\b
-    );
-    _ = try repo.commit(null, .{ .message = "b" });
-    try addFile(repo_kind, &repo, "f.txt",
-        \\a
-        \\b
-        \\g
-        \\a
-        \\b
-    );
-    _ = try repo.commit(null, .{ .message = "c" });
+    // from https://pijul.org/manual/why_pijul.html
     {
-        var result = try repo.switchHead("foo", .{ .force = false });
-        defer result.deinit();
-    }
-    try addFile(repo_kind, &repo, "f.txt",
-        \\a
-        \\x
-        \\b
-    );
-    _ = try repo.commit(null, .{ .message = "d" });
-    {
-        var result = try repo.switchHead("master", .{ .force = false });
-        defer result.deinit();
-    }
-    {
-        var result = try repo.merge(.{ .new = .{ .source_name = "foo" } });
-        defer result.deinit();
-        try std.testing.expect(.success == result.data);
+        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "simple" } }, writers);
+        defer repo.deinit();
 
-        // verify f.txt has been autoresolved
-        const f_txt = try repo.core.repo_dir.openFile("f.txt", .{ .mode = .read_only });
-        defer f_txt.close();
-        const f_txt_content = try f_txt.readToEndAlloc(allocator, 1024);
-        defer allocator.free(f_txt_content);
-        switch (repo_kind) {
-            // git shuffles lines
-            .git => try std.testing.expectEqualStrings(
-                \\a
-                \\x
-                \\b
-                \\g
-                \\a
-                \\b
-            ,
-                f_txt_content,
-            ),
-            // xit does not!
-            .xit => try std.testing.expectEqualStrings(
-                \\a
-                \\b
-                \\g
-                \\a
-                \\x
-                \\b
-            ,
-                f_txt_content,
-            ),
+        // A --- B --- C --- E [master]
+        //  \               /
+        //   \             /
+        //    `---------- D [foo]
+
+        try addFile(repo_kind, &repo, "f.txt",
+            \\a
+            \\b
+        );
+        _ = try repo.commit(null, .{ .message = "a" });
+        try repo.addBranch(.{ .name = "foo" });
+        try addFile(repo_kind, &repo, "f.txt",
+            \\g
+            \\a
+            \\b
+        );
+        _ = try repo.commit(null, .{ .message = "b" });
+        try addFile(repo_kind, &repo, "f.txt",
+            \\a
+            \\b
+            \\g
+            \\a
+            \\b
+        );
+        _ = try repo.commit(null, .{ .message = "c" });
+        {
+            var result = try repo.switchHead("foo", .{ .force = false });
+            defer result.deinit();
+        }
+        try addFile(repo_kind, &repo, "f.txt",
+            \\a
+            \\x
+            \\b
+        );
+        _ = try repo.commit(null, .{ .message = "d" });
+        {
+            var result = try repo.switchHead("master", .{ .force = false });
+            defer result.deinit();
+        }
+        {
+            var result = try repo.merge(.{ .new = .{ .source_name = "foo" } });
+            defer result.deinit();
+            try std.testing.expect(.success == result.data);
+
+            // verify f.txt has been autoresolved
+            const f_txt = try repo.core.repo_dir.openFile("f.txt", .{ .mode = .read_only });
+            defer f_txt.close();
+            const f_txt_content = try f_txt.readToEndAlloc(allocator, 1024);
+            defer allocator.free(f_txt_content);
+            switch (repo_kind) {
+                // git shuffles lines
+                .git => try std.testing.expectEqualStrings(
+                    \\a
+                    \\x
+                    \\b
+                    \\g
+                    \\a
+                    \\b
+                ,
+                    f_txt_content,
+                ),
+                // xit does not!
+                .xit => try std.testing.expectEqualStrings(
+                    \\a
+                    \\b
+                    \\g
+                    \\a
+                    \\x
+                    \\b
+                ,
+                    f_txt_content,
+                ),
+            }
+        }
+
+        // generate diff
+        var status = try repo.status();
+        defer status.deinit();
+        var file_iter = try repo.filePairs(.{
+            .workspace = .{
+                .conflict_diff_kind = .target,
+                .status = &status,
+            },
+        });
+        if (try file_iter.next()) |*line_iter_pair_ptr| {
+            var line_iter_pair = line_iter_pair_ptr.*;
+            defer line_iter_pair.deinit();
+            return error.DiffResultNotExpected;
+        }
+
+        // if we try merging foo again, it does nothing
+        {
+            var merge_result = try repo.merge(.{ .new = .{ .source_name = "foo" } });
+            defer merge_result.deinit();
+            try std.testing.expect(.nothing == merge_result.data);
         }
     }
 
-    // generate diff
-    var status = try repo.status();
-    defer status.deinit();
-    var file_iter = try repo.filePairs(.{
-        .workspace = .{
-            .conflict_diff_kind = .target,
-            .status = &status,
-        },
-    });
-    if (try file_iter.next()) |*line_iter_pair_ptr| {
-        var line_iter_pair = line_iter_pair_ptr.*;
-        defer line_iter_pair.deinit();
-        return error.DiffResultNotExpected;
-    }
-
-    // if we try merging foo again, it does nothing
+    // from https://tahoe-lafs.org/~zooko/badmerge/concrete-good-semantics.html
     {
-        var merge_result = try repo.merge(.{ .new = .{ .source_name = "foo" } });
-        defer merge_result.deinit();
-        try std.testing.expect(.nothing == merge_result.data);
+        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "concrete" } }, writers);
+        defer repo.deinit();
+
+        // A --- B --- C --- E [master]
+        //  \               /
+        //   \             /
+        //    `---------- D [foo]
+
+        try addFile(repo_kind, &repo, "f.txt",
+            \\int square(int x) {
+            \\  int y = x;
+            \\  /* Update y to equal the result. */
+            \\  /* Question: what is the order of magnitude of this algorithm with respect to x? */
+            \\  for (int i = 0; i < x; i++) y += x;
+            \\  return y;
+            \\}
+        );
+        _ = try repo.commit(null, .{ .message = "a" });
+        try repo.addBranch(.{ .name = "foo" });
+        try addFile(repo_kind, &repo, "f.txt",
+            \\int very_slow_square(int x) {
+            \\  int y = 0;
+            \\  /* Update y to equal the result. */
+            \\  /* Question: what is the order of magnitude of this algorithm with respect to x? */
+            \\  for (int i = 0; i < x; i++)
+            \\    for (int j = 0; j < x; j++)
+            \\      y += 1;
+            \\  return y;
+            \\}
+            \\
+            \\int square(int x) {
+            \\  int y = x;
+            \\  /* Update y to equal the result. */
+            \\  /* Question: what is the order of magnitude of this algorithm with respect to x? */
+            \\  for (int i = 0; i < x; i++) y += x;
+            \\  return y;
+            \\}
+        );
+        _ = try repo.commit(null, .{ .message = "b" });
+        try addFile(repo_kind, &repo, "f.txt",
+            \\int square(int x) {
+            \\  int y = x;
+            \\  /* Update y to equal the result. */
+            \\  /* Question: what is the order of magnitude of this algorithm with respect to x? */
+            \\  return y * x;
+            \\}
+            \\
+            \\int very_slow_square(int x) {
+            \\  int y = 0;
+            \\  /* Update y to equal the result. */
+            \\  /* Question: what is the order of magnitude of this algorithm with respect to x? */
+            \\  for (int i = 0; i < x; i++)
+            \\    for (int j = 0; j < x; j++)
+            \\      y += 1;
+            \\  return y;
+            \\}
+            \\
+            \\int slow_square(int x) {
+            \\  int y = x;
+            \\  /* Update y to equal the result. */
+            \\  /* Question: what is the order of magnitude of this algorithm with respect to x? */
+            \\  for (int i = 0; i < x; i++) y += x;
+            \\  return y;
+            \\}
+        );
+        _ = try repo.commit(null, .{ .message = "c" });
+        {
+            var result = try repo.switchHead("foo", .{ .force = false });
+            defer result.deinit();
+        }
+        try addFile(repo_kind, &repo, "f.txt",
+            \\int square(int x) {
+            \\  int y = 0;
+            \\  /* Update y to equal the result. */
+            \\  /* Question: what is the order of magnitude of this algorithm with respect to x? */
+            \\  for (int i = 0; i < x; i++) y += x;
+            \\  return y;
+            \\}
+        );
+        _ = try repo.commit(null, .{ .message = "d" });
+        {
+            var result = try repo.switchHead("master", .{ .force = false });
+            defer result.deinit();
+        }
+        {
+            var result = try repo.merge(.{ .new = .{ .source_name = "foo" } });
+            defer result.deinit();
+            try std.testing.expect(.conflict == result.data);
+
+            // verify f.txt has conflict markers
+            const f_txt = try repo.core.repo_dir.openFile("f.txt", .{ .mode = .read_only });
+            defer f_txt.close();
+            const f_txt_content = try f_txt.readToEndAlloc(allocator, 1024);
+            defer allocator.free(f_txt_content);
+            switch (repo_kind) {
+                .git => try std.testing.expectEqualStrings(
+                    \\int square(int x) {
+                    \\<<<<<<< master
+                    \\  int y = x;
+                    \\  /* Update y to equal the result. */
+                    \\  /* Question: what is the order of magnitude of this algorithm with respect to x? */
+                    \\  return y * x;
+                    \\}
+                    \\
+                    \\int very_slow_square(int x) {
+                    \\  int y = 0;
+                    \\||||||| original (218399a19e8507080980d6b43a64c069133fd26f)
+                    \\  int y = x;
+                    \\=======
+                    \\  int y = 0;
+                    \\>>>>>>> foo
+                    \\  /* Update y to equal the result. */
+                    \\  /* Question: what is the order of magnitude of this algorithm with respect to x? */
+                    \\  for (int i = 0; i < x; i++)
+                    \\    for (int j = 0; j < x; j++)
+                    \\      y += 1;
+                    \\  return y;
+                    \\}
+                    \\
+                    \\int slow_square(int x) {
+                    \\  int y = x;
+                    \\  /* Update y to equal the result. */
+                    \\  /* Question: what is the order of magnitude of this algorithm with respect to x? */
+                    \\  for (int i = 0; i < x; i++) y += x;
+                    \\  return y;
+                    \\}
+                ,
+                    f_txt_content,
+                ),
+                .xit => try std.testing.expectEqualStrings(
+                    \\int square(int x) {
+                    \\  int y = x;
+                    \\  /* Update y to equal the result. */
+                    \\  /* Question: what is the order of magnitude of this algorithm with respect to x? */
+                    \\  return y * x;
+                    \\}
+                    \\
+                    \\int very_slow_square(int x) {
+                    \\  int y = 0;
+                    \\  /* Update y to equal the result. */
+                    \\  /* Question: what is the order of magnitude of this algorithm with respect to x? */
+                    \\  for (int i = 0; i < x; i++)
+                    \\    for (int j = 0; j < x; j++)
+                    \\      y += 1;
+                    \\  return y;
+                    \\}
+                    \\
+                    \\<<<<<<< master
+                    \\int slow_square(int x) {
+                    \\  int y = x;
+                    \\||||||| original (218399a19e8507080980d6b43a64c069133fd26f)
+                    \\=======
+                    \\  int y = 0;
+                    \\>>>>>>> foo
+                    \\  /* Update y to equal the result. */
+                    \\  /* Question: what is the order of magnitude of this algorithm with respect to x? */
+                    \\  for (int i = 0; i < x; i++) y += x;
+                    \\  return y;
+                    \\}
+                ,
+                    f_txt_content,
+                ),
+            }
+        }
     }
 }
 
