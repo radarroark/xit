@@ -297,10 +297,10 @@ pub fn applyPatchForFile(
                     // if parent is a ghost node, keep going up the chain until we find a live parent
                     while (!std.mem.eql(u8, &FIRST_NODE_ID_BYTES, &parent_node_id_bytes) and null == try live_parent_to_children.getCursor(parent_node_id_hash)) {
                         const next_parent_cursor = (try child_to_parent.getCursor(parent_node_id_hash)) orelse return error.ExpectedParent;
-                        const next_parent_node_id_bytes = try next_parent_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
-                        defer allocator.free(next_parent_node_id_bytes);
-                        @memcpy(&parent_node_id_bytes, next_parent_node_id_bytes);
-                        parent_node_id_hash = hash.hashBuffer(&parent_node_id_bytes);
+                        var next_parent_node_id_bytes = [_]u8{0} ** NODE_ID_SIZE;
+                        _ = try next_parent_cursor.readBytes(&next_parent_node_id_bytes);
+                        @memcpy(&parent_node_id_bytes, &next_parent_node_id_bytes);
+                        parent_node_id_hash = hash.hashBuffer(&next_parent_node_id_bytes);
                     }
 
                     const live_children_cursor = try live_parent_to_children.putCursor(parent_node_id_hash);
@@ -323,9 +323,9 @@ pub fn applyPatchForFile(
                 // normally the parent should be in here, but if we are cherry-picking
                 // without bringing along dependent patches, it may not
                 if (try child_to_parent.getCursor(node_id_hash)) |parent_cursor| {
-                    const parent_node_id_bytes = try parent_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
-                    defer allocator.free(parent_node_id_bytes);
-                    const parent_node_id_hash = hash.hashBuffer(parent_node_id_bytes);
+                    var parent_node_id_bytes = [_]u8{0} ** NODE_ID_SIZE;
+                    const parent_node_id_slice = try parent_cursor.readBytes(&parent_node_id_bytes);
+                    const parent_node_id_hash = hash.hashBuffer(parent_node_id_slice);
 
                     const live_children_cursor = try live_parent_to_children.putCursor(parent_node_id_hash);
                     const live_children = try rp.Repo(.xit).DB.HashMap(.read_write).init(live_children_cursor);
