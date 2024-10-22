@@ -276,9 +276,11 @@ pub fn applyPatchForFile(
                 if (try child_to_parent.getCursor(node_id_hash)) |*existing_parent_cursor| {
                     const existing_parent_node_id_bytes = try existing_parent_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
                     defer allocator.free(existing_parent_node_id_bytes);
-                    const old_live_children_cursor = try live_parent_to_children.putCursor(hash.hashBuffer(existing_parent_node_id_bytes));
-                    const old_live_children = try rp.Repo(.xit).DB.HashMap(.read_write).init(old_live_children_cursor);
-                    _ = try old_live_children.remove(node_id_hash);
+                    if (null != try live_parent_to_children.getCursor(hash.hashBuffer(existing_parent_node_id_bytes))) {
+                        const old_live_children_cursor = try live_parent_to_children.putCursor(hash.hashBuffer(existing_parent_node_id_bytes));
+                        const old_live_children = try rp.Repo(.xit).DB.HashMap(.read_write).init(old_live_children_cursor);
+                        _ = try old_live_children.remove(node_id_hash);
+                    }
                 }
 
                 // add to live-parent->children with empty children
