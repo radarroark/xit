@@ -824,10 +824,7 @@ fn writeBlobWithPatches(
                             const join_parent_node_id_hash = hash.hashBuffer(&join_parent_bytes);
                             self.parent.current_node_id_hash = join_parent_node_id_hash;
 
-                            // TODO: this technically isn't always going to be true,
-                            // because it's possible for the source and target branch
-                            // to both create the exact same patch, which means the
-                            // node would not be in the base.
+                            // TODO: is it actually guaranteed that the join node is in base?
                             if (null == try self.parent.base_live_parent_to_children.getCursor(join_node_id_hash)) return error.ExpectedBaseToContainJoinNode;
                         } else {
                             self.parent.current_node_id_hash = null;
