@@ -1036,81 +1036,82 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind) !void {
         {
             var result = try repo.merge(.{ .new = .{ .source_name = "foo" } });
             defer result.deinit();
-            try std.testing.expect(.conflict == result.data);
 
-            // verify f.txt has conflict markers
             const f_txt = try repo.core.repo_dir.openFile("f.txt", .{ .mode = .read_only });
             defer f_txt.close();
             const f_txt_content = try f_txt.readToEndAlloc(allocator, 1024);
             defer allocator.free(f_txt_content);
             switch (repo_kind) {
-                .git => try std.testing.expectEqualStrings(
-                    \\int square(int x) {
-                    \\<<<<<<< master
-                    \\  int y = x;
-                    \\  /* Update y to equal the result. */
-                    \\  /* Question: what is the order of magnitude of this algorithm with respect to x? */
-                    \\  return y * x;
-                    \\}
-                    \\
-                    \\int very_slow_square(int x) {
-                    \\  int y = 0;
-                    \\||||||| original (218399a19e8507080980d6b43a64c069133fd26f)
-                    \\  int y = x;
-                    \\=======
-                    \\  int y = 0;
-                    \\>>>>>>> foo
-                    \\  /* Update y to equal the result. */
-                    \\  /* Question: what is the order of magnitude of this algorithm with respect to x? */
-                    \\  for (int i = 0; i < x; i++)
-                    \\    for (int j = 0; j < x; j++)
-                    \\      y += 1;
-                    \\  return y;
-                    \\}
-                    \\
-                    \\int slow_square(int x) {
-                    \\  int y = x;
-                    \\  /* Update y to equal the result. */
-                    \\  /* Question: what is the order of magnitude of this algorithm with respect to x? */
-                    \\  for (int i = 0; i < x; i++) y += x;
-                    \\  return y;
-                    \\}
-                ,
-                    f_txt_content,
-                ),
-                .xit => try std.testing.expectEqualStrings(
-                    \\int square(int x) {
-                    \\  int y = x;
-                    \\  /* Update y to equal the result. */
-                    \\  /* Question: what is the order of magnitude of this algorithm with respect to x? */
-                    \\  return y * x;
-                    \\}
-                    \\
-                    \\int very_slow_square(int x) {
-                    \\  int y = 0;
-                    \\  /* Update y to equal the result. */
-                    \\  /* Question: what is the order of magnitude of this algorithm with respect to x? */
-                    \\  for (int i = 0; i < x; i++)
-                    \\    for (int j = 0; j < x; j++)
-                    \\      y += 1;
-                    \\  return y;
-                    \\}
-                    \\
-                    \\<<<<<<< master
-                    \\int slow_square(int x) {
-                    \\  int y = x;
-                    \\||||||| original (218399a19e8507080980d6b43a64c069133fd26f)
-                    \\=======
-                    \\  int y = 0;
-                    \\>>>>>>> foo
-                    \\  /* Update y to equal the result. */
-                    \\  /* Question: what is the order of magnitude of this algorithm with respect to x? */
-                    \\  for (int i = 0; i < x; i++) y += x;
-                    \\  return y;
-                    \\}
-                ,
-                    f_txt_content,
-                ),
+                // verify f.txt has conflict markers
+                .git => {
+                    try std.testing.expect(.conflict == result.data);
+                    try std.testing.expectEqualStrings(
+                        \\int square(int x) {
+                        \\<<<<<<< master
+                        \\  int y = x;
+                        \\  /* Update y to equal the result. */
+                        \\  /* Question: what is the order of magnitude of this algorithm with respect to x? */
+                        \\  return y * x;
+                        \\}
+                        \\
+                        \\int very_slow_square(int x) {
+                        \\  int y = 0;
+                        \\||||||| original (218399a19e8507080980d6b43a64c069133fd26f)
+                        \\  int y = x;
+                        \\=======
+                        \\  int y = 0;
+                        \\>>>>>>> foo
+                        \\  /* Update y to equal the result. */
+                        \\  /* Question: what is the order of magnitude of this algorithm with respect to x? */
+                        \\  for (int i = 0; i < x; i++)
+                        \\    for (int j = 0; j < x; j++)
+                        \\      y += 1;
+                        \\  return y;
+                        \\}
+                        \\
+                        \\int slow_square(int x) {
+                        \\  int y = x;
+                        \\  /* Update y to equal the result. */
+                        \\  /* Question: what is the order of magnitude of this algorithm with respect to x? */
+                        \\  for (int i = 0; i < x; i++) y += x;
+                        \\  return y;
+                        \\}
+                    ,
+                        f_txt_content,
+                    );
+                },
+                // verify f.txt has been autoresolved
+                .xit => {
+                    try std.testing.expect(.success == result.data);
+                    try std.testing.expectEqualStrings(
+                        \\int square(int x) {
+                        \\  int y = x;
+                        \\  /* Update y to equal the result. */
+                        \\  /* Question: what is the order of magnitude of this algorithm with respect to x? */
+                        \\  return y * x;
+                        \\}
+                        \\
+                        \\int very_slow_square(int x) {
+                        \\  int y = 0;
+                        \\  /* Update y to equal the result. */
+                        \\  /* Question: what is the order of magnitude of this algorithm with respect to x? */
+                        \\  for (int i = 0; i < x; i++)
+                        \\    for (int j = 0; j < x; j++)
+                        \\      y += 1;
+                        \\  return y;
+                        \\}
+                        \\
+                        \\int slow_square(int x) {
+                        \\  int y = 0;
+                        \\  /* Update y to equal the result. */
+                        \\  /* Question: what is the order of magnitude of this algorithm with respect to x? */
+                        \\  for (int i = 0; i < x; i++) y += x;
+                        \\  return y;
+                        \\}
+                    ,
+                        f_txt_content,
+                    );
+                },
             }
         }
     }
