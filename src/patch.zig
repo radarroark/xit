@@ -255,10 +255,10 @@ pub fn applyPatchForFile(
     const child_to_parent_cursor = try path_to_child_to_parent.putCursor(path_hash);
     const child_to_parent = try rp.Repo(.xit).DB.HashMap(.read_write).init(child_to_parent_cursor);
 
-    var removed_parent_to_child = std.AutoArrayHashMap(hash.Hash, hash.Hash).init(allocator);
-    defer removed_parent_to_child.deinit();
-    var added_parent_to_child = std.AutoArrayHashMap(hash.Hash, [NODE_ID_SIZE]u8).init(allocator);
-    defer added_parent_to_child.deinit();
+    var parent_to_removed_child = std.AutoArrayHashMap(hash.Hash, hash.Hash).init(allocator);
+    defer parent_to_removed_child.deinit();
+    var parent_to_added_child = std.AutoArrayHashMap(hash.Hash, [NODE_ID_SIZE]u8).init(allocator);
+    defer parent_to_added_child.deinit();
 
     var iter = try change_list_cursor.iterator();
     defer iter.deinit();
@@ -299,7 +299,7 @@ pub fn applyPatchForFile(
                     var parent_node_id_bytes = try hash.numToBytes(NodeIdInt, parent_node_id_int);
                     var parent_node_id_hash = hash.hashBuffer(&parent_node_id_bytes);
 
-                    try added_parent_to_child.put(parent_node_id_hash, node_id_bytes);
+                    try parent_to_added_child.put(parent_node_id_hash, node_id_bytes);
 
                     // if parent is a ghost node, keep going up the chain until we find a live parent
                     while (!std.mem.eql(u8, &FIRST_NODE_ID_BYTES, &parent_node_id_bytes) and null == try live_parent_to_children.getCursor(parent_node_id_hash)) {
@@ -334,7 +334,7 @@ pub fn applyPatchForFile(
                     const parent_node_id_slice = try parent_cursor.readBytes(&parent_node_id_bytes);
                     const parent_node_id_hash = hash.hashBuffer(parent_node_id_slice);
 
-                    try removed_parent_to_child.put(parent_node_id_hash, node_id_hash);
+                    try parent_to_removed_child.put(parent_node_id_hash, node_id_hash);
 
                     const live_children_cursor = try live_parent_to_children.putCursor(parent_node_id_hash);
                     const live_children = try rp.Repo(.xit).DB.HashMap(.read_write).init(live_children_cursor);
@@ -349,8 +349,8 @@ pub fn applyPatchForFile(
     // this avoids an unnecessary merge conflict when
     // applying a patch from another branch, in which a
     // parent node doesn't exist because it's been replaced.
-    for (removed_parent_to_child.keys(), removed_parent_to_child.values()) |removed_parent, removed_child| {
-        if (added_parent_to_child.get(removed_parent)) |*added_child_bytes| {
+    for (parent_to_removed_child.keys(), parent_to_removed_child.values()) |parent, removed_child| {
+        if (parent_to_added_child.get(parent)) |*added_child_bytes| {
             try child_to_parent.put(removed_child, .{ .bytes = added_child_bytes });
         }
     }
