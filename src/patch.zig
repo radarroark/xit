@@ -66,10 +66,10 @@ fn createPatchEntries(
                 const node_id_list = try rp.Repo(.xit).DB.LinkedArrayList(.read_only).init(node_id_list_cursor);
                 const node_id_cursor = (try node_id_list.getCursor(eql.old_line.num - 1)) orelse return error.ExpectedNode;
 
-                const node_id_bytes = try node_id_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
-                defer allocator.free(node_id_bytes);
+                var node_id_bytes = [_]u8{0} ** NODE_ID_SIZE;
+                const node_id_slice = try node_id_cursor.readBytes(&node_id_bytes);
 
-                var stream = std.io.fixedBufferStream(node_id_bytes);
+                var stream = std.io.fixedBufferStream(node_id_slice);
                 var reader = stream.reader();
                 const node_id: NodeId = @bitCast(try reader.readInt(NodeIdInt, .big));
 
@@ -110,10 +110,10 @@ fn createPatchEntries(
                 const node_id_list = try rp.Repo(.xit).DB.LinkedArrayList(.read_only).init(node_id_list_cursor);
                 const node_id_cursor = (try node_id_list.getCursor(del.old_line.num - 1)) orelse return error.ExpectedNode;
 
-                const node_id_bytes = try node_id_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
-                defer allocator.free(node_id_bytes);
+                var node_id_bytes = [_]u8{0} ** NODE_ID_SIZE;
+                const node_id_slice = try node_id_cursor.readBytes(&node_id_bytes);
 
-                var stream = std.io.fixedBufferStream(node_id_bytes);
+                var stream = std.io.fixedBufferStream(node_id_slice);
                 var reader = stream.reader();
                 const node_id: NodeId = @bitCast(try reader.readInt(NodeIdInt, .big));
 
@@ -305,9 +305,9 @@ pub fn applyPatchForFile(
                     while (!std.mem.eql(u8, &FIRST_NODE_ID_BYTES, &parent_node_id_bytes) and null == try live_parent_to_children.getCursor(parent_node_id_hash)) {
                         const next_parent_cursor = (try child_to_parent.getCursor(parent_node_id_hash)) orelse return error.ExpectedParent;
                         var next_parent_node_id_bytes = [_]u8{0} ** NODE_ID_SIZE;
-                        _ = try next_parent_cursor.readBytes(&next_parent_node_id_bytes);
-                        @memcpy(&parent_node_id_bytes, &next_parent_node_id_bytes);
-                        parent_node_id_hash = hash.hashBuffer(&next_parent_node_id_bytes);
+                        const next_parent_node_id_slice = try next_parent_cursor.readBytes(&next_parent_node_id_bytes);
+                        @memcpy(&parent_node_id_bytes, next_parent_node_id_slice);
+                        parent_node_id_hash = hash.hashBuffer(next_parent_node_id_slice);
                     }
 
                     const live_children_cursor = try live_parent_to_children.putCursor(parent_node_id_hash);
@@ -389,9 +389,9 @@ pub fn applyPatchForFile(
 
                     if (current_index_maybe) |*current_index| {
                         if (try node_id_list.getCursor(current_index.*)) |existing_node_id_cursor| {
-                            const existing_node_id = try existing_node_id_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
-                            defer allocator.free(existing_node_id);
-                            if (std.mem.eql(u8, existing_node_id, child_slice)) {
+                            var existing_node_id_bytes = [_]u8{0} ** NODE_ID_SIZE;
+                            const existing_node_id_slice = try existing_node_id_cursor.readBytes(&existing_node_id_bytes);
+                            if (std.mem.eql(u8, existing_node_id_slice, child_slice)) {
                                 // node id hasn't changed, so just continue without changing the data
                                 current_index.* += 1;
                             } else {
