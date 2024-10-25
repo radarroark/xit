@@ -160,7 +160,7 @@ fn patchHash(
     return patch_hash;
 }
 
-fn writePatchForFile(
+fn writePatch(
     moment: *const rp.Repo(.xit).DB.HashMap(.read_write),
     branch: *const rp.Repo(.xit).DB.HashMap(.read_write),
     allocator: std.mem.Allocator,
@@ -212,7 +212,7 @@ fn writePatchForFile(
     return patch_hash_bytes;
 }
 
-pub fn applyPatchForFile(
+pub fn applyPatch(
     moment: *const rp.Repo(.xit).DB.HashMap(.read_only),
     branch: *const rp.Repo(.xit).DB.HashMap(.read_write),
     allocator: std.mem.Allocator,
@@ -452,7 +452,7 @@ fn removePatch(branch: *const rp.Repo(.xit).DB.HashMap(.read_write), path: []con
     }
 }
 
-pub fn writePatch(
+pub fn writeAndApplyPatches(
     state: rp.Repo(.xit).State(.read_write),
     allocator: std.mem.Allocator,
     status: *st.Status(.xit),
@@ -497,11 +497,11 @@ pub fn writePatch(
             try path_cursor.writeIfEmpty(.{ .bytes = line_iter_pair.path });
 
             // create patch
-            const patch_hash_bytes = try writePatchForFile(state.extra.moment, &branch, allocator, &line_iter_pair, path_hash);
+            const patch_hash_bytes = try writePatch(state.extra.moment, &branch, allocator, &line_iter_pair, path_hash);
             const patch_hash = hash.bytesToHash(&patch_hash_bytes);
 
             // apply patch
-            try applyPatchForFile(state.readOnly().extra.moment, &branch, allocator, path_hash, patch_hash);
+            try applyPatch(state.readOnly().extra.moment, &branch, allocator, path_hash, patch_hash);
 
             // associate patch hash with path/commit
             const commit_id_to_path_to_patch_id_cursor = try state.extra.moment.putCursor(hash.hashBuffer("commit-id->path->patch-id"));
