@@ -538,7 +538,7 @@ fn writeBlobWithPatches(
 
     for (0..patch_ids.items.len) |i| {
         const patch_id = patch_ids.items[patch_ids.items.len - i - 1];
-        try pch.applyPatchForFile(state.readOnly().extra.moment, &merge_branch, allocator, path_hash, patch_id);
+        try pch.applyPatch(state.readOnly().extra.moment, &merge_branch, allocator, path_hash, patch_id);
     }
 
     const merge_path_to_live_parent_to_children_cursor = (try merge_branch.getCursor(hash.hashBuffer("path->live-parent->children"))) orelse return error.KeyNotFound;

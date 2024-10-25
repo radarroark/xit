@@ -595,7 +595,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                             var stat = try st.Status(.xit).init(ctx.allocator, state.readOnly());
                             defer stat.deinit();
                             ctx.result.* = try obj.writeCommit(repo_kind, state, ctx.allocator, ctx.parent_oids_maybe, ctx.metadata);
-                            try pch.writePatch(state, ctx.allocator, &stat, ctx.result);
+                            try pch.writeAndApplyPatches(state, ctx.allocator, &stat, ctx.result);
                         }
                     };
 
