@@ -1,10 +1,16 @@
 const std = @import("std");
 const hash = @import("./hash.zig");
 const rp = @import("./repo.zig");
+const io = @import("./io.zig");
 
 const CHUNK_SIZE = 1024;
 
-pub fn writeChunks(state: rp.Repo(.xit).State(.read_write), file: anytype, file_hash: hash.Hash) !void {
+pub fn writeChunks(
+    state: rp.Repo(.xit).State(.read_write),
+    allocator: std.mem.Allocator,
+    file: anytype,
+    file_hash: hash.Hash,
+) !void {
     // get writer to the chunk hashes for the given file hash (null if it already exists)
     const blob_id_to_chunk_hashes_cursor = try state.extra.moment.putCursor(hash.hashBuffer("blob-id->chunk-hashes"));
     const blob_id_to_chunk_hashes = try rp.Repo(.xit).DB.HashMap(.read_write).init(blob_id_to_chunk_hashes_cursor);
@@ -35,8 +41,10 @@ pub fn writeChunks(state: rp.Repo(.xit).State(.read_write), file: anytype, file_
             continue;
         } else |err| switch (err) {
             error.FileNotFound => {
-                const chunk_file = try chunks_dir.createFile(&chunk_hash_hex, .{});
-                try chunk_file.writeAll(chunk);
+                var lock = try io.LockFile.init(allocator, chunks_dir, &chunk_hash_hex);
+                defer lock.deinit();
+                try lock.lock_file.writeAll(chunk);
+                lock.success = true;
             },
             else => return err,
         }
