@@ -12,7 +12,7 @@ pub const LockFile = struct {
     pub fn init(allocator: std.mem.Allocator, dir: std.fs.Dir, file_name: []const u8) !LockFile {
         const lock_name = try std.fmt.allocPrint(allocator, "{s}.lock", .{file_name});
         errdefer allocator.free(lock_name);
-        const lock_file = try dir.createFile(lock_name, .{ .truncate = true, .lock = .exclusive });
+        const lock_file = try dir.createFile(lock_name, .{ .truncate = true, .lock = .exclusive, .read = true });
         errdefer dir.deleteFile(lock_name) catch {};
         return .{
             .allocator = allocator,
