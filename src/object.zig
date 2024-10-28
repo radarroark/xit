@@ -119,7 +119,7 @@ pub fn writeBlob(
             const file_hash = hash.bytesToHash(sha1_bytes_buffer);
 
             const chunk = @import("./chunk.zig");
-            try chunk.writeChunks(state, file, file_hash);
+            try chunk.writeChunks(state, allocator, file, file_hash);
             try file.seekTo(0);
 
             const file_values_cursor = try state.extra.moment.putCursor(hash.hashBuffer("file-values"));
