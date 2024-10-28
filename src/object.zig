@@ -15,24 +15,6 @@ const pack = @import("./pack.zig");
 
 const MAX_READ_BYTES = 1024; // FIXME: this is arbitrary...
 
-/// returns a single random character. just lower case for now.
-/// eventually i'll make it return upper case and maybe numbers too.
-fn randChar() !u8 {
-    var rand_int: u8 = 0;
-    try std.posix.getrandom(std.mem.asBytes(&rand_int));
-    const rand_float: f32 = @as(f32, @floatFromInt(rand_int)) / @as(f32, @floatFromInt(std.math.maxInt(u8)));
-    const min = 'a';
-    const max = 'z';
-    return @as(u8, @intFromFloat(rand_float * (max - min))) + min;
-}
-
-/// fills the given buffer with random chars.
-fn fillWithRandChars(buffer: []u8) !void {
-    for (buffer) |*ch| {
-        ch.* = try randChar();
-    }
-}
-
 pub const Tree = struct {
     entries: std.StringArrayHashMap([]const u8),
     allocator: std.mem.Allocator,
@@ -109,13 +91,11 @@ pub fn writeBlob(
                 }
             }
 
-            // open temp file
-            var rand_chars = [_]u8{0} ** 6;
-            try fillWithRandChars(&rand_chars);
-            const tmp_file_name = "tmp_obj_" ++ rand_chars;
-            const tmp_file = try hash_prefix_dir.createFile(tmp_file_name, .{ .read = true, .truncate = true });
-            defer tmp_file.close();
-            try tmp_file.writeAll(header);
+            // create lock file
+            var lock = try io.LockFile.init(allocator, hash_prefix_dir, hash_suffix ++ ".uncompressed");
+            defer lock.deinit();
+
+            try lock.lock_file.writeAll(header);
 
             // copy file into temp file
             var read_buffer = [_]u8{0} ** MAX_READ_BYTES;
@@ -124,20 +104,16 @@ pub fn writeBlob(
                 if (size == 0) {
                     break;
                 }
-                try tmp_file.writeAll(read_buffer[0..size]);
+                try lock.lock_file.writeAll(read_buffer[0..size]);
             }
 
+            // create compressed lock file
+            var compressed_lock = try io.LockFile.init(allocator, hash_prefix_dir, hash_suffix);
+            defer compressed_lock.deinit();
+
             // compress the file
-            const compressed_tmp_file_name = tmp_file_name ++ ".compressed";
-            const compressed_tmp_file = try hash_prefix_dir.createFile(compressed_tmp_file_name, .{});
-            defer compressed_tmp_file.close();
-            try compress.compress(tmp_file, compressed_tmp_file);
-
-            // delete uncompressed temp file
-            try hash_prefix_dir.deleteFile(tmp_file_name);
-
-            // rename the compressed temp file
-            try std.fs.rename(hash_prefix_dir, compressed_tmp_file_name, hash_prefix_dir, hash_suffix);
+            try compress.compress(lock.lock_file, compressed_lock.lock_file);
+            compressed_lock.success = true;
         },
         .xit => {
             const file_hash = hash.bytesToHash(sha1_bytes_buffer);
@@ -221,31 +197,19 @@ fn writeTree(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.r
                 }
             }
 
-            // open temp file
-            var tree_rand_chars = [_]u8{0} ** 6;
-            try fillWithRandChars(&tree_rand_chars);
-            const tree_tmp_file_name = "tmp_obj_" ++ tree_rand_chars;
-            const tree_tmp_file = try tree_hash_prefix_dir.createFile(tree_tmp_file_name, .{ .read = true });
-            defer tree_tmp_file.close();
+            // create lock file
+            var lock = try io.LockFile.init(allocator, tree_hash_prefix_dir, tree_hash_suffix ++ ".uncompressed");
+            defer lock.deinit();
 
-            // write to the temp file
-            try tree_tmp_file.pwriteAll(tree_bytes, 0);
+            try lock.lock_file.writeAll(tree_bytes);
 
-            // open compressed temp file
-            var tree_comp_rand_chars = [_]u8{0} ** 6;
-            try fillWithRandChars(&tree_comp_rand_chars);
-            const tree_comp_tmp_file_name = "tmp_obj_" ++ tree_comp_rand_chars;
-            const tree_comp_tmp_file = try tree_hash_prefix_dir.createFile(tree_comp_tmp_file_name, .{});
-            defer tree_comp_tmp_file.close();
+            // create compressed lock file
+            var compressed_lock = try io.LockFile.init(allocator, tree_hash_prefix_dir, tree_hash_suffix);
+            defer compressed_lock.deinit();
 
             // compress the file
-            try compress.compress(tree_tmp_file, tree_comp_tmp_file);
-
-            // delete first temp file
-            try tree_hash_prefix_dir.deleteFile(tree_tmp_file_name);
-
-            // rename the file
-            try std.fs.rename(tree_hash_prefix_dir, tree_comp_tmp_file_name, tree_hash_prefix_dir, tree_hash_suffix);
+            try compress.compress(lock.lock_file, compressed_lock.lock_file);
+            compressed_lock.success = true;
         },
         .xit => {
             const object_hash = hash.bytesToHash(sha1_bytes_buffer);
@@ -392,31 +356,19 @@ pub fn writeCommit(
             defer commit_hash_prefix_dir.close();
             const commit_hash_suffix = commit_sha1_hex[2..];
 
-            // open temp file
-            var commit_rand_chars = [_]u8{0} ** 6;
-            try fillWithRandChars(&commit_rand_chars);
-            const commit_tmp_file_name = "tmp_obj_" ++ commit_rand_chars;
-            const commit_tmp_file = try commit_hash_prefix_dir.createFile(commit_tmp_file_name, .{ .read = true });
-            defer commit_tmp_file.close();
+            // create lock file
+            var lock = try io.LockFile.init(allocator, commit_hash_prefix_dir, commit_hash_suffix ++ ".uncompressed");
+            defer lock.deinit();
 
-            // write to the temp file
-            try commit_tmp_file.pwriteAll(commit, 0);
+            try lock.lock_file.writeAll(commit);
 
-            // open compressed temp file
-            var commit_comp_rand_chars = [_]u8{0} ** 6;
-            try fillWithRandChars(&commit_comp_rand_chars);
-            const commit_comp_tmp_file_name = "tmp_obj_" ++ commit_comp_rand_chars;
-            const commit_comp_tmp_file = try commit_hash_prefix_dir.createFile(commit_comp_tmp_file_name, .{});
-            defer commit_comp_tmp_file.close();
+            // create compressed lock file
+            var compressed_lock = try io.LockFile.init(allocator, commit_hash_prefix_dir, commit_hash_suffix);
+            defer compressed_lock.deinit();
 
             // compress the file
-            try compress.compress(commit_tmp_file, commit_comp_tmp_file);
-
-            // delete first temp file
-            try commit_hash_prefix_dir.deleteFile(commit_tmp_file_name);
-
-            // rename the file
-            try std.fs.rename(commit_hash_prefix_dir, commit_comp_tmp_file_name, commit_hash_prefix_dir, commit_hash_suffix);
+            try compress.compress(lock.lock_file, compressed_lock.lock_file);
+            compressed_lock.success = true;
 
             // write commit id to HEAD
             try ref.updateRecur(repo_kind, state, allocator, &.{"HEAD"}, &commit_sha1_hex);
