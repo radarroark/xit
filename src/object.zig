@@ -140,6 +140,10 @@ pub fn writeBlob(
             try std.fs.rename(hash_prefix_dir, compressed_tmp_file_name, hash_prefix_dir, hash_suffix);
         },
         .xit => {
+            const chunk = @import("./chunk.zig");
+            try chunk.writeChunks(state, file);
+            try file.seekTo(0);
+
             const file_hash = hash.bytesToHash(sha1_bytes_buffer);
 
             const file_values_cursor = try state.extra.moment.putCursor(hash.hashBuffer("file-values"));
