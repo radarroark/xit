@@ -140,11 +140,11 @@ pub fn writeBlob(
             try std.fs.rename(hash_prefix_dir, compressed_tmp_file_name, hash_prefix_dir, hash_suffix);
         },
         .xit => {
-            const chunk = @import("./chunk.zig");
-            try chunk.writeChunks(state, file);
-            try file.seekTo(0);
-
             const file_hash = hash.bytesToHash(sha1_bytes_buffer);
+
+            const chunk = @import("./chunk.zig");
+            try chunk.writeChunks(state, file, file_hash);
+            try file.seekTo(0);
 
             const file_values_cursor = try state.extra.moment.putCursor(hash.hashBuffer("file-values"));
             const file_values = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(file_values_cursor);
@@ -167,7 +167,7 @@ pub fn writeBlob(
 
                 const objects_cursor = try state.extra.moment.putCursor(hash.hashBuffer("objects"));
                 const objects = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(objects_cursor);
-                try objects.put(try hash.hexToHash(&sha1_hex), .{ .slot = writer.slot });
+                try objects.put(file_hash, .{ .slot = writer.slot });
             }
         },
     }
