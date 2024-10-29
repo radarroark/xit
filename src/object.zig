@@ -118,8 +118,9 @@ pub fn writeBlob(
         .xit => {
             const file_hash = hash.bytesToHash(sha1_bytes_buffer);
 
+            // write chunks
             const chunk = @import("./chunk.zig");
-            try chunk.writeChunks(state, allocator, file, file_hash);
+            try chunk.writeChunks(state, allocator, file, file_hash, .{ .kind = .blob, .size = file_size });
             try file.seekTo(0);
 
             const file_values_cursor = try state.extra.moment.putCursor(hash.hashBuffer("file-values"));
@@ -213,6 +214,12 @@ fn writeTree(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.r
         },
         .xit => {
             const object_hash = hash.bytesToHash(sha1_bytes_buffer);
+
+            // write chunks
+            const chunk = @import("./chunk.zig");
+            var stream = std.io.fixedBufferStream(tree_contents);
+            try chunk.writeChunks(state, allocator, &stream, object_hash, .{ .kind = .tree, .size = tree_contents.len });
+
             const objects_cursor = try state.extra.moment.putCursor(hash.hashBuffer("objects"));
             const objects = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(objects_cursor);
 
@@ -397,6 +404,11 @@ pub fn writeCommit(
             const commit_sha1_hex = std.fmt.bytesToHex(commit_sha1_bytes_buffer, .lower);
             const commit_hash = hash.bytesToHash(&commit_sha1_bytes_buffer);
 
+            // write chunks
+            const chunk = @import("./chunk.zig");
+            var stream = std.io.fixedBufferStream(commit_contents);
+            try chunk.writeChunks(state, allocator, &stream, commit_hash, .{ .kind = .commit, .size = commit_contents.len });
+
             // write commit content
             const object_values_cursor = try state.extra.moment.putCursor(hash.hashBuffer("object-values"));
             const object_values = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(object_values_cursor);
@@ -538,14 +550,80 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
         internal: switch (repo_kind) {
             .git => void,
             .xit => struct {
-                header_offset: u64,
                 cursor: *rp.Repo(repo_kind).DB.Cursor(.read_only),
             },
         },
 
         pub const Reader = switch (repo_kind) {
             .git => pack.LooseOrPackObjectReader,
-            .xit => rp.Repo(repo_kind).DB.Cursor(.read_only).Reader,
+            .xit => struct {
+                xit_dir: std.fs.Dir,
+                chunk_hashes_reader: rp.Repo(repo_kind).DB.Cursor(.read_only).Reader,
+                position: u64,
+
+                pub const Error = std.fs.File.OpenError || rp.Repo(repo_kind).DB.Cursor(.read_only).Reader.Error || error{InvalidOffset};
+
+                pub fn read(self: *@This(), buf: []u8) !usize {
+                    var size: usize = 0;
+                    while (size < buf.len) {
+                        const remaining_size = buf[size..].len;
+                        const read_size = try self.readStep(buf[size..]);
+                        size += read_size;
+                        self.position += read_size;
+                        if (read_size < remaining_size) {
+                            break;
+                        }
+                    }
+                    return size;
+                }
+
+                fn readStep(self: *@This(), buf: []u8) !usize {
+                    const chunk = @import("./chunk.zig");
+                    return try chunk.readChunk(self.xit_dir, &self.chunk_hashes_reader, self.position, buf);
+                }
+
+                pub fn reset(self: *@This()) !void {
+                    try self.seekTo(0);
+                }
+
+                pub fn seekTo(self: *@This(), offset: u64) !void {
+                    self.position = offset;
+                }
+
+                pub fn readNoEof(self: *@This(), dest: []u8) !void {
+                    var reader = std.io.GenericReader(*@This(), Error, @This().read){
+                        .context = self,
+                    };
+                    try reader.readNoEof(dest);
+                }
+
+                pub fn readUntilDelimiter(self: *@This(), dest: []u8, delimiter: u8) ![]u8 {
+                    var reader = std.io.GenericReader(*@This(), Error, @This().read){
+                        .context = self,
+                    };
+                    return reader.readUntilDelimiter(dest, delimiter) catch |err| switch (err) {
+                        error.StreamTooLong => return error.EndOfStream,
+                        else => return err,
+                    };
+                }
+
+                pub fn readUntilDelimiterAlloc(self: *@This(), allocator: std.mem.Allocator, delimiter: u8, max_size: usize) ![]u8 {
+                    var reader = std.io.GenericReader(*@This(), Error, @This().read){
+                        .context = self,
+                    };
+                    return reader.readUntilDelimiterAlloc(allocator, delimiter, max_size) catch |err| switch (err) {
+                        error.StreamTooLong => return error.EndOfStream,
+                        else => return err,
+                    };
+                }
+
+                pub fn readAllAlloc(self: *@This(), allocator: std.mem.Allocator, max_size: usize) ![]u8 {
+                    var reader = std.io.GenericReader(*@This(), Error, @This().read){
+                        .context = self,
+                    };
+                    return try reader.readAllAlloc(allocator, max_size);
+                }
+            },
         };
 
         pub fn init(allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State(.read_only), oid: *const [hash.SHA1_HEX_LEN]u8) !@This() {
@@ -560,28 +638,38 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
                     };
                 },
                 .xit => {
-                    if (try state.extra.moment.cursor.readPath(void, &.{
-                        .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
+                    const chunk_hashes_cursor = (try state.extra.moment.cursor.readPath(void, &.{
+                        .{ .hash_map_get = .{ .value = hash.hashBuffer("object-id->chunk-hashes") } },
                         .{ .hash_map_get = .{ .value = try hash.hexToHash(oid) } },
-                    })) |cursor| {
-                        // put cursor on the heap so the pointer is stable (the reader uses it internally)
-                        const cursor_ptr = try allocator.create(rp.Repo(repo_kind).DB.Cursor(.read_only));
-                        errdefer allocator.destroy(cursor_ptr);
-                        cursor_ptr.* = cursor;
-                        var rdr = try cursor_ptr.reader();
+                    })) orelse return error.ObjectNotFound;
 
-                        return .{
-                            .allocator = allocator,
-                            .header = try readObjectHeader(&rdr),
-                            .reader = std.io.bufferedReaderSize(BUFFER_SIZE, rdr),
-                            .internal = .{
-                                .header_offset = rdr.relative_position,
-                                .cursor = cursor_ptr,
-                            },
-                        };
-                    } else {
-                        return error.ObjectNotFound;
-                    }
+                    const header_cursor = (try state.extra.moment.cursor.readPath(void, &.{
+                        .{ .hash_map_get = .{ .value = hash.hashBuffer("object-id->header") } },
+                        .{ .hash_map_get = .{ .value = try hash.hexToHash(oid) } },
+                    })) orelse return error.ObjectNotFound;
+
+                    var header_buffer = [_]u8{0} ** 32;
+                    const header_slice = try header_cursor.readBytes(&header_buffer);
+                    var stream = std.io.fixedBufferStream(header_slice);
+                    const header = try readObjectHeader(stream.reader());
+
+                    // put cursor on the heap so the pointer is stable (the reader uses it internally)
+                    const chunk_hashes_ptr = try allocator.create(rp.Repo(repo_kind).DB.Cursor(.read_only));
+                    errdefer allocator.destroy(chunk_hashes_ptr);
+                    chunk_hashes_ptr.* = chunk_hashes_cursor;
+
+                    return .{
+                        .allocator = allocator,
+                        .header = header,
+                        .reader = std.io.bufferedReaderSize(BUFFER_SIZE, Reader{
+                            .xit_dir = state.core.xit_dir,
+                            .chunk_hashes_reader = try chunk_hashes_ptr.reader(),
+                            .position = 0,
+                        }),
+                        .internal = .{
+                            .cursor = chunk_hashes_ptr,
+                        },
+                    };
                 },
             }
         }
@@ -594,22 +682,14 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
         }
 
         pub fn reset(self: *ObjectReader(repo_kind)) !void {
-            switch (repo_kind) {
-                .git => {
-                    try self.reader.unbuffered_reader.reset();
-                    self.reader = std.io.bufferedReaderSize(BUFFER_SIZE, self.reader.unbuffered_reader);
-                },
-                .xit => {
-                    try self.reader.unbuffered_reader.seekTo(self.internal.header_offset);
-                    self.reader = std.io.bufferedReaderSize(BUFFER_SIZE, self.reader.unbuffered_reader);
-                },
-            }
+            try self.reader.unbuffered_reader.reset();
+            self.reader = std.io.bufferedReaderSize(BUFFER_SIZE, self.reader.unbuffered_reader);
         }
 
         pub fn seekTo(self: *ObjectReader(repo_kind), position: u64) !void {
             switch (repo_kind) {
                 .git => try self.reader.unbuffered_reader.skipBytes(position), // assumes that reset() has just been called!
-                .xit => try self.reader.unbuffered_reader.seekTo(self.internal.header_offset + position),
+                .xit => try self.reader.unbuffered_reader.seekTo(position),
             }
         }
     };
@@ -631,6 +711,25 @@ pub fn readObjectHeader(reader: anytype) !ObjectHeader {
         .kind = try ObjectKind.init(object_kind),
         .size = object_len,
     };
+}
+
+pub fn writeObjectHeader(header: ObjectHeader, buf: []u8) ![]u8 {
+    var stream = std.io.fixedBufferStream(buf);
+    const writer = stream.writer();
+
+    const kind_str = switch (header.kind) {
+        .blob => "blob",
+        .tree => "tree",
+        .commit => "commit",
+    };
+    try writer.writeAll(kind_str);
+    try writer.writeByte(' ');
+    try writer.print("{}", .{header.size});
+    try writer.writeByte(0);
+
+    const end_pos = try stream.getPos();
+
+    return buf[0..end_pos];
 }
 
 pub const ObjectHeader = struct {

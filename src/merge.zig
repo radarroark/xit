@@ -295,6 +295,18 @@ fn writeBlobWithDiff3(
             parent: *Parent,
 
             pub fn read(self: @This(), buf: []u8) !usize {
+                var size: usize = 0;
+                while (size < buf.len) {
+                    const read_size = try self.readStep(buf[size..]);
+                    if (read_size == 0) {
+                        break;
+                    }
+                    size += read_size;
+                }
+                return size;
+            }
+
+            fn readStep(self: @This(), buf: []u8) !usize {
                 if (self.parent.current_line) |current_line| {
                     const size = @min(buf.len, current_line.len);
                     var line_finished = current_line.len == 0;
@@ -354,7 +366,7 @@ fn writeBlobWithDiff3(
                                     self.parent.current_line = self.parent.line_buffer.items[0];
                                     source_lines.lines.clearAndFree();
                                 }
-                                return self.read(buf);
+                                return self.readStep(buf);
                             }
                             // if base == source, return target to autoresolve conflict
                             else if (base_lines.eql(source_lines)) {
@@ -363,7 +375,7 @@ fn writeBlobWithDiff3(
                                     self.parent.current_line = self.parent.line_buffer.items[0];
                                     target_lines.lines.clearAndFree();
                                 }
-                                return self.read(buf);
+                                return self.readStep(buf);
                             }
 
                             // return conflict
@@ -402,7 +414,7 @@ fn writeBlobWithDiff3(
                             self.parent.has_conflict = true;
                         },
                     }
-                    return self.read(buf);
+                    return self.readStep(buf);
                 } else {
                     return 0;
                 }
@@ -645,6 +657,18 @@ fn writeBlobWithPatches(
             parent: *Parent,
 
             pub fn read(self: @This(), buf: []u8) !usize {
+                var size: usize = 0;
+                while (size < buf.len) {
+                    const read_size = try self.readStep(buf[size..]);
+                    if (read_size == 0) {
+                        break;
+                    }
+                    size += read_size;
+                }
+                return size;
+            }
+
+            fn readStep(self: @This(), buf: []u8) !usize {
                 if (self.parent.current_line) |current_line| {
                     const size = @min(buf.len, current_line.len);
                     var line_finished = current_line.len == 0;
@@ -844,7 +868,7 @@ fn writeBlobWithPatches(
                                 self.parent.current_line = self.parent.line_buffer.items[0];
                                 source_lines.lines.clearAndFree();
                             }
-                            return self.read(buf);
+                            return self.readStep(buf);
                         }
                         // if base == source, return target to autoresolve conflict
                         else if (base_lines.eql(source_lines)) {
@@ -853,7 +877,7 @@ fn writeBlobWithPatches(
                                 self.parent.current_line = self.parent.line_buffer.items[0];
                                 target_lines.lines.clearAndFree();
                             }
-                            return self.read(buf);
+                            return self.readStep(buf);
                         }
 
                         // return conflict
@@ -911,7 +935,7 @@ fn writeBlobWithPatches(
                             self.parent.current_node_id_hash = null;
                         }
                     }
-                    return self.read(buf);
+                    return self.readStep(buf);
                 } else {
                     return 0;
                 }
