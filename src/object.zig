@@ -12,6 +12,7 @@ const ref = @import("./ref.zig");
 const io = @import("./io.zig");
 const rp = @import("./repo.zig");
 const pack = @import("./pack.zig");
+const chunk = @import("./chunk.zig");
 
 const MAX_READ_BYTES = 1024; // FIXME: this is arbitrary...
 
@@ -114,9 +115,6 @@ pub fn writeBlob(
         },
         .xit => {
             const file_hash = hash.bytesToHash(sha1_bytes_buffer);
-
-            // write chunks
-            const chunk = @import("./chunk.zig");
             try chunk.writeChunks(state, allocator, file, file_hash, header);
         },
     }
@@ -187,9 +185,6 @@ fn writeTree(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.r
         },
         .xit => {
             const object_hash = hash.bytesToHash(sha1_bytes_buffer);
-
-            // write chunks
-            const chunk = @import("./chunk.zig");
             var stream = std.io.fixedBufferStream(tree_contents);
             try chunk.writeChunks(state, allocator, &stream, object_hash, header);
         },
@@ -345,9 +340,6 @@ pub fn writeCommit(
             try ref.updateRecur(repo_kind, state, allocator, &.{"HEAD"}, &commit_sha1_hex);
         },
         .xit => {
-
-            // write chunks
-            const chunk = @import("./chunk.zig");
             var stream = std.io.fixedBufferStream(commit_contents);
             try chunk.writeChunks(state, allocator, &stream, commit_hash, header);
 
@@ -508,7 +500,6 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
                 }
 
                 fn readStep(self: *@This(), buf: []u8) !usize {
-                    const chunk = @import("./chunk.zig");
                     return try chunk.readChunk(self.xit_dir, &self.chunk_hashes_reader, self.position, buf);
                 }
 
