@@ -12,11 +12,14 @@ pub fn writeChunks(
     object_hash: hash.Hash,
     object_header: []const u8,
 ) !void {
-    // get writer to the chunk hashes for the given file hash (null if it already exists)
+    // exit early if the chunks for this object already exist
     const blob_id_to_chunk_hashes_cursor = try state.extra.moment.putCursor(hash.hashBuffer("object-id->chunk-hashes"));
     const blob_id_to_chunk_hashes = try rp.Repo(.xit).DB.HashMap(.read_write).init(blob_id_to_chunk_hashes_cursor);
+    if (null != try blob_id_to_chunk_hashes.getCursor(object_hash)) return;
+
+    // get the writer
     var chunk_hashes_cursor = try blob_id_to_chunk_hashes.putCursor(object_hash);
-    var writer_maybe = if (chunk_hashes_cursor.slot().tag == .none) try chunk_hashes_cursor.writer() else null;
+    var writer = try chunk_hashes_cursor.writer();
 
     // make the .xit/chunks dir
     var chunks_dir = try state.core.xit_dir.makeOpenPath("chunks", .{});
@@ -37,7 +40,7 @@ pub fn writeChunks(
         var chunk_hash_bytes = [_]u8{0} ** hash.SHA1_BYTES_LEN;
         try hash.sha1Buffer(chunk, &chunk_hash_bytes);
 
-        // write chunk as separate file if necessary
+        // write chunk unless it already exists
         const chunk_hash_hex = std.fmt.bytesToHex(chunk_hash_bytes, .lower);
         if (chunks_dir.openFile(&chunk_hash_hex, .{})) |chunk_file| {
             chunk_file.close();
@@ -51,16 +54,12 @@ pub fn writeChunks(
             else => return err,
         }
 
-        // write hash to db if necessary
-        if (writer_maybe) |*writer| {
-            try writer.writeAll(&chunk_hash_bytes);
-        }
+        // write hash to db
+        try writer.writeAll(&chunk_hash_bytes);
     }
 
-    // finish writing to db if necessary
-    if (writer_maybe) |*writer| {
-        try writer.finish();
-    }
+    // finish writing to db
+    try writer.finish();
 
     // write object header
     const object_id_to_header_cursor = try state.extra.moment.putCursor(hash.hashBuffer("object-id->header"));
