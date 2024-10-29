@@ -546,11 +546,11 @@ fn writeBlobWithPatches(
     try merge_branch_cursor.writeIfEmpty(.{ .slot = branch_cursor.slot() });
     const merge_branch = try rp.Repo(.xit).DB.HashMap(.read_write).init(merge_branch_cursor);
 
-    const pch = @import("./patch.zig");
+    const patch = @import("./patch.zig");
 
     for (0..patch_ids.items.len) |i| {
         const patch_id = patch_ids.items[patch_ids.items.len - i - 1];
-        try pch.applyPatch(state.readOnly().extra.moment, &merge_branch, allocator, path_hash, patch_id);
+        try patch.applyPatch(state.readOnly().extra.moment, &merge_branch, allocator, path_hash, patch_id);
     }
 
     const merge_path_to_live_parent_to_children_cursor = (try merge_branch.getCursor(hash.hashBuffer("path->live-parent->children"))) orelse return error.KeyNotFound;
@@ -591,7 +591,7 @@ fn writeBlobWithPatches(
         allocator: std.mem.Allocator,
         lines: std.ArrayList([]const u8),
 
-        fn init(alctr: std.mem.Allocator, patch_id_to_change_content_list_ptr: *const rp.Repo(.xit).DB.HashMap(.read_only), node_ids: []pch.NodeId) !@This() {
+        fn init(alctr: std.mem.Allocator, patch_id_to_change_content_list_ptr: *const rp.Repo(.xit).DB.HashMap(.read_only), node_ids: []patch.NodeId) !@This() {
             var lines = std.ArrayList([]const u8).init(alctr);
             errdefer {
                 for (lines.items) |line| {
@@ -708,12 +708,12 @@ fn writeBlobWithPatches(
 
                     const first_child_cursor = (try children_iter.next()) orelse return error.ExpectedChild;
                     const first_kv_pair = try first_child_cursor.readKeyValuePair();
-                    var first_child_bytes = [_]u8{0} ** pch.NODE_ID_SIZE;
+                    var first_child_bytes = [_]u8{0} ** patch.NODE_ID_SIZE;
                     const first_child_slice = try first_kv_pair.key_cursor.readBytes(&first_child_bytes);
-                    const first_node_id: pch.NodeId = blk: {
+                    const first_node_id: patch.NodeId = blk: {
                         var stream = std.io.fixedBufferStream(first_child_slice);
                         var node_id_reader = stream.reader();
-                        break :blk @bitCast(try node_id_reader.readInt(pch.NodeIdInt, .big));
+                        break :blk @bitCast(try node_id_reader.readInt(patch.NodeIdInt, .big));
                     };
                     const first_node_id_hash = hash.hashBuffer(first_child_slice);
 
@@ -721,12 +721,12 @@ fn writeBlobWithPatches(
                         if (try children_iter.next() != null) return error.MoreThanTwoChildrenFound;
 
                         const second_kv_pair = try second_child_cursor.readKeyValuePair();
-                        var second_child_bytes = [_]u8{0} ** pch.NODE_ID_SIZE;
+                        var second_child_bytes = [_]u8{0} ** patch.NODE_ID_SIZE;
                         const second_child_slice = try second_kv_pair.key_cursor.readBytes(&second_child_bytes);
-                        const second_node_id: pch.NodeId = blk: {
+                        const second_node_id: patch.NodeId = blk: {
                             var stream = std.io.fixedBufferStream(second_child_slice);
                             var node_id_reader = stream.reader();
-                            break :blk @bitCast(try node_id_reader.readInt(pch.NodeIdInt, .big));
+                            break :blk @bitCast(try node_id_reader.readInt(patch.NodeIdInt, .big));
                         };
                         const second_node_id_hash = hash.hashBuffer(second_child_slice);
 
@@ -736,7 +736,7 @@ fn writeBlobWithPatches(
                         else
                             .{ second_node_id, second_node_id_hash, first_node_id, first_node_id_hash };
 
-                        var target_node_ids = std.ArrayList(pch.NodeId).init(self.parent.allocator);
+                        var target_node_ids = std.ArrayList(patch.NodeId).init(self.parent.allocator);
                         defer target_node_ids.deinit();
 
                         var join_node_id_hash_maybe: ?hash.Hash = null;
@@ -756,12 +756,12 @@ fn writeBlobWithPatches(
                             if (try next_children_iter.next()) |next_child_cursor| {
                                 if (try next_children_iter.next() != null) return error.ExpectedOneChild;
                                 const next_kv_pair = try next_child_cursor.readKeyValuePair();
-                                var next_child_bytes = [_]u8{0} ** pch.NODE_ID_SIZE;
+                                var next_child_bytes = [_]u8{0} ** patch.NODE_ID_SIZE;
                                 const next_child_slice = try next_kv_pair.key_cursor.readBytes(&next_child_bytes);
                                 next_node_id = blk: {
                                     var stream = std.io.fixedBufferStream(next_child_slice);
                                     var node_id_reader = stream.reader();
-                                    break :blk @bitCast(try node_id_reader.readInt(pch.NodeIdInt, .big));
+                                    break :blk @bitCast(try node_id_reader.readInt(patch.NodeIdInt, .big));
                                 };
                                 next_node_id_hash = hash.hashBuffer(next_child_slice);
                             } else {
@@ -769,7 +769,7 @@ fn writeBlobWithPatches(
                             }
                         }
 
-                        var source_node_ids = std.ArrayList(pch.NodeId).init(self.parent.allocator);
+                        var source_node_ids = std.ArrayList(patch.NodeId).init(self.parent.allocator);
                         defer source_node_ids.deinit();
 
                         // find the source node ids that aren't in target
@@ -787,12 +787,12 @@ fn writeBlobWithPatches(
                             if (try next_children_iter.next()) |next_child_cursor| {
                                 if (try next_children_iter.next() != null) return error.ExpectedOneChild;
                                 const next_kv_pair = try next_child_cursor.readKeyValuePair();
-                                var next_child_bytes = [_]u8{0} ** pch.NODE_ID_SIZE;
+                                var next_child_bytes = [_]u8{0} ** patch.NODE_ID_SIZE;
                                 const next_child_slice = try next_kv_pair.key_cursor.readBytes(&next_child_bytes);
                                 next_node_id = blk: {
                                     var stream = std.io.fixedBufferStream(next_child_slice);
                                     var node_id_reader = stream.reader();
-                                    break :blk @bitCast(try node_id_reader.readInt(pch.NodeIdInt, .big));
+                                    break :blk @bitCast(try node_id_reader.readInt(patch.NodeIdInt, .big));
                                 };
                                 next_node_id_hash = hash.hashBuffer(next_child_slice);
                             } else {
@@ -800,7 +800,7 @@ fn writeBlobWithPatches(
                             }
                         }
 
-                        var base_node_ids = std.ArrayList(pch.NodeId).init(self.parent.allocator);
+                        var base_node_ids = std.ArrayList(patch.NodeId).init(self.parent.allocator);
                         defer base_node_ids.deinit();
 
                         // find the base node ids up to (but not including) the join node id if it exists,
@@ -812,12 +812,12 @@ fn writeBlobWithPatches(
                             if (try next_children_iter.next()) |next_child_cursor| {
                                 if (try next_children_iter.next() != null) return error.ExpectedOneChild;
                                 const next_kv_pair = try next_child_cursor.readKeyValuePair();
-                                var next_child_bytes = [_]u8{0} ** pch.NODE_ID_SIZE;
+                                var next_child_bytes = [_]u8{0} ** patch.NODE_ID_SIZE;
                                 const next_child_slice = try next_kv_pair.key_cursor.readBytes(&next_child_bytes);
                                 next_node_id = blk: {
                                     var stream = std.io.fixedBufferStream(next_child_slice);
                                     var node_id_reader = stream.reader();
-                                    break :blk @bitCast(try node_id_reader.readInt(pch.NodeIdInt, .big));
+                                    break :blk @bitCast(try node_id_reader.readInt(patch.NodeIdInt, .big));
                                 };
                                 next_node_id_hash = hash.hashBuffer(next_child_slice);
                                 if (join_node_id_hash_maybe) |join_node_id_hash| {
@@ -839,11 +839,11 @@ fn writeBlobWithPatches(
                         if (join_node_id_hash_maybe) |join_node_id_hash| {
                             if (source_node_ids.items.len == 0) return error.ExpectedAtLeastOneSourceNodeId;
                             const join_parent_node_id = source_node_ids.items[source_node_ids.items.len - 1];
-                            var join_parent_bytes = [_]u8{0} ** pch.NODE_ID_SIZE;
+                            var join_parent_bytes = [_]u8{0} ** patch.NODE_ID_SIZE;
                             {
                                 var stream = std.io.fixedBufferStream(&join_parent_bytes);
                                 var node_id_writer = stream.writer();
-                                try node_id_writer.writeInt(pch.NodeIdInt, @bitCast(join_parent_node_id), .big);
+                                try node_id_writer.writeInt(patch.NodeIdInt, @bitCast(join_parent_node_id), .big);
                             }
                             const join_parent_node_id_hash = hash.hashBuffer(&join_parent_bytes);
                             self.parent.current_node_id_hash = join_parent_node_id_hash;
@@ -944,7 +944,7 @@ fn writeBlobWithPatches(
 
         pub fn seekTo(self: *@This(), offset: usize) !void {
             if (offset == 0) {
-                self.current_node_id_hash = hash.hashBuffer(&pch.FIRST_NODE_ID_BYTES);
+                self.current_node_id_hash = hash.hashBuffer(&patch.FIRST_NODE_ID_BYTES);
             } else {
                 return error.InvalidOffset;
             }
@@ -993,7 +993,7 @@ fn writeBlobWithPatches(
         .patch_id_to_change_content_list = &patch_id_to_change_content_list,
         .line_buffer = &line_buffer,
         .current_line = null,
-        .current_node_id_hash = hash.hashBuffer(&pch.FIRST_NODE_ID_BYTES),
+        .current_node_id_hash = hash.hashBuffer(&patch.FIRST_NODE_ID_BYTES),
         .has_conflict = false,
     };
 
