@@ -121,31 +121,6 @@ pub fn writeBlob(
             // write chunks
             const chunk = @import("./chunk.zig");
             try chunk.writeChunks(state, allocator, file, file_hash, .{ .kind = .blob, .size = file_size });
-            try file.seekTo(0);
-
-            const file_values_cursor = try state.extra.moment.putCursor(hash.hashBuffer("file-values"));
-            const file_values = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(file_values_cursor);
-            var file_value_cursor = try file_values.putCursor(file_hash);
-
-            if (file_value_cursor.slot().tag == .none) {
-                var writer = try file_value_cursor.writer();
-                try writer.writeAll(header);
-
-                var read_buffer = [_]u8{0} ** MAX_READ_BYTES;
-                while (true) {
-                    const size = try reader.read(&read_buffer);
-                    if (size == 0) {
-                        break;
-                    }
-                    try writer.writeAll(read_buffer[0..size]);
-                }
-
-                try writer.finish();
-
-                const objects_cursor = try state.extra.moment.putCursor(hash.hashBuffer("objects"));
-                const objects = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(objects_cursor);
-                try objects.put(file_hash, .{ .slot = writer.slot });
-            }
         },
     }
 }
@@ -219,17 +194,6 @@ fn writeTree(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.r
             const chunk = @import("./chunk.zig");
             var stream = std.io.fixedBufferStream(tree_contents);
             try chunk.writeChunks(state, allocator, &stream, object_hash, .{ .kind = .tree, .size = tree_contents.len });
-
-            const objects_cursor = try state.extra.moment.putCursor(hash.hashBuffer("objects"));
-            const objects = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(objects_cursor);
-
-            if (try objects.getCursor(object_hash) == null) {
-                const object_values_cursor = try state.extra.moment.putCursor(hash.hashBuffer("object-values"));
-                const object_values = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(object_values_cursor);
-                var object_value_cursor = try object_values.putCursor(object_hash);
-                try object_value_cursor.writeIfEmpty(.{ .bytes = tree_bytes });
-                try objects.put(object_hash, .{ .slot = object_value_cursor.slot() });
-            }
         },
     }
 }
@@ -408,17 +372,6 @@ pub fn writeCommit(
             const chunk = @import("./chunk.zig");
             var stream = std.io.fixedBufferStream(commit_contents);
             try chunk.writeChunks(state, allocator, &stream, commit_hash, .{ .kind = .commit, .size = commit_contents.len });
-
-            // write commit content
-            const object_values_cursor = try state.extra.moment.putCursor(hash.hashBuffer("object-values"));
-            const object_values = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(object_values_cursor);
-            var object_value_cursor = try object_values.putCursor(commit_hash);
-            try object_value_cursor.writeIfEmpty(.{ .bytes = commit });
-
-            // write commit
-            const objects_cursor = try state.extra.moment.putCursor(hash.hashBuffer("objects"));
-            const objects = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(objects_cursor);
-            try objects.put(commit_hash, .{ .slot = object_value_cursor.slot() });
 
             // write commit id to HEAD
             try ref.updateRecur(repo_kind, state, allocator, &.{"HEAD"}, &commit_sha1_hex);

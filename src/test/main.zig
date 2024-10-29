@@ -204,11 +204,11 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 var moment = try repo.core.latestMoment();
                 const state = .{ .core = &repo.core, .extra = .{ .moment = &moment } };
                 const head_file_buffer = try ref.readHead(repo_kind, state);
-                const bytes_cursor_maybe = try moment.cursor.readPath(void, &.{
-                    .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
+                const chunk_hashes_cursor_maybe = try moment.cursor.readPath(void, &.{
+                    .{ .hash_map_get = .{ .value = hash.hashBuffer("object-id->chunk-hashes") } },
                     .{ .hash_map_get = .{ .value = try hash.hexToHash(&head_file_buffer) } },
                 });
-                try std.testing.expect(bytes_cursor_maybe != null);
+                try std.testing.expect(chunk_hashes_cursor_maybe != null);
             },
         }
     }
@@ -453,11 +453,11 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 var moment = try repo.core.latestMoment();
                 const state = .{ .core = &repo.core, .extra = .{ .moment = &moment } };
                 const head_file_buffer = try ref.readHead(repo_kind, state);
-                const bytes_cursor_maybe = try moment.cursor.readPath(void, &.{
-                    .{ .hash_map_get = .{ .value = hash.hashBuffer("objects") } },
+                const chunk_hashes_cursor_maybe = try moment.cursor.readPath(void, &.{
+                    .{ .hash_map_get = .{ .value = hash.hashBuffer("object-id->chunk-hashes") } },
                     .{ .hash_map_get = .{ .value = try hash.hexToHash(&head_file_buffer) } },
                 });
-                try std.testing.expect(bytes_cursor_maybe != null);
+                try std.testing.expect(chunk_hashes_cursor_maybe != null);
             },
         }
     }
