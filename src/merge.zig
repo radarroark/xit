@@ -3,7 +3,7 @@ const hash = @import("./hash.zig");
 const obj = @import("./object.zig");
 const idx = @import("./index.zig");
 const ref = @import("./ref.zig");
-const chk = @import("./checkout.zig");
+const cht = @import("./checkout.zig");
 const io = @import("./io.zig");
 const rp = @import("./repo.zig");
 const df = @import("./diff.zig");
@@ -1358,14 +1358,14 @@ pub const Merge = struct {
                         defer index.deinit();
 
                         // update the working tree
-                        try chk.migrate(repo_kind, state, allocator, clean_diff, &index, null);
+                        try cht.migrate(repo_kind, state, allocator, clean_diff, &index, null);
 
                         for (conflicts.keys(), conflicts.values()) |path, conflict| {
                             // add conflict to index
                             try index.addConflictEntries(path, .{ conflict.base, conflict.target, conflict.source });
                             // write renamed file if necessary
                             if (conflict.renamed) |renamed| {
-                                try chk.objectToFile(repo_kind, state.readOnly(), allocator, renamed.path, renamed.tree_entry);
+                                try cht.objectToFile(repo_kind, state.readOnly(), allocator, renamed.path, renamed.tree_entry);
                             }
                         }
 
@@ -1407,14 +1407,14 @@ pub const Merge = struct {
                         defer index.deinit();
 
                         // update the working tree
-                        try chk.migrate(repo_kind, state, allocator, clean_diff, &index, null);
+                        try cht.migrate(repo_kind, state, allocator, clean_diff, &index, null);
 
                         for (conflicts.keys(), conflicts.values()) |path, conflict| {
                             // add conflict to index
                             try index.addConflictEntries(path, .{ conflict.base, conflict.target, conflict.source });
                             // write renamed file if necessary
                             if (conflict.renamed) |renamed| {
-                                try chk.objectToFile(repo_kind, state.readOnly(), allocator, renamed.path, renamed.tree_entry);
+                                try cht.objectToFile(repo_kind, state.readOnly(), allocator, renamed.path, renamed.tree_entry);
                             }
                         }
 

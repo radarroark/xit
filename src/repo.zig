@@ -5,7 +5,7 @@ const cmd = @import("./command.zig");
 const idx = @import("./index.zig");
 const st = @import("./status.zig");
 const bch = @import("./branch.zig");
-const chk = @import("./checkout.zig");
+const cht = @import("./checkout.zig");
 const ref = @import("./ref.zig");
 const io = @import("./io.zig");
 const df = @import("./diff.zig");
@@ -921,23 +921,23 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             }
         }
 
-        pub fn switchHead(self: *Repo(repo_kind), target: []const u8, options: chk.Switch.Options) !chk.Switch {
+        pub fn switchHead(self: *Repo(repo_kind), target: []const u8, options: cht.Switch.Options) !cht.Switch {
             switch (repo_kind) {
-                .git => return try chk.Switch.init(repo_kind, .{ .core = &self.core, .extra = .{} }, self.allocator, target, options),
+                .git => return try cht.Switch.init(repo_kind, .{ .core = &self.core, .extra = .{} }, self.allocator, target, options),
                 .xit => {
-                    var result: chk.Switch = undefined;
+                    var result: cht.Switch = undefined;
 
                     const Ctx = struct {
                         core: *Repo(repo_kind).Core,
                         allocator: std.mem.Allocator,
                         target: []const u8,
-                        options: chk.Switch.Options,
-                        result: *chk.Switch,
+                        options: cht.Switch.Options,
+                        result: *cht.Switch,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            ctx.result.* = try chk.Switch.init(repo_kind, state, ctx.allocator, ctx.target, ctx.options);
+                            ctx.result.* = try cht.Switch.init(repo_kind, state, ctx.allocator, ctx.target, ctx.options);
                         }
                     };
 
@@ -955,7 +955,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
         pub fn restore(self: *Repo(repo_kind), path: []const u8) !void {
             var moment = try self.core.latestMoment();
             const state = .{ .core = &self.core, .extra = .{ .moment = &moment } };
-            try chk.restore(repo_kind, state, self.allocator, path);
+            try cht.restore(repo_kind, state, self.allocator, path);
         }
 
         pub fn log(self: *Repo(repo_kind), start_oids_maybe: ?[]const [hash.SHA1_HEX_LEN]u8) !obj.ObjectIterator(repo_kind, .full) {
