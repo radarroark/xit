@@ -578,7 +578,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             switch (repo_kind) {
                 .git => return try obj.writeCommit(repo_kind, .{ .core = &self.core, .extra = .{} }, self.allocator, parent_oids_maybe, metadata),
                 .xit => {
-                    const pch = @import("./patch.zig");
+                    const patch = @import("./patch.zig");
 
                     var result: [hash.SHA1_HEX_LEN]u8 = undefined;
 
@@ -595,7 +595,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                             var stat = try st.Status(.xit).init(ctx.allocator, state.readOnly());
                             defer stat.deinit();
                             ctx.result.* = try obj.writeCommit(repo_kind, state, ctx.allocator, ctx.parent_oids_maybe, ctx.metadata);
-                            try pch.writeAndApplyPatches(state, ctx.allocator, &stat, ctx.result);
+                            try patch.writeAndApplyPatches(state, ctx.allocator, &stat, ctx.result);
                         }
                     };
 
