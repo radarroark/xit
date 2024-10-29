@@ -34,13 +34,14 @@ pub fn writeChunks(
         }
         const chunk = chunk_buffer[0..size];
 
-        // write chunk as separate file if necessary
+        // hash the chunk
         var chunk_hash_bytes = [_]u8{0} ** hash.SHA1_BYTES_LEN;
         try hash.sha1Buffer(chunk, &chunk_hash_bytes);
+
+        // write chunk as separate file if necessary
         const chunk_hash_hex = std.fmt.bytesToHex(chunk_hash_bytes, .lower);
         if (chunks_dir.openFile(&chunk_hash_hex, .{})) |chunk_file| {
             chunk_file.close();
-            continue;
         } else |err| switch (err) {
             error.FileNotFound => {
                 var lock = try io.LockFile.init(allocator, chunks_dir, &chunk_hash_hex);
@@ -77,7 +78,7 @@ pub fn readChunk(
     buf: []u8,
 ) !usize {
     const chunk_index = position / CHUNK_SIZE;
-    const chunk_hash_position = chunk_index * (@bitSizeOf(hash.Hash) / 8);
+    const chunk_hash_position = chunk_index * hash.SHA1_BYTES_LEN;
     if (chunk_hash_position == chunk_hashes_reader.size) {
         return 0;
     }
