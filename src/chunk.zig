@@ -2,7 +2,6 @@ const std = @import("std");
 const hash = @import("./hash.zig");
 const rp = @import("./repo.zig");
 const io = @import("./io.zig");
-const obj = @import("./object.zig");
 
 const CHUNK_SIZE = 1024;
 
@@ -11,7 +10,7 @@ pub fn writeChunks(
     allocator: std.mem.Allocator,
     file: anytype,
     object_hash: hash.Hash,
-    object_header: obj.ObjectHeader,
+    object_header: []const u8,
 ) !void {
     // get writer to the chunk hashes for the given file hash (null if it already exists)
     const blob_id_to_chunk_hashes_cursor = try state.extra.moment.putCursor(hash.hashBuffer("object-id->chunk-hashes"));
@@ -66,9 +65,7 @@ pub fn writeChunks(
     // write object header
     const object_id_to_header_cursor = try state.extra.moment.putCursor(hash.hashBuffer("object-id->header"));
     const object_id_to_header = try rp.Repo(.xit).DB.HashMap(.read_write).init(object_id_to_header_cursor);
-    var header_buffer = [_]u8{0} ** 32;
-    const header_slice = try obj.writeObjectHeader(object_header, &header_buffer);
-    try object_id_to_header.put(object_hash, .{ .bytes = header_slice });
+    try object_id_to_header.put(object_hash, .{ .bytes = object_header });
 }
 
 pub fn readChunk(
