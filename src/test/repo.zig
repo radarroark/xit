@@ -5,7 +5,6 @@ const std = @import("std");
 const hash = @import("../hash.zig");
 const rp = @import("../repo.zig");
 const ref = @import("../ref.zig");
-const chk = @import("../checkout.zig");
 const obj = @import("../object.zig");
 const mrg = @import("../merge.zig");
 const df = @import("../diff.zig");

@@ -5,7 +5,6 @@ const hash = @import("./hash.zig");
 const io = @import("./io.zig");
 const idx = @import("./index.zig");
 const obj = @import("./object.zig");
-const chk = @import("./checkout.zig");
 
 const MAX_READ_BYTES = 1024; // FIXME: this is arbitrary...
 pub const MAX_LINE_BYTES = 10_000;
