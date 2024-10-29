@@ -60,8 +60,8 @@ pub fn writeBlob(
     sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8,
 ) !void {
     // create blob header
-    const header = try std.fmt.allocPrint(allocator, "blob {}\x00", .{file_size});
-    defer allocator.free(header);
+    var header_buffer = [_]u8{0} ** 32;
+    const header = try std.fmt.bufPrint(&header_buffer, "blob {}\x00", .{file_size});
 
     // calc the sha1 of its contents
     const reader = file.reader();
@@ -94,7 +94,6 @@ pub fn writeBlob(
             // create lock file
             var lock = try io.LockFile.init(allocator, hash_prefix_dir, hash_suffix ++ ".uncompressed");
             defer lock.deinit();
-
             try lock.lock_file.writeAll(header);
 
             // copy file into temp file
@@ -110,8 +109,6 @@ pub fn writeBlob(
             // create compressed lock file
             var compressed_lock = try io.LockFile.init(allocator, hash_prefix_dir, hash_suffix);
             defer compressed_lock.deinit();
-
-            // compress the file
             try compress.compress(lock.lock_file, compressed_lock.lock_file);
             compressed_lock.success = true;
         },
@@ -120,7 +117,7 @@ pub fn writeBlob(
 
             // write chunks
             const chunk = @import("./chunk.zig");
-            try chunk.writeChunks(state, allocator, file, file_hash, .{ .kind = .blob, .size = file_size });
+            try chunk.writeChunks(state, allocator, file, file_hash, header);
         },
     }
 }
@@ -145,8 +142,12 @@ fn writeTree(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.r
     const tree_contents = try std.mem.join(allocator, "", tree.entries.values());
     defer allocator.free(tree_contents);
 
+    // create tree header
+    var header_buffer = [_]u8{0} ** 32;
+    const header = try std.fmt.bufPrint(&header_buffer, "tree {}\x00", .{tree_contents.len});
+
     // create tree
-    const tree_bytes = try std.fmt.allocPrint(allocator, "tree {}\x00{s}", .{ tree_contents.len, tree_contents });
+    const tree_bytes = try std.fmt.allocPrint(allocator, "{s}{s}", .{ header, tree_contents });
     defer allocator.free(tree_bytes);
 
     // calc the sha1 of its contents
@@ -176,14 +177,11 @@ fn writeTree(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.r
             // create lock file
             var lock = try io.LockFile.init(allocator, tree_hash_prefix_dir, tree_hash_suffix ++ ".uncompressed");
             defer lock.deinit();
-
             try lock.lock_file.writeAll(tree_bytes);
 
             // create compressed lock file
             var compressed_lock = try io.LockFile.init(allocator, tree_hash_prefix_dir, tree_hash_suffix);
             defer compressed_lock.deinit();
-
-            // compress the file
             try compress.compress(lock.lock_file, compressed_lock.lock_file);
             compressed_lock.success = true;
         },
@@ -193,7 +191,7 @@ fn writeTree(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.r
             // write chunks
             const chunk = @import("./chunk.zig");
             var stream = std.io.fixedBufferStream(tree_contents);
-            try chunk.writeChunks(state, allocator, &stream, object_hash, .{ .kind = .tree, .size = tree_contents.len });
+            try chunk.writeChunks(state, allocator, &stream, object_hash, header);
         },
     }
 }
@@ -294,33 +292,38 @@ pub fn writeCommit(
     var index = try idx.Index(repo_kind).init(allocator, state.readOnly());
     defer index.deinit();
 
+    // create tree and add index entries
+    var tree = Tree.init(allocator);
+    defer tree.deinit();
+    try addIndexEntries(repo_kind, state, allocator, &tree, index, "", index.root_children.keys());
+
+    // write and hash tree
+    var tree_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+    try writeTree(repo_kind, state, allocator, &tree, &tree_sha1_bytes_buffer);
+    const tree_sha1_hex = std.fmt.bytesToHex(tree_sha1_bytes_buffer, .lower);
+
+    // create commit contents
+    const commit_contents = try createCommitContents(allocator, &tree_sha1_hex, parent_oids, metadata);
+    defer allocator.free(commit_contents);
+
+    // create commit header
+    var header_buffer = [_]u8{0} ** 32;
+    const header = try std.fmt.bufPrint(&header_buffer, "commit {}\x00", .{commit_contents.len});
+
+    // create commit
+    const commit = try std.fmt.allocPrint(allocator, "{s}{s}", .{ header, commit_contents });
+    defer allocator.free(commit);
+
+    // calc the sha1 of its contents
+    try hash.sha1Buffer(commit, &commit_sha1_bytes_buffer);
+    const commit_sha1_hex = std.fmt.bytesToHex(commit_sha1_bytes_buffer, .lower);
+    const commit_hash = hash.bytesToHash(&commit_sha1_bytes_buffer);
+
     switch (repo_kind) {
         .git => {
             // open the objects dir
             var objects_dir = try state.core.git_dir.openDir("objects", .{});
             defer objects_dir.close();
-
-            // create tree and add index entries
-            var tree = Tree.init(allocator);
-            defer tree.deinit();
-            try addIndexEntries(repo_kind, state, allocator, &tree, index, "", index.root_children.keys());
-
-            // write and hash tree
-            var tree_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-            try writeTree(repo_kind, state, allocator, &tree, &tree_sha1_bytes_buffer);
-            const tree_sha1_hex = std.fmt.bytesToHex(tree_sha1_bytes_buffer, .lower);
-
-            // create commit contents
-            const commit_contents = try createCommitContents(allocator, &tree_sha1_hex, parent_oids, metadata);
-            defer allocator.free(commit_contents);
-
-            // create commit
-            const commit = try std.fmt.allocPrint(allocator, "commit {}\x00{s}", .{ commit_contents.len, commit_contents });
-            defer allocator.free(commit);
-
-            // calc the sha1 of its contents
-            try hash.sha1Buffer(commit, &commit_sha1_bytes_buffer);
-            const commit_sha1_hex = std.fmt.bytesToHex(commit_sha1_bytes_buffer, .lower);
 
             // make the two char dir
             var commit_hash_prefix_dir = try objects_dir.makeOpenPath(commit_sha1_hex[0..2], .{});
@@ -330,14 +333,11 @@ pub fn writeCommit(
             // create lock file
             var lock = try io.LockFile.init(allocator, commit_hash_prefix_dir, commit_hash_suffix ++ ".uncompressed");
             defer lock.deinit();
-
             try lock.lock_file.writeAll(commit);
 
             // create compressed lock file
             var compressed_lock = try io.LockFile.init(allocator, commit_hash_prefix_dir, commit_hash_suffix);
             defer compressed_lock.deinit();
-
-            // compress the file
             try compress.compress(lock.lock_file, compressed_lock.lock_file);
             compressed_lock.success = true;
 
@@ -345,33 +345,11 @@ pub fn writeCommit(
             try ref.updateRecur(repo_kind, state, allocator, &.{"HEAD"}, &commit_sha1_hex);
         },
         .xit => {
-            // create tree and add index entries
-            var tree = Tree.init(allocator);
-            defer tree.deinit();
-            try addIndexEntries(repo_kind, state, allocator, &tree, index, "", index.root_children.keys());
-
-            // write and hash tree
-            var tree_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-            try writeTree(repo_kind, state, allocator, &tree, &tree_sha1_bytes_buffer);
-            const tree_sha1_hex = std.fmt.bytesToHex(tree_sha1_bytes_buffer, .lower);
-
-            // create commit contents
-            const commit_contents = try createCommitContents(allocator, &tree_sha1_hex, parent_oids, metadata);
-            defer allocator.free(commit_contents);
-
-            // create commit
-            const commit = try std.fmt.allocPrint(allocator, "commit {}\x00{s}", .{ commit_contents.len, commit_contents });
-            defer allocator.free(commit);
-
-            // calc the sha1 of its contents
-            try hash.sha1Buffer(commit, &commit_sha1_bytes_buffer);
-            const commit_sha1_hex = std.fmt.bytesToHex(commit_sha1_bytes_buffer, .lower);
-            const commit_hash = hash.bytesToHash(&commit_sha1_bytes_buffer);
 
             // write chunks
             const chunk = @import("./chunk.zig");
             var stream = std.io.fixedBufferStream(commit_contents);
-            try chunk.writeChunks(state, allocator, &stream, commit_hash, .{ .kind = .commit, .size = commit_contents.len });
+            try chunk.writeChunks(state, allocator, &stream, commit_hash, header);
 
             // write commit id to HEAD
             try ref.updateRecur(repo_kind, state, allocator, &.{"HEAD"}, &commit_sha1_hex);
@@ -657,25 +635,6 @@ pub fn readObjectHeader(reader: anytype) !ObjectHeader {
         .kind = try ObjectKind.init(object_kind),
         .size = object_len,
     };
-}
-
-pub fn writeObjectHeader(header: ObjectHeader, buf: []u8) ![]u8 {
-    var stream = std.io.fixedBufferStream(buf);
-    const writer = stream.writer();
-
-    const kind_str = switch (header.kind) {
-        .blob => "blob",
-        .tree => "tree",
-        .commit => "commit",
-    };
-    try writer.writeAll(kind_str);
-    try writer.writeByte(' ');
-    try writer.print("{}", .{header.size});
-    try writer.writeByte(0);
-
-    const end_pos = try stream.getPos();
-
-    return buf[0..end_pos];
 }
 
 pub const ObjectHeader = struct {
