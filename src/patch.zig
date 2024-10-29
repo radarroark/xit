@@ -1,5 +1,4 @@
 const std = @import("std");
-const xitdb = @import("xitdb");
 const rp = @import("./repo.zig");
 const hash = @import("./hash.zig");
 const st = @import("./status.zig");
