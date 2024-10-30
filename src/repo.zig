@@ -965,8 +965,8 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             if (start_oids_maybe) |start_oids| {
                 return try obj.ObjectIterator(repo_kind, .full).init(self.allocator, state, start_oids, options);
             } else {
-                const head_oid = try ref.readHead(repo_kind, state);
-                return try obj.ObjectIterator(repo_kind, .full).init(self.allocator, state, &.{head_oid}, options);
+                const start_oids = if (try ref.readHeadMaybe(repo_kind, state)) |head_oid| &.{head_oid} else &.{};
+                return try obj.ObjectIterator(repo_kind, .full).init(self.allocator, state, start_oids, options);
             }
         }
 
