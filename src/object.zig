@@ -297,6 +297,15 @@ pub fn writeCommit(
     try writeTree(repo_kind, state, allocator, &tree, &tree_sha1_bytes_buffer);
     const tree_sha1_hex = std.fmt.bytesToHex(tree_sha1_bytes_buffer, .lower);
 
+    // don't allow commit if the tree hasn't changed
+    if (parent_oids.len == 1) {
+        var first_parent = try Object(repo_kind, .full).init(allocator, state.readOnly(), &parent_oids[0]);
+        defer first_parent.deinit();
+        if (std.mem.eql(u8, &first_parent.content.commit.tree, &tree_sha1_hex)) {
+            return error.EmptyCommit;
+        }
+    }
+
     // create commit contents
     const commit_contents = try createCommitContents(allocator, &tree_sha1_hex, parent_oids, metadata);
     defer allocator.free(commit_contents);
