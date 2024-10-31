@@ -414,23 +414,30 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
             }
 
             // compute the path relative to the repo path
-            // (allocate using the arena so it has the same lifetime as the overall Index instance)
-            var relative_path = try std.fs.path.relative(self.arena.allocator(), repo_path, input_path);
-            if (relative_path.len == 0) {
-                // an empty relative path means the root of the project was added,
-                // and we need to make it a single dot so the dir can be opened
-                relative_path = try self.arena.allocator().dupe(u8, ".");
-            }
+            const relative_path = try std.fs.path.relative(self.allocator, repo_path, input_path);
+            defer self.allocator.free(relative_path);
+
+            // normalize the relative path, replacing \ with /
+            const normalized_path = if (relative_path.len == 0) "." else blk: {
+                var path_parts = std.ArrayList([]const u8).init(self.allocator);
+                defer path_parts.deinit();
+                var iter = try std.fs.path.componentIterator(relative_path);
+                while (iter.next()) |component| {
+                    try path_parts.append(component.name);
+                }
+                // allocate using the arena so it has the same lifetime as the overall Index instance
+                break :blk try io.joinPath(self.arena.allocator(), path_parts.items);
+            };
 
             // if the path doesn't exist, remove it, regardless of what the `action` is
-            if (state.core.repo_dir.openFile(relative_path, .{ .mode = .read_only })) |file| {
+            if (state.core.repo_dir.openFile(normalized_path, .{ .mode = .read_only })) |file| {
                 file.close();
             } else |err| {
                 switch (err) {
                     error.IsDir => {}, // only happens on windows
                     error.FileNotFound => {
-                        if (self.entries.contains(relative_path)) {
-                            self.removePath(relative_path);
+                        if (self.entries.contains(normalized_path)) {
+                            self.removePath(normalized_path);
                             return;
                         } else {
                             return err;
@@ -442,12 +449,12 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
 
             // add or remove based on the `action`
             switch (action) {
-                .add => try self.addPath(state, relative_path),
+                .add => try self.addPath(state, normalized_path),
                 .rm => {
-                    if (!self.entries.contains(relative_path)) {
+                    if (!self.entries.contains(normalized_path)) {
                         return error.CannotRemoveUnindexedFile;
                     }
-                    self.removePath(relative_path);
+                    self.removePath(normalized_path);
                 },
             }
         }
