@@ -88,6 +88,7 @@ pub fn readChunk(
     defer chunks_dir.close();
 
     const chunk_file = try chunks_dir.openFile(&chunk_hash_hex, .{});
+    defer chunk_file.close();
     try chunk_file.seekTo(position % CHUNK_SIZE);
     return try chunk_file.read(buf);
 }
