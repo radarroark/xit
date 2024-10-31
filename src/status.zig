@@ -211,7 +211,7 @@ fn addEntries(
                 }
 
                 const subpath = if (std.mem.eql(u8, path, "."))
-                    try std.fmt.allocPrint(allocator, "{s}", .{entry.name})
+                    try allocator.dupe(u8, entry.name)
                 else
                     try io.joinPath(allocator, &.{ path, entry.name });
 

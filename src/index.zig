@@ -268,7 +268,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                         }
 
                         const subpath = if (std.mem.eql(u8, path, "."))
-                            try std.fmt.allocPrint(self.arena.allocator(), "{s}", .{entry.name})
+                            try self.arena.allocator().dupe(u8, entry.name)
                         else
                             try io.joinPath(self.arena.allocator(), &.{ path, entry.name });
                         try self.addPath(state, subpath);
@@ -332,7 +332,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
 
         pub fn addConflictEntries(self: *Index(repo_kind), path: []const u8, tree_entries: [3]?obj.TreeEntry) !void {
             // add the conflict entries
-            const owned_path = try std.fmt.allocPrint(self.arena.allocator(), "{s}", .{path});
+            const owned_path = try self.arena.allocator().dupe(u8, path);
             for (tree_entries, 1..) |tree_entry_maybe, stage| {
                 if (tree_entry_maybe) |tree_entry| {
                     const entry = Entry{
