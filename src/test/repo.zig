@@ -39,9 +39,16 @@ fn testSimple(comptime repo_kind: rp.RepoKind) !void {
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
-    const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
+    {
+        const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
+        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, writers);
+        defer repo.deinit();
+    }
 
-    var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, writers);
+    var repo_dir = try temp_dir.openDir("repo", .{});
+    defer repo_dir.close();
+
+    var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
     defer repo.deinit();
 
     try addFile(repo_kind, &repo, "README.md", "Hello, world!");
@@ -94,9 +101,16 @@ fn testMerge(comptime repo_kind: rp.RepoKind) !void {
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
-    const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
+    {
+        const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
+        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, writers);
+        defer repo.deinit();
+    }
 
-    var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, writers);
+    var repo_dir = try temp_dir.openDir("repo", .{});
+    defer repo_dir.close();
+
+    var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
     defer repo.deinit();
 
     // A --- B --- C --------- J --- K [master]
@@ -213,8 +227,6 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
-    const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
-
     const checkMergeAbort = struct {
         fn run(repo: *rp.Repo(repo_kind)) !void {
             // can't merge again with an unresolved merge
@@ -245,7 +257,16 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
 
     // same file conflict
     {
-        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "same-file-conflict" } }, writers);
+        {
+            const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
+            var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "same-file-conflict" } }, writers);
+            defer repo.deinit();
+        }
+
+        var repo_dir = try temp_dir.openDir("same-file-conflict", .{});
+        defer repo_dir.close();
+
+        var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
 
         // A --- B --- D [master]
@@ -346,7 +367,16 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
 
     // same file conflict (autoresolved)
     {
-        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "same-file-conflict-autoresolved" } }, writers);
+        {
+            const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
+            var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "same-file-conflict-autoresolved" } }, writers);
+            defer repo.deinit();
+        }
+
+        var repo_dir = try temp_dir.openDir("same-file-conflict-autoresolved", .{});
+        defer repo_dir.close();
+
+        var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
 
         // A --- B --- D [master]
@@ -425,7 +455,16 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
 
     // modify/delete conflict (target modifies, source deletes)
     {
-        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "modify-delete-conflict" } }, writers);
+        {
+            const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
+            var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "modify-delete-conflict" } }, writers);
+            defer repo.deinit();
+        }
+
+        var repo_dir = try temp_dir.openDir("modify-delete-conflict", .{});
+        defer repo_dir.close();
+
+        var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
 
         // A --- B --- D [master]
@@ -492,7 +531,16 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
 
     // delete/modify conflict (target deletes, source modifies)
     {
-        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "delete-modify-conflict" } }, writers);
+        {
+            const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
+            var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "delete-modify-conflict" } }, writers);
+            defer repo.deinit();
+        }
+
+        var repo_dir = try temp_dir.openDir("delete-modify-conflict", .{});
+        defer repo_dir.close();
+
+        var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
 
         // A --- B --- D [master]
@@ -557,7 +605,16 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
 
     // file/dir conflict (target has file, source has dir)
     {
-        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "file-dir-conflict" } }, writers);
+        {
+            const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
+            var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "file-dir-conflict" } }, writers);
+            defer repo.deinit();
+        }
+
+        var repo_dir = try temp_dir.openDir("file-dir-conflict", .{});
+        defer repo_dir.close();
+
+        var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
 
         // A --- B --- D [master]
@@ -628,7 +685,16 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
 
     // dir/file conflict (target has dir, source has file)
     {
-        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "dir-file-conflict" } }, writers);
+        {
+            const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
+            var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "dir-file-conflict" } }, writers);
+            defer repo.deinit();
+        }
+
+        var repo_dir = try temp_dir.openDir("dir-file-conflict", .{});
+        defer repo_dir.close();
+
+        var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
 
         // A --- B --- D [master]
@@ -718,9 +784,16 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind) !void {
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
-    const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
+    {
+        const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
+        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, writers);
+        defer repo.deinit();
+    }
 
-    var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, writers);
+    var repo_dir = try temp_dir.openDir("repo", .{});
+    defer repo_dir.close();
+
+    var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
     defer repo.deinit();
 
     // A --- B --------- D [master]
@@ -849,7 +922,15 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind) !void {
 
     // from https://pijul.org/manual/why_pijul.html
     {
-        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "simple" } }, writers);
+        {
+            var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "simple" } }, writers);
+            defer repo.deinit();
+        }
+
+        var repo_dir = try temp_dir.openDir("simple", .{});
+        defer repo_dir.close();
+
+        var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
 
         // A --- B --- C --- E [master]
@@ -952,7 +1033,15 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind) !void {
 
     // from https://tahoe-lafs.org/~zooko/badmerge/concrete-good-semantics.html
     {
-        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "concrete" } }, writers);
+        {
+            var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "concrete" } }, writers);
+            defer repo.deinit();
+        }
+
+        var repo_dir = try temp_dir.openDir("concrete", .{});
+        defer repo_dir.close();
+
+        var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
 
         // A --- B --- C --- E [master]
@@ -1140,9 +1229,16 @@ fn testCherryPick(comptime repo_kind: rp.RepoKind) !void {
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
-    const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
+    {
+        const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
+        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, writers);
+        defer repo.deinit();
+    }
 
-    var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, writers);
+    var repo_dir = try temp_dir.openDir("repo", .{});
+    defer repo_dir.close();
+
+    var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
     defer repo.deinit();
 
     // A --- B ------------ D' [master]
@@ -1213,8 +1309,6 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind) !void {
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
-    const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
-
     const checkCherryPickAbort = struct {
         fn run(repo: *rp.Repo(repo_kind)) !void {
             // can't cherry-pick again with an unresolved cherry-pick
@@ -1243,7 +1337,16 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind) !void {
         }
     }.run;
 
-    var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, writers);
+    {
+        const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
+        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, writers);
+        defer repo.deinit();
+    }
+
+    var repo_dir = try temp_dir.openDir("repo", .{});
+    defer repo_dir.close();
+
+    var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
     defer repo.deinit();
 
     // A --- B ------------ D' [master]
@@ -1343,9 +1446,16 @@ fn testLog(comptime repo_kind: rp.RepoKind) !void {
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
-    const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
+    {
+        const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
+        var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, writers);
+        defer repo.deinit();
+    }
 
-    var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, writers);
+    var repo_dir = try temp_dir.openDir("repo", .{});
+    defer repo_dir.close();
+
+    var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
     defer repo.deinit();
 
     // A --- B --- C --------- G --- H [master]

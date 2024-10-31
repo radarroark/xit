@@ -389,15 +389,23 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
             }
         }
 
-        pub fn addOrRemovePath(self: *Index(repo_kind), state: rp.Repo(repo_kind).State(.read_write), path: []const u8, action: enum { add, rm }) !void {
+        pub fn addOrRemovePath(
+            self: *Index(repo_kind),
+            state: rp.Repo(repo_kind).State(.read_write),
+            cwd: std.fs.Dir,
+            path: []const u8,
+            action: enum { add, rm },
+        ) !void {
             // get the absolute paths to the repo and the input
             const repo_path = try state.core.repo_dir.realpathAlloc(self.allocator, ".");
             defer self.allocator.free(repo_path);
+            const cwd_path = try cwd.realpathAlloc(self.allocator, ".");
+            defer self.allocator.free(cwd_path);
             const input_path =
                 if (std.fs.path.isAbsolute(path))
                 try self.allocator.dupe(u8, path)
             else
-                try std.fs.path.resolve(self.allocator, &.{ repo_path, path });
+                try std.fs.path.resolve(self.allocator, &.{ cwd_path, path });
             defer self.allocator.free(input_path);
 
             // make sure the input path is in the repo

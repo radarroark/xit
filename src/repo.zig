@@ -620,7 +620,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     defer index.deinit();
 
                     for (paths) |path| {
-                        try index.addOrRemovePath(.{ .core = &self.core, .extra = .{} }, path, .add);
+                        try index.addOrRemovePath(.{ .core = &self.core, .extra = .{} }, self.init_opts.cwd, path, .add);
                     }
 
                     try index.write(self.allocator, .{ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } });
@@ -631,6 +631,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     const Ctx = struct {
                         core: *Repo(repo_kind).Core,
                         allocator: std.mem.Allocator,
+                        cwd: std.fs.Dir,
                         paths: []const []const u8,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
@@ -641,7 +642,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                             defer index.deinit();
 
                             for (ctx.paths) |path| {
-                                try index.addOrRemovePath(state, path, .add);
+                                try index.addOrRemovePath(state, ctx.cwd, path, .add);
                             }
 
                             try index.write(ctx.allocator, state);
@@ -651,7 +652,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
                     try history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
-                        Ctx{ .core = &self.core, .allocator = self.allocator, .paths = paths },
+                        Ctx{ .core = &self.core, .allocator = self.allocator, .cwd = self.init_opts.cwd, .paths = paths },
                     );
                 },
             }
@@ -691,7 +692,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                                         return error.CannotRemoveFileWithUnstagedChanges;
                                     }
                                 }
-                                try index.addOrRemovePath(.{ .core = &self.core, .extra = .{} }, path, .rm);
+                                try index.addOrRemovePath(.{ .core = &self.core, .extra = .{} }, self.init_opts.cwd, path, .rm);
                             },
                             else => return error.UnexpectedPathType,
                         }
@@ -715,6 +716,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     const Ctx = struct {
                         core: *Repo(repo_kind).Core,
                         allocator: std.mem.Allocator,
+                        cwd: std.fs.Dir,
                         paths: []const []const u8,
                         opts: idx.IndexRemoveOptions,
 
@@ -742,7 +744,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                                                 return error.CannotRemoveFileWithUnstagedChanges;
                                             }
                                         }
-                                        try index.addOrRemovePath(state, path, .rm);
+                                        try index.addOrRemovePath(state, ctx.cwd, path, .rm);
                                     },
                                     else => return error.UnexpectedPathType,
                                 }
@@ -766,7 +768,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
                     try history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
-                        Ctx{ .core = &self.core, .allocator = self.allocator, .paths = paths, .opts = opts },
+                        Ctx{ .core = &self.core, .allocator = self.allocator, .cwd = self.init_opts.cwd, .paths = paths, .opts = opts },
                     );
                 },
             }
