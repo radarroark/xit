@@ -51,6 +51,9 @@ fn testSimple(comptime repo_kind: rp.RepoKind) !void {
     try removeFile(repo_kind, &repo, "README.md");
     const commit_c = try repo.commit(null, .{ .message = "c" });
 
+    // can't add path that is outside repo
+    try std.testing.expectError(error.PathIsOutsideRepo, repo.add(&.{"../README.md"}));
+
     // commits that haven't changed content are an error
     try std.testing.expectError(error.EmptyCommit, repo.commit(null, .{ .message = "d" }));
 
