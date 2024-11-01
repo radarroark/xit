@@ -42,7 +42,7 @@ test "pull" {
         const file = try repo.core.repo_dir.createFile("hello.txt", .{ .truncate = true });
         defer file.close();
         try file.writeAll("hello, world!");
-        try repo.add(&.{"hello.txt"});
+        try repo.add(&.{"server/hello.txt"});
         _ = try repo.commit(null, .{ .message = "let there be light" });
     }
 
