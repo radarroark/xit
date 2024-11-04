@@ -169,7 +169,7 @@ fn testMerge(comptime repo_kind: rp.RepoKind) !void {
     const commit_k = try repo.commit(null, .{ .message = "k" });
 
     var moment = try repo.core.latestMoment();
-    const state = .{ .core = &repo.core, .extra = .{ .moment = &moment } };
+    const state = rp.Repo(repo_kind).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
 
     // there are multiple common ancestors, b and d,
     // but d is the best one because it is a descendent of b
@@ -1550,7 +1550,7 @@ fn testLog(comptime repo_kind: rp.RepoKind) !void {
     {
         var count: usize = 0;
         var moment = try repo.core.latestMoment();
-        const state = .{ .core = &repo.core, .extra = .{ .moment = &moment } };
+        const state = rp.Repo(repo_kind).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
         var obj_iter = try obj.ObjectIterator(repo_kind, .full).init(allocator, state, &.{commit_g}, .{ .recursive = true });
         defer obj_iter.deinit();
         while (try obj_iter.next()) |object| {
