@@ -809,7 +809,7 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime load_kind: Objec
         }
 
         pub fn next(self: *ObjectIterator(repo_kind, load_kind)) !?*Object(repo_kind, load_kind) {
-            const state = .{ .core = self.core, .extra = .{ .moment = &self.moment } };
+            const state = rp.Repo(repo_kind).State(.read_only){ .core = self.core, .extra = .{ .moment = &self.moment } };
             while (self.oid_queue.popFirst()) |node| {
                 const next_oid = node.data;
                 self.allocator.destroy(node);
@@ -877,7 +877,7 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime load_kind: Objec
         pub fn exclude(self: *ObjectIterator(repo_kind, load_kind), oid: *const [hash.SHA1_HEX_LEN]u8) !void {
             try self.oid_excludes.put(oid.*, {});
 
-            const state = .{ .core = self.core, .extra = .{ .moment = &self.moment } };
+            const state = rp.Repo(repo_kind).State(.read_only){ .core = self.core, .extra = .{ .moment = &self.moment } };
             var object = try Object(repo_kind, .full).init(self.allocator, state, oid);
             defer object.deinit();
             switch (object.content) {

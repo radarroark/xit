@@ -437,7 +437,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     switch (branch_cmd) {
                         .list => {
                             var moment = try self.core.latestMoment();
-                            const state = .{ .core = &self.core, .extra = .{ .moment = &moment } };
+                            const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
 
                             var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, state, self.allocator, "HEAD");
                             defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
@@ -787,13 +787,13 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
         pub fn status(self: *Repo(repo_kind)) !st.Status(repo_kind) {
             var moment = try self.core.latestMoment();
-            const state = .{ .core = &self.core, .extra = .{ .moment = &moment } };
+            const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
             return try st.Status(repo_kind).init(self.allocator, state);
         }
 
         pub fn filePair(self: *Repo(repo_kind), path: []const u8, status_kind: st.StatusKind, stat: *st.Status(repo_kind)) !df.LineIteratorPair(repo_kind) {
             var moment = try self.core.latestMoment();
-            const state = .{ .core = &self.core, .extra = .{ .moment = &moment } };
+            const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
             switch (status_kind) {
                 .added => |added| {
                     switch (added) {
@@ -860,13 +860,13 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
         pub fn filePairs(self: *Repo(repo_kind), diff_opts: df.DiffOptions(repo_kind)) !df.FileIterator(repo_kind) {
             var moment = try self.core.latestMoment();
-            const state = .{ .core = &self.core, .extra = .{ .moment = &moment } };
+            const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
             return try df.FileIterator(repo_kind).init(self.allocator, state, diff_opts);
         }
 
         pub fn treeDiff(self: *Repo(repo_kind), old_oid_maybe: ?[hash.SHA1_HEX_LEN]u8, new_oid_maybe: ?[hash.SHA1_HEX_LEN]u8) !obj.TreeDiff(repo_kind) {
             var moment = try self.core.latestMoment();
-            const state = .{ .core = &self.core, .extra = .{ .moment = &moment } };
+            const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
             var tree_diff = obj.TreeDiff(repo_kind).init(self.allocator);
             errdefer tree_diff.deinit();
             try tree_diff.compare(state, old_oid_maybe, new_oid_maybe, null);
@@ -956,14 +956,14 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
         pub fn restore(self: *Repo(repo_kind), path: []const u8) !void {
             var moment = try self.core.latestMoment();
-            const state = .{ .core = &self.core, .extra = .{ .moment = &moment } };
+            const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
             try cht.restore(repo_kind, state, self.allocator, path);
         }
 
         pub fn log(self: *Repo(repo_kind), start_oids_maybe: ?[]const [hash.SHA1_HEX_LEN]u8) !obj.ObjectIterator(repo_kind, .full) {
             const options = .{ .recursive = false };
             var moment = try self.core.latestMoment();
-            const state = .{ .core = &self.core, .extra = .{ .moment = &moment } };
+            const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
             if (start_oids_maybe) |start_oids| {
                 return try obj.ObjectIterator(repo_kind, .full).init(self.allocator, state, start_oids, options);
             } else {
@@ -1048,7 +1048,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
         pub fn config(self: *Repo(repo_kind)) !cfg.Config(repo_kind) {
             var moment = try self.core.latestMoment();
-            const state = .{ .core = &self.core, .extra = .{ .moment = &moment } };
+            const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
             return try cfg.Config(repo_kind).init(state, self.allocator);
         }
 

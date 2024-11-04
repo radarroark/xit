@@ -1303,7 +1303,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
         }
 
         pub fn next(self: *FileIterator(repo_kind)) !?LineIteratorPair(repo_kind) {
-            const state = .{ .core = self.core, .extra = .{ .moment = &self.moment } };
+            const state = rp.Repo(repo_kind).State(.read_only){ .core = self.core, .extra = .{ .moment = &self.moment } };
             var next_index = self.next_index;
             switch (self.diff_opts) {
                 .workspace => |workspace| {
