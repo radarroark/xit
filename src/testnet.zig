@@ -1,5 +1,6 @@
 const std = @import("std");
 const rp = @import("repo.zig");
+const net = @import("./net.zig");
 
 const c = @cImport({
     @cInclude("git2.h");
@@ -33,18 +34,16 @@ test "pull" {
     defer _ = process.kill() catch {};
 
     // init server repo
-    {
-        const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
+    const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
+    var server_repo = try rp.Repo(.git).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "server" } }, writers);
+    defer server_repo.deinit();
 
-        var repo = try rp.Repo(.git).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "server" } }, writers);
-        defer repo.deinit();
-
-        const file = try repo.core.repo_dir.createFile("hello.txt", .{ .truncate = true });
-        defer file.close();
-        try file.writeAll("hello, world!");
-        try repo.add(&.{"server/hello.txt"});
-        _ = try repo.commit(null, .{ .message = "let there be light" });
-    }
+    // make a commit
+    const file = try server_repo.core.repo_dir.createFile("hello.txt", .{ .truncate = true });
+    defer file.close();
+    try file.writeAll("hello, world!");
+    try server_repo.add(&.{"server/hello.txt"});
+    _ = try server_repo.commit(null, .{ .message = "let there be light" });
 
     // start server
     try process.spawn();
@@ -63,15 +62,10 @@ test "pull" {
     try std.testing.expectEqual(0, c.git_repository_init(&repo, repo_path, 0));
     defer c.git_repository_free(repo);
 
-    // make sure the git dir was created
-    var git_dir = try client_dir.openDir(".git", .{});
-    defer git_dir.close();
-
-    {
-        var remote: ?*c.git_remote = null;
-        try std.testing.expectEqual(0, c.git_remote_create(&remote, repo, "origin", "git://localhost:3000/server"));
-        defer c.git_remote_free(remote);
-    }
+    // add remote
+    var client_repo = try rp.Repo(.git).init(allocator, .{ .cwd = client_dir });
+    defer client_repo.deinit();
+    try client_repo.addRemote(.{ .name = "origin", .value = "git://localhost:3000/server" });
 
     var refspec_strs = [_][*c]const u8{
         @ptrCast("+refs/heads/master:refs/heads/master"),
@@ -139,15 +133,11 @@ test "push" {
     defer _ = process.kill() catch {};
 
     // init server repo
-    {
-        const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
-
-        var repo = try rp.Repo(.git).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "server" } }, writers);
-        defer repo.deinit();
-
-        try repo.addConfig(.{ .name = "core.bare", .value = "false" });
-        try repo.addConfig(.{ .name = "receive.denycurrentbranch", .value = "updateinstead" });
-    }
+    const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
+    var server_repo = try rp.Repo(.git).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "server" } }, writers);
+    defer server_repo.deinit();
+    try server_repo.addConfig(.{ .name = "core.bare", .value = "false" });
+    try server_repo.addConfig(.{ .name = "receive.denycurrentbranch", .value = "updateinstead" });
 
     // start server
     try process.spawn();
@@ -166,9 +156,10 @@ test "push" {
     try std.testing.expectEqual(0, c.git_repository_init(&repo, repo_path, 0));
     defer c.git_repository_free(repo);
 
-    // make sure the git dir was created
-    var git_dir = try client_dir.openDir(".git", .{});
-    defer git_dir.close();
+    // add remote
+    var client_repo = try rp.Repo(.git).init(allocator, .{ .cwd = client_dir });
+    defer client_repo.deinit();
+    try client_repo.addRemote(.{ .name = "origin", .value = "git://localhost:3001/server" });
 
     // add and commit
     var commit_oid1: c.git_oid = undefined;
@@ -212,12 +203,6 @@ test "push" {
             0,
             null,
         ));
-    }
-
-    {
-        var remote: ?*c.git_remote = null;
-        try std.testing.expectEqual(0, c.git_remote_create(&remote, repo, "origin", "git://localhost:3001/server"));
-        defer c.git_remote_free(remote);
     }
 
     var refspec_strs = [_][*c]const u8{
