@@ -33,8 +33,9 @@ test "pull" {
     process.cwd = temp_dir_name;
     defer _ = process.kill() catch {};
 
-    // init server repo
     const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
+
+    // init server repo
     var server_repo = try rp.Repo(.git).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "server" } }, writers);
     defer server_repo.deinit();
 
@@ -53,56 +54,59 @@ test "pull" {
     var client_dir = try temp_dir.makeOpenPath("client", .{});
     defer client_dir.close();
 
-    // get repo path for libgit
-    var repo_path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
-    const repo_path: [*c]const u8 = @ptrCast(try client_dir.realpath(".", &repo_path_buffer));
-
     // init client repo
-    var repo: ?*c.git_repository = null;
-    try std.testing.expectEqual(0, c.git_repository_init(&repo, repo_path, 0));
-    defer c.git_repository_free(repo);
-
-    // add remote
-    var client_repo = try rp.Repo(.git).init(allocator, .{ .cwd = client_dir });
+    var client_repo = try rp.Repo(.git).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "client" } }, writers);
     defer client_repo.deinit();
     try client_repo.addRemote(.{ .name = "origin", .value = "git://localhost:3000/server" });
 
-    var refspec_strs = [_][*c]const u8{
-        @ptrCast("+refs/heads/master:refs/heads/master"),
-    };
-    var refspecs: c.git_strarray = undefined;
-    refspecs.strings = @ptrCast(&refspec_strs);
-    refspecs.count = refspec_strs.len;
+    // test with libgit2
+    {
+        // get repo path for libgit
+        var repo_path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
+        const repo_path: [*c]const u8 = @ptrCast(try client_dir.realpath(".", &repo_path_buffer));
 
-    var remote: ?*c.git_remote = null;
-    try std.testing.expectEqual(0, c.git_remote_lookup(&remote, repo, "origin"));
-    defer c.git_remote_free(remote);
+        // init client repo
+        var repo: ?*c.git_repository = null;
+        try std.testing.expectEqual(0, c.git_repository_open(&repo, repo_path));
+        defer c.git_repository_free(repo);
 
-    var callbacks: c.git_remote_callbacks = undefined;
-    try std.testing.expectEqual(0, c.git_remote_init_callbacks(&callbacks, c.GIT_REMOTE_CALLBACKS_VERSION));
+        var refspec_strs = [_][*c]const u8{
+            @ptrCast("+refs/heads/master:refs/heads/master"),
+        };
+        var refspecs: c.git_strarray = undefined;
+        refspecs.strings = @ptrCast(&refspec_strs);
+        refspecs.count = refspec_strs.len;
 
-    var options: c.git_fetch_options = undefined;
-    try std.testing.expectEqual(0, c.git_fetch_options_init(&options, c.GIT_FETCH_OPTIONS_VERSION));
-    options.callbacks = callbacks;
+        var remote: ?*c.git_remote = null;
+        try std.testing.expectEqual(0, c.git_remote_lookup(&remote, repo, "origin"));
+        defer c.git_remote_free(remote);
 
-    std.testing.expectEqual(0, c.git_remote_fetch(remote, &refspecs, &options, null)) catch |err| {
-        const last_err = c.giterr_last();
-        std.debug.print("{s}\n", .{last_err.*.message});
-        return err;
-    };
+        var callbacks: c.git_remote_callbacks = undefined;
+        try std.testing.expectEqual(0, c.git_remote_init_callbacks(&callbacks, c.GIT_REMOTE_CALLBACKS_VERSION));
 
-    // update the working dir
-    var head_ref: ?*c.git_reference = null;
-    try std.testing.expectEqual(0, c.git_repository_head(&head_ref, repo));
-    defer c.git_reference_free(head_ref);
-    var head_obj: ?*c.git_object = null;
-    try std.testing.expectEqual(0, c.git_reference_peel(&head_obj, head_ref, c.GIT_OBJECT_COMMIT));
-    defer c.git_object_free(head_obj);
-    try std.testing.expectEqual(0, c.git_reset(repo, head_obj, c.GIT_RESET_HARD, null));
+        var options: c.git_fetch_options = undefined;
+        try std.testing.expectEqual(0, c.git_fetch_options_init(&options, c.GIT_FETCH_OPTIONS_VERSION));
+        options.callbacks = callbacks;
 
-    // make sure pull was successful
-    const hello_txt = try client_dir.openFile("hello.txt", .{});
-    defer hello_txt.close();
+        std.testing.expectEqual(0, c.git_remote_fetch(remote, &refspecs, &options, null)) catch |err| {
+            const last_err = c.giterr_last();
+            std.debug.print("{s}\n", .{last_err.*.message});
+            return err;
+        };
+
+        // update the working dir
+        var head_ref: ?*c.git_reference = null;
+        try std.testing.expectEqual(0, c.git_repository_head(&head_ref, repo));
+        defer c.git_reference_free(head_ref);
+        var head_obj: ?*c.git_object = null;
+        try std.testing.expectEqual(0, c.git_reference_peel(&head_obj, head_ref, c.GIT_OBJECT_COMMIT));
+        defer c.git_object_free(head_obj);
+        try std.testing.expectEqual(0, c.git_reset(repo, head_obj, c.GIT_RESET_HARD, null));
+
+        // make sure pull was successful
+        const hello_txt = try client_dir.openFile("hello.txt", .{});
+        defer hello_txt.close();
+    }
 }
 
 test "push" {
@@ -132,8 +136,9 @@ test "push" {
     process.cwd = temp_dir_name;
     defer _ = process.kill() catch {};
 
-    // init server repo
     const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
+
+    // init server repo
     var server_repo = try rp.Repo(.git).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "server" } }, writers);
     defer server_repo.deinit();
     try server_repo.addConfig(.{ .name = "core.bare", .value = "false" });
@@ -147,91 +152,94 @@ test "push" {
     var client_dir = try temp_dir.makeOpenPath("client", .{});
     defer client_dir.close();
 
-    // get repo path for libgit
-    var repo_path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
-    const repo_path: [*c]const u8 = @ptrCast(try client_dir.realpath(".", &repo_path_buffer));
-
     // init client repo
-    var repo: ?*c.git_repository = null;
-    try std.testing.expectEqual(0, c.git_repository_init(&repo, repo_path, 0));
-    defer c.git_repository_free(repo);
-
-    // add remote
-    var client_repo = try rp.Repo(.git).init(allocator, .{ .cwd = client_dir });
+    var client_repo = try rp.Repo(.git).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "client" } }, writers);
     defer client_repo.deinit();
     try client_repo.addRemote(.{ .name = "origin", .value = "git://localhost:3001/server" });
 
-    // add and commit
-    var commit_oid1: c.git_oid = undefined;
+    // test with libgit2
     {
-        // make file
-        var hello_txt = try client_dir.createFile("hello.txt", .{});
+        // get repo path for libgit
+        var repo_path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
+        const repo_path: [*c]const u8 = @ptrCast(try client_dir.realpath(".", &repo_path_buffer));
+
+        // init client repo
+        var repo: ?*c.git_repository = null;
+        try std.testing.expectEqual(0, c.git_repository_open(&repo, repo_path));
+        defer c.git_repository_free(repo);
+
+        // add and commit
+        var commit_oid1: c.git_oid = undefined;
+        {
+            // make file
+            var hello_txt = try client_dir.createFile("hello.txt", .{});
+            defer hello_txt.close();
+            try hello_txt.writeAll("hello, world!");
+
+            // make file
+            var readme = try client_dir.createFile("README", .{});
+            defer readme.close();
+            try readme.writeAll("My cool project");
+
+            // add the files
+            var index: ?*c.git_index = null;
+            try std.testing.expectEqual(0, c.git_repository_index(&index, repo));
+            defer c.git_index_free(index);
+            try std.testing.expectEqual(0, c.git_index_add_bypath(index, "hello.txt"));
+            try std.testing.expectEqual(0, c.git_index_add_bypath(index, "README"));
+            try std.testing.expectEqual(0, c.git_index_write(index));
+
+            // make the commit
+            var tree_oid: c.git_oid = undefined;
+            try std.testing.expectEqual(0, c.git_index_write_tree(&tree_oid, index));
+            var tree: ?*c.git_tree = null;
+            try std.testing.expectEqual(0, c.git_tree_lookup(&tree, repo, &tree_oid));
+            defer c.git_tree_free(tree);
+            var signature: ?*c.git_signature = null;
+            try std.testing.expectEqual(0, c.git_signature_default(&signature, repo));
+            defer c.git_signature_free(signature);
+            try std.testing.expectEqual(0, c.git_commit_create(
+                &commit_oid1,
+                repo,
+                "HEAD",
+                signature,
+                signature,
+                null,
+                "let there be light",
+                tree,
+                0,
+                null,
+            ));
+        }
+
+        var refspec_strs = [_][*c]const u8{
+            @ptrCast("+refs/heads/master:refs/heads/master"),
+        };
+        var refspecs: c.git_strarray = undefined;
+        refspecs.strings = @ptrCast(&refspec_strs);
+        refspecs.count = refspec_strs.len;
+
+        var remote: ?*c.git_remote = null;
+        try std.testing.expectEqual(0, c.git_remote_lookup(&remote, repo, "origin"));
+        defer c.git_remote_free(remote);
+
+        var callbacks: c.git_remote_callbacks = undefined;
+        try std.testing.expectEqual(0, c.git_remote_init_callbacks(&callbacks, c.GIT_REMOTE_CALLBACKS_VERSION));
+
+        var options: c.git_push_options = undefined;
+        try std.testing.expectEqual(0, c.git_push_options_init(&options, c.GIT_PUSH_OPTIONS_VERSION));
+        options.callbacks = callbacks;
+
+        std.testing.expectEqual(0, c.git_remote_push(remote, &refspecs, &options)) catch |err| {
+            const last_err = c.giterr_last();
+            std.debug.print("{s}\n", .{last_err.*.message});
+            return err;
+        };
+
+        // make sure push was successful
+        var server_dir = try temp_dir.openDir("server", .{});
+        defer server_dir.close();
+        const hello_txt = try server_dir.openFile("hello.txt", .{});
         defer hello_txt.close();
-        try hello_txt.writeAll("hello, world!");
-
-        // make file
-        var readme = try client_dir.createFile("README", .{});
-        defer readme.close();
-        try readme.writeAll("My cool project");
-
-        // add the files
-        var index: ?*c.git_index = null;
-        try std.testing.expectEqual(0, c.git_repository_index(&index, repo));
-        defer c.git_index_free(index);
-        try std.testing.expectEqual(0, c.git_index_add_bypath(index, "hello.txt"));
-        try std.testing.expectEqual(0, c.git_index_add_bypath(index, "README"));
-        try std.testing.expectEqual(0, c.git_index_write(index));
-
-        // make the commit
-        var tree_oid: c.git_oid = undefined;
-        try std.testing.expectEqual(0, c.git_index_write_tree(&tree_oid, index));
-        var tree: ?*c.git_tree = null;
-        try std.testing.expectEqual(0, c.git_tree_lookup(&tree, repo, &tree_oid));
-        defer c.git_tree_free(tree);
-        var signature: ?*c.git_signature = null;
-        try std.testing.expectEqual(0, c.git_signature_default(&signature, repo));
-        defer c.git_signature_free(signature);
-        try std.testing.expectEqual(0, c.git_commit_create(
-            &commit_oid1,
-            repo,
-            "HEAD",
-            signature,
-            signature,
-            null,
-            "let there be light",
-            tree,
-            0,
-            null,
-        ));
     }
-
-    var refspec_strs = [_][*c]const u8{
-        @ptrCast("+refs/heads/master:refs/heads/master"),
-    };
-    var refspecs: c.git_strarray = undefined;
-    refspecs.strings = @ptrCast(&refspec_strs);
-    refspecs.count = refspec_strs.len;
-
-    var remote: ?*c.git_remote = null;
-    try std.testing.expectEqual(0, c.git_remote_lookup(&remote, repo, "origin"));
-    defer c.git_remote_free(remote);
-
-    var callbacks: c.git_remote_callbacks = undefined;
-    try std.testing.expectEqual(0, c.git_remote_init_callbacks(&callbacks, c.GIT_REMOTE_CALLBACKS_VERSION));
-
-    var options: c.git_push_options = undefined;
-    try std.testing.expectEqual(0, c.git_push_options_init(&options, c.GIT_PUSH_OPTIONS_VERSION));
-    options.callbacks = callbacks;
-
-    std.testing.expectEqual(0, c.git_remote_push(remote, &refspecs, &options)) catch |err| {
-        const last_err = c.giterr_last();
-        std.debug.print("{s}\n", .{last_err.*.message});
-        return err;
-    };
-
-    // make sure push was successful
-    var server_dir = try temp_dir.openDir("server", .{});
-    defer server_dir.close();
-    const hello_txt = try server_dir.openFile("hello.txt", .{});
-    defer hello_txt.close();
 }
