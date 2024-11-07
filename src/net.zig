@@ -1,11 +1,27 @@
 const std = @import("std");
 const network = @import("network");
+const rp = @import("./repo.zig");
 
 const TIMEOUT_MICRO_SECS: u32 = 2_000_000;
 
-pub fn fetch(allocator: std.mem.Allocator, host: []const u8, port: u16, repo: []const u8) !void {
+pub fn fetch(
+    comptime repo_kind: rp.RepoKind,
+    repo: *rp.Repo(repo_kind),
+    allocator: std.mem.Allocator,
+    remote_name: []const u8,
+) !void {
     try network.init();
     defer network.deinit();
+
+    var remote = try repo.remote();
+    defer remote.deinit();
+
+    const remote_section = remote.sections.get(remote_name) orelse return error.RemoteNotFound;
+    const remote_url = remote_section.get("url") orelse return error.RemoteNotFound;
+    const parsed_url = try std.Uri.parse(remote_url);
+    const host = (parsed_url.host orelse return error.RemoteUrlInvalid).percent_encoded;
+    const port = parsed_url.port orelse return error.RemoteUrlInvalid;
+    const path = parsed_url.path.percent_encoded;
 
     var sock = try network.connectToHost(allocator, host, port, .tcp);
     defer sock.close();
@@ -17,7 +33,7 @@ pub fn fetch(allocator: std.mem.Allocator, host: []const u8, port: u16, repo: []
     // send command
     {
         var command_buf = [_]u8{0} ** 256;
-        const command = try std.fmt.bufPrint(&command_buf, "0000git-upload-pack {s}\x00host={s}\x00", .{ repo, host });
+        const command = try std.fmt.bufPrint(&command_buf, "0000git-upload-pack {s}\x00host={s}\x00", .{ path, host });
 
         var command_size_buf = [_]u8{0} ** 4;
         const command_size = try std.fmt.bufPrint(&command_size_buf, "{x}", .{command.len});
