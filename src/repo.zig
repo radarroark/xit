@@ -107,7 +107,10 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     var repo_dir = try opts.cwd.openDir(".", .{});
                     errdefer repo_dir.close();
 
-                    var git_dir = repo_dir.openDir(".git", .{}) catch return error.RepoDoesNotExist;
+                    var git_dir = repo_dir.openDir(".git", .{}) catch |err| switch (err) {
+                        error.FileNotFound => return error.RepoDoesNotExist,
+                        else => return err,
+                    };
                     errdefer git_dir.close();
 
                     return .{
@@ -123,10 +126,16 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     var repo_dir = try opts.cwd.openDir(".", .{});
                     errdefer repo_dir.close();
 
-                    var xit_dir = repo_dir.openDir(".xit", .{}) catch return error.RepoDoesNotExist;
+                    var xit_dir = repo_dir.openDir(".xit", .{}) catch |err| switch (err) {
+                        error.FileNotFound => return error.RepoDoesNotExist,
+                        else => return err,
+                    };
                     errdefer xit_dir.close();
 
-                    var db_file = xit_dir.openFile("db", .{ .mode = .read_write, .lock = .exclusive }) catch return error.RepoDoesNotExist;
+                    var db_file = xit_dir.openFile("db", .{ .mode = .read_write, .lock = .exclusive }) catch |err| switch (err) {
+                        error.FileNotFound => return error.RepoDoesNotExist,
+                        else => return err,
+                    };
                     errdefer db_file.close();
 
                     return .{
@@ -282,7 +291,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     self.* = Repo(repo_kind).initNew(self.allocator, self.init_opts.cwd, init_cmd.dir) catch |err| switch (err) {
                         error.RepoAlreadyExists => {
                             try writers.err.print("{s} is already a repository\n", .{init_cmd.dir});
-                            return;
+                            return err;
                         },
                         else => return err,
                     };
