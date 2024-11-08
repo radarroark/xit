@@ -1,6 +1,8 @@
 const std = @import("std");
 const network = @import("network");
 const rp = @import("./repo.zig");
+const obj = @import("./object.zig");
+const hash = @import("./hash.zig");
 
 const TIMEOUT_MICRO_SECS: u32 = 2_000_000;
 
@@ -46,7 +48,7 @@ pub fn fetch(
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    var ref_to_hash = std.StringArrayHashMap([]const u8).init(arena.allocator());
+    var ref_to_oid = std.StringArrayHashMap(*const [hash.SHA1_HEX_LEN]u8).init(arena.allocator());
     var capabilities = std.ArrayList([]const u8).init(arena.allocator());
 
     // read messages
@@ -81,7 +83,7 @@ pub fn fetch(
 
         // the very first message should have a null byte
         // and include the capabilities after
-        if (ref_to_hash.count() == 0) {
+        if (ref_to_oid.count() == 0) {
             if (std.mem.indexOfScalar(u8, msg_buffer, 0)) |null_index| {
                 var iter = std.mem.splitScalar(u8, msg_buffer[null_index + 1 ..], ' ');
                 while (iter.next()) |cap| {
@@ -96,13 +98,33 @@ pub fn fetch(
 
         // populate the map of refs
         if (std.mem.indexOfScalar(u8, msg_buffer, ' ')) |space_index| {
-            try ref_to_hash.put(msg_buffer[space_index + 1 ..], msg_buffer[0..space_index]);
+            if (space_index != hash.SHA1_HEX_LEN) {
+                return error.UnexpectedOidLength;
+            }
+            try ref_to_oid.put(msg_buffer[hash.SHA1_HEX_LEN + 1 ..], msg_buffer[0..hash.SHA1_HEX_LEN]);
         } else {
             return error.SpaceByteNotFound;
         }
     }
 
-    for (ref_to_hash.keys(), ref_to_hash.values()) |ref, hash| {
-        std.debug.print("{s} {s}\n", .{ ref, hash });
+    var wanted_oids = std.StringArrayHashMap(void).init(allocator);
+    defer wanted_oids.deinit();
+
+    var moment = try repo.core.latestMoment();
+    const state = rp.Repo(repo_kind).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
+
+    for (ref_to_oid.values()) |oid| {
+        if (wanted_oids.contains(oid)) {
+            continue;
+        }
+        var object = obj.Object(repo_kind, .raw).init(allocator, state, oid) catch |err| switch (err) {
+            error.ObjectNotFound => {
+                std.debug.print("want {s}\n", .{oid});
+                try wanted_oids.put(oid, {});
+                continue;
+            },
+            else => return err,
+        };
+        defer object.deinit();
     }
 }
