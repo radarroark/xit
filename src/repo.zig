@@ -11,6 +11,7 @@ const io = @import("./io.zig");
 const df = @import("./diff.zig");
 const mrg = @import("./merge.zig");
 const cfg = @import("./config.zig");
+const net = @import("./net.zig");
 
 pub const RepoKind = enum {
     git,
@@ -1216,6 +1217,20 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     );
                 },
             }
+        }
+
+        pub fn fetch(self: *Repo(repo_kind), remote_name: []const u8) !void {
+            var rem = try self.remote();
+            defer rem.deinit();
+
+            const remote_section = rem.sections.get(remote_name) orelse return error.RemoteNotFound;
+            const remote_url = remote_section.get("url") orelse return error.RemoteNotFound;
+            const parsed_uri = try std.Uri.parse(remote_url);
+
+            var moment = try self.core.latestMoment();
+            const state = Repo(repo_kind).State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
+
+            try net.fetch(repo_kind, state, self.allocator, parsed_uri);
         }
     };
 }
