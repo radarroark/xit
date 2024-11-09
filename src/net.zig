@@ -43,7 +43,7 @@ pub fn fetch(
     defer arena.deinit();
 
     var ref_to_oid = std.StringArrayHashMap(*const [hash.SHA1_HEX_LEN]u8).init(arena.allocator());
-    var capabilities = std.ArrayList([]const u8).init(arena.allocator());
+    var capability_set = std.StringArrayHashMap(void).init(arena.allocator());
 
     // read messages
     while (true) {
@@ -81,7 +81,7 @@ pub fn fetch(
             if (std.mem.indexOfScalar(u8, msg_buffer, 0)) |null_index| {
                 var iter = std.mem.splitScalar(u8, msg_buffer[null_index + 1 ..], ' ');
                 while (iter.next()) |cap| {
-                    try capabilities.append(cap);
+                    try capability_set.put(cap, {});
                 }
 
                 msg_buffer = msg_buffer[0..null_index];
@@ -101,16 +101,15 @@ pub fn fetch(
         }
     }
 
+    // build list of wanted oids
     var wanted_oids = std.StringArrayHashMap(void).init(allocator);
     defer wanted_oids.deinit();
-
     for (ref_to_oid.values()) |oid| {
         if (wanted_oids.contains(oid)) {
             continue;
         }
         var object = obj.Object(repo_kind, .raw).init(allocator, state, oid) catch |err| switch (err) {
             error.ObjectNotFound => {
-                std.debug.print("want {s}\n", .{oid});
                 try wanted_oids.put(oid, {});
                 continue;
             },
@@ -118,4 +117,37 @@ pub fn fetch(
         };
         defer object.deinit();
     }
+
+    // build list of capabilities
+    var capability_list = std.ArrayList([]const u8).init(allocator);
+    defer capability_list.deinit();
+    const allowed_caps = [_][]const u8{
+        "multi_ack",
+    };
+    for (allowed_caps) |allowed_cap| {
+        if (capability_set.contains(allowed_cap)) {
+            try capability_list.append(allowed_cap);
+        }
+    }
+    const caps = try std.mem.join(allocator, " ", capability_list.items);
+    defer allocator.free(caps);
+
+    // send want lines
+    for (wanted_oids.keys(), 0..) |oid, i| {
+        var command_buf = [_]u8{0} ** 256;
+        const command = if (i == 0)
+            try std.fmt.bufPrint(&command_buf, "0000want {s} {s}\n", .{ oid, caps })
+        else
+            try std.fmt.bufPrint(&command_buf, "0000want {s}\n", .{oid});
+
+        var command_size_buf = [_]u8{0} ** 4;
+        const command_size = try std.fmt.bufPrint(&command_size_buf, "{x}", .{command.len});
+
+        @memcpy(command[command_size_buf.len - command_size.len .. command_size_buf.len], command_size);
+
+        try writer.writeAll(command);
+    }
+
+    // flush
+    try writer.writeAll("0000");
 }
