@@ -8,22 +8,16 @@ const TIMEOUT_MICRO_SECS: u32 = 2_000_000;
 
 pub fn fetch(
     comptime repo_kind: rp.RepoKind,
-    repo: *rp.Repo(repo_kind),
+    state: rp.Repo(repo_kind).State(.read_only),
     allocator: std.mem.Allocator,
-    remote_name: []const u8,
+    uri: std.Uri,
 ) !void {
     try network.init();
     defer network.deinit();
 
-    var remote = try repo.remote();
-    defer remote.deinit();
-
-    const remote_section = remote.sections.get(remote_name) orelse return error.RemoteNotFound;
-    const remote_url = remote_section.get("url") orelse return error.RemoteNotFound;
-    const parsed_url = try std.Uri.parse(remote_url);
-    const host = (parsed_url.host orelse return error.RemoteUrlInvalid).percent_encoded;
-    const port = parsed_url.port orelse return error.RemoteUrlInvalid;
-    const path = parsed_url.path.percent_encoded;
+    const host = (uri.host orelse return error.RemoteUriInvalid).percent_encoded;
+    const port = uri.port orelse return error.RemoteUriInvalid;
+    const path = uri.path.percent_encoded;
 
     var sock = try network.connectToHost(allocator, host, port, .tcp);
     defer sock.close();
@@ -109,9 +103,6 @@ pub fn fetch(
 
     var wanted_oids = std.StringArrayHashMap(void).init(allocator);
     defer wanted_oids.deinit();
-
-    var moment = try repo.core.latestMoment();
-    const state = rp.Repo(repo_kind).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
 
     for (ref_to_oid.values()) |oid| {
         if (wanted_oids.contains(oid)) {
