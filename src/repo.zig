@@ -1141,6 +1141,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
         pub fn addRemote(self: *Repo(repo_kind), input: cfg.AddConfigInput) !void {
             const new_name = try std.fmt.allocPrint(self.allocator, "remote.{s}.url", .{input.name});
             defer self.allocator.free(new_name);
+            _ = try std.Uri.parse(input.value); // validate url
             const new_input = cfg.AddConfigInput{
                 .name = new_name,
                 .value = input.value,
