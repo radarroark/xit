@@ -239,6 +239,9 @@ test "pack" {
 
             var pack_reader = try pack.PackObjectReader.initWithPath(allocator, pack_file_path, &commit_oid_hex);
             defer pack_reader.deinit();
+
+            // make sure the reader's position is at the beginning
+            try std.testing.expectEqual(0, pack_reader.relative_position);
         }
     }
 }

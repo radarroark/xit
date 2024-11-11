@@ -131,6 +131,68 @@ fn searchPackIndexes(pack_dir: std.fs.Dir, oid_hex: *const [hash.SHA1_HEX_LEN]u8
     return error.ObjectNotFound;
 }
 
+pub const PackObjectIterator = struct {
+    allocator: std.mem.Allocator,
+    pack_file_path: []const u8,
+    pack_file: std.fs.File,
+    start_position: u64,
+    object_count: u32,
+    object_index: u32,
+    pack_reader: PackObjectReader,
+
+    pub fn init(allocator: std.mem.Allocator, pack_file_path: []const u8) !PackObjectIterator {
+        var pack_file = try std.fs.openFileAbsolute(pack_file_path, .{ .mode = .read_only });
+        errdefer pack_file.close();
+        const reader = pack_file.reader();
+
+        // parse header
+        const sig = try reader.readBytesNoEof(4);
+        if (!std.mem.eql(u8, "PACK", &sig)) {
+            return error.InvalidPackFileSig;
+        }
+        const version = try reader.readInt(u32, .big);
+        if (version != 2) {
+            return error.InvalidPackFileVersion;
+        }
+        const obj_count = try reader.readInt(u32, .big);
+
+        return .{
+            .allocator = allocator,
+            .pack_file_path = pack_file_path,
+            .pack_file = pack_file,
+            .start_position = try pack_file.getPos(),
+            .object_count = obj_count,
+            .object_index = 0,
+            .pack_reader = undefined,
+        };
+    }
+
+    pub fn next(self: *PackObjectIterator) !?*PackObjectReader {
+        if (self.object_index == self.object_count) {
+            return null;
+        }
+
+        const start_position = self.start_position;
+
+        var pack_reader = try PackObjectReader.initAtPosition(self.allocator, self.pack_file_path, start_position);
+        errdefer pack_reader.deinit();
+
+        // make sure the stream is at the end so the file position is correct
+        while (try pack_reader.stream.next()) |_| {}
+
+        self.start_position = try pack_reader.pack_file.getPos();
+        self.object_index += 1;
+
+        try pack_reader.reset();
+        self.pack_reader = pack_reader;
+        return &self.pack_reader;
+    }
+
+    pub fn deinit(self: *PackObjectIterator) void {
+        self.pack_file.close();
+    }
+};
+
 const PackObjectKind = enum(u3) {
     commit = 1,
     tree = 2,
@@ -226,47 +288,32 @@ pub const PackObjectReader = struct {
     }
 
     pub fn initWithPath(allocator: std.mem.Allocator, pack_file_path: []const u8, oid_hex: *const [hash.SHA1_HEX_LEN]u8) !PackObjectReader {
-        var pack_file = try std.fs.openFileAbsolute(pack_file_path, .{ .mode = .read_only });
-        defer pack_file.close();
-        const reader = pack_file.reader();
+        var iter = try PackObjectIterator.init(allocator, pack_file_path);
+        defer iter.deinit();
 
-        // parse header
-        const sig = try reader.readBytesNoEof(4);
-        if (!std.mem.eql(u8, "PACK", &sig)) {
-            return error.InvalidPackFileSig;
-        }
-        const version = try reader.readInt(u32, .big);
-        if (version != 2) {
-            return error.InvalidPackFileVersion;
-        }
-        const obj_count = try reader.readInt(u32, .big);
+        while (try iter.next()) |pack_reader| {
+            {
+                errdefer pack_reader.deinit();
 
-        var start_position = try pack_file.getPos();
+                var header_bytes = [_]u8{0} ** 128;
+                const type_name = switch (pack_reader.header().kind) {
+                    .blob => "blob",
+                    .tree => "tree",
+                    .commit => "commit",
+                };
+                const file_size = pack_reader.header().size;
+                const header_str = try std.fmt.bufPrint(&header_bytes, "{s} {}\x00", .{ type_name, file_size });
 
-        for (0..obj_count) |_| {
-            var pack_reader = try PackObjectReader.initAtPosition(allocator, pack_file_path, start_position);
-            defer pack_reader.deinit();
+                var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+                try hash.sha1Reader(pack_reader, header_str, &oid);
 
-            var header_bytes = [_]u8{0} ** 128;
-            const type_name = switch (pack_reader.header().kind) {
-                .blob => "blob",
-                .tree => "tree",
-                .commit => "commit",
-            };
-            const file_size = pack_reader.header().size;
-            const header_str = try std.fmt.bufPrint(&header_bytes, "{s} {}\x00", .{ type_name, file_size });
-
-            var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-            try hash.sha1Reader(&pack_reader, header_str, &oid);
-
-            if (std.mem.eql(u8, oid_hex, &std.fmt.bytesToHex(oid, .lower))) {
-                return try PackObjectReader.initAtPosition(allocator, pack_file_path, start_position);
+                if (std.mem.eql(u8, oid_hex, &std.fmt.bytesToHex(oid, .lower))) {
+                    try pack_reader.reset();
+                    return pack_reader.*;
+                }
             }
 
-            // make sure the stream is at the end so the file position is correct
-            while (try pack_reader.stream.next()) |_| {}
-
-            start_position = try pack_reader.pack_file.getPos();
+            pack_reader.deinit();
         }
 
         return error.ObjectNotFound;
