@@ -115,12 +115,18 @@ pub fn writeBlob(
         },
         .xit => {
             const file_hash = hash.bytesToHash(sha1_bytes_buffer);
-            try chunk.writeChunks(state, allocator, file, file_hash, header);
+            try chunk.writeChunks(state, allocator, file, file_hash, header_str);
         },
     }
 }
 
-fn writeTree(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_write), allocator: std.mem.Allocator, tree: *Tree, sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8) !void {
+fn writeTree(
+    comptime repo_kind: rp.RepoKind,
+    state: rp.Repo(repo_kind).State(.read_write),
+    allocator: std.mem.Allocator,
+    tree: *Tree,
+    sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8,
+) !void {
     // sort the entries. this is needed for xit,
     // because its index entries are stored as a
     // hash map, thus making their order random.
@@ -245,7 +251,12 @@ pub const CommitMetadata = struct {
     message: []const u8 = "",
 };
 
-fn createCommitContents(allocator: std.mem.Allocator, tree_sha1_hex: *const [hash.SHA1_HEX_LEN]u8, parent_oids: []const [hash.SHA1_HEX_LEN]u8, metadata: CommitMetadata) ![]const u8 {
+fn createCommitContents(
+    allocator: std.mem.Allocator,
+    tree_sha1_hex: *const [hash.SHA1_HEX_LEN]u8,
+    parent_oids: []const [hash.SHA1_HEX_LEN]u8,
+    metadata: CommitMetadata,
+) ![]const u8 {
     var metadata_lines = std.ArrayList([]const u8).init(allocator);
     defer {
         for (metadata_lines.items) |line| {
