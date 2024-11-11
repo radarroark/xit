@@ -307,6 +307,13 @@ pub fn updateRecur(
             const path = try io.joinPath(allocator, path_parts);
             defer allocator.free(path);
 
+            // ensure the parent dirs exist
+            if (path_parts.len > 1) {
+                if (std.fs.path.dirname(path)) |parent_path| {
+                    try state.core.git_dir.makePath(parent_path);
+                }
+            }
+
             var lock = try io.LockFile.init(allocator, state.core.git_dir, path);
             defer lock.deinit();
 

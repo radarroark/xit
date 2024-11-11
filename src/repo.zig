@@ -1230,7 +1230,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
             switch (repo_kind) {
                 .git => {
-                    return try net.fetch(repo_kind, .{ .core = &self.core, .extra = .{} }, self.allocator, parsed_uri);
+                    return try net.fetch(repo_kind, .{ .core = &self.core, .extra = .{} }, self.allocator, remote_name, parsed_uri);
                 },
                 .xit => {
                     return error.NotImplemented;

@@ -5,6 +5,7 @@ const obj = @import("./object.zig");
 const hash = @import("./hash.zig");
 const io = @import("./io.zig");
 const pack = @import("./pack.zig");
+const ref = @import("./ref.zig");
 
 const TIMEOUT_MICRO_SECS: u32 = 2_000_000;
 
@@ -16,6 +17,7 @@ pub fn fetch(
     comptime repo_kind: rp.RepoKind,
     state: rp.Repo(repo_kind).State(.read_write),
     allocator: std.mem.Allocator,
+    remote_name: []const u8,
     uri: std.Uri,
 ) !FetchResult {
     try network.init();
@@ -48,10 +50,9 @@ pub fn fetch(
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
+    // read messages
     var ref_to_oid = std.StringArrayHashMap(*const [hash.SHA1_HEX_LEN]u8).init(arena.allocator());
     var capability_set = std.StringArrayHashMap(void).init(arena.allocator());
-
-    // read messages
     while (true) {
         var size_buffer = [_]u8{0} ** 4;
         try sock_reader.readNoEof(&size_buffer);
@@ -105,6 +106,11 @@ pub fn fetch(
         } else {
             return error.SpaceByteNotFound;
         }
+    }
+
+    // update refs
+    for (ref_to_oid.keys(), ref_to_oid.values()) |ref_name, oid| {
+        try ref.updateRecur(repo_kind, state, allocator, &.{ "refs", "remotes", remote_name, ref_name }, oid);
     }
 
     // build list of wanted oids
