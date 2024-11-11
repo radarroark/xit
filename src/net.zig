@@ -3,6 +3,8 @@ const network = @import("network");
 const rp = @import("./repo.zig");
 const obj = @import("./object.zig");
 const hash = @import("./hash.zig");
+const io = @import("./io.zig");
+const pack = @import("./pack.zig");
 
 const TIMEOUT_MICRO_SECS: u32 = 2_000_000;
 
@@ -184,6 +186,42 @@ pub fn fetch(
 
         if (std.mem.eql(u8, "NAK", msg_buffer)) {
             break;
+        }
+    }
+
+    const dir = switch (repo_kind) {
+        .git => state.core.git_dir,
+        .xit => state.core.xit_dir,
+    };
+
+    // write pack file to temp file
+    {
+        var lock = try io.LockFile.init(allocator, dir, "temp.pack");
+        defer lock.deinit();
+        while (true) {
+            var read_buffer = [_]u8{0} ** 1024;
+            const read_size = try reader.read(&read_buffer);
+            if (read_size == 0) {
+                break;
+            }
+            try lock.lock_file.writeAll(read_buffer[0..read_size]);
+        }
+        lock.success = true;
+    }
+
+    // iterate over pack file
+    {
+        defer dir.deleteFile("temp.pack") catch {};
+        const pack_file_path = try dir.realpathAlloc(allocator, "temp.pack");
+        defer allocator.free(pack_file_path);
+        var iter = try pack.PackObjectIterator.init(allocator, pack_file_path);
+        defer iter.deinit();
+        while (try iter.next()) |pack_reader| {
+            defer pack_reader.deinit();
+            switch (pack_reader.internal) {
+                .basic => std.debug.print("{}\n", .{pack_reader.internal.basic.header}),
+                .delta => std.debug.print("delta\n", .{}),
+            }
         }
     }
 }
