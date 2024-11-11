@@ -478,7 +478,7 @@ fn writeBlobWithDiff3(
     };
 
     var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-    try obj.writeBlob(repo_kind, state, allocator, &stream, try stream.count(), &oid);
+    try obj.writeObject(repo_kind, state, allocator, &stream, .{ .kind = .blob, .size = try stream.count() }, &oid);
     has_conflict.* = stream.has_conflict;
     return oid;
 }
@@ -998,7 +998,7 @@ fn writeBlobWithPatches(
     };
 
     var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-    try obj.writeBlob(.xit, state, allocator, &stream, try stream.count(), &oid);
+    try obj.writeObject(.xit, state, allocator, &stream, .{ .kind = .blob, .size = try stream.count() }, &oid);
     has_conflict.* = stream.has_conflict;
     return oid;
 }

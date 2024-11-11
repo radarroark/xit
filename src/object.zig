@@ -47,26 +47,21 @@ pub const Tree = struct {
     }
 };
 
-/// writes the file at the given path as a blob.
-/// sha1_bytes_buffer will have the oid when it's done.
-/// on windows files are never marked as executable because
-/// apparently i can't even check if they are...
-/// maybe i'll figure that out later.
-pub fn writeBlob(
+pub fn writeObject(
     comptime repo_kind: rp.RepoKind,
     state: rp.Repo(repo_kind).State(.read_write),
     allocator: std.mem.Allocator,
     file: anytype,
-    file_size: u64,
+    header: ObjectHeader,
     sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8,
 ) !void {
-    // create blob header
-    var header_buffer = [_]u8{0} ** 32;
-    const header = try std.fmt.bufPrint(&header_buffer, "blob {}\x00", .{file_size});
+    // serialize object header
+    var header_bytes = [_]u8{0} ** 32;
+    const header_str = try writeObjectHeader(header, &header_bytes);
 
     // calc the sha1 of its contents
     const reader = file.reader();
-    try hash.sha1Reader(reader, header, sha1_bytes_buffer);
+    try hash.sha1Reader(reader, header_str, sha1_bytes_buffer);
     const sha1_hex = std.fmt.bytesToHex(sha1_bytes_buffer, .lower);
 
     // reset seek pos so we can reuse the reader for copying
@@ -95,7 +90,7 @@ pub fn writeBlob(
             // create lock file
             var lock = try io.LockFile.init(allocator, hash_prefix_dir, hash_suffix ++ ".uncompressed");
             defer lock.deinit();
-            try lock.lock_file.writeAll(header);
+            try lock.lock_file.writeAll(header_str);
 
             // copy file into temp file
             var read_buffer = [_]u8{0} ** MAX_READ_BYTES;
@@ -587,6 +582,16 @@ pub fn readObjectHeader(reader: anytype) !ObjectHeader {
         .kind = try ObjectKind.init(object_kind),
         .size = object_len,
     };
+}
+
+pub fn writeObjectHeader(header: ObjectHeader, buffer: []u8) ![]const u8 {
+    const type_name = switch (header.kind) {
+        .blob => "blob",
+        .tree => "tree",
+        .commit => "commit",
+    };
+    const file_size = header.size;
+    return try std.fmt.bufPrint(buffer, "{s} {}\x00", .{ type_name, file_size });
 }
 
 pub const ObjectHeader = struct {

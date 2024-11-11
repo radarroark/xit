@@ -295,14 +295,9 @@ pub const PackObjectReader = struct {
             {
                 errdefer pack_reader.deinit();
 
-                var header_bytes = [_]u8{0} ** 128;
-                const type_name = switch (pack_reader.header().kind) {
-                    .blob => "blob",
-                    .tree => "tree",
-                    .commit => "commit",
-                };
-                const file_size = pack_reader.header().size;
-                const header_str = try std.fmt.bufPrint(&header_bytes, "{s} {}\x00", .{ type_name, file_size });
+                // serialize object header
+                var header_bytes = [_]u8{0} ** 32;
+                const header_str = try obj.writeObjectHeader(pack_reader.header(), &header_bytes);
 
                 var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
                 try hash.sha1Reader(pack_reader, header_str, &oid);
