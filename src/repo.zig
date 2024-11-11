@@ -1220,7 +1220,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             }
         }
 
-        pub fn fetch(self: *Repo(repo_kind), remote_name: []const u8) !void {
+        pub fn fetch(self: *Repo(repo_kind), remote_name: []const u8) !net.FetchResult {
             var rem = try self.remote();
             defer rem.deinit();
 
@@ -1228,10 +1228,14 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             const remote_url = remote_section.get("url") orelse return error.RemoteNotFound;
             const parsed_uri = try std.Uri.parse(remote_url);
 
-            var moment = try self.core.latestMoment();
-            const state = Repo(repo_kind).State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
-
-            try net.fetch(repo_kind, state, self.allocator, parsed_uri);
+            switch (repo_kind) {
+                .git => {
+                    return try net.fetch(repo_kind, .{ .core = &self.core, .extra = .{} }, self.allocator, parsed_uri);
+                },
+                .xit => {
+                    return error.NotImplemented;
+                },
+            }
         }
     };
 }
