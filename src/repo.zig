@@ -1237,5 +1237,17 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 },
             }
         }
+
+        pub fn pull(self: *Repo(repo_kind), remote_name: []const u8) !net.FetchResult {
+            const fetch_result = try self.fetch(remote_name);
+
+            var moment = try self.core.latestMoment();
+            const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
+
+            const head_name = try ref.readHeadName(repo_kind, state, self.allocator);
+            defer self.allocator.free(head_name);
+
+            return fetch_result;
+        }
     };
 }
