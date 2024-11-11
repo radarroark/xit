@@ -8,12 +8,16 @@ const pack = @import("./pack.zig");
 
 const TIMEOUT_MICRO_SECS: u32 = 2_000_000;
 
+pub const FetchResult = struct {
+    object_count: u32,
+};
+
 pub fn fetch(
     comptime repo_kind: rp.RepoKind,
-    state: rp.Repo(repo_kind).State(.read_only),
+    state: rp.Repo(repo_kind).State(.read_write),
     allocator: std.mem.Allocator,
     uri: std.Uri,
-) !void {
+) !FetchResult {
     try network.init();
     defer network.deinit();
 
@@ -25,8 +29,8 @@ pub fn fetch(
     defer sock.close();
     try sock.setTimeouts(TIMEOUT_MICRO_SECS, TIMEOUT_MICRO_SECS);
 
-    const reader = sock.reader();
-    const writer = sock.writer();
+    const sock_reader = sock.reader();
+    const sock_writer = sock.writer();
 
     // send command
     {
@@ -38,7 +42,7 @@ pub fn fetch(
 
         @memcpy(command[command_size_buf.len - command_size.len .. command_size_buf.len], command_size);
 
-        try writer.writeAll(command);
+        try sock_writer.writeAll(command);
     }
 
     var arena = std.heap.ArenaAllocator.init(allocator);
@@ -50,7 +54,7 @@ pub fn fetch(
     // read messages
     while (true) {
         var size_buffer = [_]u8{0} ** 4;
-        try reader.readNoEof(&size_buffer);
+        try sock_reader.readNoEof(&size_buffer);
 
         var msg_size: usize = try std.fmt.parseInt(u16, &size_buffer, 16);
 
@@ -68,7 +72,7 @@ pub fn fetch(
 
         // alloc the buffer that will hold the message
         var msg_buffer = try arena.allocator().alloc(u8, msg_size);
-        try reader.readNoEof(msg_buffer);
+        try sock_reader.readNoEof(msg_buffer);
 
         // ignore newline char
         if (msg_buffer[msg_buffer.len - 1] == '\n') {
@@ -110,7 +114,7 @@ pub fn fetch(
         if (wanted_oids.contains(oid)) {
             continue;
         }
-        var object = obj.Object(repo_kind, .raw).init(allocator, state, oid) catch |err| switch (err) {
+        var object = obj.Object(repo_kind, .raw).init(allocator, state.readOnly(), oid) catch |err| switch (err) {
             error.ObjectNotFound => {
                 try wanted_oids.put(oid, {});
                 continue;
@@ -147,17 +151,23 @@ pub fn fetch(
 
         @memcpy(command[command_size_buf.len - command_size.len .. command_size_buf.len], command_size);
 
-        try writer.writeAll(command);
+        try sock_writer.writeAll(command);
     }
 
     // flush
-    try writer.writeAll("0000");
-    try writer.writeAll("0009done\n");
+    try sock_writer.writeAll("0000");
+    try sock_writer.writeAll("0009done\n");
+
+    if (wanted_oids.count() == 0) {
+        return .{
+            .object_count = 0,
+        };
+    }
 
     // read messages
     while (true) {
         var size_buffer = [_]u8{0} ** 4;
-        try reader.readNoEof(&size_buffer);
+        try sock_reader.readNoEof(&size_buffer);
 
         var msg_size: usize = try std.fmt.parseInt(u16, &size_buffer, 16);
 
@@ -175,7 +185,7 @@ pub fn fetch(
 
         // alloc the buffer that will hold the message
         var msg_buffer = try arena.allocator().alloc(u8, msg_size);
-        try reader.readNoEof(msg_buffer);
+        try sock_reader.readNoEof(msg_buffer);
 
         // ignore newline char
         if (msg_buffer[msg_buffer.len - 1] == '\n') {
@@ -200,7 +210,7 @@ pub fn fetch(
         defer lock.deinit();
         while (true) {
             var read_buffer = [_]u8{0} ** 1024;
-            const read_size = try reader.read(&read_buffer);
+            const read_size = try sock_reader.read(&read_buffer);
             if (read_size == 0) {
                 break;
             }
@@ -218,10 +228,34 @@ pub fn fetch(
         defer iter.deinit();
         while (try iter.next()) |pack_reader| {
             defer pack_reader.deinit();
+
+            const Stream = struct {
+                pack_reader: *pack.PackObjectReader,
+
+                pub fn reader(self: @This()) *pack.PackObjectReader {
+                    return self.pack_reader;
+                }
+
+                pub fn seekTo(self: @This(), offset: usize) !void {
+                    if (offset == 0) {
+                        try self.pack_reader.reset();
+                    } else {
+                        return error.InvalidOffset;
+                    }
+                }
+            };
+            const stream = Stream{
+                .pack_reader = pack_reader,
+            };
+
+            var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
             switch (pack_reader.internal) {
-                .basic => std.debug.print("{}\n", .{pack_reader.internal.basic.header}),
-                .delta => std.debug.print("delta\n", .{}),
+                .basic => try obj.writeObject(repo_kind, state, allocator, &stream, pack_reader.internal.basic.header, &oid),
+                .delta => return error.NotImplemented,
             }
         }
+        return .{
+            .object_count = iter.object_count,
+        };
     }
 }

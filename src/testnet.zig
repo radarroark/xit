@@ -59,6 +59,12 @@ test "pull" {
     defer client_repo.deinit();
     try client_repo.addRemote(.{ .name = "origin", .value = "git://localhost:3000/server" });
 
+    // fetch the objects
+    try std.testing.expectEqual(3, (try client_repo.fetch("origin")).object_count);
+
+    // calling fetch again returns no objects
+    try std.testing.expectEqual(0, (try client_repo.fetch("origin")).object_count);
+
     // test with libgit2
     {
         // get repo path for libgit
