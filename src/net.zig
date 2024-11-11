@@ -150,4 +150,40 @@ pub fn fetch(
 
     // flush
     try writer.writeAll("0000");
+    try writer.writeAll("0009done\n");
+
+    // read messages
+    while (true) {
+        var size_buffer = [_]u8{0} ** 4;
+        try reader.readNoEof(&size_buffer);
+
+        var msg_size: usize = try std.fmt.parseInt(u16, &size_buffer, 16);
+
+        // a flush packet has a size of 0
+        if (msg_size == 0) {
+            break;
+        }
+
+        // subtract the size of the hexadecimal size itself
+        // to get the rest of the message size
+        if (msg_size <= size_buffer.len) {
+            return error.UnexpectedMessageSize;
+        }
+        msg_size -= size_buffer.len;
+
+        // alloc the buffer that will hold the message
+        var msg_buffer = try arena.allocator().alloc(u8, msg_size);
+        try reader.readNoEof(msg_buffer);
+
+        // ignore newline char
+        if (msg_buffer[msg_buffer.len - 1] == '\n') {
+            msg_buffer = msg_buffer[0 .. msg_buffer.len - 1];
+        } else {
+            return error.NewlineByteNotFound;
+        }
+
+        if (std.mem.eql(u8, "NAK", msg_buffer)) {
+            break;
+        }
+    }
 }
