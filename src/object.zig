@@ -50,7 +50,6 @@ pub const Tree = struct {
 pub fn writeObject(
     comptime repo_kind: rp.RepoKind,
     state: rp.Repo(repo_kind).State(.read_write),
-    allocator: std.mem.Allocator,
     file: anytype,
     header: ObjectHeader,
     sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8,
@@ -88,7 +87,7 @@ pub fn writeObject(
             }
 
             // create lock file
-            var lock = try io.LockFile.init(allocator, hash_prefix_dir, hash_suffix ++ ".uncompressed");
+            var lock = try io.LockFile.init(hash_prefix_dir, hash_suffix ++ ".uncompressed");
             defer lock.deinit();
             try lock.lock_file.writeAll(header_str);
 
@@ -103,14 +102,14 @@ pub fn writeObject(
             }
 
             // create compressed lock file
-            var compressed_lock = try io.LockFile.init(allocator, hash_prefix_dir, hash_suffix);
+            var compressed_lock = try io.LockFile.init(hash_prefix_dir, hash_suffix);
             defer compressed_lock.deinit();
             try compress.compress(lock.lock_file, compressed_lock.lock_file);
             compressed_lock.success = true;
         },
         .xit => {
             const file_hash = hash.bytesToHash(sha1_bytes_buffer);
-            try chunk.writeChunks(state, allocator, file, file_hash, header_str);
+            try chunk.writeChunks(state, file, file_hash, header_str);
         },
     }
 }
@@ -174,12 +173,12 @@ fn writeTree(
             }
 
             // create lock file
-            var lock = try io.LockFile.init(allocator, tree_hash_prefix_dir, tree_hash_suffix ++ ".uncompressed");
+            var lock = try io.LockFile.init(tree_hash_prefix_dir, tree_hash_suffix ++ ".uncompressed");
             defer lock.deinit();
             try lock.lock_file.writeAll(tree_bytes);
 
             // create compressed lock file
-            var compressed_lock = try io.LockFile.init(allocator, tree_hash_prefix_dir, tree_hash_suffix);
+            var compressed_lock = try io.LockFile.init(tree_hash_prefix_dir, tree_hash_suffix);
             defer compressed_lock.deinit();
             try compress.compress(lock.lock_file, compressed_lock.lock_file);
             compressed_lock.success = true;
@@ -187,7 +186,7 @@ fn writeTree(
         .xit => {
             const object_hash = hash.bytesToHash(sha1_bytes_buffer);
             var stream = std.io.fixedBufferStream(tree_contents);
-            try chunk.writeChunks(state, allocator, &stream, object_hash, header);
+            try chunk.writeChunks(state, &stream, object_hash, header);
         },
     }
 }
@@ -341,12 +340,12 @@ pub fn writeCommit(
             const commit_hash_suffix = commit_sha1_hex[2..];
 
             // create lock file
-            var lock = try io.LockFile.init(allocator, commit_hash_prefix_dir, commit_hash_suffix ++ ".uncompressed");
+            var lock = try io.LockFile.init(commit_hash_prefix_dir, commit_hash_suffix ++ ".uncompressed");
             defer lock.deinit();
             try lock.lock_file.writeAll(commit);
 
             // create compressed lock file
-            var compressed_lock = try io.LockFile.init(allocator, commit_hash_prefix_dir, commit_hash_suffix);
+            var compressed_lock = try io.LockFile.init(commit_hash_prefix_dir, commit_hash_suffix);
             defer compressed_lock.deinit();
             try compress.compress(lock.lock_file, compressed_lock.lock_file);
             compressed_lock.success = true;
@@ -356,7 +355,7 @@ pub fn writeCommit(
         },
         .xit => {
             var stream = std.io.fixedBufferStream(commit_contents);
-            try chunk.writeChunks(state, allocator, &stream, commit_hash, header);
+            try chunk.writeChunks(state, &stream, commit_hash, header);
 
             // write commit id to HEAD
             try ref.updateRecur(repo_kind, state, allocator, &.{"HEAD"}, &commit_sha1_hex);

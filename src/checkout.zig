@@ -363,7 +363,7 @@ pub const Switch = struct {
         switch (repo_kind) {
             .git => {
                 // create lock file
-                var lock = try io.LockFile.init(allocator, state.core.git_dir, "index");
+                var lock = try io.LockFile.init(state.core.git_dir, "index");
                 defer lock.deinit();
 
                 // read index
@@ -382,7 +382,7 @@ pub const Switch = struct {
                 try index.write(allocator, .{ .core = state.core, .extra = .{ .lock_file_maybe = lock.lock_file } });
 
                 // update HEAD
-                try ref.writeHead(repo_kind, state, allocator, target, target_oid);
+                try ref.writeHead(repo_kind, state, target, target_oid);
 
                 // finish lock
                 lock.success = true;
@@ -404,7 +404,7 @@ pub const Switch = struct {
                 try index.write(allocator, state);
 
                 // update HEAD
-                try ref.writeHead(repo_kind, state, allocator, target, target_oid);
+                try ref.writeHead(repo_kind, state, target, target_oid);
             },
         }
 

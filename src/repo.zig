@@ -218,7 +218,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
                     // update HEAD
                     const state = State(.read_write){ .core = &self.core, .extra = .{} };
-                    try ref.writeHead(repo_kind, state, allocator, "master", null);
+                    try ref.writeHead(repo_kind, state, "master", null);
 
                     return self;
                 },
@@ -255,18 +255,17 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     // update HEAD
                     const Ctx = struct {
                         core: *Repo(repo_kind).Core,
-                        allocator: std.mem.Allocator,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            try ref.writeHead(repo_kind, state, ctx.allocator, "master", null);
+                            try ref.writeHead(repo_kind, state, "master", null);
                         }
                     };
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
                     try history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
-                        Ctx{ .core = &self.core, .allocator = self.allocator },
+                        Ctx{ .core = &self.core },
                     );
 
                     return self;
@@ -625,7 +624,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
         pub fn add(self: *Repo(repo_kind), paths: []const []const u8) !void {
             switch (repo_kind) {
                 .git => {
-                    var lock = try io.LockFile.init(self.allocator, self.core.git_dir, "index");
+                    var lock = try io.LockFile.init(self.core.git_dir, "index");
                     defer lock.deinit();
 
                     var index = try idx.Index(repo_kind).init(self.allocator, .{ .core = &self.core, .extra = .{} });
@@ -681,7 +680,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             // TODO: add support for -r (removing dirs)
             switch (repo_kind) {
                 .git => {
-                    var lock = try io.LockFile.init(self.allocator, self.core.git_dir, "index");
+                    var lock = try io.LockFile.init(self.core.git_dir, "index");
                     defer lock.deinit();
 
                     var index = try idx.Index(repo_kind).init(self.allocator, .{ .core = &self.core, .extra = .{} });
@@ -1069,7 +1068,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             defer conf.deinit();
             switch (repo_kind) {
                 .git => {
-                    var lock = try io.LockFile.init(self.allocator, self.core.git_dir, "config");
+                    var lock = try io.LockFile.init(self.core.git_dir, "config");
                     defer lock.deinit();
 
                     try conf.add(.{ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } }, input);
@@ -1103,7 +1102,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             defer conf.deinit();
             switch (repo_kind) {
                 .git => {
-                    var lock = try io.LockFile.init(self.allocator, self.core.git_dir, "config");
+                    var lock = try io.LockFile.init(self.core.git_dir, "config");
                     defer lock.deinit();
 
                     try conf.remove(.{ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } }, input);
@@ -1151,7 +1150,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             defer conf.deinit();
             switch (repo_kind) {
                 .git => {
-                    var lock = try io.LockFile.init(self.allocator, self.core.git_dir, "config");
+                    var lock = try io.LockFile.init(self.core.git_dir, "config");
                     defer lock.deinit();
 
                     try conf.add(.{ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } }, new_input);
@@ -1191,7 +1190,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             defer conf.deinit();
             switch (repo_kind) {
                 .git => {
-                    var lock = try io.LockFile.init(self.allocator, self.core.git_dir, "config");
+                    var lock = try io.LockFile.init(self.core.git_dir, "config");
                     defer lock.deinit();
 
                     try conf.remove(.{ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } }, new_input);
