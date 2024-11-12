@@ -1271,7 +1271,7 @@ pub const Merge = struct {
                 @memcpy(source_name, new.source_name);
 
                 // get the oids for the three-way merge
-                const source_oid = try ref.resolve(repo_kind, state.readOnly(), ref.ResolveInput.init(source_name)) orelse return error.InvalidTarget;
+                const source_oid = try ref.readRecur(repo_kind, state.readOnly(), ref.RefInput.init(source_name)) orelse return error.InvalidTarget;
                 var base_oid: [hash.SHA1_HEX_LEN]u8 = undefined;
                 switch (merge_kind) {
                     .merge => base_oid = try commonAncestor(repo_kind, allocator, state.readOnly(), &target_oid, &source_oid),
