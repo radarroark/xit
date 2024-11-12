@@ -350,7 +350,7 @@ pub const Switch = struct {
     pub fn init(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_write), allocator: std.mem.Allocator, target: []const u8, options: Options) !Switch {
         // get the current commit and target oid
         const current_oid = try ref.readHead(repo_kind, state.readOnly());
-        const target_oid = try ref.resolve(repo_kind, state.readOnly(), target) orelse return error.InvalidTarget;
+        const target_oid = try ref.resolve(repo_kind, state.readOnly(), ref.ResolveInput.init(target)) orelse return error.InvalidTarget;
 
         // compare the commits
         var tree_diff = obj.TreeDiff(repo_kind).init(allocator);

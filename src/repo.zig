@@ -459,7 +459,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
                             for (ref_list.refs.items) |r| {
                                 const is_current_branch = if (current_branch_maybe) |current_branch|
-                                    std.mem.eql(u8, current_branch.name, r.name)
+                                    std.mem.endsWith(u8, current_branch.name, r.path)
                                 else
                                     false;
                                 try writers.out.print("{s} {s}\n", .{ if (is_current_branch) "*" else " ", r.name });
