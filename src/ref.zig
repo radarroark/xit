@@ -42,7 +42,7 @@ pub const Ref = struct {
                 .allocator = allocator,
                 .path = path,
                 .name = name,
-                .oid_hex = try readRecur(repo_kind, state, RefInput.init(content)),
+                .oid_hex = try readRecur(repo_kind, state, RefContent.init(content)),
             };
         } else {
             return null;
@@ -131,12 +131,12 @@ pub const RefList = struct {
     }
 };
 
-pub const RefInput = union(enum) {
+pub const RefContent = union(enum) {
     ref_path: []const u8,
     ref_name: []const u8,
     oid: *const [hash.SHA1_HEX_LEN]u8,
 
-    pub fn init(content: []const u8) RefInput {
+    pub fn init(content: []const u8) RefContent {
         if (std.mem.startsWith(u8, content, REF_START_STR)) {
             return .{ .ref_path = content[REF_START_STR.len..] };
         } else if (content.len == hash.SHA1_HEX_LEN) {
@@ -147,7 +147,7 @@ pub const RefInput = union(enum) {
     }
 };
 
-pub fn readRecur(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), input: RefInput) !?[hash.SHA1_HEX_LEN]u8 {
+pub fn readRecur(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), input: RefContent) !?[hash.SHA1_HEX_LEN]u8 {
     switch (input) {
         .ref_path => |ref_path| {
             var buffer = [_]u8{0} ** MAX_READ_BYTES;
@@ -155,7 +155,7 @@ pub fn readRecur(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).Stat
                 error.RefNotFound => return null,
                 else => return err,
             };
-            return try readRecur(repo_kind, state, RefInput.init(content));
+            return try readRecur(repo_kind, state, RefContent.init(content));
         },
         .ref_name => |ref_name| {
             var buffer = [_]u8{0} ** MAX_READ_BYTES;
@@ -286,7 +286,7 @@ pub fn writeRecur(
         },
         else => return err,
     };
-    const input = RefInput.init(existing_content);
+    const input = RefContent.init(existing_content);
     switch (input) {
         .ref_path => |next_ref_path| {
             try writeRecur(repo_kind, state, next_ref_path, oid_hex);
