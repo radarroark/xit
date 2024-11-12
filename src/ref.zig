@@ -28,10 +28,8 @@ pub const Ref = struct {
         const content = try read(repo_kind, state, ref_path, &buffer);
 
         if (std.mem.startsWith(u8, content, REF_START_STR) and content.len > REF_START_STR.len) {
-            const path_len = content.len - REF_START_STR.len;
-            const path = try allocator.alloc(u8, path_len);
+            const path = try allocator.dupe(u8, content[REF_START_STR.len..]);
             errdefer allocator.free(path);
-            @memcpy(path, content[REF_START_STR.len..]);
 
             const slash_idx1 = std.mem.indexOfScalar(u8, path, '/') orelse return error.InvalidPath;
             const slash_idx2 = std.mem.indexOfScalar(u8, path[slash_idx1 + 1 ..], '/') orelse return error.InvalidPath;
@@ -219,13 +217,9 @@ pub fn readHeadName(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).S
     const ref_heads_start_str = "ref: refs/heads/";
     if (std.mem.startsWith(u8, content, ref_heads_start_str) and content.len > ref_heads_start_str.len) {
         const ref_name = content[ref_heads_start_str.len..];
-        const buf = try allocator.alloc(u8, ref_name.len);
-        @memcpy(buf, ref_name);
-        return buf;
+        return try allocator.dupe(u8, ref_name);
     } else {
-        const buf = try allocator.alloc(u8, content.len);
-        @memcpy(buf, content);
-        return buf;
+        return try allocator.dupe(u8, content);
     }
 }
 
