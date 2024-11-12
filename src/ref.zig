@@ -20,7 +20,7 @@ pub const Ref = struct {
             .allocator = allocator,
             .path = path,
             .name = name,
-            .oid_hex = try resolve(repo_kind, state, .{ .ref_path = path }),
+            .oid_hex = try readRecur(repo_kind, state, .{ .ref_path = path }),
         };
     }
 
@@ -42,7 +42,7 @@ pub const Ref = struct {
                 .allocator = allocator,
                 .path = path,
                 .name = name,
-                .oid_hex = try resolve(repo_kind, state, ResolveInput.init(content)),
+                .oid_hex = try readRecur(repo_kind, state, RefInput.init(content)),
             };
         } else {
             return null;
@@ -131,12 +131,12 @@ pub const RefList = struct {
     }
 };
 
-pub const ResolveInput = union(enum) {
+pub const RefInput = union(enum) {
     ref_path: []const u8,
     ref_name: []const u8,
     oid: *const [hash.SHA1_HEX_LEN]u8,
 
-    pub fn init(content: []const u8) ResolveInput {
+    pub fn init(content: []const u8) RefInput {
         if (std.mem.startsWith(u8, content, REF_START_STR)) {
             return .{ .ref_path = content[REF_START_STR.len..] };
         } else if (content.len == hash.SHA1_HEX_LEN) {
@@ -147,7 +147,7 @@ pub const ResolveInput = union(enum) {
     }
 };
 
-pub fn resolve(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), input: ResolveInput) !?[hash.SHA1_HEX_LEN]u8 {
+pub fn readRecur(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), input: RefInput) !?[hash.SHA1_HEX_LEN]u8 {
     switch (input) {
         .ref_path => |ref_path| {
             var buffer = [_]u8{0} ** MAX_READ_BYTES;
@@ -155,12 +155,12 @@ pub fn resolve(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(
                 error.RefNotFound => return null,
                 else => return err,
             };
-            return try resolve(repo_kind, state, ResolveInput.init(content));
+            return try readRecur(repo_kind, state, RefInput.init(content));
         },
         .ref_name => |ref_name| {
             var buffer = [_]u8{0} ** MAX_READ_BYTES;
             const path = try std.fmt.bufPrint(&buffer, "refs/heads/{s}", .{ref_name});
-            return try resolve(repo_kind, state, .{ .ref_path = path });
+            return try readRecur(repo_kind, state, .{ .ref_path = path });
         },
         .oid => |oid| {
             var buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
@@ -202,7 +202,7 @@ pub fn read(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.re
 }
 
 pub fn readHeadMaybe(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only)) !?[hash.SHA1_HEX_LEN]u8 {
-    return try resolve(repo_kind, state, .{ .ref_path = "HEAD" });
+    return try readRecur(repo_kind, state, .{ .ref_path = "HEAD" });
 }
 
 pub fn readHead(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only)) ![hash.SHA1_HEX_LEN]u8 {
