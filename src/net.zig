@@ -108,11 +108,6 @@ pub fn fetch(
         }
     }
 
-    // update refs
-    for (ref_to_oid.keys(), ref_to_oid.values()) |ref_name, oid| {
-        try ref.updateRecur(repo_kind, state, allocator, &.{ "refs", "remotes", remote_name, ref_name }, oid);
-    }
-
     // build list of wanted oids
     var wanted_oids = std.StringArrayHashMap(void).init(allocator);
     defer wanted_oids.deinit();
@@ -226,42 +221,46 @@ pub fn fetch(
     }
 
     // iterate over pack file
-    {
-        defer dir.deleteFile("temp.pack") catch {};
-        const pack_file_path = try dir.realpathAlloc(allocator, "temp.pack");
-        defer allocator.free(pack_file_path);
-        var iter = try pack.PackObjectIterator.init(allocator, pack_file_path);
-        defer iter.deinit();
-        while (try iter.next()) |pack_reader| {
-            defer pack_reader.deinit();
+    defer dir.deleteFile("temp.pack") catch {};
+    const pack_file_path = try dir.realpathAlloc(allocator, "temp.pack");
+    defer allocator.free(pack_file_path);
+    var iter = try pack.PackObjectIterator.init(allocator, pack_file_path);
+    defer iter.deinit();
+    while (try iter.next()) |pack_reader| {
+        defer pack_reader.deinit();
 
-            const Stream = struct {
-                pack_reader: *pack.PackObjectReader,
+        const Stream = struct {
+            pack_reader: *pack.PackObjectReader,
 
-                pub fn reader(self: @This()) *pack.PackObjectReader {
-                    return self.pack_reader;
-                }
-
-                pub fn seekTo(self: @This(), offset: usize) !void {
-                    if (offset == 0) {
-                        try self.pack_reader.reset();
-                    } else {
-                        return error.InvalidOffset;
-                    }
-                }
-            };
-            const stream = Stream{
-                .pack_reader = pack_reader,
-            };
-
-            var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-            switch (pack_reader.internal) {
-                .basic => try obj.writeObject(repo_kind, state, allocator, &stream, pack_reader.internal.basic.header, &oid),
-                .delta => return error.NotImplemented,
+            pub fn reader(self: @This()) *pack.PackObjectReader {
+                return self.pack_reader;
             }
-        }
-        return .{
-            .object_count = iter.object_count,
+
+            pub fn seekTo(self: @This(), offset: usize) !void {
+                if (offset == 0) {
+                    try self.pack_reader.reset();
+                } else {
+                    return error.InvalidOffset;
+                }
+            }
         };
+        const stream = Stream{
+            .pack_reader = pack_reader,
+        };
+
+        var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+        switch (pack_reader.internal) {
+            .basic => try obj.writeObject(repo_kind, state, allocator, &stream, pack_reader.internal.basic.header, &oid),
+            .delta => return error.NotImplemented,
+        }
     }
+
+    // update refs
+    for (ref_to_oid.keys(), ref_to_oid.values()) |ref_name, oid| {
+        try ref.updateRecur(repo_kind, state, allocator, &.{ "refs", "remotes", remote_name, ref_name }, oid);
+    }
+
+    return .{
+        .object_count = iter.object_count,
+    };
 }
