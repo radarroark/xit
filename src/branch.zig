@@ -54,7 +54,7 @@ pub fn add(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.rea
             defer if (subdir_maybe) |*subdir| subdir.close();
 
             // create lock file
-            var lock = try io.LockFile.init(allocator, if (subdir_maybe) |subdir| subdir else heads_dir, leaf_name);
+            var lock = try io.LockFile.init(if (subdir_maybe) |subdir| subdir else heads_dir, leaf_name);
             defer lock.deinit();
 
             // get HEAD contents
@@ -122,7 +122,7 @@ pub fn remove(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.
             const ref_path = try heads_dir.realpath(input.name, &ref_buffer);
 
             // create lock file for HEAD
-            var head_lock = try io.LockFile.init(allocator, state.core.git_dir, "HEAD");
+            var head_lock = try io.LockFile.init(state.core.git_dir, "HEAD");
             defer head_lock.deinit();
 
             // don't allow current branch to be deleted

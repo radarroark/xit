@@ -226,10 +226,10 @@ pub fn readHeadName(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).S
 }
 
 /// makes HEAD point to a new ref
-pub fn writeHead(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_write), allocator: std.mem.Allocator, target: []const u8, oid_hex_maybe: ?[hash.SHA1_HEX_LEN]u8) !void {
+pub fn writeHead(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_write), target: []const u8, oid_hex_maybe: ?[hash.SHA1_HEX_LEN]u8) !void {
     switch (repo_kind) {
         .git => {
-            var lock = try io.LockFile.init(allocator, state.core.git_dir, "HEAD");
+            var lock = try io.LockFile.init(state.core.git_dir, "HEAD");
             defer lock.deinit();
 
             // if the target is a ref, just update HEAD to point to it
@@ -317,7 +317,7 @@ pub fn updateRecur(
                 }
             }
 
-            var lock = try io.LockFile.init(allocator, state.core.git_dir, path);
+            var lock = try io.LockFile.init(state.core.git_dir, path);
             defer lock.deinit();
 
             // read file and get ref name if necessary

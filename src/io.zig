@@ -2,23 +2,26 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 pub const LockFile = struct {
-    allocator: std.mem.Allocator,
     dir: std.fs.Dir,
     file_name: []const u8,
-    lock_name: []const u8,
+    lock_name_buffer: [lock_name_buffer_size]u8,
+    lock_name_len: usize,
     lock_file: std.fs.File,
     success: bool,
 
-    pub fn init(allocator: std.mem.Allocator, dir: std.fs.Dir, file_name: []const u8) !LockFile {
-        const lock_name = try std.fmt.allocPrint(allocator, "{s}.lock", .{file_name});
-        errdefer allocator.free(lock_name);
+    const suffix = ".lock";
+    const lock_name_buffer_size = 256;
+
+    pub fn init(dir: std.fs.Dir, file_name: []const u8) !LockFile {
+        var lock_name_buffer = [_]u8{0} ** lock_name_buffer_size;
+        const lock_name = try std.fmt.bufPrint(&lock_name_buffer, "{s}.lock", .{file_name});
         const lock_file = try dir.createFile(lock_name, .{ .truncate = true, .lock = .exclusive, .read = true });
         errdefer dir.deleteFile(lock_name) catch {};
         return .{
-            .allocator = allocator,
             .dir = dir,
             .file_name = file_name,
-            .lock_name = lock_name,
+            .lock_name_buffer = lock_name_buffer,
+            .lock_name_len = lock_name.len,
             .lock_file = lock_file,
             .success = false,
         };
@@ -26,15 +29,15 @@ pub const LockFile = struct {
 
     pub fn deinit(self: *LockFile) void {
         self.lock_file.close();
+        const lock_name = self.lock_name_buffer[0..self.lock_name_len];
         if (self.success) {
-            self.dir.rename(self.lock_name, self.file_name) catch {
+            self.dir.rename(lock_name, self.file_name) catch {
                 self.success = false;
             };
         }
         if (!self.success) {
-            self.dir.deleteFile(self.lock_name) catch {};
+            self.dir.deleteFile(lock_name) catch {};
         }
-        self.allocator.free(self.lock_name);
     }
 };
 

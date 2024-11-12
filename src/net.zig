@@ -207,7 +207,7 @@ pub fn fetch(
 
     // write pack file to temp file
     {
-        var lock = try io.LockFile.init(allocator, dir, "temp.pack");
+        var lock = try io.LockFile.init(dir, "temp.pack");
         defer lock.deinit();
         while (true) {
             var read_buffer = [_]u8{0} ** 1024;
@@ -250,7 +250,7 @@ pub fn fetch(
 
         var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
         switch (pack_reader.internal) {
-            .basic => try obj.writeObject(repo_kind, state, allocator, &stream, pack_reader.internal.basic.header, &oid),
+            .basic => try obj.writeObject(repo_kind, state, &stream, pack_reader.internal.basic.header, &oid),
             .delta => return error.NotImplemented,
         }
     }

@@ -7,7 +7,6 @@ const CHUNK_SIZE = 1024;
 
 pub fn writeChunks(
     state: rp.Repo(.xit).State(.read_write),
-    allocator: std.mem.Allocator,
     file: anytype,
     object_hash: hash.Hash,
     object_header: []const u8,
@@ -46,7 +45,7 @@ pub fn writeChunks(
             chunk_file.close();
         } else |err| switch (err) {
             error.FileNotFound => {
-                var lock = try io.LockFile.init(allocator, chunks_dir, &chunk_hash_hex);
+                var lock = try io.LockFile.init(chunks_dir, &chunk_hash_hex);
                 defer lock.deinit();
                 try lock.lock_file.writeAll(chunk);
                 lock.success = true;

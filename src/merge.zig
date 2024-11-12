@@ -478,7 +478,7 @@ fn writeBlobWithDiff3(
     };
 
     var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-    try obj.writeObject(repo_kind, state, allocator, &stream, .{ .kind = .blob, .size = try stream.count() }, &oid);
+    try obj.writeObject(repo_kind, state, &stream, .{ .kind = .blob, .size = try stream.count() }, &oid);
     has_conflict.* = stream.has_conflict;
     return oid;
 }
@@ -998,7 +998,7 @@ fn writeBlobWithPatches(
     };
 
     var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-    try obj.writeObject(.xit, state, allocator, &stream, .{ .kind = .blob, .size = try stream.count() }, &oid);
+    try obj.writeObject(.xit, state, &stream, .{ .kind = .blob, .size = try stream.count() }, &oid);
     has_conflict.* = stream.has_conflict;
     return oid;
 }
@@ -1350,7 +1350,7 @@ pub const Merge = struct {
                 switch (repo_kind) {
                     .git => {
                         // create lock file
-                        var lock = try io.LockFile.init(allocator, state.core.git_dir, "index");
+                        var lock = try io.LockFile.init(state.core.git_dir, "index");
                         defer lock.deinit();
 
                         // read index
