@@ -155,18 +155,19 @@ pub fn readRecur(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).Stat
                 error.RefNotFound => return null,
                 else => return err,
             };
-            return try readRecur(repo_kind, state, RefContent.init(content));
+            const next_input = RefContent.init(content);
+            return switch (next_input) {
+                .ref_path => try readRecur(repo_kind, state, next_input),
+                .ref_name => null, // should never happen
+                .oid => |oid| oid.*,
+            };
         },
         .ref_name => |ref_name| {
             var buffer = [_]u8{0} ** MAX_READ_BYTES;
             const path = try std.fmt.bufPrint(&buffer, "refs/heads/{s}", .{ref_name});
             return try readRecur(repo_kind, state, .{ .ref_path = path });
         },
-        .oid => |oid| {
-            var buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
-            @memcpy(&buffer, oid);
-            return buffer;
-        },
+        .oid => |oid| return oid.*,
     }
 }
 
