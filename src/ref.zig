@@ -4,40 +4,45 @@ const io = @import("./io.zig");
 const rp = @import("./repo.zig");
 
 const MAX_READ_BYTES = 1024; // FIXME: this is arbitrary...
-const REF_START_STR = "ref: refs/heads/";
+const REF_HEADS_START_STR = "ref: refs/heads/";
+const REF_START_STR = "ref: ";
 
 pub const Ref = struct {
     allocator: std.mem.Allocator,
+    path: []const u8,
     name: []const u8,
     oid_hex: ?[hash.SHA1_HEX_LEN]u8,
 
     pub fn initWithName(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator, dir_name: []const u8, name: []const u8) !Ref {
         const path = try io.joinPath(allocator, &.{ "refs", dir_name, name });
-        defer allocator.free(path);
-        const content = try std.fmt.allocPrint(allocator, "ref: {s}", .{path});
-        defer allocator.free(content);
-
+        errdefer allocator.free(path);
         return .{
             .allocator = allocator,
+            .path = path,
             .name = name,
-            .oid_hex = try resolve(repo_kind, state, content),
+            .oid_hex = try resolve(repo_kind, state, .{ .ref_path = path }),
         };
     }
 
-    pub fn initFromLink(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator, path: []const u8) !?Ref {
+    pub fn initFromLink(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator, ref_path: []const u8) !?Ref {
         var buffer = [_]u8{0} ** MAX_READ_BYTES;
-        const content = try read(repo_kind, state, path, &buffer);
+        const content = try read(repo_kind, state, ref_path, &buffer);
 
         if (std.mem.startsWith(u8, content, REF_START_STR) and content.len > REF_START_STR.len) {
-            const name_len = content.len - REF_START_STR.len;
-            const name = try allocator.alloc(u8, name_len);
-            errdefer allocator.free(name);
-            @memcpy(name, content[REF_START_STR.len..]);
+            const path_len = content.len - REF_START_STR.len;
+            const path = try allocator.alloc(u8, path_len);
+            errdefer allocator.free(path);
+            @memcpy(path, content[REF_START_STR.len..]);
+
+            const slash_idx1 = std.mem.indexOfScalar(u8, path, '/') orelse return error.InvalidPath;
+            const slash_idx2 = std.mem.indexOfScalar(u8, path[slash_idx1 + 1 ..], '/') orelse return error.InvalidPath;
+            const name = path[slash_idx1 + 1 + slash_idx2 + 1 ..];
 
             return .{
                 .allocator = allocator,
+                .path = path,
                 .name = name,
-                .oid_hex = try resolve(repo_kind, state, content),
+                .oid_hex = try resolve(repo_kind, state, ResolveInput.init(content)),
             };
         } else {
             return null;
@@ -45,7 +50,7 @@ pub const Ref = struct {
     }
 
     pub fn deinit(self: *Ref) void {
-        self.allocator.free(self.name);
+        self.allocator.free(self.path);
     }
 };
 
@@ -126,77 +131,75 @@ pub const RefList = struct {
     }
 };
 
-pub fn resolve(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), content: []const u8) !?[hash.SHA1_HEX_LEN]u8 {
-    if (std.mem.startsWith(u8, content, REF_START_STR) and content.len > REF_START_STR.len) {
-        return try resolve(repo_kind, state, content[REF_START_STR.len..]);
+pub const ResolveInput = union(enum) {
+    ref_path: []const u8,
+    ref_name: []const u8,
+    oid: *const [hash.SHA1_HEX_LEN]u8,
+
+    pub fn init(content: []const u8) ResolveInput {
+        if (std.mem.startsWith(u8, content, REF_START_STR)) {
+            return .{ .ref_path = content[REF_START_STR.len..] };
+        } else if (content.len == hash.SHA1_HEX_LEN) {
+            return .{ .oid = content[0..hash.SHA1_HEX_LEN] };
+        } else {
+            return .{ .ref_name = content };
+        }
     }
+};
 
-    switch (repo_kind) {
-        .git => {
-            var refs_dir = try state.core.git_dir.openDir("refs", .{});
-            defer refs_dir.close();
-            var heads_dir = try refs_dir.openDir("heads", .{});
-            defer heads_dir.close();
-
-            blk: {
-                var ref_file = heads_dir.openFile(content, .{ .mode = .read_only }) catch break :blk;
-                defer ref_file.close();
-                var buffer = [_]u8{0} ** MAX_READ_BYTES;
-                const size = try ref_file.reader().readAll(&buffer);
-                return try resolve(repo_kind, state, std.mem.sliceTo(buffer[0..size], '\n'));
-            }
-
-            if (content.len == hash.SHA1_HEX_LEN) {
-                var buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
-                @memcpy(&buffer, content[0..hash.SHA1_HEX_LEN]);
-                return buffer;
-            } else {
-                return null;
-            }
+pub fn resolve(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), input: ResolveInput) !?[hash.SHA1_HEX_LEN]u8 {
+    switch (input) {
+        .ref_path => |ref_path| {
+            var buffer = [_]u8{0} ** MAX_READ_BYTES;
+            const content = read(repo_kind, state, ref_path, &buffer) catch |err| switch (err) {
+                error.RefNotFound => return null,
+                else => return err,
+            };
+            return try resolve(repo_kind, state, ResolveInput.init(content));
         },
-        .xit => {
-            var db_buffer = [_]u8{0} ** MAX_READ_BYTES;
-            if (try state.extra.moment.cursor.readPath(void, &.{
-                .{ .hash_map_get = .{ .value = hash.hashBuffer("refs") } },
-                .{ .hash_map_get = .{ .value = hash.hashBuffer("heads") } },
-                .{ .hash_map_get = .{ .value = hash.hashBuffer(content) } },
-            })) |bytes_cursor| {
-                const bytes = try bytes_cursor.readBytes(&db_buffer);
-                return try resolve(repo_kind, state, bytes);
-            } else {
-                if (content.len == hash.SHA1_HEX_LEN) {
-                    var buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
-                    @memcpy(&buffer, content[0..hash.SHA1_HEX_LEN]);
-                    return buffer;
-                } else {
-                    return null;
-                }
-            }
+        .ref_name => |ref_name| {
+            var buffer = [_]u8{0} ** MAX_READ_BYTES;
+            const path = try std.fmt.bufPrint(&buffer, "refs/heads/{s}", .{ref_name});
+            return try resolve(repo_kind, state, .{ .ref_path = path });
+        },
+        .oid => |oid| {
+            var buffer = [_]u8{0} ** hash.SHA1_HEX_LEN;
+            @memcpy(&buffer, oid);
+            return buffer;
         },
     }
 }
 
-pub fn read(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), path: []const u8, buffer: *[MAX_READ_BYTES]u8) ![]u8 {
+pub fn read(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), ref_path: []const u8, buffer: *[MAX_READ_BYTES]u8) ![]u8 {
     switch (repo_kind) {
         .git => {
-            const head_file = try state.core.git_dir.openFile(path, .{ .mode = .read_only });
-            defer head_file.close();
-            const size = try head_file.reader().readAll(buffer);
+            const ref_file = state.core.git_dir.openFile(ref_path, .{ .mode = .read_only }) catch |err| switch (err) {
+                error.FileNotFound => return error.RefNotFound,
+                else => return err,
+            };
+            defer ref_file.close();
+            const size = try ref_file.reader().readAll(buffer);
             return std.mem.sliceTo(buffer[0..size], '\n');
         },
         .xit => {
-            if (try state.extra.moment.getCursor(hash.hashBuffer(path))) |target_bytes_cursor| {
-                return try target_bytes_cursor.readBytes(buffer);
-            } else {
-                return error.KeyNotFound;
+            var cursor = state.extra.moment.cursor;
+            var split_iter = std.mem.splitScalar(u8, ref_path, '/');
+            while (split_iter.next()) |part_name| {
+                if (try cursor.readPath(void, &.{.{ .hash_map_get = .{ .value = hash.hashBuffer(part_name) } }})) |next_cursor| {
+                    cursor = next_cursor;
+                } else {
+                    return error.RefNotFound;
+                }
             }
+            return try cursor.readBytes(buffer);
         },
     }
 }
 
 pub fn readHeadMaybe(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only)) !?[hash.SHA1_HEX_LEN]u8 {
     var buffer = [_]u8{0} ** MAX_READ_BYTES;
-    return try resolve(repo_kind, state, try read(repo_kind, state, "HEAD", &buffer));
+    const buffer_slice = try read(repo_kind, state, "HEAD", &buffer);
+    return try resolve(repo_kind, state, ResolveInput.init(buffer_slice));
 }
 
 pub fn readHead(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only)) ![hash.SHA1_HEX_LEN]u8 {
@@ -210,8 +213,8 @@ pub fn readHead(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State
 pub fn readHeadName(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator) ![]u8 {
     var buffer = [_]u8{0} ** MAX_READ_BYTES;
     const content = try read(repo_kind, state, "HEAD", &buffer);
-    if (std.mem.startsWith(u8, content, REF_START_STR) and content.len > REF_START_STR.len) {
-        const ref_name = content[REF_START_STR.len..];
+    if (std.mem.startsWith(u8, content, REF_HEADS_START_STR) and content.len > REF_HEADS_START_STR.len) {
+        const ref_name = content[REF_HEADS_START_STR.len..];
         const buf = try allocator.alloc(u8, ref_name.len);
         @memcpy(buf, ref_name);
         return buf;
@@ -321,11 +324,11 @@ pub fn updateRecur(
             var buffer = [_]u8{0} ** MAX_READ_BYTES;
             const ref_name_maybe = blk: {
                 const old_content = read(repo_kind, state.readOnly(), path, &buffer) catch |err| switch (err) {
-                    error.FileNotFound => break :blk null,
+                    error.RefNotFound => break :blk null,
                     else => return err,
                 };
-                if (std.mem.startsWith(u8, old_content, REF_START_STR) and old_content.len > REF_START_STR.len) {
-                    break :blk old_content[REF_START_STR.len..];
+                if (std.mem.startsWith(u8, old_content, REF_HEADS_START_STR) and old_content.len > REF_HEADS_START_STR.len) {
+                    break :blk old_content[REF_HEADS_START_STR.len..];
                 } else {
                     break :blk null;
                 }
@@ -360,8 +363,8 @@ pub fn updateRecur(
             if (try butlast.getCursor(file_name_hash)) |old_content_cursor| {
                 const old_content = try old_content_cursor.readBytes(&buffer);
                 // if it's a ref, update it recursively
-                if (std.mem.startsWith(u8, old_content, REF_START_STR) and old_content.len > REF_START_STR.len) {
-                    const ref_name = old_content[REF_START_STR.len..];
+                if (std.mem.startsWith(u8, old_content, REF_HEADS_START_STR) and old_content.len > REF_HEADS_START_STR.len) {
+                    const ref_name = old_content[REF_HEADS_START_STR.len..];
                     try updateRecur(repo_kind, state, allocator, &.{ "refs", "heads", ref_name }, oid_hex);
                     return;
                 }
