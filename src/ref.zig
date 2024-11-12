@@ -182,16 +182,21 @@ pub fn read(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.re
             return std.mem.sliceTo(buffer[0..size], '\n');
         },
         .xit => {
-            var cursor = state.extra.moment.cursor;
-            var split_iter = std.mem.splitScalar(u8, ref_path, '/');
-            while (split_iter.next()) |part_name| {
-                if (try cursor.readPath(void, &.{.{ .hash_map_get = .{ .value = hash.hashBuffer(part_name) } }})) |next_cursor| {
-                    cursor = next_cursor;
-                } else {
-                    return error.RefNotFound;
+            var map = state.extra.moment.*;
+            if (std.fs.path.dirname(ref_path)) |ref_parent_path| {
+                var split_iter = std.mem.splitScalar(u8, ref_parent_path, '/');
+                while (split_iter.next()) |part_name| {
+                    if (try map.getCursor(hash.hashBuffer(part_name))) |cursor| {
+                        map = try rp.Repo(repo_kind).DB.HashMap(.read_only).init(cursor);
+                    } else {
+                        return error.RefNotFound;
+                    }
                 }
             }
-            return try cursor.readBytes(buffer);
+
+            const ref_name = std.fs.path.basename(ref_path);
+            const ref_cursor = (try map.getCursor(hash.hashBuffer(ref_name))) orelse return error.RefNotFound;
+            return try ref_cursor.readBytes(buffer);
         },
     }
 }
