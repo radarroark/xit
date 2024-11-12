@@ -202,9 +202,7 @@ pub fn read(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.re
 }
 
 pub fn readHeadMaybe(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only)) !?[hash.SHA1_HEX_LEN]u8 {
-    var buffer = [_]u8{0} ** MAX_READ_BYTES;
-    const buffer_slice = try read(repo_kind, state, "HEAD", &buffer);
-    return try resolve(repo_kind, state, ResolveInput.init(buffer_slice));
+    return try resolve(repo_kind, state, .{ .ref_path = "HEAD" });
 }
 
 pub fn readHead(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only)) ![hash.SHA1_HEX_LEN]u8 {
