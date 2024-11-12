@@ -233,7 +233,7 @@ pub fn write(
     comptime repo_kind: rp.RepoKind,
     state: rp.Repo(repo_kind).State(.read_write),
     ref_path: []const u8,
-    oid_hex: *const [hash.SHA1_HEX_LEN]u8,
+    content: []const u8,
 ) !void {
     switch (repo_kind) {
         .git => {
@@ -242,7 +242,7 @@ pub fn write(
             }
             var lock = try io.LockFile.init(state.core.git_dir, ref_path);
             defer lock.deinit();
-            try lock.lock_file.writeAll(oid_hex);
+            try lock.lock_file.writeAll(content);
             try lock.lock_file.writeAll("\n");
             lock.success = true;
         },
@@ -266,8 +266,8 @@ pub fn write(
             try map.putKey(ref_name_hash, .{ .slot = ref_name_cursor.slot() });
             const ref_content_set_cursor = try state.extra.moment.putCursor(hash.hashBuffer("ref-content-set"));
             const ref_content_set = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(ref_content_set_cursor);
-            var ref_content_cursor = try ref_content_set.putKeyCursor(try hash.hexToHash(oid_hex));
-            try ref_content_cursor.writeIfEmpty(.{ .bytes = oid_hex });
+            var ref_content_cursor = try ref_content_set.putKeyCursor(hash.hashBuffer(content));
+            try ref_content_cursor.writeIfEmpty(.{ .bytes = content });
             try map.put(ref_name_hash, .{ .slot = ref_content_cursor.slot() });
         },
     }
@@ -296,72 +296,17 @@ pub fn writeRecur(
     }
 }
 
-/// makes HEAD point to a new ref
 pub fn writeHead(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_write), target: []const u8, oid_hex_maybe: ?[hash.SHA1_HEX_LEN]u8) !void {
-    switch (repo_kind) {
-        .git => {
-            var lock = try io.LockFile.init(state.core.git_dir, "HEAD");
-            defer lock.deinit();
-
-            // if the target is a ref, just update HEAD to point to it
-            var refs_dir = try state.core.git_dir.openDir("refs", .{});
-            defer refs_dir.close();
-            var heads_dir = try refs_dir.openDir("heads", .{});
-            defer heads_dir.close();
-            var ref_file = heads_dir.openFile(target, .{ .mode = .read_only }) catch |err| switch (err) {
-                error.FileNotFound => {
-                    if (oid_hex_maybe) |oid_hex| {
-                        // the HEAD is detached, so just update it with the oid
-                        try lock.lock_file.writeAll(&oid_hex);
-                    } else {
-                        // point HEAD at the ref, even though the ref doesn't exist
-                        var write_buffer = [_]u8{0} ** MAX_READ_BYTES;
-                        const content = try std.fmt.bufPrint(&write_buffer, "ref: refs/heads/{s}", .{target});
-                        try lock.lock_file.writeAll(content);
-                    }
-                    lock.success = true;
-                    return;
-                },
-                else => return err,
-            };
-            defer ref_file.close();
-
-            // point HEAD at the ref
-            var write_buffer = [_]u8{0} ** MAX_READ_BYTES;
-            const content = try std.fmt.bufPrint(&write_buffer, "ref: refs/heads/{s}", .{target});
-            try lock.lock_file.writeAll(content);
-            lock.success = true;
-        },
-        .xit => {
-            const ref_content_set_cursor = try state.extra.moment.putCursor(hash.hashBuffer("ref-content-set"));
-            const ref_content_set = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(ref_content_set_cursor);
-
-            if (try state.extra.moment.cursor.readPath(void, &.{
-                .{ .hash_map_get = .{ .value = hash.hashBuffer("refs") } },
-                .{ .hash_map_get = .{ .value = hash.hashBuffer("heads") } },
-                .{ .hash_map_get = .{ .value = hash.hashBuffer(target) } },
-            })) |_| {
-                // point HEAD at the ref
-                var write_buffer = [_]u8{0} ** MAX_READ_BYTES;
-                const content = try std.fmt.bufPrint(&write_buffer, "ref: refs/heads/{s}", .{target});
-                var ref_content_cursor = try ref_content_set.putKeyCursor(hash.hashBuffer(content));
-                try ref_content_cursor.writeIfEmpty(.{ .bytes = content });
-                try state.extra.moment.put(hash.hashBuffer("HEAD"), .{ .slot = ref_content_cursor.slot() });
-            } else {
-                if (oid_hex_maybe) |oid_hex| {
-                    // the HEAD is detached, so just update it with the oid
-                    var ref_content_cursor = try ref_content_set.putKeyCursor(try hash.hexToHash(&oid_hex));
-                    try ref_content_cursor.writeIfEmpty(.{ .bytes = &oid_hex });
-                    try state.extra.moment.put(hash.hashBuffer("HEAD"), .{ .slot = ref_content_cursor.slot() });
-                } else {
-                    // point HEAD at the ref, even though the ref doesn't exist
-                    var write_buffer = [_]u8{0} ** MAX_READ_BYTES;
-                    const content = try std.fmt.bufPrint(&write_buffer, "ref: refs/heads/{s}", .{target});
-                    var ref_content_cursor = try ref_content_set.putKeyCursor(hash.hashBuffer(content));
-                    try ref_content_cursor.writeIfEmpty(.{ .bytes = content });
-                    try state.extra.moment.put(hash.hashBuffer("HEAD"), .{ .slot = ref_content_cursor.slot() });
-                }
-            }
-        },
-    }
+    var buffer = [_]u8{0} ** MAX_READ_BYTES;
+    const content =
+        // target is a ref, so make HEAD point to it
+        if (try readRecur(repo_kind, state.readOnly(), .{ .ref_name = target }) != null)
+        try std.fmt.bufPrint(&buffer, "ref: refs/heads/{s}", .{target})
+        // the HEAD is detached, so just update it with the oid
+    else if (oid_hex_maybe) |oid_hex|
+        &oid_hex
+        // point HEAD at the ref, even though the ref doesn't exist
+    else
+        try std.fmt.bufPrint(&buffer, "ref: refs/heads/{s}", .{target});
+    try write(repo_kind, state, "HEAD", content);
 }
