@@ -3,8 +3,7 @@ const hash = @import("./hash.zig");
 const io = @import("./io.zig");
 const rp = @import("./repo.zig");
 
-const MAX_READ_BYTES = 1024; // FIXME: this is arbitrary...
-const REF_HEADS_START_STR = "ref: refs/heads/";
+const MAX_REF_CONTENT_SIZE = 512;
 const REF_START_STR = "ref: ";
 
 pub const Ref = struct {
@@ -25,7 +24,7 @@ pub const Ref = struct {
     }
 
     pub fn initFromLink(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator, ref_path: []const u8) !?Ref {
-        var buffer = [_]u8{0} ** MAX_READ_BYTES;
+        var buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
         const content = try read(repo_kind, state, ref_path, &buffer);
 
         if (std.mem.startsWith(u8, content, REF_START_STR) and content.len > REF_START_STR.len) {
@@ -89,7 +88,7 @@ pub const RefList = struct {
                     defer iter.deinit();
                     while (try iter.next()) |*next_cursor| {
                         const kv_pair = try next_cursor.readKeyValuePair();
-                        const name = try kv_pair.key_cursor.readBytesAlloc(ref_list.arena.allocator(), MAX_READ_BYTES);
+                        const name = try kv_pair.key_cursor.readBytesAlloc(ref_list.arena.allocator(), MAX_REF_CONTENT_SIZE);
                         const ref = try Ref.initWithName(repo_kind, state, ref_list.arena.allocator(), dir_name, name);
                         try ref_list.refs.append(ref);
                     }
@@ -150,7 +149,7 @@ pub const RefContent = union(enum) {
 pub fn readRecur(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), input: RefContent) !?[hash.SHA1_HEX_LEN]u8 {
     switch (input) {
         .ref_path => |ref_path| {
-            var buffer = [_]u8{0} ** MAX_READ_BYTES;
+            var buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
             const content = read(repo_kind, state, ref_path, &buffer) catch |err| switch (err) {
                 error.RefNotFound => return null,
                 else => return err,
@@ -163,7 +162,7 @@ pub fn readRecur(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).Stat
             };
         },
         .ref_name => |ref_name| {
-            var buffer = [_]u8{0} ** MAX_READ_BYTES;
+            var buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
             const path = try std.fmt.bufPrint(&buffer, "refs/heads/{s}", .{ref_name});
             return try readRecur(repo_kind, state, .{ .ref_path = path });
         },
@@ -171,7 +170,7 @@ pub fn readRecur(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).Stat
     }
 }
 
-pub fn read(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), ref_path: []const u8, buffer: *[MAX_READ_BYTES]u8) ![]u8 {
+pub fn read(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), ref_path: []const u8, buffer: []u8) ![]u8 {
     switch (repo_kind) {
         .git => {
             const ref_file = state.core.git_dir.openFile(ref_path, .{ .mode = .read_only }) catch |err| switch (err) {
@@ -215,10 +214,11 @@ pub fn readHead(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State
 }
 
 pub fn readHeadName(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator) ![]u8 {
-    var buffer = [_]u8{0} ** MAX_READ_BYTES;
+    var buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
     const content = try read(repo_kind, state, "HEAD", &buffer);
-    if (std.mem.startsWith(u8, content, REF_HEADS_START_STR) and content.len > REF_HEADS_START_STR.len) {
-        const ref_name = content[REF_HEADS_START_STR.len..];
+    const ref_heads_start_str = "ref: refs/heads/";
+    if (std.mem.startsWith(u8, content, ref_heads_start_str) and content.len > ref_heads_start_str.len) {
+        const ref_name = content[ref_heads_start_str.len..];
         const buf = try allocator.alloc(u8, ref_name.len);
         @memcpy(buf, ref_name);
         return buf;
@@ -279,7 +279,7 @@ pub fn writeRecur(
     ref_path: []const u8,
     oid_hex: *const [hash.SHA1_HEX_LEN]u8,
 ) !void {
-    var buffer = [_]u8{0} ** MAX_READ_BYTES;
+    var buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
     const existing_content = read(repo_kind, state.readOnly(), ref_path, &buffer) catch |err| switch (err) {
         error.RefNotFound => {
             try write(repo_kind, state, ref_path, oid_hex);
@@ -297,7 +297,7 @@ pub fn writeRecur(
 }
 
 pub fn writeHead(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_write), target: []const u8, oid_hex_maybe: ?[hash.SHA1_HEX_LEN]u8) !void {
-    var buffer = [_]u8{0} ** MAX_READ_BYTES;
+    var buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
     const content =
         // target is a ref, so make HEAD point to it
         if (try readRecur(repo_kind, state.readOnly(), .{ .ref_name = target }) != null)
