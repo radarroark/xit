@@ -257,7 +257,9 @@ pub fn fetch(
 
     // update refs
     for (ref_to_oid.keys(), ref_to_oid.values()) |ref_name, oid| {
-        try ref.updateRecur(repo_kind, state, allocator, &.{ "refs", "remotes", remote_name, ref_name }, oid);
+        var buffer = [_]u8{0} ** 256;
+        const ref_path = try std.fmt.bufPrint(&buffer, "ref: refs/remotes/{s}/{s}", .{ remote_name, ref_name });
+        try ref.writeRecur(repo_kind, state, ref_path, oid);
     }
 
     return .{

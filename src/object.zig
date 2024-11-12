@@ -351,14 +351,14 @@ pub fn writeCommit(
             compressed_lock.success = true;
 
             // write commit id to HEAD
-            try ref.updateRecur(repo_kind, state, allocator, &.{"HEAD"}, &commit_sha1_hex);
+            try ref.writeRecur(repo_kind, state, "HEAD", &commit_sha1_hex);
         },
         .xit => {
             var stream = std.io.fixedBufferStream(commit_contents);
             try chunk.writeChunks(state, &stream, commit_hash, header);
 
             // write commit id to HEAD
-            try ref.updateRecur(repo_kind, state, allocator, &.{"HEAD"}, &commit_sha1_hex);
+            try ref.writeRecur(repo_kind, state, "HEAD", &commit_sha1_hex);
         },
     }
 

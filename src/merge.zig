@@ -1456,7 +1456,7 @@ pub const Merge = struct {
 
                 if (std.mem.eql(u8, &target_oid, &base_oid)) {
                     // the base ancestor is the target oid, so just update HEAD
-                    try ref.updateRecur(repo_kind, state, allocator, &.{"HEAD"}, &source_oid);
+                    try ref.writeRecur(repo_kind, state, "HEAD", &source_oid);
                     return .{
                         .arena = arena,
                         .allocator = allocator,

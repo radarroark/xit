@@ -228,6 +228,73 @@ pub fn readHeadName(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).S
     }
 }
 
+pub fn write(
+    comptime repo_kind: rp.RepoKind,
+    state: rp.Repo(repo_kind).State(.read_write),
+    ref_path: []const u8,
+    oid_hex: *const [hash.SHA1_HEX_LEN]u8,
+) !void {
+    switch (repo_kind) {
+        .git => {
+            if (std.fs.path.dirname(ref_path)) |ref_parent_path| {
+                try state.core.git_dir.makePath(ref_parent_path);
+            }
+            var lock = try io.LockFile.init(state.core.git_dir, ref_path);
+            defer lock.deinit();
+            try lock.lock_file.writeAll(oid_hex);
+            try lock.lock_file.writeAll("\n");
+            lock.success = true;
+        },
+        .xit => {
+            var map = state.extra.moment.*;
+            if (std.fs.path.dirname(ref_path)) |ref_parent_path| {
+                var split_iter = std.mem.splitScalar(u8, ref_parent_path, '/');
+                while (split_iter.next()) |part_name| {
+                    const cursor = try map.putCursor(hash.hashBuffer(part_name));
+                    map = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(cursor);
+                }
+            }
+
+            const ref_name = std.fs.path.basename(ref_path);
+            const ref_name_hash = hash.hashBuffer(ref_name);
+
+            const ref_name_set_cursor = try state.extra.moment.putCursor(hash.hashBuffer("ref-name-set"));
+            const ref_name_set = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(ref_name_set_cursor);
+            var ref_name_cursor = try ref_name_set.putKeyCursor(ref_name_hash);
+            try ref_name_cursor.writeIfEmpty(.{ .bytes = ref_name });
+            try map.putKey(ref_name_hash, .{ .slot = ref_name_cursor.slot() });
+            const ref_content_set_cursor = try state.extra.moment.putCursor(hash.hashBuffer("ref-content-set"));
+            const ref_content_set = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(ref_content_set_cursor);
+            var ref_content_cursor = try ref_content_set.putKeyCursor(try hash.hexToHash(oid_hex));
+            try ref_content_cursor.writeIfEmpty(.{ .bytes = oid_hex });
+            try map.put(ref_name_hash, .{ .slot = ref_content_cursor.slot() });
+        },
+    }
+}
+
+pub fn writeRecur(
+    comptime repo_kind: rp.RepoKind,
+    state: rp.Repo(repo_kind).State(.read_write),
+    ref_path: []const u8,
+    oid_hex: *const [hash.SHA1_HEX_LEN]u8,
+) !void {
+    var buffer = [_]u8{0} ** MAX_READ_BYTES;
+    const existing_content = read(repo_kind, state.readOnly(), ref_path, &buffer) catch |err| switch (err) {
+        error.RefNotFound => {
+            try write(repo_kind, state, ref_path, oid_hex);
+            return;
+        },
+        else => return err,
+    };
+    const input = RefInput.init(existing_content);
+    switch (input) {
+        .ref_path => |next_ref_path| {
+            try writeRecur(repo_kind, state, next_ref_path, oid_hex);
+        },
+        .ref_name, .oid => try write(repo_kind, state, ref_path, oid_hex),
+    }
+}
+
 /// makes HEAD point to a new ref
 pub fn writeHead(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_write), target: []const u8, oid_hex_maybe: ?[hash.SHA1_HEX_LEN]u8) !void {
     switch (repo_kind) {
@@ -294,96 +361,6 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).Stat
                     try state.extra.moment.put(hash.hashBuffer("HEAD"), .{ .slot = ref_content_cursor.slot() });
                 }
             }
-        },
-    }
-}
-
-/// update the given file with the given oid,
-/// following refs recursively if necessary.
-/// used after a commit is made.
-pub fn updateRecur(
-    comptime repo_kind: rp.RepoKind,
-    state: rp.Repo(repo_kind).State(.read_write),
-    allocator: std.mem.Allocator,
-    path_parts: []const []const u8,
-    oid_hex: *const [hash.SHA1_HEX_LEN]u8,
-) anyerror!void {
-    switch (repo_kind) {
-        .git => {
-            const path = try io.joinPath(allocator, path_parts);
-            defer allocator.free(path);
-
-            // ensure the parent dirs exist
-            if (path_parts.len > 1) {
-                if (std.fs.path.dirname(path)) |parent_path| {
-                    try state.core.git_dir.makePath(parent_path);
-                }
-            }
-
-            var lock = try io.LockFile.init(state.core.git_dir, path);
-            defer lock.deinit();
-
-            // read file and get ref name if necessary
-            var buffer = [_]u8{0} ** MAX_READ_BYTES;
-            const ref_name_maybe = blk: {
-                const old_content = read(repo_kind, state.readOnly(), path, &buffer) catch |err| switch (err) {
-                    error.RefNotFound => break :blk null,
-                    else => return err,
-                };
-                if (std.mem.startsWith(u8, old_content, REF_HEADS_START_STR) and old_content.len > REF_HEADS_START_STR.len) {
-                    break :blk old_content[REF_HEADS_START_STR.len..];
-                } else {
-                    break :blk null;
-                }
-            };
-
-            // if it's a ref, update it recursively
-            if (ref_name_maybe) |ref_name| {
-                try updateRecur(repo_kind, state, allocator, &.{ "refs", "heads", ref_name }, oid_hex);
-            }
-            // otherwise, update it with the oid
-            else {
-                try lock.lock_file.writeAll(oid_hex);
-                try lock.lock_file.writeAll("\n");
-                lock.success = true;
-            }
-        },
-        .xit => {
-            var db_path_parts = std.ArrayList(rp.Repo(repo_kind).DB.PathPart(void)).init(allocator);
-            defer db_path_parts.deinit();
-            for (path_parts[0 .. path_parts.len - 1]) |part_name| {
-                try db_path_parts.append(.{ .hash_map_get = .{ .value = hash.hashBuffer(part_name) } });
-                try db_path_parts.append(.hash_map_init);
-            }
-
-            const butlast_cursor = try state.extra.moment.cursor.writePath(void, db_path_parts.items);
-            const butlast = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(butlast_cursor);
-
-            const file_name = path_parts[path_parts.len - 1];
-            const file_name_hash = hash.hashBuffer(file_name);
-
-            var buffer = [_]u8{0} ** MAX_READ_BYTES;
-            if (try butlast.getCursor(file_name_hash)) |old_content_cursor| {
-                const old_content = try old_content_cursor.readBytes(&buffer);
-                // if it's a ref, update it recursively
-                if (std.mem.startsWith(u8, old_content, REF_HEADS_START_STR) and old_content.len > REF_HEADS_START_STR.len) {
-                    const ref_name = old_content[REF_HEADS_START_STR.len..];
-                    try updateRecur(repo_kind, state, allocator, &.{ "refs", "heads", ref_name }, oid_hex);
-                    return;
-                }
-            }
-
-            // otherwise, update with the oid
-            const ref_name_set_cursor = try state.extra.moment.putCursor(hash.hashBuffer("ref-name-set"));
-            const ref_name_set = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(ref_name_set_cursor);
-            var ref_name_cursor = try ref_name_set.putKeyCursor(file_name_hash);
-            try ref_name_cursor.writeIfEmpty(.{ .bytes = file_name });
-            try butlast.putKey(file_name_hash, .{ .slot = ref_name_cursor.slot() });
-            const ref_content_set_cursor = try state.extra.moment.putCursor(hash.hashBuffer("ref-content-set"));
-            const ref_content_set = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(ref_content_set_cursor);
-            var ref_content_cursor = try ref_content_set.putKeyCursor(try hash.hexToHash(oid_hex));
-            try ref_content_cursor.writeIfEmpty(.{ .bytes = oid_hex });
-            try butlast.put(file_name_hash, .{ .slot = ref_content_cursor.slot() });
         },
     }
 }
