@@ -6,6 +6,22 @@ const rp = @import("./repo.zig");
 const MAX_REF_CONTENT_SIZE = 512;
 const REF_START_STR = "ref: ";
 
+fn parseRefPath(ref_path: []const u8) !struct { dirs: ?[2][]const u8, name: []const u8 } {
+    if (std.mem.startsWith(u8, ref_path, "refs/")) {
+        const slash_idx1 = std.mem.indexOfScalar(u8, ref_path, '/') orelse return error.InvalidPath;
+        const slash_idx2 = std.mem.indexOfScalar(u8, ref_path[slash_idx1 + 1 ..], '/') orelse return error.InvalidPath;
+        return .{
+            .dirs = .{ ref_path[0..slash_idx1], ref_path[slash_idx1 + 1 .. slash_idx1 + 1 + slash_idx2] },
+            .name = ref_path[slash_idx1 + 1 + slash_idx2 + 1 ..],
+        };
+    } else {
+        return .{
+            .dirs = null,
+            .name = ref_path,
+        };
+    }
+}
+
 pub const Ref = struct {
     allocator: std.mem.Allocator,
     path: []const u8,
@@ -26,15 +42,10 @@ pub const Ref = struct {
     pub fn initWithPath(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator, ref_path: []const u8) !Ref {
         const path = try allocator.dupe(u8, ref_path);
         errdefer allocator.free(path);
-
-        const slash_idx1 = std.mem.indexOfScalar(u8, path, '/') orelse return error.InvalidPath;
-        const slash_idx2 = std.mem.indexOfScalar(u8, path[slash_idx1 + 1 ..], '/') orelse return error.InvalidPath;
-        const name = path[slash_idx1 + 1 + slash_idx2 + 1 ..];
-
         return .{
             .allocator = allocator,
             .path = path,
-            .name = name,
+            .name = (try parseRefPath(path)).name,
             .oid_hex = try readRecur(repo_kind, state, .{ .ref_path = ref_path }),
         };
     }
@@ -184,11 +195,12 @@ pub fn read(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.re
             return std.mem.sliceTo(buffer[0..size], '\n');
         },
         .xit => {
+            const parsed_ref_path = try parseRefPath(ref_path);
+
             var map = state.extra.moment.*;
-            if (std.fs.path.dirname(ref_path)) |ref_parent_path| {
-                var split_iter = std.mem.splitScalar(u8, ref_parent_path, '/');
-                while (split_iter.next()) |part_name| {
-                    if (try map.getCursor(hash.hashBuffer(part_name))) |cursor| {
+            if (parsed_ref_path.dirs) |dirs| {
+                for (dirs) |dir_name| {
+                    if (try map.getCursor(hash.hashBuffer(dir_name))) |cursor| {
                         map = try rp.Repo(repo_kind).DB.HashMap(.read_only).init(cursor);
                     } else {
                         return error.RefNotFound;
@@ -196,8 +208,7 @@ pub fn read(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.re
                 }
             }
 
-            const ref_name = std.fs.path.basename(ref_path);
-            const ref_cursor = (try map.getCursor(hash.hashBuffer(ref_name))) orelse return error.RefNotFound;
+            const ref_cursor = (try map.getCursor(hash.hashBuffer(parsed_ref_path.name))) orelse return error.RefNotFound;
             return try ref_cursor.readBytes(buffer);
         },
     }
@@ -245,16 +256,17 @@ pub fn write(
             lock.success = true;
         },
         .xit => {
+            const parsed_ref_path = try parseRefPath(ref_path);
+
             var map = state.extra.moment.*;
-            if (std.fs.path.dirname(ref_path)) |ref_parent_path| {
-                var split_iter = std.mem.splitScalar(u8, ref_parent_path, '/');
-                while (split_iter.next()) |part_name| {
-                    const cursor = try map.putCursor(hash.hashBuffer(part_name));
+            if (parsed_ref_path.dirs) |dirs| {
+                for (dirs) |dir_name| {
+                    const cursor = try map.putCursor(hash.hashBuffer(dir_name));
                     map = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(cursor);
                 }
             }
 
-            const ref_name = std.fs.path.basename(ref_path);
+            const ref_name = parsed_ref_path.name;
             const ref_name_hash = hash.hashBuffer(ref_name);
 
             const ref_name_set_cursor = try state.extra.moment.putCursor(hash.hashBuffer("ref-name-set"));
