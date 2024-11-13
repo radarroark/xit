@@ -6,19 +6,63 @@ const rp = @import("./repo.zig");
 const MAX_REF_CONTENT_SIZE = 512;
 const REF_START_STR = "ref: ";
 
-fn parseRefPath(ref_path: []const u8) !struct { dirs: ?[2][]const u8, name: []const u8 } {
+pub const Ref = struct {
+    kind: union(enum) {
+        local,
+        remote: []const u8,
+    },
+    name: []const u8,
+};
+
+pub const RefOrOid = union(enum) {
+    ref: Ref,
+    oid: *const [hash.SHA1_HEX_LEN]u8,
+
+    pub fn initFromDb(content: []const u8) ?RefOrOid {
+        if (std.mem.startsWith(u8, content, REF_START_STR)) {
+            return initFromPath(content[REF_START_STR.len..]);
+        } else if (content.len == hash.SHA1_HEX_LEN) {
+            return .{ .oid = content[0..hash.SHA1_HEX_LEN] };
+        } else {
+            return null;
+        }
+    }
+
+    pub fn initFromPath(ref_path: []const u8) ?RefOrOid {
+        const parsed_ref_path = parseRefPath(ref_path) orelse return null;
+        if (std.mem.eql(u8, "heads", parsed_ref_path.dirs[1])) {
+            return .{ .ref = .{ .kind = .local, .name = parsed_ref_path.name } };
+        } else if (std.mem.eql(u8, "remotes", parsed_ref_path.dirs[1])) {
+            const ref_name = parsed_ref_path.name;
+            const slash_idx1 = std.mem.indexOfScalar(u8, ref_name, '/') orelse return null;
+            const slash_idx2 = std.mem.indexOfScalar(u8, ref_name[slash_idx1 + 1 ..], '/') orelse return null;
+            const remote_name = ref_name[0..slash_idx1];
+            const name = ref_name[slash_idx1 + 1 .. slash_idx1 + 1 + slash_idx2];
+            return .{ .ref = .{ .kind = .{ .remote = remote_name }, .name = name } };
+        } else {
+            return null;
+        }
+    }
+
+    pub fn initFromUser(content: []const u8) RefOrOid {
+        if (content.len == hash.SHA1_HEX_LEN) {
+            return .{ .oid = content[0..hash.SHA1_HEX_LEN] };
+        } else {
+            return .{ .ref = .{ .kind = .local, .name = content } };
+        }
+    }
+};
+
+fn parseRefPath(ref_path: []const u8) ?struct { dirs: [2][]const u8, name: []const u8 } {
     if (std.mem.startsWith(u8, ref_path, "refs/")) {
-        const slash_idx1 = std.mem.indexOfScalar(u8, ref_path, '/') orelse return error.InvalidPath;
-        const slash_idx2 = std.mem.indexOfScalar(u8, ref_path[slash_idx1 + 1 ..], '/') orelse return error.InvalidPath;
+        const slash_idx1 = std.mem.indexOfScalar(u8, ref_path, '/') orelse return null;
+        const slash_idx2 = std.mem.indexOfScalar(u8, ref_path[slash_idx1 + 1 ..], '/') orelse return null;
         return .{
             .dirs = .{ ref_path[0..slash_idx1], ref_path[slash_idx1 + 1 .. slash_idx1 + 1 + slash_idx2] },
             .name = ref_path[slash_idx1 + 1 + slash_idx2 + 1 ..],
         };
     } else {
-        return .{
-            .dirs = null,
-            .name = ref_path,
-        };
+        return null;
     }
 }
 
@@ -35,7 +79,7 @@ pub const LoadedRef = struct {
             .allocator = allocator,
             .path = path,
             .name = name,
-            .oid_hex = try readRecur(repo_kind, state, .{ .ref_path = path }),
+            .oid_hex = try readRecur(repo_kind, state, RefOrOid.initFromPath(path) orelse return error.InvalidRefPath),
         };
     }
 
@@ -45,8 +89,8 @@ pub const LoadedRef = struct {
         return .{
             .allocator = allocator,
             .path = path,
-            .name = (try parseRefPath(path)).name,
-            .oid_hex = try readRecur(repo_kind, state, .{ .ref_path = ref_path }),
+            .name = (parseRefPath(path) orelse return error.InvalidRefPath).name,
+            .oid_hex = try readRecur(repo_kind, state, RefOrOid.initFromPath(path) orelse return error.InvalidRefPath),
         };
     }
 
@@ -143,48 +187,26 @@ pub const RefList = struct {
     }
 };
 
-pub const RefContent = union(enum) {
-    ref_path: []const u8,
-    ref_name: []const u8,
-    oid: *const [hash.SHA1_HEX_LEN]u8,
-
-    pub fn initFromDb(content: []const u8) ?RefContent {
-        if (std.mem.startsWith(u8, content, REF_START_STR)) {
-            return .{ .ref_path = content[REF_START_STR.len..] };
-        } else if (content.len == hash.SHA1_HEX_LEN) {
-            return .{ .oid = content[0..hash.SHA1_HEX_LEN] };
-        } else {
-            return null;
-        }
-    }
-
-    pub fn initFromUser(content: []const u8) RefContent {
-        if (content.len == hash.SHA1_HEX_LEN) {
-            return .{ .oid = content[0..hash.SHA1_HEX_LEN] };
-        } else {
-            return .{ .ref_name = content };
-        }
-    }
-};
-
-pub fn readRecur(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), input: RefContent) !?[hash.SHA1_HEX_LEN]u8 {
+pub fn readRecur(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), input: RefOrOid) !?[hash.SHA1_HEX_LEN]u8 {
     switch (input) {
-        .ref_path => |ref_path| {
-            var buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
-            const content = read(repo_kind, state, ref_path, &buffer) catch |err| switch (err) {
+        .ref => |ref| {
+            var ref_path_buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
+            const ref_path = switch (ref.kind) {
+                .local => try std.fmt.bufPrint(&ref_path_buffer, "refs/heads/{s}", .{ref.name}),
+                .remote => |remote| try std.fmt.bufPrint(&ref_path_buffer, "refs/remotes/{s}/{s}", .{ remote, ref.name }),
+            };
+
+            var read_buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
+            const content = read(repo_kind, state, ref_path, &read_buffer) catch |err| switch (err) {
                 error.RefNotFound => return null,
                 else => return err,
             };
-            if (RefContent.initFromDb(content)) |next_input| {
+
+            if (RefOrOid.initFromDb(content)) |next_input| {
                 return try readRecur(repo_kind, state, next_input);
             } else {
                 return null;
             }
-        },
-        .ref_name => |ref_name| {
-            var buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
-            const path = try std.fmt.bufPrint(&buffer, "refs/heads/{s}", .{ref_name});
-            return try readRecur(repo_kind, state, .{ .ref_path = path });
         },
         .oid => |oid| return oid.*,
     }
@@ -202,27 +224,34 @@ pub fn read(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.re
             return std.mem.sliceTo(buffer[0..size], '\n');
         },
         .xit => {
-            const parsed_ref_path = try parseRefPath(ref_path);
-
             var map = state.extra.moment.*;
-            if (parsed_ref_path.dirs) |dirs| {
-                for (dirs) |dir_name| {
+            var ref_name = ref_path;
+
+            if (parseRefPath(ref_path)) |parsed_ref_path| {
+                for (parsed_ref_path.dirs) |dir_name| {
                     if (try map.getCursor(hash.hashBuffer(dir_name))) |cursor| {
                         map = try rp.Repo(repo_kind).DB.HashMap(.read_only).init(cursor);
                     } else {
                         return error.RefNotFound;
                     }
                 }
+                ref_name = parsed_ref_path.name;
             }
 
-            const ref_cursor = (try map.getCursor(hash.hashBuffer(parsed_ref_path.name))) orelse return error.RefNotFound;
+            const ref_cursor = (try map.getCursor(hash.hashBuffer(ref_name))) orelse return error.RefNotFound;
             return try ref_cursor.readBytes(buffer);
         },
     }
 }
 
 pub fn readHeadMaybe(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only)) !?[hash.SHA1_HEX_LEN]u8 {
-    return try readRecur(repo_kind, state, .{ .ref_path = "HEAD" });
+    var buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
+    const content = try read(repo_kind, state, "HEAD", &buffer);
+    if (RefOrOid.initFromDb(content)) |input| {
+        return try readRecur(repo_kind, state, input);
+    } else {
+        return null;
+    }
 }
 
 pub fn readHead(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only)) ![hash.SHA1_HEX_LEN]u8 {
@@ -263,17 +292,17 @@ pub fn write(
             lock.success = true;
         },
         .xit => {
-            const parsed_ref_path = try parseRefPath(ref_path);
-
             var map = state.extra.moment.*;
-            if (parsed_ref_path.dirs) |dirs| {
-                for (dirs) |dir_name| {
+            var ref_name = ref_path;
+
+            if (parseRefPath(ref_path)) |parsed_ref_path| {
+                for (parsed_ref_path.dirs) |dir_name| {
                     const cursor = try map.putCursor(hash.hashBuffer(dir_name));
                     map = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(cursor);
                 }
+                ref_name = parsed_ref_path.name;
             }
 
-            const ref_name = parsed_ref_path.name;
             const ref_name_hash = hash.hashBuffer(ref_name);
 
             const ref_name_set_cursor = try state.extra.moment.putCursor(hash.hashBuffer("ref-name-set"));
@@ -304,12 +333,17 @@ pub fn writeRecur(
         },
         else => return err,
     };
-    if (RefContent.initFromDb(existing_content)) |input| {
+    if (RefOrOid.initFromDb(existing_content)) |input| {
         switch (input) {
-            .ref_path => |next_ref_path| {
+            .ref => |ref| {
+                var ref_path_buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
+                const next_ref_path = switch (ref.kind) {
+                    .local => try std.fmt.bufPrint(&ref_path_buffer, "refs/heads/{s}", .{ref.name}),
+                    .remote => |remote| try std.fmt.bufPrint(&ref_path_buffer, "refs/remotes/{s}/{s}", .{ remote, ref.name }),
+                };
                 try writeRecur(repo_kind, state, next_ref_path, oid_hex);
             },
-            .ref_name, .oid => try write(repo_kind, state, ref_path, oid_hex),
+            .oid => try write(repo_kind, state, ref_path, oid_hex),
         }
     } else {
         try write(repo_kind, state, ref_path, oid_hex);
@@ -320,7 +354,7 @@ pub fn writeHead(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).Stat
     var buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
     const content =
         // target is a ref, so make HEAD point to it
-        if (try readRecur(repo_kind, state.readOnly(), .{ .ref_name = target }) != null)
+        if (try readRecur(repo_kind, state.readOnly(), .{ .ref = .{ .kind = .local, .name = target } }) != null)
         try std.fmt.bufPrint(&buffer, "ref: refs/heads/{s}", .{target})
         // the HEAD is detached, so just update it with the oid
     else if (oid_hex_maybe) |oid_hex|

@@ -1055,7 +1055,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
         try std.testing.expectEqual(commit2, try ref.readHead(repo_kind, state));
-        try std.testing.expectEqual(commit2, try ref.readRecur(repo_kind, state, .{ .ref_name = "stuff" }));
+        try std.testing.expectEqual(commit2, try ref.readRecur(repo_kind, state, ref.RefOrOid.initFromUser("stuff")));
     }
 
     // list all branches
@@ -1203,7 +1203,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-        try std.testing.expectEqual(commit3, try ref.readRecur(repo_kind, state, .{ .ref_name = "master" }));
+        try std.testing.expectEqual(commit3, try ref.readRecur(repo_kind, state, ref.RefOrOid.initFromUser("master")));
     }
 
     // log
