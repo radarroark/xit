@@ -1232,7 +1232,27 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     return try net.fetch(repo_kind, .{ .core = &self.core, .extra = .{} }, self.allocator, remote_name, parsed_uri);
                 },
                 .xit => {
-                    return error.NotImplemented;
+                    var fetch_result: net.FetchResult = undefined;
+                    const Ctx = struct {
+                        core: *Repo(repo_kind).Core,
+                        allocator: std.mem.Allocator,
+                        remote_name: []const u8,
+                        parsed_uri: std.Uri,
+                        fetch_result: *net.FetchResult,
+
+                        pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
+                            var moment = try DB.HashMap(.read_write).init(cursor.*);
+                            const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
+                            ctx.fetch_result.* = try net.fetch(repo_kind, state, ctx.allocator, ctx.remote_name, ctx.parsed_uri);
+                        }
+                    };
+
+                    const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
+                    try history.appendContext(
+                        .{ .slot = try history.getSlot(-1) },
+                        Ctx{ .core = &self.core, .allocator = self.allocator, .remote_name = remote_name, .parsed_uri = parsed_uri, .fetch_result = &fetch_result },
+                    );
+                    return fetch_result;
                 },
             }
         }
@@ -1267,7 +1287,37 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     };
                 },
                 .xit => {
-                    return error.NotImplemented;
+                    var pull_result: PullResult = undefined;
+                    const Ctx = struct {
+                        core: *Repo(repo_kind).Core,
+                        allocator: std.mem.Allocator,
+                        remote_name: []const u8,
+                        remote_ref_name: []const u8,
+                        parsed_uri: std.Uri,
+                        pull_result: *PullResult,
+
+                        pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
+                            var moment = try DB.HashMap(.read_write).init(cursor.*);
+                            const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
+
+                            const fetch_result = try net.fetch(repo_kind, state, ctx.allocator, ctx.remote_name, ctx.parsed_uri);
+                            const remote_ref = ref.Ref{ .kind = .{ .remote = ctx.remote_name }, .name = ctx.remote_ref_name };
+                            var merge_result = try mrg.Merge.init(repo_kind, state, ctx.allocator, .{ .new = .{ .ref = remote_ref } }, .merge, .patch);
+                            errdefer merge_result.deinit();
+
+                            ctx.pull_result.* = .{
+                                .fetch = fetch_result,
+                                .merge = merge_result,
+                            };
+                        }
+                    };
+
+                    const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
+                    try history.appendContext(
+                        .{ .slot = try history.getSlot(-1) },
+                        Ctx{ .core = &self.core, .allocator = self.allocator, .remote_name = remote_name, .remote_ref_name = remote_ref_name, .parsed_uri = parsed_uri, .pull_result = &pull_result },
+                    );
+                    return pull_result;
                 },
             }
         }

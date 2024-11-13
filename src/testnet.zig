@@ -6,8 +6,7 @@ const c = @cImport({
     @cInclude("git2.h");
 });
 
-test "pull" {
-    const allocator = std.testing.allocator;
+fn testPull(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator) !void {
     const temp_dir_name = "temp-testnet-pull";
 
     // start libgit
@@ -55,7 +54,7 @@ test "pull" {
     defer client_dir.close();
 
     // init client repo
-    var client_repo = try rp.Repo(.git).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "client" } }, writers);
+    var client_repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "client" } }, writers);
     defer client_repo.deinit();
     try client_repo.addRemote(.{ .name = "origin", .value = "git://localhost:3000/server" });
 
@@ -72,6 +71,12 @@ test "pull" {
     // make sure pull was successful
     const hello_txt = try client_dir.openFile("hello.txt", .{});
     defer hello_txt.close();
+}
+
+test "pull" {
+    const allocator = std.testing.allocator;
+    try testPull(.git, allocator);
+    try testPull(.xit, allocator);
 }
 
 test "push" {
