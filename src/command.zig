@@ -7,6 +7,7 @@ const idx = @import("./index.zig");
 const obj = @import("./object.zig");
 const cfg = @import("./config.zig");
 const bch = @import("./branch.zig");
+const ref = @import("./ref.zig");
 
 pub const SubCommandKind = enum {
     init,
@@ -264,10 +265,12 @@ pub const Command = union(enum) {
         } else if (std.mem.eql(u8, sub_command, "log")) {
             return .{ .cli = .log };
         } else if (std.mem.eql(u8, sub_command, "merge")) {
-            var merge_input_maybe: ?mrg.MergeInput = null;
-            if (extra_args.len > 0) {
-                merge_input_maybe = .{ .new = .{ .source_name = extra_args[0] } };
-            }
+            var merge_input_maybe: ?mrg.MergeInput = switch (extra_args.len) {
+                0 => null,
+                1 => .{ .new = ref.RefOrOid.initFromUser(extra_args[0]) },
+                2 => .{ .new = .{ .ref = .{ .kind = .{ .remote = extra_args[0] }, .name = extra_args[1] } } },
+                else => return error.TooManyArgs,
+            };
             if (map_args.contains("--continue")) {
                 if (merge_input_maybe != null) {
                     return error.ConflictingMergeArgs;
@@ -280,10 +283,12 @@ pub const Command = union(enum) {
                 return error.InsufficientMergeArgs;
             }
         } else if (std.mem.eql(u8, sub_command, "cherry-pick")) {
-            var merge_input_maybe: ?mrg.MergeInput = null;
-            if (extra_args.len > 0) {
-                merge_input_maybe = .{ .new = .{ .source_name = extra_args[0] } };
-            }
+            var merge_input_maybe: ?mrg.MergeInput = switch (extra_args.len) {
+                0 => null,
+                1 => .{ .new = ref.RefOrOid.initFromUser(extra_args[0]) },
+                2 => .{ .new = .{ .ref = .{ .kind = .{ .remote = extra_args[0] }, .name = extra_args[1] } } },
+                else => return error.TooManyArgs,
+            };
             if (map_args.contains("--continue")) {
                 if (merge_input_maybe != null) {
                     return error.ConflictingCherryPickArgs;
