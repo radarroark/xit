@@ -79,8 +79,7 @@ test "pull" {
     try testPull(.xit, allocator);
 }
 
-test "push" {
-    const allocator = std.testing.allocator;
+fn testPush(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator) !void {
     const temp_dir_name = "temp-testnet-push";
 
     // start libgit
@@ -123,7 +122,7 @@ test "push" {
     defer client_dir.close();
 
     // init client repo
-    var client_repo = try rp.Repo(.git).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "client" } }, writers);
+    var client_repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "client" } }, writers);
     defer client_repo.deinit();
     try client_repo.addRemote(.{ .name = "origin", .value = "git://localhost:3001/server" });
 
@@ -212,4 +211,9 @@ test "push" {
         const hello_txt = try server_dir.openFile("hello.txt", .{});
         defer hello_txt.close();
     }
+}
+
+test "push" {
+    const allocator = std.testing.allocator;
+    try testPush(.git, allocator);
 }
