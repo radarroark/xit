@@ -256,9 +256,12 @@ pub fn fetch(
     }
 
     // update refs
-    for (ref_to_oid.keys(), ref_to_oid.values()) |ref_name, oid| {
-        var buffer = [_]u8{0} ** 256;
-        const ref_path = try std.fmt.bufPrint(&buffer, "ref: refs/remotes/{s}/{s}", .{ remote_name, ref_name });
+    for (ref_to_oid.keys(), ref_to_oid.values()) |remote_ref_path, oid| {
+        var buffer = [_]u8{0} ** ref.MAX_REF_CONTENT_SIZE;
+        const ref_path = if (ref.Ref.initFromPath(remote_ref_path)) |rf|
+            try std.fmt.bufPrint(&buffer, "refs/remotes/{s}/{s}", .{ remote_name, rf.name })
+        else
+            try std.fmt.bufPrint(&buffer, "refs/remotes/{s}/{s}", .{ remote_name, remote_ref_path });
         try ref.writeRecur(repo_kind, state, ref_path, oid);
     }
 

@@ -1231,7 +1231,7 @@ pub const Merge = struct {
 
         // get the current branch name and oid
         const target_name = try ref.readHeadName(repo_kind, state.readOnly(), arena.allocator());
-        const target_oid = try ref.readHead(repo_kind, state.readOnly());
+        const target_oid_maybe = try ref.readHeadMaybe(repo_kind, state.readOnly());
 
         // init the diff that we will use for the migration and the conflicts maps.
         // they're using the arena because they'll be included in the result.
@@ -1272,6 +1272,31 @@ pub const Merge = struct {
 
                 // get the oids for the three-way merge
                 const source_oid = try ref.readRecur(repo_kind, state.readOnly(), ref_or_oid) orelse return error.InvalidTarget;
+                const target_oid = target_oid_maybe orelse {
+                    // the target branch is completely empty, so just set it to the source oid
+                    try ref.writeRecur(repo_kind, state, "HEAD", &source_oid);
+
+                    // make a TreeDiff that adds all files from source
+                    try clean_diff.compare(state.readOnly(), null, source_oid, null);
+
+                    // read index
+                    var index = try idx.Index(repo_kind).init(allocator, state.readOnly());
+                    defer index.deinit();
+
+                    // update the working tree
+                    try cht.migrate(repo_kind, state, allocator, clean_diff, &index, null);
+
+                    return .{
+                        .arena = arena,
+                        .allocator = allocator,
+                        .changes = clean_diff.changes,
+                        .auto_resolved_conflicts = auto_resolved_conflicts,
+                        .base_oid = [_]u8{0} ** hash.SHA1_HEX_LEN,
+                        .target_name = target_name,
+                        .source_name = source_name,
+                        .data = .fast_forward,
+                    };
+                };
                 var base_oid: [hash.SHA1_HEX_LEN]u8 = undefined;
                 switch (merge_kind) {
                     .merge => base_oid = try commonAncestor(repo_kind, allocator, state.readOnly(), &target_oid, &source_oid),
@@ -1548,6 +1573,7 @@ pub const Merge = struct {
 
                 // get the base oid
                 var base_oid: [hash.SHA1_HEX_LEN]u8 = undefined;
+                const target_oid = target_oid_maybe orelse return error.TargetOidNotFound;
                 switch (merge_kind) {
                     .merge => base_oid = try commonAncestor(repo_kind, allocator, state.readOnly(), &target_oid, &source_oid),
                     .cherry_pick => {

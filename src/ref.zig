@@ -3,7 +3,7 @@ const hash = @import("./hash.zig");
 const io = @import("./io.zig");
 const rp = @import("./repo.zig");
 
-const MAX_REF_CONTENT_SIZE = 512;
+pub const MAX_REF_CONTENT_SIZE = 512;
 const REF_START_STR = "ref: ";
 
 pub const Ref = struct {
