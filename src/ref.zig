@@ -52,7 +52,7 @@ pub const RefOrOid = union(enum) {
             } else {
                 return null;
             }
-        } else if (content.len == hash.SHA1_HEX_LEN) {
+        } else if (isOid(content)) {
             return .{ .oid = content[0..hash.SHA1_HEX_LEN] };
         } else {
             return null;
@@ -60,11 +60,23 @@ pub const RefOrOid = union(enum) {
     }
 
     pub fn initFromUser(content: []const u8) RefOrOid {
-        if (content.len == hash.SHA1_HEX_LEN) {
+        if (isOid(content)) {
             return .{ .oid = content[0..hash.SHA1_HEX_LEN] };
         } else {
             return .{ .ref = .{ .kind = .local, .name = content } };
         }
+    }
+
+    fn isOid(content: []const u8) bool {
+        if (content.len != hash.SHA1_HEX_LEN) {
+            return false;
+        }
+        for (content) |ch| {
+            if (!std.ascii.isHex(ch)) {
+                return false;
+            }
+        }
+        return true;
     }
 };
 
