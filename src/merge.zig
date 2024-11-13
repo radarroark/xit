@@ -1267,8 +1267,7 @@ pub const Merge = struct {
 
                 // we need to return the source name so copy it into a new buffer
                 // so we an ensure it lives as long as the rest of the return struct
-                const source_name = try arena.allocator().alloc(u8, new.source_name.len);
-                @memcpy(source_name, new.source_name);
+                const source_name = try arena.allocator().dupe(u8, new.source_name);
 
                 // get the oids for the three-way merge
                 const source_oid = try ref.readRecur(repo_kind, state.readOnly(), ref.RefOrOid.initFromUser(source_name)) orelse return error.InvalidTarget;
@@ -1544,8 +1543,7 @@ pub const Merge = struct {
 
                 // we need to return the source name but we don't have it,
                 // so just copy the source oid into a buffer and return that instead
-                const source_name = try arena.allocator().alloc(u8, source_oid.len);
-                @memcpy(source_name, &source_oid);
+                const source_name = try arena.allocator().dupe(u8, &source_oid);
 
                 // get the base oid
                 var base_oid: [hash.SHA1_HEX_LEN]u8 = undefined;
