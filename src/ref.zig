@@ -22,13 +22,13 @@ fn parseRefPath(ref_path: []const u8) !struct { dirs: ?[2][]const u8, name: []co
     }
 }
 
-pub const Ref = struct {
+pub const LoadedRef = struct {
     allocator: std.mem.Allocator,
     path: []const u8,
     name: []const u8,
     oid_hex: ?[hash.SHA1_HEX_LEN]u8,
 
-    pub fn initWithName(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator, dir_name: []const u8, name: []const u8) !Ref {
+    pub fn initWithName(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator, dir_name: []const u8, name: []const u8) !LoadedRef {
         const path = try io.joinPath(allocator, &.{ "refs", dir_name, name });
         errdefer allocator.free(path);
         return .{
@@ -39,7 +39,7 @@ pub const Ref = struct {
         };
     }
 
-    pub fn initWithPath(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator, ref_path: []const u8) !Ref {
+    pub fn initWithPath(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator, ref_path: []const u8) !LoadedRef {
         const path = try allocator.dupe(u8, ref_path);
         errdefer allocator.free(path);
         return .{
@@ -50,7 +50,7 @@ pub const Ref = struct {
         };
     }
 
-    pub fn initWithPathRecur(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator, ref_path: []const u8) !?Ref {
+    pub fn initWithPathRecur(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator, ref_path: []const u8) !?LoadedRef {
         var buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
         const content = try read(repo_kind, state, ref_path, &buffer);
 
@@ -61,13 +61,13 @@ pub const Ref = struct {
         }
     }
 
-    pub fn deinit(self: *Ref) void {
+    pub fn deinit(self: *LoadedRef) void {
         self.allocator.free(self.path);
     }
 };
 
 pub const RefList = struct {
-    refs: std.ArrayList(Ref),
+    refs: std.ArrayList(LoadedRef),
     arena: *std.heap.ArenaAllocator,
     allocator: std.mem.Allocator,
 
@@ -75,7 +75,7 @@ pub const RefList = struct {
         const arena = try allocator.create(std.heap.ArenaAllocator);
         arena.* = std.heap.ArenaAllocator.init(allocator);
         var ref_list = RefList{
-            .refs = std.ArrayList(Ref).init(allocator),
+            .refs = std.ArrayList(LoadedRef).init(allocator),
             .arena = arena,
             .allocator = allocator,
         };
@@ -102,7 +102,7 @@ pub const RefList = struct {
                     while (try iter.next()) |*next_cursor| {
                         const kv_pair = try next_cursor.readKeyValuePair();
                         const name = try kv_pair.key_cursor.readBytesAlloc(ref_list.arena.allocator(), MAX_REF_CONTENT_SIZE);
-                        const ref = try Ref.initWithName(repo_kind, state, ref_list.arena.allocator(), dir_name, name);
+                        const ref = try LoadedRef.initWithName(repo_kind, state, ref_list.arena.allocator(), dir_name, name);
                         try ref_list.refs.append(ref);
                     }
                 }
@@ -129,7 +129,7 @@ pub const RefList = struct {
             switch (entry.kind) {
                 .file => {
                     const name = try io.joinPath(self.arena.allocator(), next_path.items);
-                    const ref = try Ref.initWithName(repo_kind, state, self.arena.allocator(), dir_name, name);
+                    const ref = try LoadedRef.initWithName(repo_kind, state, self.arena.allocator(), dir_name, name);
                     try self.refs.append(ref);
                 },
                 .directory => {
