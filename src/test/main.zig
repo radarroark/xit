@@ -1075,7 +1075,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-        var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, state, allocator, "HEAD");
+        var current_branch_maybe = try ref.Ref.initWithPathRecur(repo_kind, state, allocator, "HEAD");
         defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
         try std.testing.expectEqualStrings("stuff", current_branch_maybe.?.name);
     }

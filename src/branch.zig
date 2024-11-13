@@ -126,7 +126,7 @@ pub fn remove(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.
             defer head_lock.deinit();
 
             // don't allow current branch to be deleted
-            var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, state.readOnly(), allocator, "HEAD");
+            var current_branch_maybe = try ref.Ref.initWithPathRecur(repo_kind, state.readOnly(), allocator, "HEAD");
             defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
             if (current_branch_maybe) |current_branch| {
                 if (std.mem.eql(u8, current_branch.name, input.name)) {
@@ -155,7 +155,7 @@ pub fn remove(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.
         },
         .xit => {
             // don't allow current branch to be deleted
-            var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, state.readOnly(), allocator, "HEAD");
+            var current_branch_maybe = try ref.Ref.initWithPathRecur(repo_kind, state.readOnly(), allocator, "HEAD");
             defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
             if (current_branch_maybe) |current_branch| {
                 if (std.mem.eql(u8, current_branch.name, input.name)) {
