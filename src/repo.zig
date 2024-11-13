@@ -1237,16 +1237,39 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             }
         }
 
-        pub fn pull(self: *Repo(repo_kind), remote_name: []const u8) !net.FetchResult {
-            const fetch_result = try self.fetch(remote_name);
+        pub const PullResult = struct {
+            fetch: net.FetchResult,
+            merge: mrg.Merge,
 
-            var moment = try self.core.latestMoment();
-            const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
+            pub fn deinit(self: *PullResult) void {
+                self.merge.deinit();
+            }
+        };
 
-            const head_name = try ref.readHeadName(repo_kind, state, self.allocator);
-            defer self.allocator.free(head_name);
+        pub fn pull(self: *Repo(repo_kind), remote_name: []const u8, remote_ref_name: []const u8) !PullResult {
+            var rem = try self.remote();
+            defer rem.deinit();
 
-            return fetch_result;
+            const remote_section = rem.sections.get(remote_name) orelse return error.RemoteNotFound;
+            const remote_url = remote_section.get("url") orelse return error.RemoteNotFound;
+            const parsed_uri = try std.Uri.parse(remote_url);
+
+            switch (repo_kind) {
+                .git => {
+                    const fetch_result = try net.fetch(repo_kind, .{ .core = &self.core, .extra = .{} }, self.allocator, remote_name, parsed_uri);
+                    const remote_ref = ref.Ref{ .kind = .{ .remote = remote_name }, .name = remote_ref_name };
+                    var merge_result = try mrg.Merge.init(repo_kind, .{ .core = &self.core, .extra = .{} }, self.allocator, .{ .new = .{ .ref = remote_ref } }, .merge, .diff3);
+                    errdefer merge_result.deinit();
+
+                    return .{
+                        .fetch = fetch_result,
+                        .merge = merge_result,
+                    };
+                },
+                .xit => {
+                    return error.NotImplemented;
+                },
+            }
         }
     };
 }
