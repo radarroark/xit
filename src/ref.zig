@@ -23,24 +23,28 @@ pub const Ref = struct {
         };
     }
 
-    pub fn initFromLink(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator, ref_path: []const u8) !?Ref {
+    pub fn initWithPath(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator, ref_path: []const u8) !Ref {
+        const path = try allocator.dupe(u8, ref_path);
+        errdefer allocator.free(path);
+
+        const slash_idx1 = std.mem.indexOfScalar(u8, path, '/') orelse return error.InvalidPath;
+        const slash_idx2 = std.mem.indexOfScalar(u8, path[slash_idx1 + 1 ..], '/') orelse return error.InvalidPath;
+        const name = path[slash_idx1 + 1 + slash_idx2 + 1 ..];
+
+        return .{
+            .allocator = allocator,
+            .path = path,
+            .name = name,
+            .oid_hex = try readRecur(repo_kind, state, .{ .ref_path = ref_path }),
+        };
+    }
+
+    pub fn initWithPathRecur(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator, ref_path: []const u8) !?Ref {
         var buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
         const content = try read(repo_kind, state, ref_path, &buffer);
 
         if (std.mem.startsWith(u8, content, REF_START_STR) and content.len > REF_START_STR.len) {
-            const path = try allocator.dupe(u8, content[REF_START_STR.len..]);
-            errdefer allocator.free(path);
-
-            const slash_idx1 = std.mem.indexOfScalar(u8, path, '/') orelse return error.InvalidPath;
-            const slash_idx2 = std.mem.indexOfScalar(u8, path[slash_idx1 + 1 ..], '/') orelse return error.InvalidPath;
-            const name = path[slash_idx1 + 1 + slash_idx2 + 1 ..];
-
-            return .{
-                .allocator = allocator,
-                .path = path,
-                .name = name,
-                .oid_hex = try readRecur(repo_kind, state, RefContent.init(content)),
-            };
+            return try initWithPath(repo_kind, state, allocator, content[REF_START_STR.len..]);
         } else {
             return null;
         }

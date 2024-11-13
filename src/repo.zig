@@ -450,7 +450,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                             var moment = try self.core.latestMoment();
                             const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
 
-                            var current_branch_maybe = try ref.Ref.initFromLink(repo_kind, state, self.allocator, "HEAD");
+                            var current_branch_maybe = try ref.Ref.initWithPathRecur(repo_kind, state, self.allocator, "HEAD");
                             defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
 
                             var ref_list = try ref.RefList.init(repo_kind, state, self.allocator, "heads");
