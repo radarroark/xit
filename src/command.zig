@@ -286,7 +286,6 @@ pub const Command = union(enum) {
             var merge_input_maybe: ?mrg.MergeInput = switch (extra_args.len) {
                 0 => null,
                 1 => .{ .new = ref.RefOrOid.initFromUser(extra_args[0]) },
-                2 => .{ .new = .{ .ref = .{ .kind = .{ .remote = extra_args[0] }, .name = extra_args[1] } } },
                 else => return error.TooManyArgs,
             };
             if (map_args.contains("--continue")) {
