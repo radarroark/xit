@@ -1313,7 +1313,7 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind) !void {
         fn run(repo: *rp.Repo(repo_kind)) !void {
             // can't cherry-pick again with an unresolved cherry-pick
             {
-                var result_or_err = repo.cherryPick(.{ .new = ref.RefOrOid.initFromUser("foo") });
+                var result_or_err = repo.cherryPick(.{ .new = .{ .oid = &([_]u8{0} ** hash.SHA1_HEX_LEN) } });
                 if (result_or_err) |*result| {
                     defer result.deinit();
                     return error.ExpectedMergeToAbort;

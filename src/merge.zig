@@ -1241,6 +1241,11 @@ pub const Merge = struct {
 
         switch (merge_input) {
             .new => |ref_or_oid| {
+                // cherry-picking requires an oid
+                if (merge_kind == .cherry_pick and ref_or_oid != .oid) {
+                    return error.OidRequired;
+                }
+
                 // make sure there is no stored merge state
                 switch (repo_kind) {
                     .git => {
