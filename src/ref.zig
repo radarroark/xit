@@ -12,6 +12,33 @@ pub const Ref = struct {
         remote: []const u8,
     },
     name: []const u8,
+
+    pub fn initFromPath(ref_path: []const u8) ?Ref {
+        var split_iter = std.mem.splitScalar(u8, ref_path, '/');
+
+        const refs_str = split_iter.next() orelse return null;
+        if (!std.mem.eql(u8, "refs", refs_str)) return null;
+
+        const ref_kind = split_iter.next() orelse return null;
+        const ref_name = ref_path[refs_str.len + 1 + ref_kind.len + 1 ..];
+
+        if (std.mem.eql(u8, "heads", ref_kind)) {
+            return .{ .kind = .local, .name = ref_name };
+        } else if (std.mem.eql(u8, "remotes", ref_kind)) {
+            const remote_name = split_iter.next() orelse return null;
+            const remote_ref_name = ref_name[remote_name.len + 1 ..];
+            return .{ .kind = .{ .remote = remote_name }, .name = remote_ref_name };
+        } else {
+            return null;
+        }
+    }
+
+    pub fn toPath(self: Ref, buffer: []u8) ![]const u8 {
+        return switch (self.kind) {
+            .local => try std.fmt.bufPrint(buffer, "refs/heads/{s}", .{self.name}),
+            .remote => |remote| try std.fmt.bufPrint(buffer, "refs/remotes/{s}/{s}", .{ remote, self.name }),
+        };
+    }
 };
 
 pub const RefOrOid = union(enum) {
@@ -20,25 +47,13 @@ pub const RefOrOid = union(enum) {
 
     pub fn initFromDb(content: []const u8) ?RefOrOid {
         if (std.mem.startsWith(u8, content, REF_START_STR)) {
-            return initFromPath(content[REF_START_STR.len..]);
+            if (Ref.initFromPath(content[REF_START_STR.len..])) |ref| {
+                return .{ .ref = ref };
+            } else {
+                return null;
+            }
         } else if (content.len == hash.SHA1_HEX_LEN) {
             return .{ .oid = content[0..hash.SHA1_HEX_LEN] };
-        } else {
-            return null;
-        }
-    }
-
-    pub fn initFromPath(ref_path: []const u8) ?RefOrOid {
-        const parsed_ref_path = parseRefPath(ref_path) orelse return null;
-        if (std.mem.eql(u8, "heads", parsed_ref_path.dirs[1])) {
-            return .{ .ref = .{ .kind = .local, .name = parsed_ref_path.name } };
-        } else if (std.mem.eql(u8, "remotes", parsed_ref_path.dirs[1])) {
-            const ref_name = parsed_ref_path.name;
-            const slash_idx1 = std.mem.indexOfScalar(u8, ref_name, '/') orelse return null;
-            const slash_idx2 = std.mem.indexOfScalar(u8, ref_name[slash_idx1 + 1 ..], '/') orelse return null;
-            const remote_name = ref_name[0..slash_idx1];
-            const name = ref_name[slash_idx1 + 1 .. slash_idx1 + 1 + slash_idx2];
-            return .{ .ref = .{ .kind = .{ .remote = remote_name }, .name = name } };
         } else {
             return null;
         }
@@ -53,19 +68,6 @@ pub const RefOrOid = union(enum) {
     }
 };
 
-fn parseRefPath(ref_path: []const u8) ?struct { dirs: [2][]const u8, name: []const u8 } {
-    if (std.mem.startsWith(u8, ref_path, "refs/")) {
-        const slash_idx1 = std.mem.indexOfScalar(u8, ref_path, '/') orelse return null;
-        const slash_idx2 = std.mem.indexOfScalar(u8, ref_path[slash_idx1 + 1 ..], '/') orelse return null;
-        return .{
-            .dirs = .{ ref_path[0..slash_idx1], ref_path[slash_idx1 + 1 .. slash_idx1 + 1 + slash_idx2] },
-            .name = ref_path[slash_idx1 + 1 + slash_idx2 + 1 ..],
-        };
-    } else {
-        return null;
-    }
-}
-
 pub const LoadedRef = struct {
     allocator: std.mem.Allocator,
     path: []const u8,
@@ -79,7 +81,7 @@ pub const LoadedRef = struct {
             .allocator = allocator,
             .path = path,
             .name = name,
-            .oid_hex = try readRecur(repo_kind, state, RefOrOid.initFromPath(path) orelse return error.InvalidRefPath),
+            .oid_hex = try readRecur(repo_kind, state, .{ .ref = Ref.initFromPath(path) orelse return error.InvalidRefPath }),
         };
     }
 
@@ -89,8 +91,8 @@ pub const LoadedRef = struct {
         return .{
             .allocator = allocator,
             .path = path,
-            .name = (parseRefPath(path) orelse return error.InvalidRefPath).name,
-            .oid_hex = try readRecur(repo_kind, state, RefOrOid.initFromPath(path) orelse return error.InvalidRefPath),
+            .name = (Ref.initFromPath(path) orelse return error.InvalidRefPath).name,
+            .oid_hex = try readRecur(repo_kind, state, .{ .ref = Ref.initFromPath(path) orelse return error.InvalidRefPath }),
         };
     }
 
@@ -191,10 +193,7 @@ pub fn readRecur(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).Stat
     switch (input) {
         .ref => |ref| {
             var ref_path_buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
-            const ref_path = switch (ref.kind) {
-                .local => try std.fmt.bufPrint(&ref_path_buffer, "refs/heads/{s}", .{ref.name}),
-                .remote => |remote| try std.fmt.bufPrint(&ref_path_buffer, "refs/remotes/{s}/{s}", .{ remote, ref.name }),
-            };
+            const ref_path = try ref.toPath(&ref_path_buffer);
 
             var read_buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
             const content = read(repo_kind, state, ref_path, &read_buffer) catch |err| switch (err) {
@@ -227,15 +226,22 @@ pub fn read(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.re
             var map = state.extra.moment.*;
             var ref_name = ref_path;
 
-            if (parseRefPath(ref_path)) |parsed_ref_path| {
-                for (parsed_ref_path.dirs) |dir_name| {
-                    if (try map.getCursor(hash.hashBuffer(dir_name))) |cursor| {
-                        map = try rp.Repo(repo_kind).DB.HashMap(.read_only).init(cursor);
-                    } else {
-                        return error.RefNotFound;
-                    }
+            if (Ref.initFromPath(ref_path)) |ref| {
+                const refs_cursor = (try map.getCursor(hash.hashBuffer("refs"))) orelse return error.RefNotFound;
+                const refs = try rp.Repo(repo_kind).DB.HashMap(.read_only).init(refs_cursor);
+                switch (ref.kind) {
+                    .local => {
+                        const heads_cursor = (try refs.getCursor(hash.hashBuffer("heads"))) orelse return error.RefNotFound;
+                        map = try rp.Repo(repo_kind).DB.HashMap(.read_only).init(heads_cursor);
+                    },
+                    .remote => |remote| {
+                        const remotes_cursor = (try refs.getCursor(hash.hashBuffer("remotes"))) orelse return error.RefNotFound;
+                        const remotes = try rp.Repo(repo_kind).DB.HashMap(.read_only).init(remotes_cursor);
+                        const remote_cursor = (try remotes.getCursor(hash.hashBuffer(remote))) orelse return error.RefNotFound;
+                        map = try rp.Repo(repo_kind).DB.HashMap(.read_only).init(remote_cursor);
+                    },
                 }
-                ref_name = parsed_ref_path.name;
+                ref_name = ref.name;
             }
 
             const ref_cursor = (try map.getCursor(hash.hashBuffer(ref_name))) orelse return error.RefNotFound;
@@ -295,16 +301,25 @@ pub fn write(
             var map = state.extra.moment.*;
             var ref_name = ref_path;
 
-            if (parseRefPath(ref_path)) |parsed_ref_path| {
-                for (parsed_ref_path.dirs) |dir_name| {
-                    const cursor = try map.putCursor(hash.hashBuffer(dir_name));
-                    map = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(cursor);
+            if (Ref.initFromPath(ref_path)) |ref| {
+                const refs_cursor = try map.putCursor(hash.hashBuffer("refs"));
+                const refs = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(refs_cursor);
+                switch (ref.kind) {
+                    .local => {
+                        const heads_cursor = try refs.putCursor(hash.hashBuffer("heads"));
+                        map = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(heads_cursor);
+                    },
+                    .remote => |remote_name| {
+                        const remotes_cursor = try refs.putCursor(hash.hashBuffer("remotes"));
+                        const remotes = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(remotes_cursor);
+                        const remote_cursor = try remotes.putCursor(hash.hashBuffer(remote_name));
+                        map = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(remote_cursor);
+                    },
                 }
-                ref_name = parsed_ref_path.name;
+                ref_name = ref.name;
             }
 
             const ref_name_hash = hash.hashBuffer(ref_name);
-
             const ref_name_set_cursor = try state.extra.moment.putCursor(hash.hashBuffer("ref-name-set"));
             const ref_name_set = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(ref_name_set_cursor);
             var ref_name_cursor = try ref_name_set.putKeyCursor(ref_name_hash);
@@ -337,10 +352,7 @@ pub fn writeRecur(
         switch (input) {
             .ref => |ref| {
                 var ref_path_buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
-                const next_ref_path = switch (ref.kind) {
-                    .local => try std.fmt.bufPrint(&ref_path_buffer, "refs/heads/{s}", .{ref.name}),
-                    .remote => |remote| try std.fmt.bufPrint(&ref_path_buffer, "refs/remotes/{s}/{s}", .{ remote, ref.name }),
-                };
+                const next_ref_path = try ref.toPath(&ref_path_buffer);
                 try writeRecur(repo_kind, state, next_ref_path, oid_hex);
             },
             .oid => try write(repo_kind, state, ref_path, oid_hex),
