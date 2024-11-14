@@ -3,10 +3,8 @@
 //! pretty generic name. may as well call it thing.
 
 const std = @import("std");
-const builtin = @import("builtin");
 const hash = @import("./hash.zig");
 const compress = @import("./compress.zig");
-const cmd = @import("./command.zig");
 const idx = @import("./index.zig");
 const ref = @import("./ref.zig");
 const io = @import("./io.zig");
