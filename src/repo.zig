@@ -198,14 +198,10 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     errdefer git_dir.close();
 
                     // make a few dirs inside of .git
-                    var objects_dir = try git_dir.makeOpenPath("objects", .{});
-                    defer objects_dir.close();
-                    var objects_pack_dir = try objects_dir.makeOpenPath("pack", .{});
-                    defer objects_pack_dir.close();
-                    var refs_dir = try git_dir.makeOpenPath("refs", .{});
-                    defer refs_dir.close();
-                    var heads_dir = try refs_dir.makeOpenPath("heads", .{});
-                    defer heads_dir.close();
+                    try git_dir.makePath("objects");
+                    try git_dir.makePath("objects/pack");
+                    try git_dir.makePath("refs");
+                    try git_dir.makePath("refs/heads");
 
                     var self = Repo(repo_kind){
                         .allocator = allocator,
