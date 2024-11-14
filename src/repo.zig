@@ -450,18 +450,15 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                             var moment = try self.core.latestMoment();
                             const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
 
-                            var current_branch_maybe = try ref.LoadedRef.initWithPathRecur(repo_kind, state, self.allocator, "HEAD");
-                            defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
+                            const current_branch = try ref.readHeadName(repo_kind, state, self.allocator);
+                            defer self.allocator.free(current_branch);
 
                             var ref_list = try ref.RefList.init(repo_kind, state, self.allocator, "heads");
                             defer ref_list.deinit();
 
-                            for (ref_list.refs.items) |r| {
-                                const is_current_branch = if (current_branch_maybe) |current_branch|
-                                    std.mem.endsWith(u8, current_branch.name, r.path)
-                                else
-                                    false;
-                                try writers.out.print("{s} {s}\n", .{ if (is_current_branch) "*" else " ", r.name });
+                            for (ref_list.refs.items) |rf| {
+                                const prefix = if (std.mem.eql(u8, current_branch, rf.name)) "*" else " ";
+                                try writers.out.print("{s} {s}\n", .{ prefix, rf.name });
                             }
                         },
                         .add => try self.addBranch(branch_cmd.add),

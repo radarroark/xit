@@ -1075,9 +1075,9 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-        var current_branch_maybe = try ref.LoadedRef.initWithPathRecur(repo_kind, state, allocator, "HEAD");
-        defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
-        try std.testing.expectEqualStrings("stuff", current_branch_maybe.?.name);
+        const current_branch = try ref.readHeadName(repo_kind, state, allocator);
+        defer allocator.free(current_branch);
+        try std.testing.expectEqualStrings("stuff", current_branch);
     }
 
     // get the current branch with libgit
@@ -1154,8 +1154,8 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         try std.testing.expectEqual(3, ref_list.refs.items.len);
         var ref_map = std.StringHashMap(void).init(allocator);
         defer ref_map.deinit();
-        for (ref_list.refs.items) |r| {
-            try ref_map.put(r.name, {});
+        for (ref_list.refs.items) |rf| {
+            try ref_map.put(rf.name, {});
         }
         try std.testing.expect(ref_map.contains("a/b/c"));
         try std.testing.expect(ref_map.contains("stuff"));

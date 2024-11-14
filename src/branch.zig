@@ -126,12 +126,10 @@ pub fn remove(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.
             defer head_lock.deinit();
 
             // don't allow current branch to be deleted
-            var current_branch_maybe = try ref.LoadedRef.initWithPathRecur(repo_kind, state.readOnly(), allocator, "HEAD");
-            defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
-            if (current_branch_maybe) |current_branch| {
-                if (std.mem.eql(u8, current_branch.name, input.name)) {
-                    return error.CannotDeleteCurrentBranch;
-                }
+            const current_branch = try ref.readHeadName(repo_kind, state.readOnly(), allocator);
+            defer allocator.free(current_branch);
+            if (std.mem.eql(u8, current_branch, input.name)) {
+                return error.CannotDeleteCurrentBranch;
             }
 
             // delete file
@@ -155,12 +153,10 @@ pub fn remove(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.
         },
         .xit => {
             // don't allow current branch to be deleted
-            var current_branch_maybe = try ref.LoadedRef.initWithPathRecur(repo_kind, state.readOnly(), allocator, "HEAD");
-            defer if (current_branch_maybe) |*current_branch| current_branch.deinit();
-            if (current_branch_maybe) |current_branch| {
-                if (std.mem.eql(u8, current_branch.name, input.name)) {
-                    return error.CannotDeleteCurrentBranch;
-                }
+            const current_branch = try ref.readHeadName(repo_kind, state.readOnly(), allocator);
+            defer allocator.free(current_branch);
+            if (std.mem.eql(u8, current_branch, input.name)) {
+                return error.CannotDeleteCurrentBranch;
             }
 
             const name_hash = hash.hashBuffer(input.name);
