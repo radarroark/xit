@@ -241,13 +241,14 @@ pub const CommitMetadata = struct {
     author: ?[]const u8 = null,
     committer: ?[]const u8 = null,
     message: []const u8 = "",
+    parent_oids: ?[]const [hash.SHA1_HEX_LEN]u8 = null,
 };
 
 fn createCommitContents(
     allocator: std.mem.Allocator,
     tree_sha1_hex: *const [hash.SHA1_HEX_LEN]u8,
-    parent_oids: []const [hash.SHA1_HEX_LEN]u8,
     metadata: CommitMetadata,
+    parent_oids: []const [hash.SHA1_HEX_LEN]u8,
 ) ![]const u8 {
     var metadata_lines = std.ArrayList([]const u8).init(allocator);
     defer {
@@ -277,11 +278,10 @@ pub fn writeCommit(
     comptime repo_kind: rp.RepoKind,
     state: rp.Repo(repo_kind).State(.read_write),
     allocator: std.mem.Allocator,
-    parent_oids_maybe: ?[]const [hash.SHA1_HEX_LEN]u8,
     metadata: CommitMetadata,
 ) ![hash.SHA1_HEX_LEN]u8 {
     var commit_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-    const parent_oids = if (parent_oids_maybe) |oids| oids else blk: {
+    const parent_oids = if (metadata.parent_oids) |oids| oids else blk: {
         const head_oid_maybe = try ref.readHeadMaybe(repo_kind, state.readOnly());
         break :blk if (head_oid_maybe) |head_oid| &.{head_oid} else &.{};
     };
@@ -310,7 +310,7 @@ pub fn writeCommit(
     }
 
     // create commit contents
-    const commit_contents = try createCommitContents(allocator, &tree_sha1_hex, parent_oids, metadata);
+    const commit_contents = try createCommitContents(allocator, &tree_sha1_hex, metadata, parent_oids);
     defer allocator.free(commit_contents);
 
     // create commit header

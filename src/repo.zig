@@ -307,7 +307,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     try self.reset(reset_cmd.path);
                 },
                 .commit => |commit_cmd| {
-                    _ = try self.commit(null, commit_cmd);
+                    _ = try self.commit(commit_cmd);
                 },
                 .status => {
                     var stat = try self.status();
@@ -575,9 +575,9 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             }
         }
 
-        pub fn commit(self: *Repo(repo_kind), parent_oids_maybe: ?[]const [hash.SHA1_HEX_LEN]u8, metadata: obj.CommitMetadata) ![hash.SHA1_HEX_LEN]u8 {
+        pub fn commit(self: *Repo(repo_kind), metadata: obj.CommitMetadata) ![hash.SHA1_HEX_LEN]u8 {
             switch (repo_kind) {
-                .git => return try obj.writeCommit(repo_kind, .{ .core = &self.core, .extra = .{} }, self.allocator, parent_oids_maybe, metadata),
+                .git => return try obj.writeCommit(repo_kind, .{ .core = &self.core, .extra = .{} }, self.allocator, metadata),
                 .xit => {
                     const patch = @import("./patch.zig");
 
@@ -586,7 +586,6 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     const Ctx = struct {
                         core: *Repo(repo_kind).Core,
                         allocator: std.mem.Allocator,
-                        parent_oids_maybe: ?[]const [hash.SHA1_HEX_LEN]u8,
                         metadata: obj.CommitMetadata,
                         result: *[hash.SHA1_HEX_LEN]u8,
 
@@ -595,7 +594,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
                             var stat = try st.Status(.xit).init(ctx.allocator, state.readOnly());
                             defer stat.deinit();
-                            ctx.result.* = try obj.writeCommit(repo_kind, state, ctx.allocator, ctx.parent_oids_maybe, ctx.metadata);
+                            ctx.result.* = try obj.writeCommit(repo_kind, state, ctx.allocator, ctx.metadata);
                             try patch.writeAndApplyPatches(state, ctx.allocator, &stat, ctx.result);
                         }
                     };
@@ -603,7 +602,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
                     try history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
-                        Ctx{ .core = &self.core, .allocator = self.allocator, .parent_oids_maybe = parent_oids_maybe, .metadata = metadata, .result = &result },
+                        Ctx{ .core = &self.core, .allocator = self.allocator, .metadata = metadata, .result = &result },
                     );
 
                     return result;
