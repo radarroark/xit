@@ -81,7 +81,7 @@ pub const RefOrOid = union(enum) {
 };
 
 pub const RefList = struct {
-    refs: std.ArrayList(Ref),
+    refs: std.StringArrayHashMap(Ref),
     arena: *std.heap.ArenaAllocator,
     allocator: std.mem.Allocator,
 
@@ -89,7 +89,7 @@ pub const RefList = struct {
         const arena = try allocator.create(std.heap.ArenaAllocator);
         arena.* = std.heap.ArenaAllocator.init(allocator);
         var ref_list = RefList{
-            .refs = std.ArrayList(Ref).init(allocator),
+            .refs = std.StringArrayHashMap(Ref).init(allocator),
             .arena = arena,
             .allocator = allocator,
         };
@@ -116,7 +116,7 @@ pub const RefList = struct {
                     while (try iter.next()) |*next_cursor| {
                         const kv_pair = try next_cursor.readKeyValuePair();
                         const name = try kv_pair.key_cursor.readBytesAlloc(ref_list.arena.allocator(), MAX_REF_CONTENT_SIZE);
-                        try ref_list.refs.append(.{ .kind = .local, .name = name });
+                        try ref_list.refs.put(name, .{ .kind = .local, .name = name });
                     }
                 }
             },
@@ -142,7 +142,7 @@ pub const RefList = struct {
             switch (entry.kind) {
                 .file => {
                     const name = try io.joinPath(self.arena.allocator(), next_path.items);
-                    try self.refs.append(.{ .kind = .local, .name = name });
+                    try self.refs.put(name, .{ .kind = .local, .name = name });
                 },
                 .directory => {
                     var next_dir = try dir.openDir(entry.name, .{});

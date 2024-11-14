@@ -456,7 +456,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                             var ref_list = try ref.RefList.init(repo_kind, state, self.allocator, "heads");
                             defer ref_list.deinit();
 
-                            for (ref_list.refs.items) |rf| {
+                            for (ref_list.refs.values()) |rf| {
                                 const prefix = if (std.mem.eql(u8, current_branch, rf.name)) "*" else " ";
                                 try writers.out.print("{s} {s}\n", .{ prefix, rf.name });
                             }
