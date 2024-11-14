@@ -648,21 +648,18 @@ pub const PackObjectReader = struct {
             }
 
             // seek the base reader to the correct position
-            var position = switch (self.internal.delta.base_reader.internal) {
+            // TODO: can we avoid calling reset if position <= location.offset?
+            // i tried that already but the cache was
+            // getting messed up in rare cases for some reason.
+            // currently, position is always 0 because we're always resetting,
+            // but maybe in the future i can make it reset only when necessary.
+            try self.internal.delta.base_reader.reset();
+            const position = switch (self.internal.delta.base_reader.internal) {
                 .basic => self.internal.delta.base_reader.relative_position,
                 .delta => |delta| delta.real_position,
             };
-            if (position > location.offset) {
-                try self.internal.delta.base_reader.reset();
-                position = switch (self.internal.delta.base_reader.internal) {
-                    .basic => self.internal.delta.base_reader.relative_position,
-                    .delta => |delta| delta.real_position,
-                };
-            }
-            if (position < location.offset) {
-                const bytes_to_skip = location.offset - position;
-                try self.internal.delta.base_reader.skipBytes(bytes_to_skip);
-            }
+            const bytes_to_skip = location.offset - position;
+            try self.internal.delta.base_reader.skipBytes(bytes_to_skip);
 
             // read into the buffer and put it in the cache
             const buffer = try self.internal.delta.cache_arena.allocator().alloc(u8, location.size);
