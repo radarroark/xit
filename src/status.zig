@@ -122,10 +122,9 @@ pub fn Status(comptime repo_kind: rp.RepoKind) type {
                 }
             }
 
-            var iter = head_tree.entries.keyIterator();
-            while (iter.next()) |path| {
-                if (!index.entries.contains(path.*)) {
-                    try index_deleted.put(path.*, {});
+            for (head_tree.entries.keys()) |path| {
+                if (!index.entries.contains(path)) {
+                    try index_deleted.put(path, {});
                 }
             }
 
@@ -245,7 +244,7 @@ fn addEntries(
 
 pub fn HeadTree(comptime repo_kind: rp.RepoKind) type {
     return struct {
-        entries: std.StringHashMap(obj.TreeEntry),
+        entries: std.StringArrayHashMap(obj.TreeEntry),
         arena: *std.heap.ArenaAllocator,
         allocator: std.mem.Allocator,
 
@@ -253,7 +252,7 @@ pub fn HeadTree(comptime repo_kind: rp.RepoKind) type {
             const arena = try allocator.create(std.heap.ArenaAllocator);
             arena.* = std.heap.ArenaAllocator.init(allocator);
             var tree = HeadTree(repo_kind){
-                .entries = std.StringHashMap(obj.TreeEntry).init(allocator),
+                .entries = std.StringArrayHashMap(obj.TreeEntry).init(allocator),
                 .arena = arena,
                 .allocator = allocator,
             };
@@ -281,15 +280,13 @@ pub fn HeadTree(comptime repo_kind: rp.RepoKind) type {
             switch (object.content) {
                 .blob => {},
                 .tree => |tree| {
-                    var iter = tree.entries.iterator();
-                    while (iter.next()) |entry| {
-                        const name = entry.key_ptr.*;
+                    for (tree.entries.keys(), tree.entries.values()) |name, tree_entry| {
                         const path = try io.joinPath(self.arena.allocator(), &.{ prefix, name });
-                        if (obj.isTree(entry.value_ptr.*)) {
-                            const oid_hex = std.fmt.bytesToHex(entry.value_ptr.*.oid[0..hash.SHA1_BYTES_LEN], .lower);
+                        if (obj.isTree(tree_entry)) {
+                            const oid_hex = std.fmt.bytesToHex(tree_entry.oid, .lower);
                             try self.read(state, path, &oid_hex);
                         } else {
-                            try self.entries.put(path, entry.value_ptr.*);
+                            try self.entries.put(path, tree_entry);
                         }
                     }
                 },
