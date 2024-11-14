@@ -112,7 +112,7 @@ pub fn main() !void {
             }
 
             try xit_repo.add(&.{ "build.zig", "build.zig.zon", "src" });
-            _ = try xit_repo.commit(null, commit_object.content.commit.metadata);
+            _ = try xit_repo.commit(commit_object.content.commit.metadata);
         }
 
         // make changes so we see things in the status UI

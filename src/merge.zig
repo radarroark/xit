@@ -1364,7 +1364,7 @@ pub const Merge = struct {
                 }
 
                 // create commit message
-                const commit_metadata: obj.CommitMetadata = switch (merge_kind) {
+                var commit_metadata: obj.CommitMetadata = switch (merge_kind) {
                     .merge => .{
                         .message = try std.fmt.allocPrint(arena.allocator(), "merge from {s}", .{source_name}),
                     },
@@ -1500,11 +1500,11 @@ pub const Merge = struct {
                 }
 
                 // commit the change
-                const parent_oids = switch (merge_kind) {
+                commit_metadata.parent_oids = switch (merge_kind) {
                     .merge => &.{ target_oid, source_oid },
                     .cherry_pick => &.{base_oid},
                 };
-                const commit_oid = try obj.writeCommit(repo_kind, state, allocator, parent_oids, commit_metadata);
+                const commit_oid = try obj.writeCommit(repo_kind, state, allocator, commit_metadata);
 
                 return .{
                     .arena = arena,
@@ -1593,11 +1593,11 @@ pub const Merge = struct {
                 }
 
                 // commit the change
-                const parent_oids = switch (merge_kind) {
+                commit_metadata.parent_oids = switch (merge_kind) {
                     .merge => &.{ target_oid, source_oid },
                     .cherry_pick => &.{base_oid},
                 };
-                const commit_oid = try obj.writeCommit(repo_kind, state, allocator, parent_oids, commit_metadata);
+                const commit_oid = try obj.writeCommit(repo_kind, state, allocator, commit_metadata);
 
                 // clean up the stored merge state
                 switch (repo_kind) {

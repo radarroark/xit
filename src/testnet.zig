@@ -43,7 +43,7 @@ fn testPull(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator) !void
     defer file.close();
     try file.writeAll("hello, world!");
     try server_repo.add(&.{"server/hello.txt"});
-    _ = try server_repo.commit(null, .{ .message = "let there be light" });
+    _ = try server_repo.commit(.{ .message = "let there be light" });
 
     // start server
     try process.spawn();

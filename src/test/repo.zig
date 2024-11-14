@@ -52,17 +52,17 @@ fn testSimple(comptime repo_kind: rp.RepoKind) !void {
     defer repo.deinit();
 
     try addFile(repo_kind, &repo, "README.md", "Hello, world!");
-    const commit_a = try repo.commit(null, .{ .message = "a" });
+    const commit_a = try repo.commit(.{ .message = "a" });
     try addFile(repo_kind, &repo, "README.md", "Goodbye, world!");
-    const commit_b = try repo.commit(null, .{ .message = "b" });
+    const commit_b = try repo.commit(.{ .message = "b" });
     try removeFile(repo_kind, &repo, "README.md");
-    const commit_c = try repo.commit(null, .{ .message = "c" });
+    const commit_c = try repo.commit(.{ .message = "c" });
 
     // can't add path that is outside repo
     try std.testing.expectError(error.PathIsOutsideRepo, repo.add(&.{"../README.md"}));
 
     // commits that haven't changed content are an error
-    try std.testing.expectError(error.EmptyCommit, repo.commit(null, .{ .message = "d" }));
+    try std.testing.expectError(error.EmptyCommit, repo.commit(.{ .message = "d" }));
 
     // put oids in a set
     var oid_set = std.StringArrayHashMap(void).init(allocator);
@@ -122,39 +122,39 @@ fn testMerge(comptime repo_kind: rp.RepoKind) !void {
     //             G --- H [bar]
 
     try addFile(repo_kind, &repo, "master.md", "a");
-    _ = try repo.commit(null, .{ .message = "a" });
+    _ = try repo.commit(.{ .message = "a" });
     try addFile(repo_kind, &repo, "master.md", "b");
-    _ = try repo.commit(null, .{ .message = "b" });
+    _ = try repo.commit(.{ .message = "b" });
     try repo.addBranch(.{ .name = "foo" });
     {
         var result = try repo.switchHead("foo", .{ .force = false });
         defer result.deinit();
     }
     try addFile(repo_kind, &repo, "foo.md", "d");
-    const commit_d = try repo.commit(null, .{ .message = "d" });
+    const commit_d = try repo.commit(.{ .message = "d" });
     try repo.addBranch(.{ .name = "bar" });
     {
         var result = try repo.switchHead("bar", .{ .force = false });
         defer result.deinit();
     }
     try addFile(repo_kind, &repo, "bar.md", "g");
-    _ = try repo.commit(null, .{ .message = "g" });
+    _ = try repo.commit(.{ .message = "g" });
     try addFile(repo_kind, &repo, "bar.md", "h");
-    const commit_h = try repo.commit(null, .{ .message = "h" });
+    const commit_h = try repo.commit(.{ .message = "h" });
     {
         var result = try repo.switchHead("master", .{ .force = false });
         defer result.deinit();
     }
     try addFile(repo_kind, &repo, "master.md", "c");
-    _ = try repo.commit(null, .{ .message = "c" });
+    _ = try repo.commit(.{ .message = "c" });
     {
         var result = try repo.switchHead("foo", .{ .force = false });
         defer result.deinit();
     }
     try addFile(repo_kind, &repo, "foo.md", "e");
-    _ = try repo.commit(null, .{ .message = "e" });
+    _ = try repo.commit(.{ .message = "e" });
     try addFile(repo_kind, &repo, "foo.md", "f");
-    _ = try repo.commit(null, .{ .message = "f" });
+    _ = try repo.commit(.{ .message = "f" });
     {
         var result = try repo.switchHead("master", .{ .force = false });
         defer result.deinit();
@@ -166,7 +166,7 @@ fn testMerge(comptime repo_kind: rp.RepoKind) !void {
         break :blk result.data.success.oid;
     };
     try addFile(repo_kind, &repo, "master.md", "k");
-    const commit_k = try repo.commit(null, .{ .message = "k" });
+    const commit_k = try repo.commit(.{ .message = "k" });
 
     var moment = try repo.core.latestMoment();
     const state = rp.Repo(repo_kind).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
@@ -279,14 +279,14 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             \\b
             \\c
         );
-        _ = try repo.commit(null, .{ .message = "a" });
+        _ = try repo.commit(.{ .message = "a" });
         try repo.addBranch(.{ .name = "foo" });
         try addFile(repo_kind, &repo, "f.txt",
             \\a
             \\x
             \\c
         );
-        _ = try repo.commit(null, .{ .message = "b" });
+        _ = try repo.commit(.{ .message = "b" });
         {
             var result = try repo.switchHead("foo", .{ .force = false });
             defer result.deinit();
@@ -296,7 +296,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             \\y
             \\c
         );
-        _ = try repo.commit(null, .{ .message = "c" });
+        _ = try repo.commit(.{ .message = "c" });
         {
             var result = try repo.switchHead("master", .{ .force = false });
             defer result.deinit();
@@ -389,14 +389,14 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             \\b
             \\c
         );
-        _ = try repo.commit(null, .{ .message = "a" });
+        _ = try repo.commit(.{ .message = "a" });
         try repo.addBranch(.{ .name = "foo" });
         try addFile(repo_kind, &repo, "f.txt",
             \\x
             \\b
             \\c
         );
-        _ = try repo.commit(null, .{ .message = "b" });
+        _ = try repo.commit(.{ .message = "b" });
         {
             var result = try repo.switchHead("foo", .{ .force = false });
             defer result.deinit();
@@ -406,7 +406,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
             \\b
             \\y
         );
-        _ = try repo.commit(null, .{ .message = "c" });
+        _ = try repo.commit(.{ .message = "c" });
         {
             var result = try repo.switchHead("master", .{ .force = false });
             defer result.deinit();
@@ -473,16 +473,16 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         //    `---- C [foo]
 
         try addFile(repo_kind, &repo, "f.txt", "1");
-        _ = try repo.commit(null, .{ .message = "a" });
+        _ = try repo.commit(.{ .message = "a" });
         try repo.addBranch(.{ .name = "foo" });
         try addFile(repo_kind, &repo, "f.txt", "2");
-        _ = try repo.commit(null, .{ .message = "b" });
+        _ = try repo.commit(.{ .message = "b" });
         {
             var result = try repo.switchHead("foo", .{ .force = false });
             defer result.deinit();
         }
         try removeFile(repo_kind, &repo, "f.txt");
-        _ = try repo.commit(null, .{ .message = "c" });
+        _ = try repo.commit(.{ .message = "c" });
         {
             var result = try repo.switchHead("master", .{ .force = false });
             defer result.deinit();
@@ -549,16 +549,16 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         //    `---- C [foo]
 
         try addFile(repo_kind, &repo, "f.txt", "1");
-        _ = try repo.commit(null, .{ .message = "a" });
+        _ = try repo.commit(.{ .message = "a" });
         try repo.addBranch(.{ .name = "foo" });
         try removeFile(repo_kind, &repo, "f.txt");
-        _ = try repo.commit(null, .{ .message = "b" });
+        _ = try repo.commit(.{ .message = "b" });
         {
             var result = try repo.switchHead("foo", .{ .force = false });
             defer result.deinit();
         }
         try addFile(repo_kind, &repo, "f.txt", "2");
-        _ = try repo.commit(null, .{ .message = "c" });
+        _ = try repo.commit(.{ .message = "c" });
         {
             var result = try repo.switchHead("master", .{ .force = false });
             defer result.deinit();
@@ -623,16 +623,16 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         //    `---- C [foo]
 
         try addFile(repo_kind, &repo, "hi.txt", "hi");
-        _ = try repo.commit(null, .{ .message = "a" });
+        _ = try repo.commit(.{ .message = "a" });
         try repo.addBranch(.{ .name = "foo" });
         try addFile(repo_kind, &repo, "f.txt", "hi");
-        _ = try repo.commit(null, .{ .message = "b" });
+        _ = try repo.commit(.{ .message = "b" });
         {
             var result = try repo.switchHead("foo", .{ .force = false });
             defer result.deinit();
         }
         try addFile(repo_kind, &repo, "f.txt/g.txt", "hi");
-        _ = try repo.commit(null, .{ .message = "c" });
+        _ = try repo.commit(.{ .message = "c" });
         {
             var result = try repo.switchHead("master", .{ .force = false });
             defer result.deinit();
@@ -703,16 +703,16 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
         //    `---- C [foo]
 
         try addFile(repo_kind, &repo, "hi.txt", "hi");
-        _ = try repo.commit(null, .{ .message = "a" });
+        _ = try repo.commit(.{ .message = "a" });
         try repo.addBranch(.{ .name = "foo" });
         try addFile(repo_kind, &repo, "f.txt/g.txt", "hi");
-        _ = try repo.commit(null, .{ .message = "b" });
+        _ = try repo.commit(.{ .message = "b" });
         {
             var result = try repo.switchHead("foo", .{ .force = false });
             defer result.deinit();
         }
         try addFile(repo_kind, &repo, "f.txt", "hi");
-        _ = try repo.commit(null, .{ .message = "c" });
+        _ = try repo.commit(.{ .message = "c" });
         {
             var result = try repo.switchHead("master", .{ .force = false });
             defer result.deinit();
@@ -811,7 +811,7 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind) !void {
     }
 
     try addFile(repo_kind, &repo, "bin", &bin);
-    _ = try repo.commit(null, .{ .message = "a" });
+    _ = try repo.commit(.{ .message = "a" });
 
     try repo.addBranch(.{ .name = "foo" });
 
@@ -823,7 +823,7 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind) !void {
     bin[0] = 1;
 
     try addFile(repo_kind, &repo, "bin", &bin);
-    _ = try repo.commit(null, .{ .message = "c" });
+    _ = try repo.commit(.{ .message = "c" });
 
     {
         var result = try repo.switchHead("master", .{ .force = false });
@@ -833,7 +833,7 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind) !void {
     bin[0] = 2;
 
     try addFile(repo_kind, &repo, "bin", &bin);
-    _ = try repo.commit(null, .{ .message = "b" });
+    _ = try repo.commit(.{ .message = "b" });
 
     {
         var result = try repo.merge(.{ .new = ref.RefOrOid.initFromUser("foo") });
@@ -942,14 +942,14 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind) !void {
             \\a
             \\b
         );
-        _ = try repo.commit(null, .{ .message = "a" });
+        _ = try repo.commit(.{ .message = "a" });
         try repo.addBranch(.{ .name = "foo" });
         try addFile(repo_kind, &repo, "f.txt",
             \\g
             \\a
             \\b
         );
-        _ = try repo.commit(null, .{ .message = "b" });
+        _ = try repo.commit(.{ .message = "b" });
         try addFile(repo_kind, &repo, "f.txt",
             \\a
             \\b
@@ -957,7 +957,7 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind) !void {
             \\a
             \\b
         );
-        _ = try repo.commit(null, .{ .message = "c" });
+        _ = try repo.commit(.{ .message = "c" });
         {
             var result = try repo.switchHead("foo", .{ .force = false });
             defer result.deinit();
@@ -967,7 +967,7 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind) !void {
             \\x
             \\b
         );
-        _ = try repo.commit(null, .{ .message = "d" });
+        _ = try repo.commit(.{ .message = "d" });
         {
             var result = try repo.switchHead("master", .{ .force = false });
             defer result.deinit();
@@ -1058,7 +1058,7 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind) !void {
             \\  return y;
             \\}
         );
-        _ = try repo.commit(null, .{ .message = "a" });
+        _ = try repo.commit(.{ .message = "a" });
         try repo.addBranch(.{ .name = "foo" });
         try addFile(repo_kind, &repo, "f.txt",
             \\int very_slow_square(int x) {
@@ -1079,7 +1079,7 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind) !void {
             \\  return y;
             \\}
         );
-        _ = try repo.commit(null, .{ .message = "b" });
+        _ = try repo.commit(.{ .message = "b" });
         try addFile(repo_kind, &repo, "f.txt",
             \\int square(int x) {
             \\  int y = x;
@@ -1106,7 +1106,7 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind) !void {
             \\  return y;
             \\}
         );
-        _ = try repo.commit(null, .{ .message = "c" });
+        _ = try repo.commit(.{ .message = "c" });
         {
             var result = try repo.switchHead("foo", .{ .force = false });
             defer result.deinit();
@@ -1120,7 +1120,7 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind) !void {
             \\  return y;
             \\}
         );
-        _ = try repo.commit(null, .{ .message = "d" });
+        _ = try repo.commit(.{ .message = "d" });
         {
             var result = try repo.switchHead("master", .{ .force = false });
             defer result.deinit();
@@ -1247,9 +1247,9 @@ fn testCherryPick(comptime repo_kind: rp.RepoKind) !void {
     //          C --- D --- E [foo]
 
     try addFile(repo_kind, &repo, "readme.md", "a");
-    _ = try repo.commit(null, .{ .message = "a" });
+    _ = try repo.commit(.{ .message = "a" });
     try addFile(repo_kind, &repo, "readme.md", "b");
-    _ = try repo.commit(null, .{ .message = "b" });
+    _ = try repo.commit(.{ .message = "b" });
     try repo.addBranch(.{ .name = "foo" });
     {
         var result = try repo.switchHead("foo", .{ .force = false });
@@ -1259,11 +1259,11 @@ fn testCherryPick(comptime repo_kind: rp.RepoKind) !void {
     // and it is modifying a different file, so it shouldn't
     // cause a conflict.
     try addFile(repo_kind, &repo, "stuff.md", "c");
-    _ = try repo.commit(null, .{ .message = "c" });
+    _ = try repo.commit(.{ .message = "c" });
     try addFile(repo_kind, &repo, "readme.md", "d");
-    const commit_d = try repo.commit(null, .{ .message = "d" });
+    const commit_d = try repo.commit(.{ .message = "d" });
     try addFile(repo_kind, &repo, "readme.md", "e");
-    _ = try repo.commit(null, .{ .message = "e" });
+    _ = try repo.commit(.{ .message = "e" });
     {
         var result = try repo.switchHead("master", .{ .force = false });
         defer result.deinit();
@@ -1355,20 +1355,20 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind) !void {
     //          D --------- E [foo]
 
     try addFile(repo_kind, &repo, "readme.md", "a");
-    _ = try repo.commit(null, .{ .message = "a" });
+    _ = try repo.commit(.{ .message = "a" });
     try addFile(repo_kind, &repo, "readme.md", "b");
-    _ = try repo.commit(null, .{ .message = "b" });
+    _ = try repo.commit(.{ .message = "b" });
     try repo.addBranch(.{ .name = "foo" });
     {
         var result = try repo.switchHead("foo", .{ .force = false });
         defer result.deinit();
     }
     try addFile(repo_kind, &repo, "readme.md", "c");
-    _ = try repo.commit(null, .{ .message = "c" });
+    _ = try repo.commit(.{ .message = "c" });
     try addFile(repo_kind, &repo, "readme.md", "d");
-    const commit_d = try repo.commit(null, .{ .message = "d" });
+    const commit_d = try repo.commit(.{ .message = "d" });
     try addFile(repo_kind, &repo, "readme.md", "e");
-    _ = try repo.commit(null, .{ .message = "e" });
+    _ = try repo.commit(.{ .message = "e" });
     {
         var result = try repo.switchHead("master", .{ .force = false });
         defer result.deinit();
@@ -1464,30 +1464,30 @@ fn testLog(comptime repo_kind: rp.RepoKind) !void {
     //          D --- E --- F [foo]
 
     try addFile(repo_kind, &repo, "master.md", "a");
-    const commit_a = try repo.commit(null, .{ .message = "a" });
+    const commit_a = try repo.commit(.{ .message = "a" });
     try addFile(repo_kind, &repo, "master.md", "b");
-    const commit_b = try repo.commit(null, .{ .message = "b" });
+    const commit_b = try repo.commit(.{ .message = "b" });
     try repo.addBranch(.{ .name = "foo" });
     {
         var result = try repo.switchHead("foo", .{ .force = false });
         defer result.deinit();
     }
     try addFile(repo_kind, &repo, "foo.md", "d");
-    const commit_d = try repo.commit(null, .{ .message = "d" });
+    const commit_d = try repo.commit(.{ .message = "d" });
     {
         var result = try repo.switchHead("master", .{ .force = false });
         defer result.deinit();
     }
     try addFile(repo_kind, &repo, "master.md", "c");
-    const commit_c = try repo.commit(null, .{ .message = "c" });
+    const commit_c = try repo.commit(.{ .message = "c" });
     {
         var result = try repo.switchHead("foo", .{ .force = false });
         defer result.deinit();
     }
     try addFile(repo_kind, &repo, "foo.md", "e");
-    const commit_e = try repo.commit(null, .{ .message = "e" });
+    const commit_e = try repo.commit(.{ .message = "e" });
     try addFile(repo_kind, &repo, "foo.md", "f");
-    const commit_f = try repo.commit(null, .{ .message = "f" });
+    const commit_f = try repo.commit(.{ .message = "f" });
     {
         var result = try repo.switchHead("master", .{ .force = false });
         defer result.deinit();
@@ -1499,7 +1499,7 @@ fn testLog(comptime repo_kind: rp.RepoKind) !void {
         break :blk result.data.success.oid;
     };
     try addFile(repo_kind, &repo, "master.md", "h");
-    const commit_h = try repo.commit(null, .{ .message = "h" });
+    const commit_h = try repo.commit(.{ .message = "h" });
 
     // put oids in a set
     var oid_set = std.StringArrayHashMap(void).init(allocator);
