@@ -633,6 +633,10 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime load_kind: ObjectLoadKin
         pub fn init(allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State(.read_only), oid: *const [hash.SHA1_HEX_LEN]u8) !Object(repo_kind, load_kind) {
             var obj_rdr = try ObjectReader(repo_kind).init(allocator, state, oid);
             errdefer obj_rdr.deinit();
+
+            // to turn off the buffered reader, just replace the
+            // following line with:
+            //var reader = obj_rdr.reader.unbuffered_reader;
             const reader = obj_rdr.reader.reader();
 
             const arena = try allocator.create(std.heap.ArenaAllocator);
