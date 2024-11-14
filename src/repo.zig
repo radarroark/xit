@@ -447,13 +447,10 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                 .branch => |branch_cmd| {
                     switch (branch_cmd) {
                         .list => {
-                            var moment = try self.core.latestMoment();
-                            const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
-
-                            const current_branch = try ref.readHeadName(repo_kind, state, self.allocator);
+                            const current_branch = try self.currentBranch(self.allocator);
                             defer self.allocator.free(current_branch);
 
-                            var ref_list = try ref.RefList.init(repo_kind, state, self.allocator, "heads");
+                            var ref_list = try self.listBranches();
                             defer ref_list.deinit();
 
                             for (ref_list.refs.values()) |rf| {
@@ -879,6 +876,18 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             errdefer tree_diff.deinit();
             try tree_diff.compare(state, old_oid_maybe, new_oid_maybe, null);
             return tree_diff;
+        }
+
+        pub fn currentBranch(self: *Repo(repo_kind), allocator: std.mem.Allocator) ![]const u8 {
+            var moment = try self.core.latestMoment();
+            const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
+            return try ref.readHeadName(repo_kind, state, allocator);
+        }
+
+        pub fn listBranches(self: *Repo(repo_kind)) !ref.RefList {
+            var moment = try self.core.latestMoment();
+            const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
+            return try ref.RefList.init(repo_kind, state, self.allocator, "heads");
         }
 
         pub fn addBranch(self: *Repo(repo_kind), input: bch.AddBranchInput) !void {

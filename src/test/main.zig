@@ -1062,9 +1062,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
-        var moment = try repo.core.latestMoment();
-        const state = rp.Repo(repo_kind).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-        var ref_list = try ref.RefList.init(repo_kind, state, allocator, "heads");
+        var ref_list = try repo.listBranches();
         defer ref_list.deinit();
         try std.testing.expectEqual(2, ref_list.refs.count());
     }
@@ -1073,9 +1071,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
-        var moment = try repo.core.latestMoment();
-        const state = rp.Repo(repo_kind).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-        const current_branch = try ref.readHeadName(repo_kind, state, allocator);
+        const current_branch = try repo.currentBranch(allocator);
         defer allocator.free(current_branch);
         try std.testing.expectEqualStrings("stuff", current_branch);
     }
@@ -1147,9 +1143,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
-        var moment = try repo.core.latestMoment();
-        const state = rp.Repo(repo_kind).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-        var ref_list = try ref.RefList.init(repo_kind, state, allocator, "heads");
+        var ref_list = try repo.listBranches();
         defer ref_list.deinit();
         try std.testing.expectEqual(3, ref_list.refs.count());
         try std.testing.expect(ref_list.refs.contains("a/b/c"));
