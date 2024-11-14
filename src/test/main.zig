@@ -1066,7 +1066,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         const state = rp.Repo(repo_kind).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
         var ref_list = try ref.RefList.init(repo_kind, state, allocator, "heads");
         defer ref_list.deinit();
-        try std.testing.expectEqual(2, ref_list.refs.items.len);
+        try std.testing.expectEqual(2, ref_list.refs.count());
     }
 
     // get the current branch
@@ -1151,15 +1151,10 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         const state = rp.Repo(repo_kind).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
         var ref_list = try ref.RefList.init(repo_kind, state, allocator, "heads");
         defer ref_list.deinit();
-        try std.testing.expectEqual(3, ref_list.refs.items.len);
-        var ref_map = std.StringHashMap(void).init(allocator);
-        defer ref_map.deinit();
-        for (ref_list.refs.items) |rf| {
-            try ref_map.put(rf.name, {});
-        }
-        try std.testing.expect(ref_map.contains("a/b/c"));
-        try std.testing.expect(ref_map.contains("stuff"));
-        try std.testing.expect(ref_map.contains("master"));
+        try std.testing.expectEqual(3, ref_list.refs.count());
+        try std.testing.expect(ref_list.refs.contains("a/b/c"));
+        try std.testing.expect(ref_list.refs.contains("stuff"));
+        try std.testing.expect(ref_list.refs.contains("master"));
     }
 
     // remove the branch
