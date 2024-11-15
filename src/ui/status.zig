@@ -506,15 +506,18 @@ pub fn StatusContent(comptime Widget: type, comptime repo_kind: rp.RepoKind) typ
                 var diff = &self.box.children.values()[1].widget.ui_diff;
                 try diff.clearDiffs();
 
-                var line_iter_pair = self.repo.filePair(status_item.path, status_item.kind, self.status) catch |err| switch (err) {
+                const line_iter_pair = self.repo.filePairAlloc(diff.iter_arena.allocator(), status_item.path, status_item.kind, self.status) catch |err| switch (err) {
                     error.IsDir => return,
                     else => return err,
                 };
-                defer line_iter_pair.deinit();
 
-                var hunk_iter = try df.HunkIterator(repo_kind).init(self.allocator, &line_iter_pair.a, &line_iter_pair.b);
-                defer hunk_iter.deinit();
-                try diff.addHunks(&hunk_iter);
+                const line_iter_a = try diff.iter_arena.allocator().create(df.LineIterator(repo_kind));
+                line_iter_a.* = line_iter_pair.a;
+
+                const line_iter_b = try diff.iter_arena.allocator().create(df.LineIterator(repo_kind));
+                line_iter_b.* = line_iter_pair.b;
+
+                diff.hunk_iter = try df.HunkIterator(repo_kind).init(diff.iter_arena.allocator(), line_iter_a, line_iter_b);
             }
         }
     };
