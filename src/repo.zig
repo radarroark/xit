@@ -792,31 +792,35 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
         }
 
         pub fn filePair(self: *Repo(repo_kind), path: []const u8, status_kind: st.StatusKind, stat: *st.Status(repo_kind)) !df.LineIteratorPair(repo_kind) {
+            return try self.filePairAlloc(self.allocator, path, status_kind, stat);
+        }
+
+        pub fn filePairAlloc(self: *Repo(repo_kind), allocator: std.mem.Allocator, path: []const u8, status_kind: st.StatusKind, stat: *st.Status(repo_kind)) !df.LineIteratorPair(repo_kind) {
             var moment = try self.core.latestMoment();
             const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
             switch (status_kind) {
                 .added => |added| {
                     switch (added) {
                         .created => {
-                            var a = try df.LineIterator(repo_kind).initFromNothing(self.allocator, path);
+                            var a = try df.LineIterator(repo_kind).initFromNothing(allocator, path);
                             errdefer a.deinit();
                             const index_entries_for_path = stat.index.entries.get(path) orelse return error.EntryNotFound;
-                            var b = try df.LineIterator(repo_kind).initFromIndex(state, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
+                            var b = try df.LineIterator(repo_kind).initFromIndex(state, allocator, index_entries_for_path[0] orelse return error.NullEntry);
                             errdefer b.deinit();
                             return .{ .path = path, .a = a, .b = b };
                         },
                         .modified => {
-                            var a = try df.LineIterator(repo_kind).initFromHead(state, self.allocator, path, stat.head_tree.entries.get(path) orelse return error.EntryNotFound);
+                            var a = try df.LineIterator(repo_kind).initFromHead(state, allocator, path, stat.head_tree.entries.get(path) orelse return error.EntryNotFound);
                             errdefer a.deinit();
                             const index_entries_for_path = stat.index.entries.get(path) orelse return error.EntryNotFound;
-                            var b = try df.LineIterator(repo_kind).initFromIndex(state, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
+                            var b = try df.LineIterator(repo_kind).initFromIndex(state, allocator, index_entries_for_path[0] orelse return error.NullEntry);
                             errdefer b.deinit();
                             return .{ .path = path, .a = a, .b = b };
                         },
                         .deleted => {
-                            var a = try df.LineIterator(repo_kind).initFromHead(state, self.allocator, path, stat.head_tree.entries.get(path) orelse return error.EntryNotFound);
+                            var a = try df.LineIterator(repo_kind).initFromHead(state, allocator, path, stat.head_tree.entries.get(path) orelse return error.EntryNotFound);
                             errdefer a.deinit();
-                            var b = try df.LineIterator(repo_kind).initFromNothing(self.allocator, path);
+                            var b = try df.LineIterator(repo_kind).initFromNothing(allocator, path);
                             errdefer b.deinit();
                             return .{ .path = path, .a = a, .b = b };
                         },
@@ -829,17 +833,17 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                             const mode = io.getMode(meta);
 
                             const index_entries_for_path = stat.index.entries.get(path) orelse return error.EntryNotFound;
-                            var a = try df.LineIterator(repo_kind).initFromIndex(state, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
+                            var a = try df.LineIterator(repo_kind).initFromIndex(state, allocator, index_entries_for_path[0] orelse return error.NullEntry);
                             errdefer a.deinit();
-                            var b = try df.LineIterator(repo_kind).initFromWorkspace(state, self.allocator, path, mode);
+                            var b = try df.LineIterator(repo_kind).initFromWorkspace(state, allocator, path, mode);
                             errdefer b.deinit();
                             return .{ .path = path, .a = a, .b = b };
                         },
                         .deleted => {
                             const index_entries_for_path = stat.index.entries.get(path) orelse return error.EntryNotFound;
-                            var a = try df.LineIterator(repo_kind).initFromIndex(state, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
+                            var a = try df.LineIterator(repo_kind).initFromIndex(state, allocator, index_entries_for_path[0] orelse return error.NullEntry);
                             errdefer a.deinit();
-                            var b = try df.LineIterator(repo_kind).initFromNothing(self.allocator, path);
+                            var b = try df.LineIterator(repo_kind).initFromNothing(allocator, path);
                             errdefer b.deinit();
                             return .{ .path = path, .a = a, .b = b };
                         },
@@ -849,9 +853,9 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     const meta = try io.getMetadata(self.core.repo_dir, path);
                     const mode = io.getMode(meta);
 
-                    var a = try df.LineIterator(repo_kind).initFromNothing(self.allocator, path);
+                    var a = try df.LineIterator(repo_kind).initFromNothing(allocator, path);
                     errdefer a.deinit();
-                    var b = try df.LineIterator(repo_kind).initFromWorkspace(state, self.allocator, path, mode);
+                    var b = try df.LineIterator(repo_kind).initFromWorkspace(state, allocator, path, mode);
                     errdefer b.deinit();
                     return .{ .path = path, .a = a, .b = b };
                 },
@@ -859,15 +863,23 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
         }
 
         pub fn filePairs(self: *Repo(repo_kind), diff_opts: df.DiffOptions(repo_kind)) !df.FileIterator(repo_kind) {
+            return try self.filePairsAlloc(self.allocator, diff_opts);
+        }
+
+        pub fn filePairsAlloc(self: *Repo(repo_kind), allocator: std.mem.Allocator, diff_opts: df.DiffOptions(repo_kind)) !df.FileIterator(repo_kind) {
             var moment = try self.core.latestMoment();
             const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
-            return try df.FileIterator(repo_kind).init(self.allocator, state, diff_opts);
+            return try df.FileIterator(repo_kind).init(allocator, state, diff_opts);
         }
 
         pub fn treeDiff(self: *Repo(repo_kind), old_oid_maybe: ?[hash.SHA1_HEX_LEN]u8, new_oid_maybe: ?[hash.SHA1_HEX_LEN]u8) !obj.TreeDiff(repo_kind) {
+            return try self.treeDiffAlloc(self.allocator, old_oid_maybe, new_oid_maybe);
+        }
+
+        pub fn treeDiffAlloc(self: *Repo(repo_kind), allocator: std.mem.Allocator, old_oid_maybe: ?[hash.SHA1_HEX_LEN]u8, new_oid_maybe: ?[hash.SHA1_HEX_LEN]u8) !obj.TreeDiff(repo_kind) {
             var moment = try self.core.latestMoment();
             const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
-            var tree_diff = obj.TreeDiff(repo_kind).init(self.allocator);
+            var tree_diff = obj.TreeDiff(repo_kind).init(allocator);
             errdefer tree_diff.deinit();
             try tree_diff.compare(state, old_oid_maybe, new_oid_maybe, null);
             return tree_diff;

@@ -298,21 +298,13 @@ pub fn Log(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                 else
                     null;
 
-                var tree_diff = try self.repo.treeDiff(parent_oid_maybe, commit_oid);
-                defer tree_diff.deinit();
-
-                var file_iter = try self.repo.filePairs(.{ .tree = .{ .tree_diff = &tree_diff } });
-
                 var diff = &self.box.children.values()[1].widget.ui_diff;
                 try diff.clearDiffs();
 
-                while (try file_iter.next()) |*line_iter_pair_ptr| {
-                    var line_iter_pair = line_iter_pair_ptr.*;
-                    defer line_iter_pair.deinit();
-                    var hunk_iter = try df.HunkIterator(repo_kind).init(self.allocator, &line_iter_pair.a, &line_iter_pair.b);
-                    defer hunk_iter.deinit();
-                    try diff.addHunks(&hunk_iter);
-                }
+                const tree_diff = try diff.iter_arena.allocator().create(obj.TreeDiff(repo_kind));
+                tree_diff.* = try self.repo.treeDiffAlloc(diff.iter_arena.allocator(), parent_oid_maybe, commit_oid);
+
+                diff.file_iter = try self.repo.filePairsAlloc(diff.iter_arena.allocator(), .{ .tree = .{ .tree_diff = tree_diff } });
             }
         }
     };

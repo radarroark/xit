@@ -14,6 +14,9 @@ pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
         box: wgt.Box(Widget),
         allocator: std.mem.Allocator,
         repo: *rp.Repo(repo_kind),
+        iter_arena: std.heap.ArenaAllocator,
+        file_iter: ?df.FileIterator(repo_kind),
+        hunk_iter: ?df.HunkIterator(repo_kind),
         bufs: std.ArrayList([]const u8),
 
         pub fn init(allocator: std.mem.Allocator, repo: *rp.Repo(repo_kind)) !Diff(Widget, repo_kind) {
@@ -31,6 +34,9 @@ pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                 .box = outer_box,
                 .allocator = allocator,
                 .repo = repo,
+                .iter_arena = std.heap.ArenaAllocator.init(allocator),
+                .file_iter = null,
+                .hunk_iter = null,
                 .bufs = std.ArrayList([]const u8).init(allocator),
             };
         }
@@ -39,6 +45,7 @@ pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
             for (self.bufs.items) |buf| {
                 self.allocator.free(buf);
             }
+            self.iter_arena.deinit();
             self.bufs.deinit();
             self.box.deinit();
         }
@@ -46,8 +53,37 @@ pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
         pub fn build(self: *Diff(Widget, repo_kind), constraint: layout.Constraint, root_focus: *Focus) !void {
             self.clearGrid();
             self.box.border_style = if (root_focus.grandchild_id == self.getFocus().id) .double else .single;
-            if (self.bufs.items.len > 0) {
-                try self.box.build(constraint, root_focus);
+            try self.box.build(constraint, root_focus);
+
+            // add another diff if necessary
+            if (self.box.grid) |outer_box_grid| {
+                const outer_box_height = outer_box_grid.size.height - 2;
+                const scroll_y = self.box.children.values()[0].widget.scroll.y;
+                const u_scroll_y: usize = if (scroll_y >= 0) @intCast(scroll_y) else 0;
+                if (self.box.children.values()[0].widget.scroll.child.box.grid) |inner_box_grid| {
+                    const inner_box_height = inner_box_grid.size.height;
+                    const min_scroll_remaining = 5;
+                    if (inner_box_height -| (outer_box_height + u_scroll_y) <= min_scroll_remaining) {
+                        if (self.hunk_iter) |*hunk_iter| {
+                            try self.addHunks(hunk_iter);
+                            self.hunk_iter = null;
+                        }
+
+                        if (self.file_iter) |*file_iter| {
+                            if (try file_iter.next()) |line_iter_pair| {
+                                const line_iter_a = try self.iter_arena.allocator().create(df.LineIterator(repo_kind));
+                                line_iter_a.* = line_iter_pair.a;
+
+                                const line_iter_b = try self.iter_arena.allocator().create(df.LineIterator(repo_kind));
+                                line_iter_b.* = line_iter_pair.b;
+
+                                self.hunk_iter = try df.HunkIterator(repo_kind).init(self.iter_arena.allocator(), line_iter_a, line_iter_b);
+                            } else {
+                                self.file_iter = null;
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -145,6 +181,11 @@ pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                 self.allocator.free(buf);
             }
             self.bufs.clearAndFree();
+
+            // reset the arena
+            self.file_iter = null;
+            self.hunk_iter = null;
+            _ = self.iter_arena.reset(.free_all);
 
             // remove old diff widgets
             for (self.box.children.values()[0].widget.scroll.child.box.children.values()) |*child| {
