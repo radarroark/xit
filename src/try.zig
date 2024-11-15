@@ -7,7 +7,7 @@ const mn = @import("./main.zig");
 const rp = @import("./repo.zig");
 const obj = @import("./object.zig");
 
-const COMMIT_COUNT = 10;
+const COMMIT_COUNT = 5;
 
 fn copyDir(src_dir: std.fs.Dir, dest_dir: std.fs.Dir) !void {
     var iter = src_dir.iterate();

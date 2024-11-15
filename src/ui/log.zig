@@ -13,56 +13,57 @@ const obj = @import("../object.zig");
 
 pub fn LogCommitList(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
     return struct {
+        allocator: std.mem.Allocator,
         scroll: wgt.Scroll(Widget),
         repo: *rp.Repo(repo_kind),
+        commit_iter: obj.ObjectIterator(repo_kind, .full),
         commits: std.ArrayList(obj.Object(repo_kind, .full)),
 
         pub fn init(allocator: std.mem.Allocator, repo: *rp.Repo(repo_kind)) !LogCommitList(Widget, repo_kind) {
-            // init commits
-            var commits = std.ArrayList(obj.Object(repo_kind, .full)).init(allocator);
-            errdefer {
-                for (commits.items) |*commit| {
-                    commit.deinit();
+            var self = blk: {
+                // init commits
+                var commits = std.ArrayList(obj.Object(repo_kind, .full)).init(allocator);
+                errdefer {
+                    for (commits.items) |*commit| {
+                        commit.deinit();
+                    }
+                    commits.deinit();
                 }
-                commits.deinit();
-            }
 
-            // walk the commits
-            var commit_iter = try repo.log(allocator, null);
-            defer commit_iter.deinit();
-            while (try commit_iter.next()) |commit_object| {
-                errdefer commit_object.deinit();
-                try commits.append(commit_object.*);
-            }
+                // walk the commits
+                var commit_iter = try repo.log(allocator, null);
+                errdefer commit_iter.deinit();
 
-            var inner_box = try wgt.Box(Widget).init(allocator, null, .vert);
-            errdefer inner_box.deinit();
-            for (commits.items) |commit_object| {
-                const line = std.mem.sliceTo(commit_object.content.commit.metadata.message, '\n');
-                var text_box = try wgt.TextBox(Widget).init(allocator, line, .hidden);
-                errdefer text_box.deinit();
-                text_box.getFocus().focusable = true;
-                try inner_box.children.put(text_box.getFocus().id, .{ .widget = .{ .text_box = text_box }, .rect = null, .min_size = null });
-            }
+                var inner_box = try wgt.Box(Widget).init(allocator, null, .vert);
+                errdefer inner_box.deinit();
 
-            // init scroll
-            var scroll = try wgt.Scroll(Widget).init(allocator, .{ .box = inner_box }, .vert);
-            errdefer scroll.deinit();
-            if (inner_box.children.count() > 0) {
-                scroll.getFocus().child_id = inner_box.children.keys()[0];
-            }
+                // init scroll
+                var scroll = try wgt.Scroll(Widget).init(allocator, .{ .box = inner_box }, .vert);
+                errdefer scroll.deinit();
 
-            return .{
-                .scroll = scroll,
-                .repo = repo,
-                .commits = commits,
+                break :blk LogCommitList(Widget, repo_kind){
+                    .allocator = allocator,
+                    .scroll = scroll,
+                    .repo = repo,
+                    .commit_iter = commit_iter,
+                    .commits = commits,
+                };
             };
+            errdefer self.deinit();
+
+            try self.addCommits(20);
+            if (self.scroll.child.box.children.count() > 0) {
+                self.scroll.getFocus().child_id = self.scroll.child.box.children.keys()[0];
+            }
+
+            return self;
         }
 
         pub fn deinit(self: *LogCommitList(Widget, repo_kind)) void {
             for (self.commits.items) |*commit_object| {
                 commit_object.deinit();
             }
+            self.commit_iter.deinit();
             self.commits.deinit();
             self.scroll.deinit();
         }
@@ -77,6 +78,19 @@ pub fn LogCommitList(comptime Widget: type, comptime repo_kind: rp.RepoKind) typ
                     .hidden;
             }
             try self.scroll.build(constraint, root_focus);
+
+            // add more commits if necessary
+            if (self.scroll.grid) |scroll_grid| {
+                const scroll_y = self.scroll.y;
+                const u_scroll_y: usize = if (scroll_y >= 0) @intCast(scroll_y) else 0;
+                if (self.scroll.child.box.grid) |inner_box_grid| {
+                    const inner_box_height = inner_box_grid.size.height;
+                    const min_scroll_remaining = 5;
+                    if (inner_box_height -| (scroll_grid.size.height + u_scroll_y) <= min_scroll_remaining) {
+                        try self.addCommits(20);
+                    }
+                }
+            }
         }
 
         pub fn input(self: *LogCommitList(Widget, repo_kind), key: inp.Key, root_focus: *Focus) !void {
@@ -152,6 +166,26 @@ pub fn LogCommitList(comptime Widget: type, comptime repo_kind: rp.RepoKind) typ
             const left_box = &self.scroll.child.box;
             if (left_box.children.values()[index].rect) |rect| {
                 self.scroll.scrollToRect(rect);
+            }
+        }
+
+        fn addCommits(self: *LogCommitList(Widget, repo_kind), max_commits: usize) !void {
+            for (0..max_commits) |_| {
+                if (try self.commit_iter.next()) |commit_object| {
+                    {
+                        errdefer commit_object.deinit();
+                        try self.commits.append(commit_object.*);
+                    }
+
+                    const inner_box = &self.scroll.child.box;
+                    const line = std.mem.sliceTo(commit_object.content.commit.metadata.message, '\n');
+                    var text_box = try wgt.TextBox(Widget).init(self.allocator, line, .hidden);
+                    errdefer text_box.deinit();
+                    text_box.getFocus().focusable = true;
+                    try inner_box.children.put(text_box.getFocus().id, .{ .widget = .{ .text_box = text_box }, .rect = null, .min_size = null });
+                } else {
+                    break;
+                }
             }
         }
     };
