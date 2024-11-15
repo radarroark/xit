@@ -1230,7 +1230,7 @@ pub const Merge = struct {
         }
 
         // get the current branch name and oid
-        const target_name = try ref.readHeadName(repo_kind, state.readOnly(), arena.allocator());
+        const target_name = try ref.readHeadNameAlloc(repo_kind, state.readOnly(), arena.allocator());
         const target_oid_maybe = try ref.readHeadMaybe(repo_kind, state.readOnly());
 
         // init the diff that we will use for the migration and the conflicts maps.

@@ -28,7 +28,7 @@ pub fn LogCommitList(comptime Widget: type, comptime repo_kind: rp.RepoKind) typ
             }
 
             // walk the commits
-            var commit_iter = try repo.log(null);
+            var commit_iter = try repo.log(allocator, null);
             defer commit_iter.deinit();
             while (try commit_iter.next()) |commit_object| {
                 errdefer commit_object.deinit();
@@ -302,9 +302,9 @@ pub fn Log(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                 try diff.clearDiffs();
 
                 const tree_diff = try diff.iter_arena.allocator().create(obj.TreeDiff(repo_kind));
-                tree_diff.* = try self.repo.treeDiffAlloc(diff.iter_arena.allocator(), parent_oid_maybe, commit_oid);
+                tree_diff.* = try self.repo.treeDiff(diff.iter_arena.allocator(), parent_oid_maybe, commit_oid);
 
-                diff.file_iter = try self.repo.filePairsAlloc(diff.iter_arena.allocator(), .{ .tree = .{ .tree_diff = tree_diff } });
+                diff.file_iter = try self.repo.filePairs(diff.iter_arena.allocator(), .{ .tree = .{ .tree_diff = tree_diff } });
             }
         }
     };

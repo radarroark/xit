@@ -18,7 +18,7 @@ pub const RemoveBranchInput = struct {
     name: []const u8,
 };
 
-pub fn add(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_write), allocator: std.mem.Allocator, input: AddBranchInput) !void {
+pub fn add(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_write), input: AddBranchInput) !void {
     const name = input.name;
     if (name.len == 0 or
         name[0] == '.' or
@@ -92,8 +92,8 @@ pub fn add(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.rea
             try heads.put(name_hash, .{ .slot = ref_content_cursor.slot() });
 
             // get current branch name
-            const current_branch_name = try ref.readHeadName(repo_kind, state.readOnly(), allocator);
-            defer allocator.free(current_branch_name);
+            var current_branch_name_buffer = [_]u8{0} ** ref.MAX_REF_CONTENT_SIZE;
+            const current_branch_name = try ref.readHeadName(repo_kind, state.readOnly(), &current_branch_name_buffer);
 
             // if there is a branch map for the current branch,
             // make one for the new branch with the same value
@@ -107,7 +107,7 @@ pub fn add(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.rea
     }
 }
 
-pub fn remove(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_write), allocator: std.mem.Allocator, input: RemoveBranchInput) !void {
+pub fn remove(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_write), input: RemoveBranchInput) !void {
     switch (repo_kind) {
         .git => {
             var refs_dir = try state.core.git_dir.openDir("refs", .{});
@@ -126,9 +126,9 @@ pub fn remove(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.
             defer head_lock.deinit();
 
             // don't allow current branch to be deleted
-            const current_branch = try ref.readHeadName(repo_kind, state.readOnly(), allocator);
-            defer allocator.free(current_branch);
-            if (std.mem.eql(u8, current_branch, input.name)) {
+            var current_branch_name_buffer = [_]u8{0} ** ref.MAX_REF_CONTENT_SIZE;
+            const current_branch_name = try ref.readHeadName(repo_kind, state.readOnly(), &current_branch_name_buffer);
+            if (std.mem.eql(u8, current_branch_name, input.name)) {
                 return error.CannotDeleteCurrentBranch;
             }
 
@@ -153,9 +153,9 @@ pub fn remove(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.
         },
         .xit => {
             // don't allow current branch to be deleted
-            const current_branch = try ref.readHeadName(repo_kind, state.readOnly(), allocator);
-            defer allocator.free(current_branch);
-            if (std.mem.eql(u8, current_branch, input.name)) {
+            var current_branch_name_buffer = [_]u8{0} ** ref.MAX_REF_CONTENT_SIZE;
+            const current_branch_name = try ref.readHeadName(repo_kind, state.readOnly(), &current_branch_name_buffer);
+            if (std.mem.eql(u8, current_branch_name, input.name)) {
                 return error.CannotDeleteCurrentBranch;
             }
 

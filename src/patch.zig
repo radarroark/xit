@@ -458,8 +458,8 @@ pub fn writeAndApplyPatches(
     commit_oid: *const [hash.SHA1_HEX_LEN]u8,
 ) !void {
     // get current branch name
-    const current_branch_name = try ref.readHeadName(.xit, state.readOnly(), allocator);
-    defer allocator.free(current_branch_name);
+    var current_branch_name_buffer = [_]u8{0} ** ref.MAX_REF_CONTENT_SIZE;
+    const current_branch_name = try ref.readHeadName(.xit, state.readOnly(), &current_branch_name_buffer);
 
     const branch_name_hash = hash.hashBuffer(current_branch_name);
 

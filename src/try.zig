@@ -65,12 +65,12 @@ pub fn main() !void {
 
         // restore all files in working tree
         // (they are all missing because we only copied the .git dir)
-        var status = try git_repo.status();
+        var status = try git_repo.status(allocator);
         defer status.deinit();
         for (status.workspace_deleted.keys()) |path| {
             if (std.mem.startsWith(u8, path, "deps/")) continue;
             try writers.out.print("Restoring: {s}\n", .{path});
-            git_repo.restore(path) catch |err| switch (err) {
+            git_repo.restore(allocator, path) catch |err| switch (err) {
                 error.FileNotFound, error.ObjectInvalid => try writers.err.print("Failed to restore: {s}\n", .{path}),
                 else => return err,
             };
@@ -84,7 +84,7 @@ pub fn main() !void {
             commits.deinit();
         }
 
-        var log_iter = try git_repo.log(null);
+        var log_iter = try git_repo.log(allocator, null);
         defer log_iter.deinit();
         var commit_count: usize = 0;
         while (try log_iter.next()) |commit| {
@@ -105,14 +105,14 @@ pub fn main() !void {
             const commit_object = commits.items[commits.items.len - i - 1];
             try writers.out.print("Creating commit: {s}", .{commit_object.content.commit.metadata.message});
 
-            var switch_result = try git_repo.switchHead(&commit_object.oid, .{ .force = true });
+            var switch_result = try git_repo.switchHead(allocator, &commit_object.oid, .{ .force = true });
             defer switch_result.deinit();
             if (switch_result.data != .success) {
                 return error.CheckoutFailed;
             }
 
-            try xit_repo.add(&.{ "build.zig", "build.zig.zon", "src" });
-            _ = try xit_repo.commit(commit_object.content.commit.metadata);
+            try xit_repo.add(allocator, &.{ "build.zig", "build.zig.zon", "src" });
+            _ = try xit_repo.commit(allocator, commit_object.content.commit.metadata);
         }
 
         // make changes so we see things in the status UI
@@ -121,14 +121,14 @@ pub fn main() !void {
             defer build_zig.close();
             try build_zig.seekFromEnd(0);
             try build_zig.writeAll("\n// ...just felt like adding a new line!");
-            try xit_repo.add(&.{"build.zig"});
+            try xit_repo.add(allocator, &.{"build.zig"});
             try build_zig.writeAll("\n// ...and here's another one!");
         }
         try temp_dir.deleteFile("build.zig.zon");
 
         // set some config values
-        try xit_repo.addConfig(.{ .name = "core.editor", .value = "vim" });
-        try xit_repo.addConfig(.{ .name = "branch.master.remote", .value = "origin" });
+        try xit_repo.addConfig(allocator, .{ .name = "core.editor", .value = "vim" });
+        try xit_repo.addConfig(allocator, .{ .name = "branch.master.remote", .value = "origin" });
     }
 
     var args = std.ArrayList([]const u8).init(allocator);
