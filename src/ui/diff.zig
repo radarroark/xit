@@ -64,22 +64,33 @@ pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                     const inner_box_height = inner_box_grid.size.height;
                     const min_scroll_remaining = 5;
                     if (inner_box_height -| (outer_box_height + u_scroll_y) <= min_scroll_remaining) {
+                        // add the next hunk
                         if (self.hunk_iter) |*hunk_iter| {
-                            try self.addHunks(hunk_iter);
-                            self.hunk_iter = null;
+                            if (hunk_iter.header_lines.items.len > 0) {
+                                try self.addLines(hunk_iter.header_lines.items);
+                                hunk_iter.header_lines.clearAndFree();
+                            }
+                            if (try hunk_iter.next()) |hunk| {
+                                try self.addHunk(hunk);
+                            } else {
+                                self.hunk_iter = null;
+                            }
                         }
 
-                        if (self.file_iter) |*file_iter| {
-                            if (try file_iter.next()) |line_iter_pair| {
-                                const line_iter_a = try self.iter_arena.allocator().create(df.LineIterator(repo_kind));
-                                line_iter_a.* = line_iter_pair.a;
+                        // get the next hunk iter
+                        if (self.hunk_iter == null) {
+                            if (self.file_iter) |*file_iter| {
+                                if (try file_iter.next()) |line_iter_pair| {
+                                    const line_iter_a = try self.iter_arena.allocator().create(df.LineIterator(repo_kind));
+                                    line_iter_a.* = line_iter_pair.a;
 
-                                const line_iter_b = try self.iter_arena.allocator().create(df.LineIterator(repo_kind));
-                                line_iter_b.* = line_iter_pair.b;
+                                    const line_iter_b = try self.iter_arena.allocator().create(df.LineIterator(repo_kind));
+                                    line_iter_b.* = line_iter_pair.b;
 
-                                self.hunk_iter = try df.HunkIterator(repo_kind).init(self.iter_arena.allocator(), line_iter_a, line_iter_b);
-                            } else {
-                                self.file_iter = null;
+                                    self.hunk_iter = try df.HunkIterator(repo_kind).init(self.iter_arena.allocator(), line_iter_a, line_iter_b);
+                                } else {
+                                    self.file_iter = null;
+                                }
                             }
                         }
                     }
@@ -199,43 +210,59 @@ pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
             widget.scroll.y = 0;
         }
 
-        pub fn addHunks(self: *Diff(Widget, repo_kind), hunk_iter: *df.HunkIterator(repo_kind)) !void {
+        pub fn addLines(self: *Diff(Widget, repo_kind), lines: []const []const u8) !void {
             const buf = blk: {
                 var arr = std.ArrayList(u8).init(self.allocator);
                 errdefer arr.deinit();
                 const writer = arr.writer();
 
                 // add header
-                for (hunk_iter.header_lines.items) |header_line| {
-                    try writer.print("{s}\n", .{header_line});
+                for (lines) |line| {
+                    try writer.print("{s}\n", .{line});
                 }
 
-                // add hunks
-                while (try hunk_iter.next()) |*hunk_ptr| {
-                    var hunk = hunk_ptr.*;
-                    defer hunk.deinit();
-                    // create buffer from hunk
-                    const offsets = hunk.offsets();
-                    try writer.print("@@ -{},{} +{},{} @@\n", .{
-                        offsets.del_start,
-                        offsets.del_count,
-                        offsets.ins_start,
-                        offsets.ins_count,
+                break :blk try arr.toOwnedSlice();
+            };
+
+            // add buffer
+            {
+                errdefer self.allocator.free(buf);
+                try self.bufs.append(buf);
+            }
+
+            // add new diff widget
+            var text_box = try wgt.TextBox(Widget).init(self.allocator, buf, .hidden);
+            errdefer text_box.deinit();
+            try self.box.children.values()[0].widget.scroll.child.box.children.put(text_box.getFocus().id, .{ .widget = .{ .text_box = text_box }, .rect = null, .min_size = null });
+        }
+
+        pub fn addHunk(self: *Diff(Widget, repo_kind), hunk: df.Hunk(repo_kind)) !void {
+            const buf = blk: {
+                var arr = std.ArrayList(u8).init(self.allocator);
+                errdefer arr.deinit();
+                const writer = arr.writer();
+
+                // create buffer from hunk
+                const offsets = hunk.offsets();
+                try writer.print("@@ -{},{} +{},{} @@\n", .{
+                    offsets.del_start,
+                    offsets.del_count,
+                    offsets.ins_start,
+                    offsets.ins_count,
+                });
+                for (hunk.edits.items) |edit| {
+                    try writer.print("{s} {s}\n", .{
+                        switch (edit) {
+                            .eql => " ",
+                            .ins => "+",
+                            .del => "-",
+                        },
+                        switch (edit) {
+                            .eql => |eql| eql.new_line.text,
+                            .ins => |ins| ins.new_line.text,
+                            .del => |del| del.old_line.text,
+                        },
                     });
-                    for (hunk.edits.items) |edit| {
-                        try writer.print("{s} {s}\n", .{
-                            switch (edit) {
-                                .eql => " ",
-                                .ins => "+",
-                                .del => "-",
-                            },
-                            switch (edit) {
-                                .eql => |eql| eql.new_line.text,
-                                .ins => |ins| ins.new_line.text,
-                                .del => |del| del.old_line.text,
-                            },
-                        });
-                    }
                 }
 
                 break :blk try arr.toOwnedSlice();
