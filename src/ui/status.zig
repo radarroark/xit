@@ -506,7 +506,7 @@ pub fn StatusContent(comptime Widget: type, comptime repo_kind: rp.RepoKind) typ
                 var diff = &self.box.children.values()[1].widget.ui_diff;
                 try diff.clearDiffs();
 
-                const line_iter_pair = self.repo.filePairAlloc(diff.iter_arena.allocator(), status_item.path, status_item.kind, self.status) catch |err| switch (err) {
+                const line_iter_pair = self.repo.filePair(diff.iter_arena.allocator(), status_item.path, status_item.kind, self.status) catch |err| switch (err) {
                     error.IsDir => return,
                     else => return err,
                 };
@@ -532,7 +532,7 @@ pub fn Status(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
         const FocusKind = enum { status_tabs, status_content };
 
         pub fn init(allocator: std.mem.Allocator, repo: *rp.Repo(repo_kind)) !Status(Widget, repo_kind) {
-            var status = try repo.status();
+            var status = try repo.status(allocator);
             errdefer status.deinit();
 
             // put Status object on the heap so the pointer is stable

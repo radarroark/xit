@@ -84,7 +84,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
-        var status = try repo.status();
+        var status = try repo.status(allocator);
         defer status.deinit();
     }
 
@@ -284,9 +284,9 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         {
             var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
-            var status = try repo.status();
+            var status = try repo.status(allocator);
             defer status.deinit();
-            var file_iter = try repo.filePairs(.{
+            var file_iter = try repo.filePairs(allocator, .{
                 .workspace = .{
                     .conflict_diff_kind = .target,
                     .status = &status,
@@ -371,9 +371,9 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         {
             var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
-            var status = try repo.status();
+            var status = try repo.status(allocator);
             defer status.deinit();
-            var file_iter = try repo.filePairs(.{
+            var file_iter = try repo.filePairs(allocator, .{
                 .index = .{ .status = &status },
             });
 
@@ -475,9 +475,9 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
-        var tree_diff = try repo.treeDiff(commit1, commit2);
+        var tree_diff = try repo.treeDiff(allocator, commit1, commit2);
         defer tree_diff.deinit();
-        var file_iter = try repo.filePairs(.{
+        var file_iter = try repo.filePairs(allocator, .{
             .tree = .{ .tree_diff = &tree_diff },
         });
 
@@ -537,7 +537,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             {
                 var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
-                var result = try repo.switchHead(&commit1, .{ .force = false });
+                var result = try repo.switchHead(allocator, &commit1, .{ .force = false });
                 defer result.deinit();
                 try std.testing.expect(result.data == .conflict);
                 try std.testing.expectEqual(1, result.data.conflict.stale_files.count());
@@ -562,7 +562,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             {
                 var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
-                var result = try repo.switchHead(&commit1, .{ .force = false });
+                var result = try repo.switchHead(allocator, &commit1, .{ .force = false });
                 defer result.deinit();
                 try std.testing.expect(result.data == .conflict);
             }
@@ -585,7 +585,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             {
                 var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
-                var result = try repo.switchHead(&commit1, .{ .force = false });
+                var result = try repo.switchHead(allocator, &commit1, .{ .force = false });
                 defer result.deinit();
                 try std.testing.expect(result.data == .conflict);
                 try std.testing.expectEqual(1, result.data.conflict.stale_files.count());
@@ -614,7 +614,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             {
                 var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
-                var result = try repo.switchHead(&commit1, .{ .force = false });
+                var result = try repo.switchHead(allocator, &commit1, .{ .force = false });
                 defer result.deinit();
                 try std.testing.expect(result.data == .conflict);
                 try std.testing.expectEqual(1, result.data.conflict.stale_dirs.count());
@@ -922,7 +922,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             // get status
             var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
-            var status = try repo.status();
+            var status = try repo.status(allocator);
             defer status.deinit();
 
             // check the untracked entries
@@ -968,7 +968,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             // get status
             var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
-            var status = try repo.status();
+            var status = try repo.status(allocator);
             defer status.deinit();
 
             // check the index_added entries
@@ -992,7 +992,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         {
             var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
-            var status = try repo.status();
+            var status = try repo.status(allocator);
             defer status.deinit();
 
             try std.testing.expectEqual(2, status.workspace_modified.count());
@@ -1016,7 +1016,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         {
             var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
-            var status = try repo.status();
+            var status = try repo.status(allocator);
             defer status.deinit();
 
             try std.testing.expectEqual(0, status.workspace_modified.count());
@@ -1062,7 +1062,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
-        var ref_list = try repo.listBranches();
+        var ref_list = try repo.listBranches(allocator);
         defer ref_list.deinit();
         try std.testing.expectEqual(2, ref_list.refs.count());
     }
@@ -1143,7 +1143,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
-        var ref_list = try repo.listBranches();
+        var ref_list = try repo.listBranches(allocator);
         defer ref_list.deinit();
         try std.testing.expectEqual(3, ref_list.refs.count());
         try std.testing.expect(ref_list.refs.contains("a/b/c"));
@@ -1199,7 +1199,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
     {
         var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
-        var iter = try repo.log(&.{commit3});
+        var iter = try repo.log(allocator, &.{commit3});
         defer iter.deinit();
 
         var object3 = try iter.next();
@@ -1268,7 +1268,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
 
-            var config = try repo.config();
+            var config = try repo.config(allocator);
             defer config.deinit();
 
             const core_section = config.sections.get("core").?;
@@ -1284,7 +1284,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
 
-            var config = try repo.config();
+            var config = try repo.config(allocator);
             defer config.deinit();
 
             try std.testing.expectEqual(null, config.sections.get("branch.master"));
@@ -1300,7 +1300,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
 
-            var config = try repo.config();
+            var config = try repo.config(allocator);
             defer config.deinit();
 
             const user_section = config.sections.get("user").?;
@@ -1319,7 +1319,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
 
-            var remote = try repo.remote();
+            var remote = try repo.remote(allocator);
             defer remote.deinit();
 
             const origin_section = remote.sections.get("origin").?;
@@ -1332,7 +1332,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
             var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
 
-            var remote = try repo.remote();
+            var remote = try repo.remote(allocator);
             defer remote.deinit();
 
             try std.testing.expectEqual(null, remote.sections.get("origin"));

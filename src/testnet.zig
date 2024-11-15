@@ -42,8 +42,8 @@ fn testPull(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator) !void
     const file = try server_repo.core.repo_dir.createFile("hello.txt", .{ .truncate = true });
     defer file.close();
     try file.writeAll("hello, world!");
-    try server_repo.add(&.{"server/hello.txt"});
-    _ = try server_repo.commit(.{ .message = "let there be light" });
+    try server_repo.add(allocator, &.{"server/hello.txt"});
+    _ = try server_repo.commit(allocator, .{ .message = "let there be light" });
 
     // start server
     try process.spawn();
@@ -56,16 +56,16 @@ fn testPull(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator) !void
     // init client repo
     var client_repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "client" } }, writers);
     defer client_repo.deinit();
-    try client_repo.addRemote(.{ .name = "origin", .value = "git://localhost:3000/server" });
+    try client_repo.addRemote(allocator, .{ .name = "origin", .value = "git://localhost:3000/server" });
 
     // fetch the objects
-    try std.testing.expectEqual(3, (try client_repo.fetch("origin")).object_count);
+    try std.testing.expectEqual(3, (try client_repo.fetch(allocator, "origin")).object_count);
 
     // calling fetch again returns no objects
-    try std.testing.expectEqual(0, (try client_repo.fetch("origin")).object_count);
+    try std.testing.expectEqual(0, (try client_repo.fetch(allocator, "origin")).object_count);
 
     // calling pull will also merge into master
-    var pull_result = try client_repo.pull("origin", "master");
+    var pull_result = try client_repo.pull(allocator, "origin", "master");
     defer pull_result.deinit();
 
     // make sure pull was successful
@@ -110,8 +110,8 @@ fn testPush(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator) !void
     // init server repo
     var server_repo = try rp.Repo(.git).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "server" } }, writers);
     defer server_repo.deinit();
-    try server_repo.addConfig(.{ .name = "core.bare", .value = "false" });
-    try server_repo.addConfig(.{ .name = "receive.denycurrentbranch", .value = "updateinstead" });
+    try server_repo.addConfig(allocator, .{ .name = "core.bare", .value = "false" });
+    try server_repo.addConfig(allocator, .{ .name = "receive.denycurrentbranch", .value = "updateinstead" });
 
     // start server
     try process.spawn();
@@ -124,7 +124,7 @@ fn testPush(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator) !void
     // init client repo
     var client_repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "client" } }, writers);
     defer client_repo.deinit();
-    try client_repo.addRemote(.{ .name = "origin", .value = "git://localhost:3001/server" });
+    try client_repo.addRemote(allocator, .{ .name = "origin", .value = "git://localhost:3001/server" });
 
     // test with libgit2
     {

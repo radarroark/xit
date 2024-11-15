@@ -99,7 +99,7 @@ pub fn ConfigList(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
         arena: *std.heap.ArenaAllocator,
 
         pub fn init(allocator: std.mem.Allocator, repo: *rp.Repo(repo_kind)) !ConfigList(Widget, repo_kind) {
-            var config = try repo.config();
+            var config = try repo.config(allocator);
             errdefer config.deinit();
 
             const arena = try allocator.create(std.heap.ArenaAllocator);

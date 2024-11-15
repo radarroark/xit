@@ -234,16 +234,19 @@ pub fn readHead(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State
     }
 }
 
-pub fn readHeadName(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator) ![]u8 {
-    var buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
-    const content = try read(repo_kind, state, "HEAD", &buffer);
+pub fn readHeadName(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), buffer: []u8) ![]u8 {
+    const content = try read(repo_kind, state, "HEAD", buffer);
     const ref_heads_start_str = "ref: refs/heads/";
     if (std.mem.startsWith(u8, content, ref_heads_start_str) and content.len > ref_heads_start_str.len) {
-        const ref_name = content[ref_heads_start_str.len..];
-        return try allocator.dupe(u8, ref_name);
+        return content[ref_heads_start_str.len..];
     } else {
-        return try allocator.dupe(u8, content);
+        return content;
     }
+}
+
+pub fn readHeadNameAlloc(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator) ![]u8 {
+    var buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
+    return try allocator.dupe(u8, try readHeadName(repo_kind, state, &buffer));
 }
 
 pub fn write(
