@@ -104,6 +104,10 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         \\13
         \\14
         \\15
+        \\16
+        \\17
+        \\18
+        \\19
     ;
 
     // add and commit
@@ -238,6 +242,10 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
         \\13
         \\14
         \\15.0
+        \\16
+        \\17
+        \\18
+        \\19
     ;
 
     // make another commit
@@ -324,6 +332,9 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                             .{ .eql = .{ .old_line = .{ .num = 14, .text = "14" }, .new_line = .{ .num = 14, .text = "14" } } },
                             .{ .del = .{ .old_line = .{ .num = 15, .text = "15" } } },
                             .{ .ins = .{ .new_line = .{ .num = 15, .text = "15.0" } } },
+                            .{ .eql = .{ .old_line = .{ .num = 16, .text = "16" }, .new_line = .{ .num = 16, .text = "16" } } },
+                            .{ .eql = .{ .old_line = .{ .num = 17, .text = "17" }, .new_line = .{ .num = 17, .text = "17" } } },
+                            .{ .eql = .{ .old_line = .{ .num = 18, .text = "18" }, .new_line = .{ .num = 18, .text = "18" } } },
                         },
                     };
                     for (expected_hunks) |expected_hunk| {

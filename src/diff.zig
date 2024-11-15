@@ -1188,17 +1188,21 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind) type {
                             continue;
                         }
                     } else {
-                        // set eof so next() returns null afterwards
-                        self.eof = true;
-                        // return last hunk
-                        const hunk = self.next_hunk;
-                        self.next_hunk = Hunk(repo_kind){
-                            .edits = std.ArrayList(MyersDiffIterator(repo_kind).Edit).init(self.allocator),
-                            .allocator = self.allocator,
-                        };
-                        self.found_edit = false;
-                        self.margin = 0;
-                        return hunk;
+                        self.eof = true; // ensure this method returns null in the future
+
+                        if (self.found_edit) {
+                            // return the last hunk
+                            const hunk = self.next_hunk;
+                            self.next_hunk = Hunk(repo_kind){
+                                .edits = std.ArrayList(MyersDiffIterator(repo_kind).Edit).init(self.allocator),
+                                .allocator = self.allocator,
+                            };
+                            self.found_edit = false;
+                            self.margin = 0;
+                            return hunk;
+                        } else {
+                            return null;
+                        }
                     }
                 }
             } else {
