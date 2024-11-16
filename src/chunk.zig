@@ -3,7 +3,7 @@ const hash = @import("./hash.zig");
 const rp = @import("./repo.zig");
 const io = @import("./io.zig");
 
-const CHUNK_SIZE = 1024;
+const CHUNK_SIZE = 2048;
 
 pub fn writeChunks(
     state: rp.Repo(.xit).State(.read_write),
