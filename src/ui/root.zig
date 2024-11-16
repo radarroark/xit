@@ -25,7 +25,7 @@ pub fn RootTabs(comptime Widget: type) type {
                 const name = switch (focus_kind) {
                     .log => "log",
                     .status => "status",
-                    .config => "config",
+                    .config => continue, // temporarily disable config section
                 };
                 var text_box = try wgt.TextBox(Widget).init(allocator, name, .single);
                 errdefer text_box.deinit();
