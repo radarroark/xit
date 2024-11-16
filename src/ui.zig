@@ -1,4 +1,5 @@
 const std = @import("std");
+const cmd = @import("./command.zig");
 const xitui = @import("xitui");
 const term = xitui.terminal;
 const wgt = xitui.widget;
@@ -71,7 +72,7 @@ pub fn Widget(comptime repo_kind: rp.RepoKind) type {
     };
 }
 
-pub fn start(comptime repo_kind: rp.RepoKind, repo: *rp.Repo(repo_kind), allocator: std.mem.Allocator) !void {
+pub fn start(comptime repo_kind: rp.RepoKind, repo: *rp.Repo(repo_kind), allocator: std.mem.Allocator, sub_cmd_kind_maybe: ?cmd.SubCommandKind) !void {
     // init root widget
     var root = Widget(repo_kind){ .ui_root = try ui_root.Root(Widget(repo_kind), repo_kind).init(allocator, repo) };
     defer root.deinit();
@@ -83,6 +84,18 @@ pub fn start(comptime repo_kind: rp.RepoKind, repo: *rp.Repo(repo_kind), allocat
     }, root.getFocus());
     if (root.getFocus().child_id) |child_id| {
         try root.getFocus().setFocus(child_id);
+    }
+
+    // focus on the correct tab if sub command is provided
+    if (sub_cmd_kind_maybe) |sub_cmd_kind| {
+        const child_id_maybe = switch (sub_cmd_kind) {
+            .status, .diff => root.ui_root.box.children.values()[0].widget.ui_root_tabs.getChildFocusId(.status),
+            .log => root.ui_root.box.children.values()[0].widget.ui_root_tabs.getChildFocusId(.log),
+            else => null,
+        };
+        if (child_id_maybe) |child_id| {
+            try root.getFocus().setFocus(child_id);
+        }
     }
 
     // init term

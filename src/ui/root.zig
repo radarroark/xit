@@ -100,6 +100,10 @@ pub fn RootTabs(comptime Widget: type) type {
                 return null;
             }
         }
+
+        pub fn getChildFocusId(self: *RootTabs(Widget), focus_kind: FocusKind) usize {
+            return self.box.children.keys()[@intFromEnum(focus_kind)];
+        }
     };
 }
 

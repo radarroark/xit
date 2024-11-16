@@ -93,6 +93,7 @@ pub const Command = union(enum) {
     invalid: struct {
         name: []const u8,
     },
+    help: ?SubCommandKind,
     tui: ?SubCommandKind,
     cli: ?SubCommand,
 
@@ -143,39 +144,39 @@ pub const Command = union(enum) {
 
         if (extra_args.len == 0 and map_args.count() == 0) {
             if (std.mem.eql(u8, sub_command, "add")) {
-                return .{ .tui = .add };
+                return .{ .help = .add };
             } else if (std.mem.eql(u8, sub_command, "unadd")) {
-                return .{ .tui = .unadd };
+                return .{ .help = .unadd };
             } else if (std.mem.eql(u8, sub_command, "rm")) {
-                return .{ .tui = .rm };
+                return .{ .help = .rm };
             } else if (std.mem.eql(u8, sub_command, "reset")) {
-                return .{ .tui = .reset };
+                return .{ .help = .reset };
             } else if (std.mem.eql(u8, sub_command, "commit")) {
-                return .{ .tui = .commit };
+                return .{ .help = .commit };
             } else if (std.mem.eql(u8, sub_command, "status")) {
                 return .{ .tui = .status };
             } else if (std.mem.eql(u8, sub_command, "diff")) {
                 return .{ .tui = .diff };
             } else if (std.mem.eql(u8, sub_command, "branch")) {
-                return .{ .tui = .branch };
+                return .{ .help = .branch };
             } else if (std.mem.eql(u8, sub_command, "switch")) {
-                return .{ .tui = .switch_head };
+                return .{ .help = .switch_head };
             } else if (std.mem.eql(u8, sub_command, "restore")) {
-                return .{ .tui = .restore };
+                return .{ .help = .restore };
             } else if (std.mem.eql(u8, sub_command, "log")) {
                 return .{ .tui = .log };
             } else if (std.mem.eql(u8, sub_command, "merge")) {
-                return .{ .tui = .merge };
+                return .{ .help = .merge };
             } else if (std.mem.eql(u8, sub_command, "cherry-pick")) {
-                return .{ .tui = .cherry_pick };
+                return .{ .help = .cherry_pick };
             } else if (std.mem.eql(u8, sub_command, "config")) {
-                return .{ .tui = .config };
+                return .{ .help = .config };
             } else if (std.mem.eql(u8, sub_command, "remote")) {
-                return .{ .tui = .remote };
+                return .{ .help = .remote };
             } else if (std.mem.eql(u8, sub_command, "fetch")) {
-                return .{ .tui = .fetch };
+                return .{ .help = .fetch };
             } else if (std.mem.eql(u8, sub_command, "pull")) {
-                return .{ .tui = .pull };
+                return .{ .help = .pull };
             }
         }
 
@@ -426,12 +427,6 @@ test "command" {
         } else |err| {
             try std.testing.expect(error.CommitMessageNotFound == err);
         }
-    }
-
-    {
-        var command = try Command.init(allocator, &.{"commit"});
-        defer command.deinit();
-        try std.testing.expect(command == .tui and command.tui.? == .commit);
     }
 
     {
