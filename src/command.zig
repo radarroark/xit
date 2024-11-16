@@ -26,6 +26,8 @@ pub const SubCommandKind = enum {
     cherry_pick,
     config,
     remote,
+    fetch,
+    pull,
 };
 
 pub const SubCommand = union(SubCommandKind) {
@@ -63,6 +65,13 @@ pub const SubCommand = union(SubCommandKind) {
     cherry_pick: mrg.MergeInput,
     config: cfg.ConfigCommand,
     remote: cfg.ConfigCommand,
+    fetch: struct {
+        remote_name: []const u8,
+    },
+    pull: struct {
+        remote_name: []const u8,
+        remote_ref_name: []const u8,
+    },
 
     pub fn deinit(self: *SubCommand) void {
         switch (self.*) {
@@ -163,6 +172,10 @@ pub const Command = union(enum) {
                 return .{ .tui = .config };
             } else if (std.mem.eql(u8, sub_command, "remote")) {
                 return .{ .tui = .remote };
+            } else if (std.mem.eql(u8, sub_command, "fetch")) {
+                return .{ .tui = .fetch };
+            } else if (std.mem.eql(u8, sub_command, "pull")) {
+                return .{ .tui = .pull };
             }
         }
 
@@ -350,6 +363,23 @@ pub const Command = union(enum) {
                 return error.InvalidRemoteCommand;
             }
             return .{ .cli = .{ .remote = cmd } };
+        } else if (std.mem.eql(u8, sub_command, "fetch")) {
+            if (extra_args.len == 1) {
+                return .{ .cli = .{ .fetch = .{
+                    .remote_name = extra_args[0],
+                } } };
+            } else {
+                return error.WrongNumberOfFetchArgs;
+            }
+        } else if (std.mem.eql(u8, sub_command, "pull")) {
+            if (extra_args.len == 2) {
+                return .{ .cli = .{ .pull = .{
+                    .remote_name = extra_args[0],
+                    .remote_ref_name = extra_args[1],
+                } } };
+            } else {
+                return error.WrongNumberOfPullArgs;
+            }
         }
 
         return .{ .invalid = .{ .name = sub_command } };

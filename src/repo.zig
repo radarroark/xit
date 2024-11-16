@@ -484,56 +484,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         else => unreachable,
                     };
                     defer result.deinit();
-                    for (result.auto_resolved_conflicts.keys()) |path| {
-                        if (result.changes.contains(path)) {
-                            try writers.out.print("Auto-merging {s}\n", .{path});
-                        }
-                    }
-                    switch (result.data) {
-                        .success => {},
-                        .nothing => {
-                            try writers.out.print("Already up to date.\n", .{});
-                        },
-                        .fast_forward => {
-                            try writers.out.print("Fast-forward\n", .{});
-                        },
-                        .conflict => |result_conflict| {
-                            for (result_conflict.conflicts.keys(), result_conflict.conflicts.values()) |path, conflict| {
-                                if (conflict.renamed) |renamed| {
-                                    const conflict_type = if (conflict.target != null)
-                                        "file/directory"
-                                    else
-                                        "directory/file";
-                                    const dir_branch_name = if (conflict.target != null)
-                                        result.source_name
-                                    else
-                                        result.target_name;
-                                    try writers.err.print("CONFLICT ({s}): There is a directory with name {s} in {s}. Adding {s} as {s}\n", .{ conflict_type, path, dir_branch_name, path, renamed.path });
-                                } else {
-                                    if (result.changes.contains(path)) {
-                                        try writers.out.print("Auto-merging {s}\n", .{path});
-                                    }
-                                    if (conflict.target != null and conflict.source != null) {
-                                        const conflict_type = if (conflict.base != null)
-                                            "content"
-                                        else
-                                            "add/add";
-                                        try writers.err.print("CONFLICT ({s}): Merge conflict in {s}\n", .{ conflict_type, path });
-                                    } else {
-                                        const conflict_type = if (conflict.target != null)
-                                            "modify/delete"
-                                        else
-                                            "delete/modify";
-                                        const deleted_branch_name, const modified_branch_name = if (conflict.target != null)
-                                            .{ result.source_name, result.target_name }
-                                        else
-                                            .{ result.target_name, result.source_name };
-                                        try writers.err.print("CONFLICT ({s}): {s} deleted in {s} and modified in {s}\n", .{ conflict_type, path, deleted_branch_name, modified_branch_name });
-                                    }
-                                }
-                            }
-                        },
-                    }
+                    try printMergeResult(&result, writers);
                 },
                 .config => |config_cmd| {
                     switch (config_cmd) {
@@ -565,6 +516,67 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         },
                         .add => |remote_add_cmd| try self.addRemote(allocator, remote_add_cmd),
                         .remove => |remote_remove_cmd| try self.removeRemote(allocator, remote_remove_cmd),
+                    }
+                },
+                .fetch => |fetch_cmd| {
+                    _ = try self.fetch(allocator, fetch_cmd.remote_name);
+                },
+                .pull => |pull_cmd| {
+                    var result = try self.pull(allocator, pull_cmd.remote_name, pull_cmd.remote_ref_name);
+                    defer result.deinit();
+                    try printMergeResult(&result.merge, writers);
+                },
+            }
+        }
+
+        fn printMergeResult(result: *const mrg.Merge, writers: anytype) !void {
+            for (result.auto_resolved_conflicts.keys()) |path| {
+                if (result.changes.contains(path)) {
+                    try writers.out.print("Auto-merging {s}\n", .{path});
+                }
+            }
+            switch (result.data) {
+                .success => {},
+                .nothing => {
+                    try writers.out.print("Already up to date.\n", .{});
+                },
+                .fast_forward => {
+                    try writers.out.print("Fast-forward\n", .{});
+                },
+                .conflict => |result_conflict| {
+                    for (result_conflict.conflicts.keys(), result_conflict.conflicts.values()) |path, conflict| {
+                        if (conflict.renamed) |renamed| {
+                            const conflict_type = if (conflict.target != null)
+                                "file/directory"
+                            else
+                                "directory/file";
+                            const dir_branch_name = if (conflict.target != null)
+                                result.source_name
+                            else
+                                result.target_name;
+                            try writers.err.print("CONFLICT ({s}): There is a directory with name {s} in {s}. Adding {s} as {s}\n", .{ conflict_type, path, dir_branch_name, path, renamed.path });
+                        } else {
+                            if (result.changes.contains(path)) {
+                                try writers.out.print("Auto-merging {s}\n", .{path});
+                            }
+                            if (conflict.target != null and conflict.source != null) {
+                                const conflict_type = if (conflict.base != null)
+                                    "content"
+                                else
+                                    "add/add";
+                                try writers.err.print("CONFLICT ({s}): Merge conflict in {s}\n", .{ conflict_type, path });
+                            } else {
+                                const conflict_type = if (conflict.target != null)
+                                    "modify/delete"
+                                else
+                                    "delete/modify";
+                                const deleted_branch_name, const modified_branch_name = if (conflict.target != null)
+                                    .{ result.source_name, result.target_name }
+                                else
+                                    .{ result.target_name, result.source_name };
+                                try writers.err.print("CONFLICT ({s}): {s} deleted in {s} and modified in {s}\n", .{ conflict_type, path, deleted_branch_name, modified_branch_name });
+                            }
+                        }
                     }
                 },
             }
