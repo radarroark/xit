@@ -108,7 +108,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     errdefer repo_dir.close();
 
                     var git_dir = repo_dir.openDir(".git", .{}) catch |err| switch (err) {
-                        error.FileNotFound => return error.RepoDoesNotExist,
+                        error.FileNotFound => return error.RepoNotFound,
                         else => return err,
                     };
                     errdefer git_dir.close();
@@ -126,13 +126,13 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                     errdefer repo_dir.close();
 
                     var xit_dir = repo_dir.openDir(".xit", .{}) catch |err| switch (err) {
-                        error.FileNotFound => return error.RepoDoesNotExist,
+                        error.FileNotFound => return error.RepoNotFound,
                         else => return err,
                     };
                     errdefer xit_dir.close();
 
                     var db_file = xit_dir.openFile("db", .{ .mode = .read_write, .lock = .exclusive }) catch |err| switch (err) {
-                        error.FileNotFound => return error.RepoDoesNotExist,
+                        error.FileNotFound => return error.RepoNotFound,
                         else => return err,
                     };
                     errdefer db_file.close();
@@ -152,7 +152,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
         pub fn initWithCommand(allocator: std.mem.Allocator, opts: InitOpts, sub_command: cmd.SubCommand, writers: anytype) !Repo(repo_kind) {
             var repo = Repo(repo_kind).init(allocator, opts) catch |err| switch (err) {
-                error.RepoDoesNotExist => {
+                error.RepoNotFound => {
                     if (sub_command == .init) {
                         var repo = switch (repo_kind) {
                             .git => Repo(repo_kind){ .core = undefined, .init_opts = opts },
@@ -161,7 +161,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         try repo.runCommand(allocator, sub_command, writers);
                         return repo;
                     } else {
-                        return error.NotARepo;
+                        return error.RepoNotFound;
                     }
                 },
                 else => return err,
