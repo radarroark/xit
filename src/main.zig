@@ -40,14 +40,24 @@ pub fn xitMain(
             try writers.err.print("\"{s}\" is not a valid command\n", .{invalid.name});
             try writers.out.print(USAGE, .{});
         },
-        .tui => {
+        .help => |sub_cmd_kind_maybe| {
+            if (sub_cmd_kind_maybe) |sub_cmd_kind| {
+                // TODO: print usage for each sub command
+                switch (sub_cmd_kind) {
+                    else => try writers.out.print(USAGE, .{}),
+                }
+            } else {
+                try writers.out.print(USAGE, .{});
+            }
+        },
+        .tui => |sub_cmd_kind_maybe| {
             var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = cwd });
             defer repo.deinit();
-            try ui.start(repo_kind, &repo, allocator);
+            try ui.start(repo_kind, &repo, allocator, sub_cmd_kind_maybe);
         },
-        .cli => |cli| {
-            if (cli) |sub_command| {
-                var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = cwd }, sub_command, writers);
+        .cli => |sub_cmd_maybe| {
+            if (sub_cmd_maybe) |sub_cmd| {
+                var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = cwd }, sub_cmd, writers);
                 defer repo.deinit();
             } else {
                 try writers.out.print(USAGE, .{});
