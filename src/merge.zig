@@ -1311,7 +1311,7 @@ pub const Merge = struct {
                         const parent_oid = if (object.content.commit.parents.items.len == 1) object.content.commit.parents.items[0] else return error.CommitMustHaveOneParent;
                         switch (object.content) {
                             .commit => base_oid = parent_oid,
-                            else => return error.NotACommitObject,
+                            else => return error.CommitObjectNotFound,
                         }
                     },
                 }
@@ -1372,7 +1372,7 @@ pub const Merge = struct {
                         const object = try obj.Object(repo_kind, .full).init(arena.allocator(), state.readOnly(), &source_oid);
                         switch (object.content) {
                             .commit => break :blk object.content.commit.metadata,
-                            else => return error.NotACommitObject,
+                            else => return error.CommitObjectNotFound,
                         }
                     },
                 };
@@ -1587,7 +1587,7 @@ pub const Merge = struct {
                         const parent_oid = if (object.content.commit.parents.items.len == 1) object.content.commit.parents.items[0] else return error.CommitMustHaveOneParent;
                         switch (object.content) {
                             .commit => base_oid = parent_oid,
-                            else => return error.NotACommitObject,
+                            else => return error.CommitObjectNotFound,
                         }
                     },
                 }
