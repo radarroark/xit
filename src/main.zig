@@ -16,8 +16,8 @@ const ui = @import("./ui.zig");
 
 const USAGE =
     \\
-    \\start a working area:
-    \\   init
+    \\yeah, this should print the usage, but i haven't
+    \\written it yet. sowwy.
     \\
 ;
 
