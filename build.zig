@@ -22,17 +22,19 @@ pub fn build(b: *std.Build) !void {
             .target = target,
             .optimize = optimize,
         });
-        exe.root_module.addAnonymousImport("xitdb", .{
-            .root_source_file = b.path("../xitdb/src/lib.zig"),
-        });
-        exe.root_module.addAnonymousImport("xitui", .{
-            .root_source_file = b.path("../xitui/src/lib.zig"),
-        });
+        //exe.root_module.addAnonymousImport("xitdb", .{
+        //    .root_source_file = b.path("../xitdb/src/lib.zig"),
+        //});
+        //exe.root_module.addAnonymousImport("xitui", .{
+        //    .root_source_file = b.path("../xitui/src/lib.zig"),
+        //});
+        exe.root_module.addImport("xitdb", b.dependency("xitdb", .{}).module("xitdb"));
+        exe.root_module.addImport("xitui", b.dependency("xitui", .{}).module("xitui"));
+        exe.root_module.addImport("network", b.dependency("network", .{}).module("network"));
         exe.linkLibC();
         exe.linkLibrary(z.step);
         exe.linkLibrary(tls.step);
         exe.linkLibrary(ssh2.step);
-        exe.root_module.addImport("network", b.dependency("network", .{}).module("network"));
         b.installArtifact(exe);
 
         const run_cmd = b.addRunArtifact(exe);
@@ -58,17 +60,19 @@ pub fn build(b: *std.Build) !void {
             .target = target,
             .optimize = optimize,
         });
-        exe.root_module.addAnonymousImport("xitdb", .{
-            .root_source_file = b.path("../xitdb/src/lib.zig"),
-        });
-        exe.root_module.addAnonymousImport("xitui", .{
-            .root_source_file = b.path("../xitui/src/lib.zig"),
-        });
+        //exe.root_module.addAnonymousImport("xitdb", .{
+        //    .root_source_file = b.path("../xitdb/src/lib.zig"),
+        //});
+        //exe.root_module.addAnonymousImport("xitui", .{
+        //    .root_source_file = b.path("../xitui/src/lib.zig"),
+        //});
+        exe.root_module.addImport("xitdb", b.dependency("xitdb", .{}).module("xitdb"));
+        exe.root_module.addImport("xitui", b.dependency("xitui", .{}).module("xitui"));
+        exe.root_module.addImport("network", b.dependency("network", .{}).module("network"));
         exe.linkLibC();
         exe.linkLibrary(z.step);
         exe.linkLibrary(tls.step);
         exe.linkLibrary(ssh2.step);
-        exe.root_module.addImport("network", b.dependency("network", .{}).module("network"));
         b.installArtifact(exe);
 
         const run_cmd = b.addRunArtifact(exe);
@@ -99,16 +103,18 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = b.path("src/test.zig"),
             .optimize = optimize,
         });
-        unit_tests.root_module.addAnonymousImport("xitdb", .{
-            .root_source_file = b.path("../xitdb/src/lib.zig"),
-        });
-        unit_tests.root_module.addAnonymousImport("xitui", .{
-            .root_source_file = b.path("../xitui/src/lib.zig"),
-        });
+        //unit_tests.root_module.addAnonymousImport("xitdb", .{
+        //    .root_source_file = b.path("../xitdb/src/lib.zig"),
+        //});
+        //unit_tests.root_module.addAnonymousImport("xitui", .{
+        //    .root_source_file = b.path("../xitui/src/lib.zig"),
+        //});
+        unit_tests.root_module.addImport("xitdb", b.dependency("xitdb", .{}).module("xitdb"));
+        unit_tests.root_module.addImport("xitui", b.dependency("xitui", .{}).module("xitui"));
+        unit_tests.root_module.addImport("network", b.dependency("network", .{}).module("network"));
         unit_tests.linkLibC();
         unit_tests.addIncludePath(b.path("deps/test/libgit2/include"));
         unit_tests.linkLibrary(git2.step);
-        unit_tests.root_module.addImport("network", b.dependency("network", .{}).module("network"));
 
         const run_unit_tests = b.addRunArtifact(unit_tests);
         run_unit_tests.has_side_effects = true;
@@ -134,16 +140,18 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = b.path("src/testnet.zig"),
             .optimize = optimize,
         });
-        unit_tests.root_module.addAnonymousImport("xitdb", .{
-            .root_source_file = b.path("../xitdb/src/lib.zig"),
-        });
-        unit_tests.root_module.addAnonymousImport("xitui", .{
-            .root_source_file = b.path("../xitui/src/lib.zig"),
-        });
+        //unit_tests.root_module.addAnonymousImport("xitdb", .{
+        //    .root_source_file = b.path("../xitdb/src/lib.zig"),
+        //});
+        //unit_tests.root_module.addAnonymousImport("xitui", .{
+        //    .root_source_file = b.path("../xitui/src/lib.zig"),
+        //});
+        unit_tests.root_module.addImport("xitdb", b.dependency("xitdb", .{}).module("xitdb"));
+        unit_tests.root_module.addImport("xitui", b.dependency("xitui", .{}).module("xitui"));
+        unit_tests.root_module.addImport("network", b.dependency("network", .{}).module("network"));
         unit_tests.linkLibC();
         unit_tests.addIncludePath(b.path("deps/test/libgit2/include"));
         unit_tests.linkLibrary(git2.step);
-        unit_tests.root_module.addImport("network", b.dependency("network", .{}).module("network"));
 
         const run_unit_tests = b.addRunArtifact(unit_tests);
         run_unit_tests.has_side_effects = true;
