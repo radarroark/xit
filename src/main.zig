@@ -16,8 +16,88 @@ const ui = @import("./ui.zig");
 
 const USAGE =
     \\
-    \\yeah, this should print the usage, but i haven't
-    \\written it yet. sowwy.
+    \\usage: xit <command> [<args>]
+    \\
+    \\init          Create an empty xit repository
+    \\              (in the current dir)
+    \\                  xit init
+    \\              (in a new dir)
+    \\                  xit init myproject
+    \\
+    \\add           Add file contents to the index
+    \\                  xit add myfile.txt
+    \\
+    \\unadd         Remove file contents from the index,
+    \\              but not from the working tree
+    \\                  xit unadd myfile.txt
+    \\
+    \\rm            Remove file contents from the index
+    \\              and from the working tree
+    \\                  xit rm myfile.txt
+    \\
+    \\reset         Add or remove file to/from the index
+    \\              to match what's in the latest commit
+    \\                  xit reset myfile.txt
+    \\
+    \\commit        Record changes to the repository
+    \\                  xit commit -m "my commit message"
+    \\
+    \\status        Show the working tree status
+    \\              (display in TUI)
+    \\                  xit status
+    \\              (display in CLI)
+    \\                  xit status --cli
+    \\
+    \\diff          Show changes between commits, commit and working tree, etc
+    \\              (display in TUI)
+    \\                  xit diff
+    \\              (display diff of workspace content in the CLI)
+    \\                  xit diff --cli
+    \\              (display diff of staged content in the CLI)
+    \\                  xit diff --staged
+    \\
+    \\branch        Add, remove, and list branches
+    \\              (add branch)
+    \\                  xit branch add mybranch
+    \\              (remove branch)
+    \\                  xit branch rm mybranch
+    \\              (list branches)
+    \\                  xit branch list
+    \\
+    \\switch        Switch branches
+    \\                  xit switch mybranch
+    \\
+    \\restore       Restore working tree files
+    \\                  xit restore myfile.txt
+    \\
+    \\log           Show commit logs
+    \\              (display in TUI)
+    \\                  xit log
+    \\              (display in CLI)
+    \\                  xit log --cli
+    \\
+    \\merge         Join two or more development histories together
+    \\                  xit merge mybranch
+    \\
+    \\cherry-pick   Apply the changes introduced by an existing commit
+    \\              (must be the entire oid for now)
+    \\                  xit cherry-pick a1b2c3...
+    \\
+    \\config        Add, remove, and list config options
+    \\              (add config)
+    \\                  xit config add core.editor vim
+    \\              (remove config)
+    \\                  xit config rm core.editor
+    \\              (list configs)
+    \\                  xit config list
+    \\
+    \\remote        Add, remove, and list remotes
+    \\              (add remote)
+    \\                  xit remote add origin https://github.com/...
+    \\              (remove remote)
+    \\                  xit remote rm origin
+    \\              (list remotes)
+    \\                  xit remote list
     \\
 ;
 
