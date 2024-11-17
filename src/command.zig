@@ -181,7 +181,11 @@ pub const Command = union(enum) {
         }
 
         if (std.mem.eql(u8, sub_command, "init")) {
-            return .{ .cli = .{ .init = .{ .dir = if (extra_args.len > 0) extra_args[0] else "." } } };
+            if (map_args.contains("help")) {
+                return .{ .help = .init };
+            } else {
+                return .{ .cli = .{ .init = .{ .dir = if (extra_args.len > 0) extra_args[0] else "." } } };
+            }
         } else if (std.mem.eql(u8, sub_command, "add")) {
             if (extra_args.len == 0) {
                 return error.AddPathsNotFound;
@@ -229,20 +233,30 @@ pub const Command = union(enum) {
             const message = if (map_args.get("-m")) |msg| (msg orelse return error.CommitMessageNotFound) else "";
             return .{ .cli = .{ .commit = .{ .message = message } } };
         } else if (std.mem.eql(u8, sub_command, "status")) {
-            return .{ .cli = .{ .status = {} } };
+            if (map_args.contains("help")) {
+                return .{ .help = .status };
+            } else if (map_args.contains("cli")) {
+                return .{ .cli = .status };
+            } else {
+                return .{ .cli = .{ .status = {} } };
+            }
         } else if (std.mem.eql(u8, sub_command, "diff")) {
-            const diff_opts: df.BasicDiffOptions = if (map_args.contains("--staged"))
-                .index
-            else
-                (if (map_args.contains("--base"))
-                    .{ .workspace = .{ .conflict_diff_kind = .base } }
-                else if (map_args.contains("--ours"))
-                    .{ .workspace = .{ .conflict_diff_kind = .target } }
-                else if (map_args.contains("--theirs"))
-                    .{ .workspace = .{ .conflict_diff_kind = .source } }
+            if (map_args.contains("help")) {
+                return .{ .help = .diff };
+            } else {
+                const diff_opts: df.BasicDiffOptions = if (map_args.contains("--staged"))
+                    .index
                 else
-                    .{ .workspace = .{ .conflict_diff_kind = .target } });
-            return .{ .cli = .{ .diff = .{ .diff_opts = diff_opts } } };
+                    (if (map_args.contains("--base"))
+                        .{ .workspace = .{ .conflict_diff_kind = .base } }
+                    else if (map_args.contains("--ours"))
+                        .{ .workspace = .{ .conflict_diff_kind = .target } }
+                    else if (map_args.contains("--theirs"))
+                        .{ .workspace = .{ .conflict_diff_kind = .source } }
+                    else
+                        .{ .workspace = .{ .conflict_diff_kind = .target } });
+                return .{ .cli = .{ .diff = .{ .diff_opts = diff_opts } } };
+            }
         } else if (std.mem.eql(u8, sub_command, "branch")) {
             const cmd_name = extra_args[0];
 
@@ -277,7 +291,11 @@ pub const Command = union(enum) {
             }
             return .{ .cli = .{ .restore = .{ .path = extra_args[0] } } };
         } else if (std.mem.eql(u8, sub_command, "log")) {
-            return .{ .cli = .log };
+            if (map_args.contains("help")) {
+                return .{ .help = .log };
+            } else {
+                return .{ .cli = .log };
+            }
         } else if (std.mem.eql(u8, sub_command, "merge")) {
             var merge_input_maybe: ?mrg.MergeInput = switch (extra_args.len) {
                 0 => null,
