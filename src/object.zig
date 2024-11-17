@@ -301,7 +301,11 @@ pub fn writeCommit(
     const tree_sha1_hex = std.fmt.bytesToHex(tree_sha1_bytes_buffer, .lower);
 
     // don't allow commit if the tree hasn't changed
-    if (parent_oids.len == 1) {
+    if (parent_oids.len == 0) {
+        if (tree.entries.count() == 0) {
+            return error.EmptyCommit;
+        }
+    } else if (parent_oids.len == 1) {
         var first_parent = try Object(repo_kind, .full).init(allocator, state.readOnly(), &parent_oids[0]);
         defer first_parent.deinit();
         if (std.mem.eql(u8, &first_parent.content.commit.tree, &tree_sha1_hex)) {
