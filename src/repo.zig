@@ -889,7 +889,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
         pub fn listBranches(self: *Repo(repo_kind), allocator: std.mem.Allocator) !ref.RefList {
             var moment = try self.core.latestMoment();
             const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
-            return try ref.RefList.init(repo_kind, state, allocator, "heads");
+            return try ref.RefList.init(repo_kind, state, allocator);
         }
 
         pub fn addBranch(self: *Repo(repo_kind), input: bch.AddBranchInput) !void {
