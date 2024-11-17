@@ -80,12 +80,13 @@ pub const RefOrOid = union(enum) {
     }
 };
 
+// TODO: this is currently hard-coded to only get local refs (from refs/heads)
 pub const RefList = struct {
     refs: std.StringArrayHashMap(Ref),
     arena: *std.heap.ArenaAllocator,
     allocator: std.mem.Allocator,
 
-    pub fn init(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator, dir_name: []const u8) !RefList {
+    pub fn init(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator) !RefList {
         const arena = try allocator.create(std.heap.ArenaAllocator);
         arena.* = std.heap.ArenaAllocator.init(allocator);
         var ref_list = RefList{
@@ -99,12 +100,12 @@ pub const RefList = struct {
             .git => {
                 var refs_dir = try state.core.git_dir.openDir("refs", .{});
                 defer refs_dir.close();
-                var heads_dir = try refs_dir.openDir("heads", .{});
+                var heads_dir = try refs_dir.openDir("heads", .{ .iterate = true });
                 defer heads_dir.close();
 
                 var path = std.ArrayList([]const u8).init(allocator);
                 defer path.deinit();
-                try ref_list.addRefs(repo_kind, state, dir_name, heads_dir, &path);
+                try ref_list.addRefs(state, heads_dir, &path);
             },
             .xit => {
                 if (try state.extra.moment.cursor.readPath(void, &.{
@@ -131,10 +132,8 @@ pub const RefList = struct {
         self.allocator.destroy(self.arena);
     }
 
-    fn addRefs(self: *RefList, comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), dir_name: []const u8, dir: std.fs.Dir, path: *std.ArrayList([]const u8)) !void {
-        var iter_dir = try dir.openDir(".", .{ .iterate = true });
-        defer iter_dir.close();
-        var iter = iter_dir.iterate();
+    fn addRefs(self: *RefList, state: rp.Repo(.git).State(.read_only), dir: std.fs.Dir, path: *std.ArrayList([]const u8)) !void {
+        var iter = dir.iterate();
         while (try iter.next()) |entry| {
             var next_path = try path.clone();
             defer next_path.deinit();
@@ -145,9 +144,9 @@ pub const RefList = struct {
                     try self.refs.put(name, .{ .kind = .local, .name = name });
                 },
                 .directory => {
-                    var next_dir = try dir.openDir(entry.name, .{});
+                    var next_dir = try dir.openDir(entry.name, .{ .iterate = true });
                     defer next_dir.close();
-                    try self.addRefs(repo_kind, state, dir_name, next_dir, &next_path);
+                    try self.addRefs(state, next_dir, &next_path);
                 },
                 else => {},
             }
