@@ -30,7 +30,6 @@ fn testPull(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator) !void
         allocator,
     );
     process.cwd = temp_dir_name;
-    defer _ = process.kill() catch {};
 
     const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
 
@@ -47,6 +46,7 @@ fn testPull(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator) !void
 
     // start server
     try process.spawn();
+    defer _ = process.kill() catch {};
     std.time.sleep(1000000000 * 0.5);
 
     // create the client dir
@@ -103,7 +103,6 @@ fn testPush(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator) !void
         allocator,
     );
     process.cwd = temp_dir_name;
-    defer _ = process.kill() catch {};
 
     const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
 
@@ -115,6 +114,7 @@ fn testPush(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator) !void
 
     // start server
     try process.spawn();
+    defer _ = process.kill() catch {};
     std.time.sleep(1000000000 * 0.5);
 
     // create the client dir
