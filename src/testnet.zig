@@ -9,10 +9,6 @@ const c = @cImport({
 fn testPull(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator) !void {
     const temp_dir_name = "temp-testnet-pull";
 
-    // start libgit
-    _ = c.git_libgit2_init();
-    defer _ = c.git_libgit2_shutdown();
-
     // create the temp dir
     const cwd = std.fs.cwd();
     var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
@@ -30,7 +26,11 @@ fn testPull(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator) !void
         allocator,
     );
     process.cwd = temp_dir_name;
+
+    // start server
+    try process.spawn();
     defer _ = process.kill() catch {};
+    std.time.sleep(std.time.ns_per_s * 0.5);
 
     const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
 
@@ -44,10 +44,6 @@ fn testPull(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator) !void
     try file.writeAll("hello, world!");
     try server_repo.add(allocator, &.{"server/hello.txt"});
     _ = try server_repo.commit(allocator, .{ .message = "let there be light" });
-
-    // start server
-    try process.spawn();
-    std.time.sleep(1000000000 * 0.5);
 
     // create the client dir
     var client_dir = try temp_dir.makeOpenPath("client", .{});
@@ -82,10 +78,6 @@ test "pull" {
 fn testPush(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator) !void {
     const temp_dir_name = "temp-testnet-push";
 
-    // start libgit
-    _ = c.git_libgit2_init();
-    defer _ = c.git_libgit2_shutdown();
-
     // create the temp dir
     const cwd = std.fs.cwd();
     var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
@@ -103,7 +95,15 @@ fn testPush(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator) !void
         allocator,
     );
     process.cwd = temp_dir_name;
+
+    // start server
+    try process.spawn();
     defer _ = process.kill() catch {};
+    std.time.sleep(std.time.ns_per_s * 0.5);
+
+    // start libgit
+    _ = c.git_libgit2_init();
+    defer _ = c.git_libgit2_shutdown();
 
     const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
 
@@ -112,10 +112,6 @@ fn testPush(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator) !void
     defer server_repo.deinit();
     try server_repo.addConfig(allocator, .{ .name = "core.bare", .value = "false" });
     try server_repo.addConfig(allocator, .{ .name = "receive.denycurrentbranch", .value = "updateinstead" });
-
-    // start server
-    try process.spawn();
-    std.time.sleep(1000000000 * 0.5);
 
     // create the client dir
     var client_dir = try temp_dir.makeOpenPath("client", .{});
