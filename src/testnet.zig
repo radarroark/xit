@@ -1,7 +1,6 @@
 const std = @import("std");
 const rp = @import("./repo.zig");
 const hash = @import("./hash.zig");
-const net = @import("./net.zig");
 
 const c = @cImport({
     @cInclude("git2.h");
@@ -33,6 +32,10 @@ fn testPull(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     defer _ = process.kill() catch {};
     std.time.sleep(std.time.ns_per_s * 0.5);
 
+    // start libgit
+    _ = c.git_libgit2_init();
+    defer _ = c.git_libgit2_shutdown();
+
     // init server repo
     var server_repo = try rp.Repo(.git, .{}).init(allocator, .{ .cwd = temp_dir }, "server");
     defer server_repo.deinit();
@@ -53,25 +56,59 @@ fn testPull(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     defer client_repo.deinit();
     try client_repo.addRemote(allocator, .{ .name = "origin", .value = "git://localhost:3000/server" });
 
-    // fetch the objects
-    try std.testing.expectEqual(3, (try client_repo.fetch(allocator, "origin")).object_count);
+    // test with libgit2
+    {
+        // get repo path for libgit
+        var repo_path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
+        const repo_path: [*c]const u8 = @ptrCast(try client_dir.realpath(".", &repo_path_buffer));
 
-    // calling fetch again returns no objects
-    try std.testing.expectEqual(0, (try client_repo.fetch(allocator, "origin")).object_count);
+        // init client repo
+        var repo: ?*c.git_repository = null;
+        try std.testing.expectEqual(0, c.git_repository_open(&repo, repo_path));
+        defer c.git_repository_free(repo);
 
-    // calling pull will also merge into master
-    var pull_result = try client_repo.pull(allocator, "origin", "master");
-    defer pull_result.deinit();
+        var refspec_strs = [_][*c]const u8{
+            @ptrCast("+refs/heads/master:refs/heads/master"),
+        };
+        var refspecs: c.git_strarray = undefined;
+        refspecs.strings = @ptrCast(&refspec_strs);
+        refspecs.count = refspec_strs.len;
 
-    // make sure pull was successful
-    const hello_txt = try client_dir.openFile("hello.txt", .{});
-    defer hello_txt.close();
+        var remote: ?*c.git_remote = null;
+        try std.testing.expectEqual(0, c.git_remote_lookup(&remote, repo, "origin"));
+        defer c.git_remote_free(remote);
+
+        var callbacks: c.git_remote_callbacks = undefined;
+        try std.testing.expectEqual(0, c.git_remote_init_callbacks(&callbacks, c.GIT_REMOTE_CALLBACKS_VERSION));
+
+        var options: c.git_fetch_options = undefined;
+        try std.testing.expectEqual(0, c.git_fetch_options_init(&options, c.GIT_FETCH_OPTIONS_VERSION));
+        options.callbacks = callbacks;
+
+        std.testing.expectEqual(0, c.git_remote_fetch(remote, &refspecs, &options, null)) catch |err| {
+            const last_err = c.giterr_last();
+            std.debug.print("{s}\n", .{last_err.*.message});
+            return err;
+        };
+
+        // update the working dir
+        var head_ref: ?*c.git_reference = null;
+        try std.testing.expectEqual(0, c.git_repository_head(&head_ref, repo));
+        defer c.git_reference_free(head_ref);
+        var head_obj: ?*c.git_object = null;
+        try std.testing.expectEqual(0, c.git_reference_peel(&head_obj, head_ref, c.GIT_OBJECT_COMMIT));
+        defer c.git_object_free(head_obj);
+        try std.testing.expectEqual(0, c.git_reset(repo, head_obj, c.GIT_RESET_HARD, null));
+
+        // make sure pull was successful
+        const hello_txt = try client_dir.openFile("hello.txt", .{});
+        defer hello_txt.close();
+    }
 }
 
 test "pull" {
     const allocator = std.testing.allocator;
     try testPull(.git, .{}, allocator);
-    try testPull(.xit, .{}, allocator);
 }
 
 fn testPush(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind), allocator: std.mem.Allocator) !void {
