@@ -1,11 +1,17 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const rp = @import("repo.zig");
 
 const c = @cImport({
     @cInclude("git2.h");
 });
 
-fn testPull(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator) !void {
+const Protocol = enum {
+    git,
+    http,
+};
+
+fn testPull(comptime repo_kind: rp.RepoKind, comptime protocol: Protocol, allocator: std.mem.Allocator) !void {
     const temp_dir_name = "temp-testnet-pull";
 
     // create the temp dir
@@ -19,9 +25,30 @@ fn testPull(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator) !void
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
+    // add cgi script if necessary
+    if (protocol == .http) {
+        var cgi_bin_dir = try temp_dir.makeOpenPath("cgi-bin", .{});
+        defer cgi_bin_dir.close();
+
+        const cgi_file = try cgi_bin_dir.createFile("git-http-backend", .{});
+        defer cgi_file.close();
+        try cgi_file.writeAll(
+            \\#!/bin/sh
+            \\git http-backend
+        );
+
+        // make the script executable
+        if (builtin.os.tag != .windows) {
+            try cgi_file.setPermissions(.{ .inner = .{ .mode = 0o755 } });
+        }
+    }
+
     // init server process
     var process = std.process.Child.init(
-        &.{ "git", "daemon", "--reuseaddr", "--base-path=.", "--export-all", "--enable=receive-pack", "--port=3000" },
+        switch (protocol) {
+            .git => &.{ "git", "daemon", "--reuseaddr", "--base-path=.", "--export-all", "--enable=receive-pack", "--port=3000" },
+            .http => &.{ "python3", "-m", "http.server", "--cgi", "3000" },
+        },
         allocator,
     );
     process.cwd = temp_dir_name;
@@ -42,11 +69,19 @@ fn testPull(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator) !void
     defer server_repo.deinit();
 
     // make a commit
-    const file = try server_repo.core.repo_dir.createFile("hello.txt", .{ .truncate = true });
-    defer file.close();
-    try file.writeAll("hello, world!");
-    try server_repo.add(allocator, &.{"server/hello.txt"});
-    _ = try server_repo.commit(allocator, .{ .message = "let there be light" });
+    {
+        const hello_txt = try server_repo.core.repo_dir.createFile("hello.txt", .{ .truncate = true });
+        defer hello_txt.close();
+        try hello_txt.writeAll("hello, world!");
+        try server_repo.add(allocator, &.{"server/hello.txt"});
+        _ = try server_repo.commit(allocator, .{ .message = "let there be light" });
+    }
+
+    // export server repo
+    {
+        const export_file = try server_repo.core.git_dir.createFile("git-daemon-export-ok", .{});
+        defer export_file.close();
+    }
 
     // create the client dir
     var client_dir = try temp_dir.makeOpenPath("client", .{});
@@ -55,7 +90,13 @@ fn testPull(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator) !void
     // init client repo
     var client_repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "client" } }, writers);
     defer client_repo.deinit();
-    try client_repo.addRemote(allocator, .{ .name = "origin", .value = "git://localhost:3000/server" });
+
+    // add remote
+    const remote_url = switch (protocol) {
+        .git => "git://localhost:3000/server",
+        .http => "http://localhost:3000/cgi-bin/git-http-backend/server",
+    };
+    try client_repo.addRemote(allocator, .{ .name = "origin", .value = remote_url });
 
     // get repo path for libgit
     var repo_path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
@@ -100,16 +141,17 @@ fn testPull(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator) !void
     try std.testing.expectEqual(0, c.git_reset(repo, head_obj, c.GIT_RESET_HARD, null));
 
     // make sure pull was successful
-    const hello_txt = try client_dir.openFile("hello.txt", .{});
+    const hello_txt = try temp_dir.openFile("client/hello.txt", .{});
     defer hello_txt.close();
 }
 
 test "pull" {
     const allocator = std.testing.allocator;
-    try testPull(.git, allocator);
+    try testPull(.git, .git, allocator);
+    try testPull(.git, .http, allocator);
 }
 
-fn testPush(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator) !void {
+fn testPush(comptime repo_kind: rp.RepoKind, comptime protocol: Protocol, allocator: std.mem.Allocator) !void {
     const temp_dir_name = "temp-testnet-push";
 
     // create the temp dir
@@ -123,9 +165,30 @@ fn testPush(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator) !void
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
+    // add cgi script if necessary
+    if (protocol == .http) {
+        var cgi_bin_dir = try temp_dir.makeOpenPath("cgi-bin", .{});
+        defer cgi_bin_dir.close();
+
+        const cgi_file = try cgi_bin_dir.createFile("git-http-backend", .{});
+        defer cgi_file.close();
+        try cgi_file.writeAll(
+            \\#!/bin/sh
+            \\git http-backend
+        );
+
+        // make the script executable
+        if (builtin.os.tag != .windows) {
+            try cgi_file.setPermissions(.{ .inner = .{ .mode = 0o755 } });
+        }
+    }
+
     // init server process
     var process = std.process.Child.init(
-        &.{ "git", "daemon", "--reuseaddr", "--base-path=.", "--export-all", "--enable=receive-pack", "--port=3001" },
+        switch (protocol) {
+            .git => &.{ "git", "daemon", "--reuseaddr", "--base-path=.", "--export-all", "--enable=receive-pack", "--port=3001" },
+            .http => &.{ "python3", "-m", "http.server", "--cgi", "3001" },
+        },
         allocator,
     );
     process.cwd = temp_dir_name;
@@ -146,6 +209,13 @@ fn testPush(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator) !void
     defer server_repo.deinit();
     try server_repo.addConfig(allocator, .{ .name = "core.bare", .value = "false" });
     try server_repo.addConfig(allocator, .{ .name = "receive.denycurrentbranch", .value = "updateinstead" });
+    try server_repo.addConfig(allocator, .{ .name = "http.receivepack", .value = "true" });
+
+    // export server repo
+    {
+        const export_file = try server_repo.core.git_dir.createFile("git-daemon-export-ok", .{});
+        defer export_file.close();
+    }
 
     // create the client dir
     var client_dir = try temp_dir.makeOpenPath("client", .{});
@@ -154,7 +224,22 @@ fn testPush(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator) !void
     // init client repo
     var client_repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "client" } }, writers);
     defer client_repo.deinit();
-    try client_repo.addRemote(allocator, .{ .name = "origin", .value = "git://localhost:3001/server" });
+
+    // make a commit
+    {
+        const hello_txt = try client_repo.core.repo_dir.createFile("hello.txt", .{ .truncate = true });
+        defer hello_txt.close();
+        try hello_txt.writeAll("hello, world!");
+        try client_repo.add(allocator, &.{"client/hello.txt"});
+        _ = try client_repo.commit(allocator, .{ .message = "let there be light" });
+    }
+
+    // add remote
+    const remote_url = switch (protocol) {
+        .git => "git://localhost:3001/server",
+        .http => "http://localhost:3001/cgi-bin/git-http-backend/server",
+    };
+    try client_repo.addRemote(allocator, .{ .name = "origin", .value = remote_url });
 
     // get repo path for libgit
     var repo_path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
@@ -164,50 +249,6 @@ fn testPush(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator) !void
     var repo: ?*c.git_repository = null;
     try std.testing.expectEqual(0, c.git_repository_open(&repo, repo_path));
     defer c.git_repository_free(repo);
-
-    // add and commit
-    var commit_oid1: c.git_oid = undefined;
-    {
-        // make file
-        var hello_txt = try client_dir.createFile("hello.txt", .{});
-        defer hello_txt.close();
-        try hello_txt.writeAll("hello, world!");
-
-        // make file
-        var readme = try client_dir.createFile("README", .{});
-        defer readme.close();
-        try readme.writeAll("My cool project");
-
-        // add the files
-        var index: ?*c.git_index = null;
-        try std.testing.expectEqual(0, c.git_repository_index(&index, repo));
-        defer c.git_index_free(index);
-        try std.testing.expectEqual(0, c.git_index_add_bypath(index, "hello.txt"));
-        try std.testing.expectEqual(0, c.git_index_add_bypath(index, "README"));
-        try std.testing.expectEqual(0, c.git_index_write(index));
-
-        // make the commit
-        var tree_oid: c.git_oid = undefined;
-        try std.testing.expectEqual(0, c.git_index_write_tree(&tree_oid, index));
-        var tree: ?*c.git_tree = null;
-        try std.testing.expectEqual(0, c.git_tree_lookup(&tree, repo, &tree_oid));
-        defer c.git_tree_free(tree);
-        var signature: ?*c.git_signature = null;
-        try std.testing.expectEqual(0, c.git_signature_new(&signature, "radarroark", "radarroark@radar.roark", 0, 0));
-        defer c.git_signature_free(signature);
-        try std.testing.expectEqual(0, c.git_commit_create(
-            &commit_oid1,
-            repo,
-            "HEAD",
-            signature,
-            signature,
-            null,
-            "let there be light",
-            tree,
-            0,
-            null,
-        ));
-    }
 
     var refspec_strs = [_][*c]const u8{
         @ptrCast("+refs/heads/master:refs/heads/master"),
@@ -234,13 +275,12 @@ fn testPush(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator) !void
     };
 
     // make sure push was successful
-    var server_dir = try temp_dir.openDir("server", .{});
-    defer server_dir.close();
-    const hello_txt = try server_dir.openFile("hello.txt", .{});
+    const hello_txt = try temp_dir.openFile("server/hello.txt", .{});
     defer hello_txt.close();
 }
 
 test "push" {
     const allocator = std.testing.allocator;
-    try testPush(.git, allocator);
+    try testPush(.git, .git, allocator);
+    //try testPush(.git, .http, allocator);
 }
