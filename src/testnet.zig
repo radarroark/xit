@@ -12,6 +12,48 @@ const Protocol = enum {
     http,
 };
 
+fn Server(comptime protocol: Protocol) type {
+    return struct {
+        core: switch (protocol) {
+            .git, .http => struct {
+                process: std.process.Child,
+            },
+        },
+
+        fn init(allocator: std.mem.Allocator, comptime temp_dir_name: []const u8, comptime port: u16) !Server(protocol) {
+            const port_str = std.fmt.comptimePrint("{}", .{port});
+            var process = std.process.Child.init(
+                switch (protocol) {
+                    .git => &.{ "git", "daemon", "--reuseaddr", "--base-path=.", "--export-all", "--enable=receive-pack", "--port=" ++ port_str },
+                    .http => &.{ "python3", "-m", "http.server", "--cgi", port_str },
+                },
+                allocator,
+            );
+            process.cwd = temp_dir_name;
+            return .{
+                .core = .{ .process = process },
+            };
+        }
+
+        fn start(self: *Server(protocol)) !void {
+            switch (protocol) {
+                .git, .http => {
+                    try self.core.process.spawn();
+                    std.time.sleep(std.time.ns_per_s * 0.5);
+                },
+            }
+        }
+
+        fn stop(self: *Server(protocol)) void {
+            switch (protocol) {
+                .git, .http => {
+                    _ = self.core.process.kill() catch {};
+                },
+            }
+        }
+    };
+}
+
 fn testPull(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind), comptime protocol: Protocol, allocator: std.mem.Allocator) !void {
     const temp_dir_name = "temp-testnet-pull";
 
@@ -44,20 +86,10 @@ fn testPull(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         }
     }
 
-    // init server process
-    var process = std.process.Child.init(
-        switch (protocol) {
-            .git => &.{ "git", "daemon", "--reuseaddr", "--base-path=.", "--export-all", "--enable=receive-pack", "--port=3000" },
-            .http => &.{ "python3", "-m", "http.server", "--cgi", "3000" },
-        },
-        allocator,
-    );
-    process.cwd = temp_dir_name;
-
-    // start server
-    try process.spawn();
-    defer _ = process.kill() catch {};
-    std.time.sleep(std.time.ns_per_s * 0.5);
+    // init server
+    var server = try Server(protocol).init(allocator, temp_dir_name, 3000);
+    try server.start();
+    defer server.stop();
 
     // start libgit
     _ = c.git_libgit2_init();
@@ -182,20 +214,10 @@ fn testPush(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         }
     }
 
-    // init server process
-    var process = std.process.Child.init(
-        switch (protocol) {
-            .git => &.{ "git", "daemon", "--reuseaddr", "--base-path=.", "--export-all", "--enable=receive-pack", "--port=3001" },
-            .http => &.{ "python3", "-m", "http.server", "--cgi", "3001" },
-        },
-        allocator,
-    );
-    process.cwd = temp_dir_name;
-
-    // start server
-    try process.spawn();
-    defer _ = process.kill() catch {};
-    std.time.sleep(std.time.ns_per_s * 0.5);
+    // init server
+    var server = try Server(protocol).init(allocator, temp_dir_name, 3001);
+    try server.start();
+    defer server.stop();
 
     // start libgit
     _ = c.git_libgit2_init();
