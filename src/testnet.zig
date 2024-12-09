@@ -13,40 +13,185 @@ const Protocol = enum {
 
 fn Server(comptime protocol: Protocol) type {
     return struct {
-        core: switch (protocol) {
-            .git, .http => struct {
+        core: Core,
+
+        const Core = switch (protocol) {
+            .git => struct {
                 process: std.process.Child,
             },
-        },
+            .http => struct {
+                allocator: std.mem.Allocator,
+                temp_dir_name: []const u8,
+                stop_server_endpoint: []const u8,
+                net_server: std.net.Server,
+                server_thread: std.Thread,
+            },
+        };
 
         fn init(allocator: std.mem.Allocator, comptime temp_dir_name: []const u8, comptime port: u16) !Server(protocol) {
-            const port_str = std.fmt.comptimePrint("{}", .{port});
-            var process = std.process.Child.init(
-                switch (protocol) {
-                    .git => &.{ "git", "daemon", "--reuseaddr", "--base-path=.", "--export-all", "--enable=receive-pack", "--port=" ++ port_str },
-                    .http => &.{ "python3", "-m", "http.server", "--cgi", port_str },
-                },
-                allocator,
-            );
-            process.cwd = temp_dir_name;
-            return .{
-                .core = .{ .process = process },
-            };
-        }
-
-        fn start(self: *Server(protocol)) !void {
             switch (protocol) {
-                .git, .http => {
-                    try self.core.process.spawn();
-                    std.time.sleep(std.time.ns_per_s * 0.5);
+                .git => {
+                    const port_str = std.fmt.comptimePrint("{}", .{port});
+                    var process = std.process.Child.init(
+                        &.{ "git", "daemon", "--reuseaddr", "--base-path=.", "--export-all", "--enable=receive-pack", "--port=" ++ port_str },
+                        allocator,
+                    );
+                    process.cwd = temp_dir_name;
+                    process.stdin_behavior = .Ignore;
+                    process.stdout_behavior = .Ignore;
+                    process.stderr_behavior = .Ignore;
+                    return .{
+                        .core = .{ .process = process },
+                    };
+                },
+                .http => {
+                    const address = try std.net.Address.parseIp("127.0.0.1", port);
+                    const net_server = try address.listen(.{ .reuse_address = true });
+                    errdefer net_server.deinit();
+                    return .{
+                        .core = .{
+                            .allocator = allocator,
+                            .temp_dir_name = temp_dir_name,
+                            .stop_server_endpoint = std.fmt.comptimePrint("http://127.0.0.1:{}/stop-server", .{port}),
+                            .net_server = net_server,
+                            .server_thread = undefined,
+                        },
+                    };
                 },
             }
         }
 
+        fn start(self: *Server(protocol)) !void {
+            switch (protocol) {
+                .git => try self.core.process.spawn(),
+                .http => {
+                    const ServerHandler = struct {
+                        fn run(core: *Core) !void {
+                            accept: while (true) {
+                                const conn = try core.net_server.accept();
+                                defer conn.stream.close();
+
+                                var header_buffer = [_]u8{0} ** 1024;
+                                var http_server = std.http.Server.init(conn, &header_buffer);
+
+                                while (http_server.state == .ready) {
+                                    // give server some time to receive the request.
+                                    // without it, POST requests sometimes don't have all the
+                                    // expected data in their bodies because they use chunked encoding.
+                                    std.time.sleep(std.time.ns_per_s * 0.5);
+
+                                    var request = http_server.receiveHead() catch |err| switch (err) {
+                                        error.HttpConnectionClosing => continue :accept,
+                                        else => |e| return e,
+                                    };
+                                    if (std.mem.eql(u8, request.head.target, "/stop-server")) {
+                                        break :accept;
+                                    }
+
+                                    const uri = try std.Uri.parseAfterScheme("", request.head.target);
+                                    if (uri.path.percent_encoded[0] != '/') return error.PathMustStartWithSlash;
+                                    const path = if (std.mem.indexOfScalar(u8, uri.path.percent_encoded[1..], '/')) |idx|
+                                        uri.path.percent_encoded[idx + 1 ..]
+                                    else
+                                        return error.SlashNotFound;
+
+                                    const temp_dir_path = try std.fs.cwd().realpathAlloc(core.allocator, core.temp_dir_name);
+                                    defer core.allocator.free(temp_dir_path);
+                                    const path_translated = try std.fmt.allocPrint(core.allocator, "{s}{s}", .{
+                                        temp_dir_path,
+                                        uri.path.percent_encoded,
+                                    });
+                                    defer core.allocator.free(path_translated);
+
+                                    // init env map
+                                    var env_map = std.process.EnvMap.init(core.allocator);
+                                    defer env_map.deinit();
+                                    try env_map.put("GATEWAY_INTERFACE", "CGI/1.1");
+                                    try env_map.put("REQUEST_METHOD", @tagName(request.head.method));
+                                    try env_map.put("PATH_INFO", path);
+                                    try env_map.put("PATH_TRANSLATED", path_translated);
+                                    if (uri.query) |query| {
+                                        try env_map.put("QUERY_STRING", query.percent_encoded);
+                                    }
+
+                                    var accept = std.ArrayList([]const u8).init(core.allocator);
+                                    defer accept.deinit();
+
+                                    // iterate over headers to fill env map
+                                    var req_header_it = request.iterateHeaders();
+                                    while (req_header_it.next()) |header| {
+                                        const header_name = header.name;
+                                        const header_value = header.value;
+
+                                        if (std.ascii.eqlIgnoreCase(header_name, "content-type")) {
+                                            try env_map.put("CONTENT_TYPE", header_value);
+                                        } else if (std.ascii.eqlIgnoreCase(header_name, "content-length")) {
+                                            try env_map.put("CONTENT_LENGTH", header_value);
+                                        } else if (std.ascii.eqlIgnoreCase(header_name, "referer")) {
+                                            try env_map.put("HTTP_REFERER", header_value);
+                                        } else if (std.ascii.eqlIgnoreCase(header_name, "accept")) {
+                                            try accept.append(header_value);
+                                        } else if (std.ascii.eqlIgnoreCase(header_name, "user-agent")) {
+                                            try env_map.put("HTTP_USER_AGENT", header_value);
+                                        }
+                                    }
+
+                                    const accept_str = try std.mem.join(core.allocator, ",", accept.items);
+                                    defer core.allocator.free(accept_str);
+                                    if (accept_str.len > 0) {
+                                        try env_map.put("HTTP_ACCEPT", accept_str);
+                                    }
+
+                                    var process = std.process.Child.init(&.{ "git", "http-backend" }, core.allocator);
+                                    process.cwd = core.temp_dir_name;
+                                    process.stdin_behavior = .Pipe;
+                                    process.stdout_behavior = .Pipe;
+                                    process.stderr_behavior = .Pipe;
+                                    process.env_map = &env_map;
+                                    try process.spawn();
+
+                                    if (request.head.method == .POST) {
+                                        const reader = try request.reader();
+                                        const request_body = try reader.readAllAlloc(core.allocator, 1024 * 1024);
+                                        defer core.allocator.free(request_body);
+                                        try process.stdin.?.writeAll(request_body);
+                                    }
+
+                                    var stdout = std.ArrayList(u8).init(core.allocator);
+                                    defer stdout.deinit();
+                                    var stderr = std.ArrayList(u8).init(core.allocator);
+                                    defer stderr.deinit();
+                                    try process.collectOutput(&stdout, &stderr, 1024 * 1024);
+
+                                    _ = try process.wait();
+
+                                    if (stderr.items.len > 0) {
+                                        std.debug.print("Error from git-http-backend:\n{s}\n", .{stderr.items});
+                                        try http_server.connection.stream.writeAll("HTTP/1.1 500 Internal Server Error\r\n\r\n");
+                                    } else {
+                                        try http_server.connection.stream.writeAll("HTTP/1.1 200 OK\r\n");
+                                        try http_server.connection.stream.writeAll(stdout.items);
+                                    }
+                                }
+                            }
+                        }
+                    };
+                    self.core.server_thread = try std.Thread.spawn(.{}, ServerHandler.run, .{&self.core});
+                },
+            }
+
+            // give server some time to start
+            std.time.sleep(std.time.ns_per_s * 0.5);
+        }
+
         fn stop(self: *Server(protocol)) void {
             switch (protocol) {
-                .git, .http => {
-                    _ = self.core.process.kill() catch {};
+                .git => _ = self.core.process.kill() catch {},
+                .http => {
+                    var client = std.http.Client{ .allocator = self.core.allocator };
+                    defer client.deinit();
+                    _ = client.fetch(.{ .location = .{ .url = self.core.stop_server_endpoint } }) catch return;
+                    self.core.server_thread.join();
                 },
             }
         }
@@ -66,24 +211,6 @@ fn testPull(comptime repo_kind: rp.RepoKind, comptime protocol: Protocol, alloca
     var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
-
-    // add cgi script if necessary
-    if (protocol == .http) {
-        var cgi_bin_dir = try temp_dir.makeOpenPath("cgi-bin", .{});
-        defer cgi_bin_dir.close();
-
-        const cgi_file = try cgi_bin_dir.createFile("git-http-backend", .{});
-        defer cgi_file.close();
-        try cgi_file.writeAll(
-            \\#!/bin/sh
-            \\git http-backend
-        );
-
-        // make the script executable
-        if (builtin.os.tag != .windows) {
-            try cgi_file.setPermissions(.{ .inner = .{ .mode = 0o755 } });
-        }
-    }
 
     // init server
     var server = try Server(protocol).init(allocator, temp_dir_name, 3000);
@@ -126,7 +253,7 @@ fn testPull(comptime repo_kind: rp.RepoKind, comptime protocol: Protocol, alloca
     // add remote
     const remote_url = switch (protocol) {
         .git => "git://localhost:3000/server",
-        .http => "http://localhost:3000/cgi-bin/git-http-backend/server",
+        .http => "http://localhost:3000/server",
     };
     try client_repo.addRemote(allocator, .{ .name = "origin", .value = remote_url });
 
@@ -197,24 +324,6 @@ fn testPush(comptime repo_kind: rp.RepoKind, comptime protocol: Protocol, alloca
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
-    // add cgi script if necessary
-    if (protocol == .http) {
-        var cgi_bin_dir = try temp_dir.makeOpenPath("cgi-bin", .{});
-        defer cgi_bin_dir.close();
-
-        const cgi_file = try cgi_bin_dir.createFile("git-http-backend", .{});
-        defer cgi_file.close();
-        try cgi_file.writeAll(
-            \\#!/bin/sh
-            \\git http-backend
-        );
-
-        // make the script executable
-        if (builtin.os.tag != .windows) {
-            try cgi_file.setPermissions(.{ .inner = .{ .mode = 0o755 } });
-        }
-    }
-
     // init server
     var server = try Server(protocol).init(allocator, temp_dir_name, 3001);
     try server.start();
@@ -259,7 +368,7 @@ fn testPush(comptime repo_kind: rp.RepoKind, comptime protocol: Protocol, alloca
     // add remote
     const remote_url = switch (protocol) {
         .git => "git://localhost:3001/server",
-        .http => "http://localhost:3001/cgi-bin/git-http-backend/server",
+        .http => "http://localhost:3001/server",
     };
     try client_repo.addRemote(allocator, .{ .name = "origin", .value = remote_url });
 
@@ -304,5 +413,5 @@ fn testPush(comptime repo_kind: rp.RepoKind, comptime protocol: Protocol, alloca
 test "push" {
     const allocator = std.testing.allocator;
     try testPush(.git, .git, allocator);
-    //try testPush(.git, .http, allocator);
+    try testPush(.git, .http, allocator);
 }
