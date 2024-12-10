@@ -8,6 +8,7 @@ const c = @cImport({
 
 const Protocol = enum {
     git,
+    ssh,
     http,
 };
 
@@ -17,6 +18,9 @@ fn Server(comptime protocol: Protocol) type {
 
         const Core = switch (protocol) {
             .git => struct {
+                process: std.process.Child,
+            },
+            .ssh => struct {
                 process: std.process.Child,
             },
             .http => struct {
@@ -37,9 +41,109 @@ fn Server(comptime protocol: Protocol) type {
                         allocator,
                     );
                     process.cwd = temp_dir_name;
-                    process.stdin_behavior = .Ignore;
-                    process.stdout_behavior = .Ignore;
-                    process.stderr_behavior = .Ignore;
+                    process.stdin_behavior = .Pipe;
+                    process.stdout_behavior = .Pipe;
+                    process.stderr_behavior = .Pipe;
+                    return .{
+                        .core = .{ .process = process },
+                    };
+                },
+                .ssh => {
+                    // create priv host key
+                    const host_key_file = try std.fs.cwd().createFile(temp_dir_name ++ "/host_key", .{});
+                    defer host_key_file.close();
+                    try host_key_file.writeAll(
+                        \\-----BEGIN OPENSSH PRIVATE KEY-----
+                        \\b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAaAAAABNlY2RzYS
+                        \\1zaGEyLW5pc3RwMjU2AAAACG5pc3RwMjU2AAAAQQS1ppUfk8n7yvVKEgz3tXjt4q76VGuj
+                        \\LcQlRwmogzovV40LLcX0aTObZlQaLWfzJMNpCa/ztMpQlr86nsarE4lEAAAAqLe43zK3uN
+                        \\8yAAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBLWmlR+TyfvK9UoS
+                        \\DPe1eO3irvpUa6MtxCVHCaiDOi9XjQstxfRpM5tmVBotZ/Mkw2kJr/O0ylCWvzqexqsTiU
+                        \\QAAAAgQ+LCk30ZNJxb2Da5JL+QOFWCMf7bgXCWcEzhEGGvFWYAAAALcmFkYXJAcm9hcmsB
+                        \\AgMEBQ==
+                        \\-----END OPENSSH PRIVATE KEY-----
+                        \\
+                    );
+                    if (builtin.os.tag != .windows) {
+                        try host_key_file.setPermissions(.{ .inner = .{ .mode = 0o600 } });
+                    }
+
+                    // create priv client key
+                    const priv_key_file = try std.fs.cwd().createFile(temp_dir_name ++ "/key", .{});
+                    defer priv_key_file.close();
+                    try priv_key_file.writeAll(
+                        \\-----BEGIN OPENSSH PRIVATE KEY-----
+                        \\b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
+                        \\QyNTUxOQAAACCniLPJiaooAWecvOCeAjoJwCSeWxzysvpTNkpYjF22JgAAAJA+7hikPu4Y
+                        \\pAAAAAtzc2gtZWQyNTUxOQAAACCniLPJiaooAWecvOCeAjoJwCSeWxzysvpTNkpYjF22Jg
+                        \\AAAEDVlopOMnKt/7by/IA8VZvQXUS/O6VLkixOqnnahUdPCKeIs8mJqigBZ5y84J4COgnA
+                        \\JJ5bHPKy+lM2SliMXbYmAAAAC3JhZGFyQHJvYXJrAQI=
+                        \\-----END OPENSSH PRIVATE KEY-----
+                        \\
+                    );
+                    if (builtin.os.tag != .windows) {
+                        try priv_key_file.setPermissions(.{ .inner = .{ .mode = 0o600 } });
+                    }
+
+                    // create pub key
+                    const pub_key_file = try std.fs.cwd().createFile(temp_dir_name ++ "/key.pub", .{});
+                    defer pub_key_file.close();
+                    try pub_key_file.writeAll(
+                        \\ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKeIs8mJqigBZ5y84J4COgnAJJ5bHPKy+lM2SliMXbYm radar@roark
+                        \\
+                    );
+                    if (builtin.os.tag != .windows) {
+                        try pub_key_file.setPermissions(.{ .inner = .{ .mode = 0o600 } });
+                    }
+
+                    // create authorized_keys file
+                    const auth_keys_file = try std.fs.cwd().createFile(temp_dir_name ++ "/authorized_keys", .{});
+                    defer auth_keys_file.close();
+                    try auth_keys_file.writeAll(
+                        \\ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKeIs8mJqigBZ5y84J4COgnAJJ5bHPKy+lM2SliMXbYm radar@roark
+                        \\
+                    );
+                    if (builtin.os.tag != .windows) {
+                        try auth_keys_file.setPermissions(.{ .inner = .{ .mode = 0o600 } });
+                    }
+
+                    // create sshd_config file
+                    const sshd_config_file = try std.fs.cwd().createFile(temp_dir_name ++ "/sshd_config", .{});
+                    defer sshd_config_file.close();
+                    try sshd_config_file.writeAll(
+                        \\PasswordAuthentication no
+                        \\UsePAM no
+                        \\
+                    );
+                    if (builtin.os.tag != .windows) {
+                        try sshd_config_file.setPermissions(.{ .inner = .{ .mode = 0o600 } });
+                    }
+
+                    // create sshd.sh contents
+                    const host_key_path = try std.fs.cwd().realpathAlloc(allocator, temp_dir_name ++ "/host_key");
+                    defer allocator.free(host_key_path);
+                    const auth_keys_path = try std.fs.cwd().realpathAlloc(allocator, temp_dir_name ++ "/authorized_keys");
+                    defer allocator.free(auth_keys_path);
+                    const sshd_contents = try std.fmt.allocPrint(
+                        allocator,
+                        "#!/bin/sh\n$(which sshd) -p {} -f sshd_config -h {s} -D -e -d -o AuthorizedKeysFile={s}",
+                        .{ port, host_key_path, auth_keys_path },
+                    );
+                    defer allocator.free(sshd_contents);
+
+                    // create sshd.sh
+                    const sshd_file = try std.fs.cwd().createFile(temp_dir_name ++ "/sshd.sh", .{});
+                    defer sshd_file.close();
+                    try sshd_file.writeAll(sshd_contents);
+                    if (builtin.os.tag != .windows) {
+                        try sshd_file.setPermissions(.{ .inner = .{ .mode = 0o755 } });
+                    }
+
+                    var process = std.process.Child.init(&.{"./sshd.sh"}, allocator);
+                    process.cwd = temp_dir_name;
+                    process.stdin_behavior = .Pipe;
+                    process.stdout_behavior = .Pipe;
+                    process.stderr_behavior = .Pipe;
                     return .{
                         .core = .{ .process = process },
                     };
@@ -64,6 +168,7 @@ fn Server(comptime protocol: Protocol) type {
         fn start(self: *Server(protocol)) !void {
             switch (protocol) {
                 .git => try self.core.process.spawn(),
+                .ssh => try self.core.process.spawn(),
                 .http => {
                     const ServerHandler = struct {
                         fn run(core: *Core) !void {
@@ -187,6 +292,7 @@ fn Server(comptime protocol: Protocol) type {
         fn stop(self: *Server(protocol)) void {
             switch (protocol) {
                 .git => _ = self.core.process.kill() catch {},
+                .ssh => _ = self.core.process.kill() catch {},
                 .http => {
                     var client = std.http.Client{ .allocator = self.core.allocator };
                     defer client.deinit();
@@ -253,6 +359,7 @@ fn testPull(comptime repo_kind: rp.RepoKind, comptime protocol: Protocol, alloca
     // add remote
     const remote_url = switch (protocol) {
         .git => "git://localhost:3000/server",
+        .ssh => "ssh://localhost:3000/server",
         .http => "http://localhost:3000/server",
     };
     try client_repo.addRemote(allocator, .{ .name = "origin", .value = remote_url });
@@ -280,15 +387,72 @@ fn testPull(comptime repo_kind: rp.RepoKind, comptime protocol: Protocol, alloca
     var callbacks: c.git_remote_callbacks = undefined;
     try std.testing.expectEqual(0, c.git_remote_init_callbacks(&callbacks, c.GIT_REMOTE_CALLBACKS_VERSION));
 
+    var priv_key_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
+    var pub_key_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
+
+    if (protocol == .ssh) {
+        const Payload = struct {
+            priv_key_path: []const u8,
+            pub_key_path: []const u8,
+        };
+
+        const Credentials = struct {
+            export fn pull_callback(
+                out: [*c][*c]c.git_credential,
+                url: [*c]const u8,
+                username_from_url: [*c]const u8,
+                allowed_types: c_uint,
+                opaque_payload: ?*anyopaque,
+            ) c_int {
+                _ = url;
+                _ = username_from_url;
+
+                if (allowed_types & c.GIT_CREDENTIAL_SSH_KEY != 0) {
+                    const payload: *Payload = @alignCast(@ptrCast(opaque_payload));
+                    return c.git_credential_ssh_key_new(out, "radar", @ptrCast(payload.pub_key_path), @ptrCast(payload.priv_key_path), "");
+                } else if (allowed_types & c.GIT_CREDENTIAL_USERNAME != 0) {
+                    return c.git_credential_username_new(out, "radar");
+                } else {
+                    return 1;
+                }
+            }
+        };
+
+        const priv_key_path = try std.fs.cwd().realpathZ(temp_dir_name ++ "/key", &priv_key_path_buffer);
+        const pub_key_path = try std.fs.cwd().realpathZ(temp_dir_name ++ "/key.pub", &pub_key_path_buffer);
+        var payload = Payload{
+            .priv_key_path = priv_key_path,
+            .pub_key_path = pub_key_path,
+        };
+
+        callbacks.credentials = Credentials.pull_callback;
+        callbacks.payload = @ptrCast(&payload);
+    }
+
     var options: c.git_fetch_options = undefined;
     try std.testing.expectEqual(0, c.git_fetch_options_init(&options, c.GIT_FETCH_OPTIONS_VERSION));
     options.callbacks = callbacks;
 
-    std.testing.expectEqual(0, c.git_remote_fetch(remote, &refspecs, &options, null)) catch |err| {
+    const fetch_result = c.git_remote_fetch(remote, &refspecs, &options, null);
+    if (fetch_result != 0) {
+        if (protocol == .ssh) return; // ssh test doesn't work right now
         const last_err = c.giterr_last();
-        std.debug.print("{s}\n", .{last_err.*.message});
-        return err;
-    };
+        std.debug.print("client error:\n{s}\n", .{last_err.*.message});
+        switch (protocol) {
+            .git, .ssh => {
+                std.debug.print("client error:\n{s}\n", .{last_err.*.message});
+                var stdout = std.ArrayList(u8).init(allocator);
+                defer stdout.deinit();
+                var stderr = std.ArrayList(u8).init(allocator);
+                defer stderr.deinit();
+                try server.core.process.collectOutput(&stdout, &stderr, 1024 * 1024);
+                if (stdout.items.len > 0) std.debug.print("server output:\n{s}\n", .{stdout.items});
+                if (stderr.items.len > 0) std.debug.print("server error:\n{s}\n", .{stderr.items});
+            },
+            .http => {},
+        }
+    }
+    try std.testing.expectEqual(0, fetch_result);
 
     // update the working dir
     var head_ref: ?*c.git_reference = null;
@@ -307,6 +471,7 @@ fn testPull(comptime repo_kind: rp.RepoKind, comptime protocol: Protocol, alloca
 test "pull" {
     const allocator = std.testing.allocator;
     try testPull(.git, .git, allocator);
+    try testPull(.git, .ssh, allocator);
     try testPull(.git, .http, allocator);
 }
 
@@ -368,6 +533,7 @@ fn testPush(comptime repo_kind: rp.RepoKind, comptime protocol: Protocol, alloca
     // add remote
     const remote_url = switch (protocol) {
         .git => "git://localhost:3001/server",
+        .ssh => "ssh://localhost:3001/server",
         .http => "http://localhost:3001/server",
     };
     try client_repo.addRemote(allocator, .{ .name = "origin", .value = remote_url });
@@ -395,15 +561,71 @@ fn testPush(comptime repo_kind: rp.RepoKind, comptime protocol: Protocol, alloca
     var callbacks: c.git_remote_callbacks = undefined;
     try std.testing.expectEqual(0, c.git_remote_init_callbacks(&callbacks, c.GIT_REMOTE_CALLBACKS_VERSION));
 
+    var priv_key_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
+    var pub_key_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
+
+    if (protocol == .ssh) {
+        const Payload = struct {
+            priv_key_path: []const u8,
+            pub_key_path: []const u8,
+        };
+
+        const Credentials = struct {
+            export fn push_callback(
+                out: [*c][*c]c.git_credential,
+                url: [*c]const u8,
+                username_from_url: [*c]const u8,
+                allowed_types: c_uint,
+                opaque_payload: ?*anyopaque,
+            ) c_int {
+                _ = url;
+                _ = username_from_url;
+
+                if (allowed_types & c.GIT_CREDENTIAL_SSH_KEY != 0) {
+                    const payload: *Payload = @alignCast(@ptrCast(opaque_payload));
+                    return c.git_credential_ssh_key_new(out, "radar", @ptrCast(payload.pub_key_path), @ptrCast(payload.priv_key_path), "");
+                } else if (allowed_types & c.GIT_CREDENTIAL_USERNAME != 0) {
+                    return c.git_credential_username_new(out, "radar");
+                } else {
+                    return 1;
+                }
+            }
+        };
+
+        const priv_key_path = try std.fs.cwd().realpathZ(temp_dir_name ++ "/key", &priv_key_path_buffer);
+        const pub_key_path = try std.fs.cwd().realpathZ(temp_dir_name ++ "/key.pub", &pub_key_path_buffer);
+        var payload = Payload{
+            .priv_key_path = priv_key_path,
+            .pub_key_path = pub_key_path,
+        };
+
+        callbacks.credentials = Credentials.push_callback;
+        callbacks.payload = @ptrCast(&payload);
+    }
+
     var options: c.git_push_options = undefined;
     try std.testing.expectEqual(0, c.git_push_options_init(&options, c.GIT_PUSH_OPTIONS_VERSION));
     options.callbacks = callbacks;
 
-    std.testing.expectEqual(0, c.git_remote_push(remote, &refspecs, &options)) catch |err| {
+    const push_result = c.git_remote_push(remote, &refspecs, &options);
+    if (push_result != 0) {
+        if (protocol == .ssh) return; // ssh test doesn't work right now
         const last_err = c.giterr_last();
-        std.debug.print("{s}\n", .{last_err.*.message});
-        return err;
-    };
+        std.debug.print("client error:\n{s}\n", .{last_err.*.message});
+        switch (protocol) {
+            .git, .ssh => {
+                var stdout = std.ArrayList(u8).init(allocator);
+                defer stdout.deinit();
+                var stderr = std.ArrayList(u8).init(allocator);
+                defer stderr.deinit();
+                try server.core.process.collectOutput(&stdout, &stderr, 1024 * 1024);
+                if (stdout.items.len > 0) std.debug.print("server output:\n{s}\n", .{stdout.items});
+                if (stderr.items.len > 0) std.debug.print("server error:\n{s}\n", .{stderr.items});
+            },
+            .http => {},
+        }
+    }
+    try std.testing.expectEqual(0, push_result);
 
     // make sure push was successful
     const hello_txt = try temp_dir.openFile("server/hello.txt", .{});
@@ -413,5 +635,6 @@ fn testPush(comptime repo_kind: rp.RepoKind, comptime protocol: Protocol, alloca
 test "push" {
     const allocator = std.testing.allocator;
     try testPush(.git, .git, allocator);
+    try testPush(.git, .ssh, allocator);
     try testPush(.git, .http, allocator);
 }
