@@ -163,7 +163,7 @@ pub fn readRecur(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).Stat
             var read_buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
             const content = read(repo_kind, state, ref_path, &read_buffer) catch |err| switch (err) {
                 error.RefNotFound => return null,
-                else => return err,
+                else => |e| return e,
             };
 
             if (RefOrOid.initFromDb(content)) |next_input| {
@@ -181,7 +181,7 @@ pub fn read(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.re
         .git => {
             const ref_file = state.core.git_dir.openFile(ref_path, .{ .mode = .read_only }) catch |err| switch (err) {
                 error.FileNotFound => return error.RefNotFound,
-                else => return err,
+                else => |e| return e,
             };
             defer ref_file.close();
             const size = try ref_file.reader().readAll(buffer);
@@ -314,7 +314,7 @@ pub fn writeRecur(
             try write(repo_kind, state, ref_path, oid_hex);
             return;
         },
-        else => return err,
+        else => |e| return e,
     };
     if (RefOrOid.initFromDb(existing_content)) |input| {
         switch (input) {

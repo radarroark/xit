@@ -1258,7 +1258,7 @@ pub const Merge = struct {
                             return error.UnfinishedMergeAlreadyInProgress;
                         } else |err| switch (err) {
                             error.FileNotFound => {},
-                            else => return err,
+                            else => |e| return e,
                         }
                     },
                     .xit => {
@@ -1542,7 +1542,7 @@ pub const Merge = struct {
                         };
                         const merge_head = state.core.git_dir.openFile(merge_head_name, .{ .mode = .read_only }) catch |err| switch (err) {
                             error.FileNotFound => return error.MergeHeadNotFound,
-                            else => return err,
+                            else => |e| return e,
                         };
                         defer merge_head.close();
                         const merge_head_len = try merge_head.readAll(&source_oid);
@@ -1552,7 +1552,7 @@ pub const Merge = struct {
 
                         const merge_msg = state.core.git_dir.openFile("MERGE_MSG", .{ .mode = .read_only }) catch |err| switch (err) {
                             error.FileNotFound => return error.MergeMessageNotFound,
-                            else => return err,
+                            else => |e| return e,
                         };
                         defer merge_msg.close();
                         commit_metadata.message = try merge_msg.readToEndAlloc(arena.allocator(), MAX_READ_BYTES);

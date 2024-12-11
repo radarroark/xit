@@ -109,7 +109,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
                     var git_dir = repo_dir.openDir(".git", .{}) catch |err| switch (err) {
                         error.FileNotFound => return error.RepoNotFound,
-                        else => return err,
+                        else => |e| return e,
                     };
                     errdefer git_dir.close();
 
@@ -127,13 +127,13 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
                     var xit_dir = repo_dir.openDir(".xit", .{}) catch |err| switch (err) {
                         error.FileNotFound => return error.RepoNotFound,
-                        else => return err,
+                        else => |e| return e,
                     };
                     errdefer xit_dir.close();
 
                     var db_file = xit_dir.openFile("db", .{ .mode = .read_write, .lock = .exclusive }) catch |err| switch (err) {
                         error.FileNotFound => return error.RepoNotFound,
-                        else => return err,
+                        else => |e| return e,
                     };
                     errdefer db_file.close();
 
@@ -164,7 +164,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         return error.RepoNotFound;
                     }
                 },
-                else => return err,
+                else => |e| return e,
             };
             errdefer repo.deinit();
             try repo.runCommand(allocator, sub_command, writers);
@@ -286,7 +286,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                             try writers.err.print("{s} is already a repository\n", .{init_cmd.dir});
                             return err;
                         },
-                        else => return err,
+                        else => |e| return e,
                     };
                 },
                 .add => |add_cmd| {
@@ -1018,7 +1018,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         Ctx{ .core = &self.core, .allocator = allocator, .input = input, .result = &result },
                     ) catch |err| switch (err) {
                         error.CancelTransaction => {},
-                        else => return err,
+                        else => |e| return e,
                     };
 
                     return result;
@@ -1055,7 +1055,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
                         Ctx{ .core = &self.core, .allocator = allocator, .input = input, .result = &result },
                     ) catch |err| switch (err) {
                         error.CancelTransaction => {},
-                        else => return err,
+                        else => |e| return e,
                     };
 
                     return result;

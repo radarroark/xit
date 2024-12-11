@@ -50,7 +50,7 @@ pub fn writeChunks(
                 try lock.lock_file.writeAll(chunk);
                 lock.success = true;
             },
-            else => return err,
+            else => |e| return e,
         }
 
         // write hash to db

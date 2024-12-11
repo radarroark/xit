@@ -194,7 +194,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                     errdefer line_arr.deinit();
                     workspace.file.reader().streamUntilDelimiter(line_arr.writer(), '\n', MAX_LINE_BYTES) catch |err| switch (err) {
                         error.EndOfStream => workspace.eof = true,
-                        else => return err,
+                        else => |e| return e,
                     };
                     return try line_arr.toOwnedSlice();
                 },
@@ -282,7 +282,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
                     is_binary = true;
                     break :blk null;
                 },
-                else => return err,
+                else => |e| return e,
             }) |line| {
                 defer self.allocator.free(line);
 

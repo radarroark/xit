@@ -233,7 +233,7 @@ pub fn migrate(
                         }
                         continue;
                     },
-                    else => return err,
+                    else => |e| return e,
                 };
                 switch (meta.kind()) {
                     .file => {

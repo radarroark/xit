@@ -81,7 +81,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     // open index
                     const index_file = state.core.git_dir.openFile("index", .{ .mode = .read_only }) catch |err| switch (err) {
                         error.FileNotFound => return self,
-                        else => return err,
+                        else => |e| return e,
                     };
                     defer index_file.close();
 
@@ -443,7 +443,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                             return err;
                         }
                     },
-                    else => return err,
+                    else => |e| return e,
                 }
             }
 

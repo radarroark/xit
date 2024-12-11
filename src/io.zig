@@ -132,7 +132,7 @@ pub fn getMetadata(parent_dir: std.fs.Dir, path: []const u8) !std.fs.File.Metada
                 defer dir.close();
                 return try dir.metadata();
             },
-            else => return err,
+            else => |e| return e,
         }
     }
 }

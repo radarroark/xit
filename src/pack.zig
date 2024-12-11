@@ -804,7 +804,7 @@ pub const PackObjectReader = struct {
         };
         return reader.readUntilDelimiter(dest, delimiter) catch |err| switch (err) {
             error.StreamTooLong => return error.EndOfStream,
-            else => return err,
+            else => |e| return e,
         };
     }
 
@@ -814,7 +814,7 @@ pub const PackObjectReader = struct {
         };
         return reader.readUntilDelimiterAlloc(allocator, delimiter, max_size) catch |err| switch (err) {
             error.StreamTooLong => return error.EndOfStream,
-            else => return err,
+            else => |e| return e,
         };
     }
 
@@ -855,7 +855,7 @@ pub const LooseOrPackObjectReader = union(enum) {
             error.FileNotFound => return .{
                 .pack = try PackObjectReader.init(allocator, core, oid_hex),
             },
-            else => return err,
+            else => |e| return e,
         };
         errdefer object_file.close();
 

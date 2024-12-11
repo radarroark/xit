@@ -120,7 +120,7 @@ pub fn fetch(
                 try wanted_oids.put(oid, {});
                 continue;
             },
-            else => return err,
+            else => |e| return e,
         };
         defer object.deinit();
     }
