@@ -276,12 +276,15 @@ pub fn migrate(
 
     for (remove_files.keys()) |path| {
         // update working tree
-        try state.core.repo_dir.deleteFile(path);
+        state.core.repo_dir.deleteFile(path) catch |err| switch (err) {
+            error.FileNotFound => {},
+            else => |e| return e,
+        };
         var dir_path_maybe = std.fs.path.dirname(path);
         while (dir_path_maybe) |dir_path| {
             state.core.repo_dir.deleteDir(dir_path) catch |err| switch (err) {
-                error.DirNotEmpty => break,
-                else => return err,
+                error.DirNotEmpty, error.FileNotFound => break,
+                else => |e| return e,
             };
             dir_path_maybe = std.fs.path.dirname(dir_path);
         }
