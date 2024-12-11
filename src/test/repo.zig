@@ -237,7 +237,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
                     return error.ExpectedMergeToAbort;
                 } else |err| switch (err) {
                     error.UnfinishedMergeAlreadyInProgress => {},
-                    else => return err,
+                    else => |e| return e,
                 }
             }
 
@@ -249,7 +249,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind) !void {
                     return error.ExpectedMergeToAbort;
                 } else |err| switch (err) {
                     error.CannotContinueMergeWithUnresolvedConflicts => {},
-                    else => return err,
+                    else => |e| return e,
                 }
             }
         }
@@ -1319,7 +1319,7 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind) !void {
                     return error.ExpectedMergeToAbort;
                 } else |err| switch (err) {
                     error.UnfinishedMergeAlreadyInProgress => {},
-                    else => return err,
+                    else => |e| return e,
                 }
             }
 
@@ -1331,7 +1331,7 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind) !void {
                     return error.ExpectedMergeToAbort;
                 } else |err| switch (err) {
                     error.CannotContinueMergeWithUnresolvedConflicts => {},
-                    else => return err,
+                    else => |e| return e,
                 }
             }
         }

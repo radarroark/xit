@@ -508,7 +508,7 @@ pub fn StatusContent(comptime Widget: type, comptime repo_kind: rp.RepoKind) typ
 
                 const line_iter_pair = self.repo.filePair(diff.iter_arena.allocator(), status_item.path, status_item.kind, self.status) catch |err| switch (err) {
                     error.IsDir => return,
-                    else => return err,
+                    else => |e| return e,
                 };
 
                 const line_iter_a = try diff.iter_arena.allocator().create(df.LineIterator(repo_kind));

@@ -146,7 +146,7 @@ pub fn remove(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.
 
                 std.fs.deleteDirAbsolute(parent_path) catch |err| switch (err) {
                     error.DirNotEmpty => break,
-                    else => return err,
+                    else => |e| return e,
                 };
                 parent_path_maybe = std.fs.path.dirname(parent_path);
             }

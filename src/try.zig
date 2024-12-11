@@ -72,7 +72,7 @@ pub fn main() !void {
             try writers.out.print("Restoring: {s}\n", .{path});
             git_repo.restore(allocator, path) catch |err| switch (err) {
                 error.FileNotFound, error.ObjectInvalid => try writers.err.print("Failed to restore: {s}\n", .{path}),
-                else => return err,
+                else => |e| return e,
             };
         }
 
