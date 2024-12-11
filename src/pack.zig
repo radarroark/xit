@@ -258,6 +258,7 @@ pub const PackObjectReader = struct {
 
     pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(.git).Core, oid_hex: *const [hash.SHA1_HEX_LEN]u8) !PackObjectReader {
         var pack_reader = try PackObjectReader.initWithIndex(allocator, core, oid_hex);
+        errdefer pack_reader.deinit();
 
         // make a list of the chain of deltified objects,
         // and initialize each one. we can't do this during the initial
