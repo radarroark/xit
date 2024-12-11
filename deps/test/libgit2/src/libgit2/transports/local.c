@@ -295,15 +295,18 @@ static int local_ls(const git_remote_head ***out, size_t *size, git_transport *t
 static int local_negotiate_fetch(
 	git_transport *transport,
 	git_repository *repo,
-	const git_remote_head * const *refs,
-	size_t count)
+	const git_fetch_negotiation *wants)
 {
 	transport_local *t = (transport_local*)transport;
 	git_remote_head *rhead;
 	unsigned int i;
 
-	GIT_UNUSED(refs);
-	GIT_UNUSED(count);
+	GIT_UNUSED(wants);
+
+	if (wants->depth) {
+		git_error_set(GIT_ERROR_NET, "shallow fetch is not supported by the local transport");
+		return GIT_ENOTSUPPORTED;
+	}
 
 	/* Fill in the loids */
 	git_vector_foreach(&t->refs, i, rhead) {
@@ -318,6 +321,16 @@ static int local_negotiate_fetch(
 			git_error_clear();
 		git_object_free(obj);
 	}
+
+	return 0;
+}
+
+static int local_shallow_roots(
+	git_oidarray *out,
+	git_transport *transport)
+{
+	GIT_UNUSED(out);
+	GIT_UNUSED(transport);
 
 	return 0;
 }
@@ -445,7 +458,7 @@ static int local_push(
 			default:
 				last = git_error_last();
 
-				if (last && last->message)
+				if (last->klass != GIT_ERROR_NONE)
 					status->msg = git__strdup(last->message);
 				else
 					status->msg = git__strdup("Unspecified error encountered");
@@ -747,6 +760,7 @@ int git_transport_local(git_transport **out, git_remote *owner, void *param)
 	t->parent.oid_type = local_oid_type;
 #endif
 	t->parent.negotiate_fetch = local_negotiate_fetch;
+	t->parent.shallow_roots = local_shallow_roots;
 	t->parent.download_pack = local_download_pack;
 	t->parent.push = local_push;
 	t->parent.close = local_close;

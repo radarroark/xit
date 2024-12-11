@@ -10,7 +10,6 @@ include(PkgBuildConfig)
 set(LIBGIT2_INCLUDES
 	"${PROJECT_BINARY_DIR}/src/util"
 	"${PROJECT_BINARY_DIR}/include"
-	"${PROJECT_BINARY_DIR}/include/git2"
 	"${PROJECT_SOURCE_DIR}/src/libgit2"
 	"${PROJECT_SOURCE_DIR}/src/util"
 	"${PROJECT_SOURCE_DIR}/include")
@@ -25,8 +24,7 @@ target_sources(libgit2 PRIVATE ${SRC_H})
 
 file(GLOB SRC_GIT2 *.c *.h
 	streams/*.c streams/*.h
-	transports/*.c transports/*.h
-	xdiff/*.c xdiff/*.h)
+	transports/*.c transports/*.h)
 list(SORT SRC_GIT2)
 target_sources(libgit2 PRIVATE ${SRC_GIT2})
 
@@ -38,23 +36,6 @@ endif()
 if(APPLE)
 	# The old Secure Transport API has been deprecated in macOS 10.15.
 	set_source_files_properties(streams/stransport.c PROPERTIES COMPILE_FLAGS -Wno-deprecated)
-endif()
-
-# the xdiff dependency is not (yet) warning-free, disable warnings
-# as errors for the xdiff sources until we've sorted them out
-if(MSVC)
-	set_source_files_properties(xdiff/xdiffi.c PROPERTIES COMPILE_FLAGS -WX-)
-	set_source_files_properties(xdiff/xemit.c PROPERTIES COMPILE_FLAGS -WX-)
-	set_source_files_properties(xdiff/xhistogram.c PROPERTIES COMPILE_FLAGS -WX-)
-	set_source_files_properties(xdiff/xmerge.c PROPERTIES COMPILE_FLAGS -WX-)
-	set_source_files_properties(xdiff/xutils.c PROPERTIES COMPILE_FLAGS -WX-)
-	set_source_files_properties(xdiff/xpatience.c PROPERTIES COMPILE_FLAGS -WX-)
-else()
-	set_source_files_properties(xdiff/xdiffi.c PROPERTIES COMPILE_FLAGS "-Wno-sign-compare -Wno-unused-parameter")
-	set_source_files_properties(xdiff/xemit.c PROPERTIES COMPILE_FLAGS "-Wno-sign-compare -Wno-unused-parameter")
-	set_source_files_properties(xdiff/xhistogram.c PROPERTIES COMPILE_FLAGS "-Wno-sign-compare")
-	set_source_files_properties(xdiff/xutils.c PROPERTIES COMPILE_FLAGS "-Wno-sign-compare")
-	set_source_files_properties(xdiff/xpatience.c PROPERTIES COMPILE_FLAGS "-Wno-sign-compare")
 endif()
 
 ide_split_sources(libgit2)
@@ -83,12 +64,6 @@ set_target_properties(libgit2package PROPERTIES C_STANDARD 90)
 set_target_properties(libgit2package PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR})
 set_target_properties(libgit2package PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR})
 set_target_properties(libgit2package PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR})
-
-# Workaround for Cmake bug #0011240 (see http://public.kitware.com/Bug/view.php?id=11240)
-# Win64+MSVC+static libs = linker error
-if(MSVC AND GIT_ARCH_64 AND NOT BUILD_SHARED_LIBS)
-	set_target_properties(libgit2package PROPERTIES STATIC_LIBRARY_FLAGS "/MACHINE:x64")
-endif()
 
 ide_split_sources(libgit2package)
 

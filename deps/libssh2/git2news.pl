@@ -1,4 +1,6 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
+# Copyright (C) The libssh2 project and its contributors.
+# SPDX-License-Identifier: BSD-3-Clause
 
 # git log --pretty=fuller --no-color --date=short --decorate=full
 
@@ -14,7 +16,7 @@ sub nicedate {
     return $date;
 }
 
-print 
+print
 '   Changelog for the libssh2 project. Generated with git2news.pl
 ';
 

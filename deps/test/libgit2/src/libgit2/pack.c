@@ -200,7 +200,7 @@ static void pack_index_free(struct git_pack_file *p)
 static int pack_index_check_locked(const char *path, struct git_pack_file *p)
 {
 	struct git_pack_idx_header *hdr;
-	uint32_t version, nr, i, *index;
+	uint32_t version, nr = 0, i, *index;
 	void *idx_map;
 	size_t idx_size;
 	struct stat st;
@@ -246,7 +246,6 @@ static int pack_index_check_locked(const char *path, struct git_pack_file *p)
 		version = 1;
 	}
 
-	nr = 0;
 	index = idx_map;
 
 	if (version > 1)
@@ -269,7 +268,7 @@ static int pack_index_check_locked(const char *path, struct git_pack_file *p)
 		 * - 20/32-byte SHA of the packfile
 		 * - 20/32-byte SHA file checksum
 		 */
-		if (idx_size != (4 * 256 + (nr * (p->oid_size + 4)) + (p->oid_size * 2))) {
+		if (idx_size != (4 * 256 + ((uint64_t) nr * (p->oid_size + 4)) + (p->oid_size * 2))) {
 			git_futils_mmap_free(&p->index_map);
 			return packfile_error("index is corrupted");
 		}
@@ -287,8 +286,8 @@ static int pack_index_check_locked(const char *path, struct git_pack_file *p)
 		 * variable sized table containing 8-byte entries
 		 * for offsets larger than 2^31.
 		 */
-		unsigned long min_size = 8 + (4 * 256) + (nr * (p->oid_size + 4 + 4)) + (p->oid_size * 2);
-		unsigned long max_size = min_size;
+		uint64_t min_size = 8 + (4 * 256) + ((uint64_t)nr * (p->oid_size + 4 + 4)) + (p->oid_size * 2);
+		uint64_t max_size = min_size;
 
 		if (nr)
 			max_size += (nr - 1)*8;
@@ -1269,13 +1268,13 @@ static off64_t nth_packed_object_offset_locked(struct git_pack_file *p, uint32_t
 	end = index + p->index_map.len;
 	index += 4 * 256;
 	if (p->index_version == 1)
-		return ntohl(*((uint32_t *)(index + (p->oid_size + 4) * n)));
+		return ntohl(*((uint32_t *)(index + (p->oid_size + 4) * (size_t) n)));
 
-	index += 8 + p->num_objects * (p->oid_size + 4);
+	index += 8 + (size_t) p->num_objects * (p->oid_size + 4);
 	off32 = ntohl(*((uint32_t *)(index + 4 * n)));
 	if (!(off32 & 0x80000000))
 		return off32;
-	index += p->num_objects * 4 + (off32 & 0x7fffffff) * 8;
+	index += (size_t) p->num_objects * 4 + (off32 & 0x7fffffff) * 8;
 
 	/* Make sure we're not being sent out of bounds */
 	if (index >= end - 8)
@@ -1500,6 +1499,7 @@ static int pack_entry_find_offset(
 	size_t len)
 {
 	const uint32_t *level1_ofs;
+	size_t ofs_delta = 0;
 	const unsigned char *index;
 	unsigned hi, lo, stride;
 	int pos, found = 0;
@@ -1525,7 +1525,13 @@ static int pack_entry_find_offset(
 
 	if (p->index_version > 1) {
 		level1_ofs += 2;
+		ofs_delta = 2;
 		index += 8;
+	}
+
+	if ((size_t)short_oid->id[0] + ofs_delta >= p->index_map.len) {
+		git_error_set(GIT_ERROR_INTERNAL, "internal error: p->short_oid->[0] out of bounds");
+		goto cleanup;
 	}
 
 	index += 4 * 256;

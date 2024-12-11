@@ -13,7 +13,6 @@
 #include "git2/transport.h"
 #include "posix.h"
 #include "str.h"
-#include "netops.h"
 #include "smart.h"
 #include "remote.h"
 #include "repository.h"
@@ -158,10 +157,10 @@ static int apply_userpass_credentials(HINTERNET request, DWORD target, int mecha
 		goto done;
 	}
 
-	if ((error = user_len = git__utf8_to_16_alloc(&user, c->username)) < 0)
+	if ((error = user_len = git_utf8_to_16_alloc(&user, c->username)) < 0)
 		goto done;
 
-	if ((error = pass_len = git__utf8_to_16_alloc(&pass, c->password)) < 0)
+	if ((error = pass_len = git_utf8_to_16_alloc(&pass, c->password)) < 0)
 		goto done;
 
 	if (!WinHttpSetCredentials(request, target, native_scheme, user, pass, NULL)) {
@@ -242,7 +241,7 @@ static int acquire_fallback_cred(
 		HRESULT hCoInitResult;
 
 		/* Convert URL to wide characters */
-		if (git__utf8_to_16_alloc(&wide_url, url) < 0) {
+		if (git_utf8_to_16_alloc(&wide_url, url) < 0) {
 			git_error_set(GIT_ERROR_OS, "failed to convert string to wide form");
 			return -1;
 		}
@@ -294,7 +293,7 @@ static int certificate_check(winhttp_stream *s, int valid)
 
 	/* If there is no override, we should fail if WinHTTP doesn't think it's fine */
 	if (t->owner->connect_opts.callbacks.certificate_check == NULL && !valid) {
-		if (!git_error_last())
+		if (git_error_last()->klass == GIT_ERROR_NONE)
 			git_error_set(GIT_ERROR_HTTP, "unknown certificate check failure");
 
 		return GIT_ECERTIFICATE;
@@ -318,7 +317,7 @@ static int certificate_check(winhttp_stream *s, int valid)
 	if (error == GIT_PASSTHROUGH)
 		error = valid ? 0 : GIT_ECERTIFICATE;
 
-	if (error < 0 && !git_error_last())
+	if (error < 0 && git_error_last()->klass == GIT_ERROR_NONE)
 		git_error_set(GIT_ERROR_HTTP, "user cancelled certificate check");
 
 	return error;
@@ -397,7 +396,7 @@ static int winhttp_stream_connect(winhttp_stream *s)
 		return -1;
 
 	/* Convert URL to wide characters */
-	if (git__utf8_to_16_alloc(&s->request_uri, git_str_cstr(&buf)) < 0) {
+	if (git_utf8_to_16_alloc(&s->request_uri, git_str_cstr(&buf)) < 0) {
 		git_error_set(GIT_ERROR_OS, "failed to convert string to wide form");
 		goto on_error;
 	}
@@ -437,17 +436,17 @@ static int winhttp_stream_connect(winhttp_stream *s)
 		GIT_ERROR_CHECK_ALLOC(proxy_url);
 	}
 
-	if (proxy_url) {
+	if (proxy_url && *proxy_url) {
 		git_str processed_url = GIT_STR_INIT;
 		WINHTTP_PROXY_INFO proxy_info;
 		wchar_t *proxy_wide;
 
 		git_net_url_dispose(&t->proxy.url);
 
-		if ((error = git_net_url_parse(&t->proxy.url, proxy_url)) < 0)
+		if ((error = git_net_url_parse_http(&t->proxy.url, proxy_url)) < 0)
 			goto on_error;
 
-		if (strcmp(t->proxy.url.scheme, "http") != 0 && strcmp(t->proxy.url.scheme, "https") != 0) {
+		if (!git_net_url_valid(&t->proxy.url)) {
 			git_error_set(GIT_ERROR_HTTP, "invalid URL: '%s'", proxy_url);
 			error = -1;
 			goto on_error;
@@ -473,7 +472,7 @@ static int winhttp_stream_connect(winhttp_stream *s)
 		}
 
 		/* Convert URL to wide characters */
-		error = git__utf8_to_16_alloc(&proxy_wide, processed_url.ptr);
+		error = git_utf8_to_16_alloc(&proxy_wide, processed_url.ptr);
 		git_str_dispose(&processed_url);
 		if (error < 0)
 			goto on_error;
@@ -531,7 +530,7 @@ static int winhttp_stream_connect(winhttp_stream *s)
 			s->service) < 0)
 			goto on_error;
 
-		if (git__utf8_to_16(ct, MAX_CONTENT_TYPE_LEN, git_str_cstr(&buf)) < 0) {
+		if (git_utf8_to_16(ct, MAX_CONTENT_TYPE_LEN, git_str_cstr(&buf)) < 0) {
 			git_error_set(GIT_ERROR_OS, "failed to convert content-type to wide characters");
 			goto on_error;
 		}
@@ -548,7 +547,7 @@ static int winhttp_stream_connect(winhttp_stream *s)
 			s->service) < 0)
 			goto on_error;
 
-		if (git__utf8_to_16(ct, MAX_CONTENT_TYPE_LEN, git_str_cstr(&buf)) < 0) {
+		if (git_utf8_to_16(ct, MAX_CONTENT_TYPE_LEN, git_str_cstr(&buf)) < 0) {
 			git_error_set(GIT_ERROR_OS, "failed to convert accept header to wide characters");
 			goto on_error;
 		}
@@ -568,7 +567,7 @@ static int winhttp_stream_connect(winhttp_stream *s)
 			git_str_puts(&buf, t->owner->connect_opts.custom_headers.strings[i]);
 
 			/* Convert header to wide characters */
-			if ((error = git__utf8_to_16_alloc(&custom_header_wide, git_str_cstr(&buf))) < 0)
+			if ((error = git_utf8_to_16_alloc(&custom_header_wide, git_str_cstr(&buf))) < 0)
 				goto on_error;
 
 			if (!WinHttpAddRequestHeaders(s->request, custom_header_wide, (ULONG)-1L,
@@ -747,6 +746,33 @@ static void CALLBACK winhttp_status(
 	}
 }
 
+static int user_agent(bool *exists, git_str *out)
+{
+	const char *product = git_settings__user_agent_product();
+	const char *comment = git_settings__user_agent();
+
+	GIT_ASSERT(product && comment);
+
+	if (!*product) {
+		*exists = false;
+		return 0;
+	}
+
+	git_str_puts(out, product);
+
+	if (*comment) {
+		git_str_puts(out, " (");
+		git_str_puts(out, comment);
+		git_str_puts(out, ")");
+	}
+
+	if (git_str_oom(out))
+		return -1;
+
+	*exists = true;
+	return 0;
+}
+
 static int winhttp_connect(
 	winhttp_subtransport *t)
 {
@@ -758,6 +784,7 @@ static int winhttp_connect(
 	int error = -1;
 	int default_timeout = TIMEOUT_INFINITE;
 	int default_connect_timeout = DEFAULT_CONNECT_TIMEOUT;
+	bool has_ua = true;
 	DWORD protocols =
 		WINHTTP_FLAG_SECURE_PROTOCOL_TLS1 |
 		WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_1 |
@@ -783,16 +810,16 @@ static int winhttp_connect(
 	}
 
 	/* Prepare host */
-	if (git__utf8_to_16_alloc(&wide_host, host) < 0) {
+	if (git_utf8_to_16_alloc(&wide_host, host) < 0) {
 		git_error_set(GIT_ERROR_OS, "unable to convert host to wide characters");
 		goto on_error;
 	}
 
-
-	if (git_http__user_agent(&ua) < 0)
+	if (user_agent(&has_ua, &ua) < 0)
 		goto on_error;
 
-	if (git__utf8_to_16_alloc(&wide_ua, git_str_cstr(&ua)) < 0) {
+	if (has_ua &&
+	    git_utf8_to_16_alloc(&wide_ua, git_str_cstr(&ua)) < 0) {
 		git_error_set(GIT_ERROR_OS, "unable to convert host to wide characters");
 		goto on_error;
 	}
@@ -934,7 +961,7 @@ static int send_request(winhttp_stream *s, size_t len, bool chunked)
 			(!request_failed && s->status_sending_request_reached)) {
 			git_error_clear();
 			if ((error = certificate_check(s, cert_valid)) < 0) {
-				if (!git_error_last())
+				if (git_error_last()->klass == GIT_ERROR_NONE)
 					git_error_set(GIT_ERROR_OS, "user cancelled certificate check");
 
 				return error;
@@ -1182,7 +1209,7 @@ replay:
 			}
 
 			/* Convert the Location header to UTF-8 */
-			if (git__utf16_to_8_alloc(&location8, location) < 0) {
+			if (git_utf8_from_16_alloc(&location8, location) < 0) {
 				git_error_set(GIT_ERROR_OS, "failed to convert Location header to UTF-8");
 				git__free(location);
 				return -1;
@@ -1254,7 +1281,7 @@ replay:
 		else
 			p_snprintf(expected_content_type_8, MAX_CONTENT_TYPE_LEN, "application/x-git-%s-advertisement", s->service);
 
-		if (git__utf8_to_16(expected_content_type, MAX_CONTENT_TYPE_LEN, expected_content_type_8) < 0) {
+		if (git_utf8_to_16(expected_content_type, MAX_CONTENT_TYPE_LEN, expected_content_type_8) < 0) {
 			git_error_set(GIT_ERROR_OS, "failed to convert expected content-type to wide characters");
 			return -1;
 		}

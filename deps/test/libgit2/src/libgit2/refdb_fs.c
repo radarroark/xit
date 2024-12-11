@@ -62,8 +62,8 @@ typedef struct refdb_fs_backend {
 
 	git_oid_t oid_type;
 
-	int fsync : 1,
-	    sorted : 1;
+	unsigned int fsync : 1,
+	             sorted : 1;
 	int peeling_mode;
 	git_iterator_flag_t iterator_flags;
 	uint32_t direach_flags;
@@ -410,7 +410,9 @@ static const char *loose_parse_symbolic(git_str *file_content)
 static bool is_per_worktree_ref(const char *ref_name)
 {
 	return git__prefixcmp(ref_name, "refs/") != 0 ||
-	    git__prefixcmp(ref_name, "refs/bisect/") == 0;
+	       git__prefixcmp(ref_name, "refs/bisect/") == 0 ||
+	       git__prefixcmp(ref_name, "refs/worktree/") == 0 ||
+	       git__prefixcmp(ref_name, "refs/rewritten/") == 0;
 }
 
 static int loose_lookup(
@@ -805,80 +807,149 @@ static void refdb_fs_backend__iterator_free(git_reference_iterator *_iter)
 	git__free(iter);
 }
 
-static int iter_load_loose_paths(refdb_fs_backend *backend, refdb_fs_iter *iter)
+struct iter_load_context {
+	refdb_fs_backend *backend;
+	refdb_fs_iter *iter;
+
+	/*
+	 * If we have a glob with a prefix (eg `refs/heads/ *`) then we can
+	 * optimize our prefix to avoid walking refs that we know won't
+	 * match. This is that prefix.
+	 */
+	const char *ref_prefix;
+	size_t ref_prefix_len;
+
+	/* Temporary variables to avoid unnecessary allocations */
+	git_str ref_name;
+	git_str path;
+};
+
+static void iter_load_optimize_prefix(struct iter_load_context *ctx)
 {
-	int error = 0;
-	git_str path = GIT_STR_INIT;
+	const char *pos, *last_sep = NULL;
+
+	if (!ctx->iter->glob)
+		return;
+
+	for (pos = ctx->iter->glob; *pos; pos++) {
+		switch (*pos) {
+		case '?':
+		case '*':
+		case '[':
+		case '\\':
+			break;
+		case '/':
+			last_sep = pos;
+			/* FALLTHROUGH */
+		default:
+			continue;
+		}
+		break;
+	}
+
+	if (last_sep) {
+		ctx->ref_prefix = ctx->iter->glob;
+		ctx->ref_prefix_len = (last_sep - ctx->ref_prefix) + 1;
+	}
+}
+
+static int iter_load_paths(
+	struct iter_load_context *ctx,
+	const char *root_path,
+	bool worktree)
+{
 	git_iterator *fsit = NULL;
 	git_iterator_options fsit_opts = GIT_ITERATOR_OPTIONS_INIT;
-	const git_index_entry *entry = NULL;
-	const char *ref_prefix = GIT_REFS_DIR;
-	size_t ref_prefix_len = strlen(ref_prefix);
+	const git_index_entry *entry;
+	int error = 0;
 
-	if (!backend->commonpath) /* do nothing if no commonpath for loose refs */
-		return 0;
+	fsit_opts.flags = ctx->backend->iterator_flags;
 
-	fsit_opts.flags = backend->iterator_flags;
+	git_str_clear(&ctx->path);
+	git_str_puts(&ctx->path, root_path);
+	git_str_put(&ctx->path, ctx->ref_prefix, ctx->ref_prefix_len);
 
-	if (iter->glob) {
-		const char *last_sep = NULL;
-		const char *pos;
-		for (pos = iter->glob; *pos; ++pos) {
-			switch (*pos) {
-			case '?':
-			case '*':
-			case '[':
-			case '\\':
-				break;
-			case '/':
-				last_sep = pos;
-				/* FALLTHROUGH */
-			default:
-				continue;
-			}
-			break;
-		}
-		if (last_sep) {
-			ref_prefix = iter->glob;
-			ref_prefix_len = (last_sep - ref_prefix) + 1;
-		}
+	fsit_opts.flags = ctx->backend->iterator_flags;
+	fsit_opts.oid_type = ctx->backend->oid_type;
+
+	if ((error = git_iterator_for_filesystem(&fsit, ctx->path.ptr, &fsit_opts)) < 0) {
+		/*
+		 * Subdirectories - either glob provided or per-worktree refs - need
+		 * not exist.
+		 */
+		if ((worktree || ctx->iter->glob) && error == GIT_ENOTFOUND)
+			error = 0;
+
+		goto done;
 	}
 
-	if ((error = git_str_puts(&path, backend->commonpath)) < 0 ||
-		(error = git_str_put(&path, ref_prefix, ref_prefix_len)) < 0) {
-		git_str_dispose(&path);
-		return error;
-	}
+	git_str_clear(&ctx->ref_name);
+	git_str_put(&ctx->ref_name, ctx->ref_prefix, ctx->ref_prefix_len);
 
-	if ((error = git_iterator_for_filesystem(&fsit, path.ptr, &fsit_opts)) < 0) {
-		git_str_dispose(&path);
-		return (iter->glob && error == GIT_ENOTFOUND)? 0 : error;
-	}
-
-	error = git_str_sets(&path, ref_prefix);
-
-	while (!error && !git_iterator_advance(&entry, fsit)) {
-		const char *ref_name;
+	while (git_iterator_advance(&entry, fsit) == 0) {
 		char *ref_dup;
 
-		git_str_truncate(&path, ref_prefix_len);
-		git_str_puts(&path, entry->path);
-		ref_name = git_str_cstr(&path);
+		git_str_truncate(&ctx->ref_name, ctx->ref_prefix_len);
+		git_str_puts(&ctx->ref_name, entry->path);
 
-		if (git__suffixcmp(ref_name, ".lock") == 0 ||
-			(iter->glob && wildmatch(iter->glob, ref_name, 0) != 0))
+		if (worktree) {
+			if (!is_per_worktree_ref(ctx->ref_name.ptr))
+				continue;
+		} else {
+			if (git_repository_is_worktree(ctx->backend->repo) &&
+			    is_per_worktree_ref(ctx->ref_name.ptr))
+				continue;
+		}
+
+		if (git__suffixcmp(ctx->ref_name.ptr, ".lock") == 0)
 			continue;
 
-		ref_dup = git_pool_strdup(&iter->pool, ref_name);
-		if (!ref_dup)
-			error = -1;
-		else
-			error = git_vector_insert(&iter->loose, ref_dup);
+		if (ctx->iter->glob && wildmatch(ctx->iter->glob, ctx->ref_name.ptr, 0))
+			continue;
+
+		ref_dup = git_pool_strdup(&ctx->iter->pool, ctx->ref_name.ptr);
+		GIT_ERROR_CHECK_ALLOC(ref_dup);
+
+		if ((error = git_vector_insert(&ctx->iter->loose, ref_dup)) < 0)
+			goto done;
 	}
 
+done:
 	git_iterator_free(fsit);
-	git_str_dispose(&path);
+	return error;
+}
 
+#define iter_load_context_init(b, i) { b, i, GIT_REFS_DIR, CONST_STRLEN(GIT_REFS_DIR) }
+#define iter_load_context_dispose(ctx) do {  \
+	git_str_dispose(&((ctx)->path));     \
+	git_str_dispose(&((ctx)->ref_name)); \
+} while(0)
+
+static int iter_load_loose_paths(
+	refdb_fs_backend *backend,
+	refdb_fs_iter *iter)
+{
+	struct iter_load_context ctx = iter_load_context_init(backend, iter);
+
+	int error = 0;
+
+	if (!backend->commonpath)
+		return 0;
+
+	iter_load_optimize_prefix(&ctx);
+
+	if ((error = iter_load_paths(&ctx,
+			backend->commonpath, false)) < 0)
+		goto done;
+
+	if (git_repository_is_worktree(backend->repo)) {
+		if ((error = iter_load_paths(&ctx,
+				backend->gitpath, true)) < 0)
+			goto done;
+	}
+
+done:
+	iter_load_context_dispose(&ctx);
 	return error;
 }
 
@@ -1782,7 +1853,7 @@ static int refdb_fs_backend__rename(
 		(error = refdb_fs_backend__lookup(&old, _backend, old_name)) < 0)
 		return error;
 
-	if ((error = refdb_fs_backend__delete(_backend, old_name, NULL, NULL)) < 0) {
+	if ((error = loose_lock(&file, backend, old->name)) < 0) {
 		git_reference_free(old);
 		return error;
 	}
@@ -1790,10 +1861,17 @@ static int refdb_fs_backend__rename(
 	new = git_reference__realloc(&old, new_name);
 	if (!new) {
 		git_reference_free(old);
+		git_filebuf_cleanup(&file);
 		return -1;
 	}
 
-	if ((error = loose_lock(&file, backend, new->name)) < 0) {
+	if ((error = refdb_fs_backend__delete_tail(_backend, &file, old_name, NULL, NULL)) < 0) {
+		git_reference_free(new);
+		git_filebuf_cleanup(&file);
+		return error;
+	}
+
+	if ((error = loose_lock(&file, backend, new_name)) < 0) {
 		git_reference_free(new);
 		return error;
 	}
@@ -1801,21 +1879,15 @@ static int refdb_fs_backend__rename(
 	/* Try to rename the refog; it's ok if the old doesn't exist */
 	error = refdb_reflog_fs__rename(_backend, old_name, new_name);
 	if (((error == 0) || (error == GIT_ENOTFOUND)) &&
-	    ((error = reflog_append(backend, new, git_reference_target(new), NULL, who, message)) < 0)) {
+		((error = reflog_append(backend, new, git_reference_target(new), NULL, who, message)) < 0)) {
 		git_reference_free(new);
 		git_filebuf_cleanup(&file);
 		return error;
 	}
-
-	if (error < 0) {
-		git_reference_free(new);
-		git_filebuf_cleanup(&file);
-		return error;
-	}
-
 
 	if ((error = loose_commit(&file, new)) < 0 || out == NULL) {
 		git_reference_free(new);
+		git_filebuf_cleanup(&file);
 		return error;
 	}
 
@@ -1949,9 +2021,9 @@ static int reflog_parse(git_reflog *log, const char *buf, size_t buf_size)
 		entry->committer = git__calloc(1, sizeof(*entry->committer));
 		GIT_ERROR_CHECK_ALLOC(entry->committer);
 
-		if (git_parse_advance_oid(&entry->oid_old, &parser) < 0 ||
+		if (git_parse_advance_oid(&entry->oid_old, &parser, log->oid_type) < 0 ||
 		    git_parse_advance_expected(&parser, " ", 1) < 0 ||
-		    git_parse_advance_oid(&entry->oid_cur, &parser) < 0)
+		    git_parse_advance_oid(&entry->oid_cur, &parser, log->oid_type) < 0)
 			goto next;
 
 		sig = parser.line;
@@ -2398,7 +2470,12 @@ static int refdb_reflog_fs__delete(git_refdb_backend *_backend, const char *name
 	if ((error = reflog_path(&path, backend->repo, name)) < 0)
 		goto out;
 
-	if (!git_fs_path_exists(path.ptr))
+	/*
+	 * If a reference was moved downwards, eg refs/heads/br2 -> refs/heads/br2/new-name,
+	 * refs/heads/br2 does exist but it's a directory. That's a valid situation.
+	 * Proceed only if it's a file.
+	 */
+	if (!git_fs_path_isfile(path.ptr))
 		goto out;
 
 	if ((error = p_unlink(path.ptr)) < 0)

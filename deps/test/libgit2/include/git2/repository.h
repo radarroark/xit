@@ -11,6 +11,7 @@
 #include "types.h"
 #include "oid.h"
 #include "buffer.h"
+#include "commit.h"
 
 /**
  * @file git2/repository.h
@@ -56,9 +57,19 @@ GIT_EXTERN(int) git_repository_open_from_worktree(git_repository **out, git_work
  *
  * @param out pointer to the repo
  * @param odb the object database to wrap
+ * @param oid_type the oid type of the object database
  * @return 0 or an error code
  */
-GIT_EXTERN(int) git_repository_wrap_odb(git_repository **out, git_odb *odb);
+#ifdef GIT_EXPERIMENTAL_SHA256
+GIT_EXTERN(int) git_repository_wrap_odb(
+	git_repository **out,
+	git_odb *odb,
+	git_oid_t oid_type);
+#else
+GIT_EXTERN(int) git_repository_wrap_odb(
+	git_repository **out,
+	git_odb *odb);
+#endif
 
 /**
  * Look for a git repository and copy its path in the given buffer.
@@ -493,6 +504,7 @@ typedef enum {
 	GIT_REPOSITORY_ITEM_LOGS,
 	GIT_REPOSITORY_ITEM_MODULES,
 	GIT_REPOSITORY_ITEM_WORKTREES,
+	GIT_REPOSITORY_ITEM_WORKTREE_CONFIG,
 	GIT_REPOSITORY_ITEM__LAST
 } git_repository_item_t;
 
@@ -536,7 +548,7 @@ GIT_EXTERN(const char *) git_repository_workdir(const git_repository *repo);
 
 /**
  * Get the path of the shared common directory for this repository.
- * 
+ *
  * If the repository is bare, it is the root directory for the repository.
  * If the repository is a worktree, it is the parent repo's gitdir.
  * Otherwise, it is the gitdir.
@@ -967,6 +979,17 @@ GIT_EXTERN(int) git_repository_set_ident(git_repository *repo, const char *name,
  * @return the object id type
  */
 GIT_EXTERN(git_oid_t) git_repository_oid_type(git_repository *repo);
+
+/**
+ * Gets the parents of the next commit, given the current repository state.
+ * Generally, this is the HEAD commit, except when performing a merge, in
+ * which case it is two or more commits.
+ *
+ * @param commits a `git_commitarray` that will contain the commit parents
+ * @param repo the repository
+ * @return 0 or an error code
+ */
+GIT_EXTERN(int) git_repository_commit_parents(git_commitarray *commits, git_repository *repo);
 
 /** @} */
 GIT_END_DECL
