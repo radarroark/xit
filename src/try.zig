@@ -112,7 +112,10 @@ pub fn main() !void {
             }
 
             try xit_repo.add(allocator, &.{ "build.zig", "build.zig.zon", "src" });
-            _ = try xit_repo.commit(allocator, commit_object.content.commit.metadata);
+
+            var metadata = commit_object.content.commit.metadata;
+            metadata.allow_empty = true;
+            _ = try xit_repo.commit(allocator, metadata);
         }
 
         // make changes so we see things in the status UI
