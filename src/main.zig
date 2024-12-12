@@ -114,7 +114,9 @@ pub fn xitMain(
     cwd: std.fs.Dir,
     writers: anytype,
 ) !void {
-    var command = try cmd.Command(hash_kind).init(allocator, args);
+    var sub_cmd_args = try cmd.SubCommandArgs.init(allocator, args);
+    defer sub_cmd_args.deinit();
+    var command = try cmd.Command(hash_kind).init(allocator, &sub_cmd_args);
     defer command.deinit();
 
     switch (command) {
