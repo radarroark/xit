@@ -4,14 +4,14 @@ const rp = @import("./repo.zig");
 const compress = @import("./compress.zig");
 const obj = @import("./object.zig");
 
-fn findOid(idx_file: std.fs.File, oid_list_pos: u64, index: usize) ![hash.SHA1_BYTES_LEN]u8 {
+fn findOid(idx_file: std.fs.File, oid_list_pos: u64, index: usize) ![hash.byteLen(.sha1)]u8 {
     const reader = idx_file.reader();
-    const oid_pos = oid_list_pos + (index * hash.SHA1_BYTES_LEN);
+    const oid_pos = oid_list_pos + (index * hash.byteLen(.sha1));
     try idx_file.seekTo(oid_pos);
-    return try reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
+    return try reader.readBytesNoEof(hash.byteLen(.sha1));
 }
 
-fn findObjectIndex(idx_file: std.fs.File, fanout_table: [256]u32, oid_list_pos: u64, oid_bytes: *const [hash.SHA1_BYTES_LEN]u8) !?usize {
+fn findObjectIndex(idx_file: std.fs.File, fanout_table: [256]u32, oid_list_pos: u64, oid_bytes: *const [hash.byteLen(.sha1)]u8) !?usize {
     var left: u32 = 0;
     var right = fanout_table[oid_bytes[0]];
 
@@ -50,7 +50,7 @@ fn findOffset(idx_file: std.fs.File, fanout_table: [256]u32, oid_list_pos: u64, 
     const entry_count = fanout_table[fanout_table.len - 1];
     const crc_size: u64 = 4;
     const offset_size: u64 = 4;
-    const crc_list_pos = oid_list_pos + (entry_count * hash.SHA1_BYTES_LEN);
+    const crc_list_pos = oid_list_pos + (entry_count * hash.byteLen(.sha1));
     const offset_list_pos = crc_list_pos + (entry_count * crc_size);
     const offset_pos = offset_list_pos + (index * offset_size);
 
@@ -71,7 +71,7 @@ fn findOffset(idx_file: std.fs.File, fanout_table: [256]u32, oid_list_pos: u64, 
     return try reader.readInt(u64, .big);
 }
 
-fn searchPackIndex(idx_file: std.fs.File, oid_bytes: *const [hash.SHA1_BYTES_LEN]u8) !?u64 {
+fn searchPackIndex(idx_file: std.fs.File, oid_bytes: *const [hash.byteLen(.sha1)]u8) !?u64 {
     const reader = idx_file.reader();
 
     const header = try reader.readBytesNoEof(4);
@@ -94,12 +94,12 @@ fn searchPackIndex(idx_file: std.fs.File, oid_bytes: *const [hash.SHA1_BYTES_LEN
 }
 
 const PackOffset = struct {
-    pack_id: [hash.SHA1_HEX_LEN]u8,
+    pack_id: [hash.hexLen(.sha1)]u8,
     value: u64,
 };
 
-fn searchPackIndexes(pack_dir: std.fs.Dir, oid_hex: *const [hash.SHA1_HEX_LEN]u8) !PackOffset {
-    const oid_bytes = try hash.hexToBytes(oid_hex.*);
+fn searchPackIndexes(pack_dir: std.fs.Dir, oid_hex: *const [hash.hexLen(.sha1)]u8) !PackOffset {
+    const oid_bytes = try hash.hexToBytes(.sha1, oid_hex.*);
 
     const prefix = "pack-";
     const suffix = ".idx";
@@ -111,13 +111,13 @@ fn searchPackIndexes(pack_dir: std.fs.Dir, oid_hex: *const [hash.SHA1_HEX_LEN]u8
                 if (std.mem.startsWith(u8, entry.name, prefix) and std.mem.endsWith(u8, entry.name, suffix)) {
                     const pack_id = entry.name[prefix.len .. entry.name.len - suffix.len];
 
-                    if (pack_id.len == hash.SHA1_HEX_LEN) {
+                    if (pack_id.len == hash.hexLen(.sha1)) {
                         var idx_file = try pack_dir.openFile(entry.name, .{ .mode = .read_only });
                         defer idx_file.close();
 
                         if (try searchPackIndex(idx_file, &oid_bytes)) |offset| {
                             return .{
-                                .pack_id = pack_id[0..hash.SHA1_HEX_LEN].*,
+                                .pack_id = pack_id[0..comptime hash.hexLen(.sha1)].*,
                                 .value = offset,
                             };
                         }
@@ -225,7 +225,7 @@ pub const PackObjectReader = struct {
                     position: u64,
                 },
                 ref: struct {
-                    oid_hex: [hash.SHA1_HEX_LEN]u8,
+                    oid_hex: [hash.hexLen(.sha1)]u8,
                 },
             },
             allocator: std.mem.Allocator,
@@ -256,7 +256,7 @@ pub const PackObjectReader = struct {
 
     pub const Error = compress.ZlibStream.Reader.Error || error{ Unseekable, UnexpectedEndOfStream, InvalidDeltaCache };
 
-    pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(.git).Core, oid_hex: *const [hash.SHA1_HEX_LEN]u8) !PackObjectReader {
+    pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(.git).Core, oid_hex: *const [hash.hexLen(.sha1)]u8) !PackObjectReader {
         var pack_reader = try PackObjectReader.initWithIndex(allocator, core, oid_hex);
         errdefer pack_reader.deinit();
 
@@ -288,7 +288,7 @@ pub const PackObjectReader = struct {
         return pack_reader;
     }
 
-    pub fn initWithPath(allocator: std.mem.Allocator, pack_file_path: []const u8, oid_hex: *const [hash.SHA1_HEX_LEN]u8) !PackObjectReader {
+    pub fn initWithPath(allocator: std.mem.Allocator, pack_file_path: []const u8, oid_hex: *const [hash.hexLen(.sha1)]u8) !PackObjectReader {
         var iter = try PackObjectIterator.init(allocator, pack_file_path);
         defer iter.deinit();
 
@@ -300,8 +300,8 @@ pub const PackObjectReader = struct {
                 var header_bytes = [_]u8{0} ** 32;
                 const header_str = try obj.writeObjectHeader(pack_reader.header(), &header_bytes);
 
-                var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-                try hash.sha1Reader(pack_reader, header_str, &oid);
+                var oid = [_]u8{0} ** hash.byteLen(.sha1);
+                try hash.hashReader(.sha1, pack_reader, header_str, &oid);
 
                 if (std.mem.eql(u8, oid_hex, &std.fmt.bytesToHex(oid, .lower))) {
                     try pack_reader.reset();
@@ -315,7 +315,7 @@ pub const PackObjectReader = struct {
         return error.ObjectNotFound;
     }
 
-    fn initWithIndex(allocator: std.mem.Allocator, core: *rp.Repo(.git).Core, oid_hex: *const [hash.SHA1_HEX_LEN]u8) !PackObjectReader {
+    fn initWithIndex(allocator: std.mem.Allocator, core: *rp.Repo(.git).Core, oid_hex: *const [hash.hexLen(.sha1)]u8) !PackObjectReader {
         var pack_dir = try core.git_dir.openDir("objects/pack", .{ .iterate = true });
         defer pack_dir.close();
 
@@ -323,7 +323,7 @@ pub const PackObjectReader = struct {
 
         const pack_prefix = "pack-";
         const pack_suffix = ".pack";
-        const pack_file_name_len = pack_prefix.len + hash.SHA1_HEX_LEN + pack_suffix.len;
+        const pack_file_name_len = pack_prefix.len + comptime hash.hexLen(.sha1) + pack_suffix.len;
 
         var file_name_buf = [_]u8{0} ** pack_file_name_len;
         const file_name = try std.fmt.bufPrint(&file_name_buf, "{s}{s}{s}", .{ pack_prefix, pack_offset.pack_id, pack_suffix });
@@ -451,7 +451,7 @@ pub const PackObjectReader = struct {
                 };
             },
             .ref_delta => {
-                const base_oid = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
+                const base_oid = try reader.readBytesNoEof(hash.byteLen(.sha1));
 
                 const start_position = try pack_file.getPos();
 
@@ -843,13 +843,13 @@ pub const LooseOrPackObjectReader = union(enum) {
 
     pub const Error = PackObjectReader.Error;
 
-    pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(.git).Core, oid_hex: *const [hash.SHA1_HEX_LEN]u8) !LooseOrPackObjectReader {
+    pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(.git).Core, oid_hex: *const [hash.hexLen(.sha1)]u8) !LooseOrPackObjectReader {
         // open the objects dir
         var objects_dir = try core.git_dir.openDir("objects", .{});
         defer objects_dir.close();
 
         // open the object file
-        var path_buf = [_]u8{0} ** (hash.SHA1_HEX_LEN + 1);
+        var path_buf = [_]u8{0} ** (hash.hexLen(.sha1) + 1);
         const path = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ oid_hex[0..2], oid_hex[2..] });
         var object_file = objects_dir.openFile(path, .{ .mode = .read_only }) catch |err| switch (err) {
             error.FileNotFound => return .{

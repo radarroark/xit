@@ -8,11 +8,11 @@ const CHUNK_SIZE = 2048;
 pub fn writeChunks(
     state: rp.Repo(.xit).State(.read_write),
     file: anytype,
-    object_hash: hash.Hash,
+    object_hash: hash.HashInt(.sha1),
     object_header: []const u8,
 ) !void {
     // exit early if the chunks for this object already exist
-    const blob_id_to_chunk_hashes_cursor = try state.extra.moment.putCursor(hash.hashBuffer("object-id->chunk-hashes"));
+    const blob_id_to_chunk_hashes_cursor = try state.extra.moment.putCursor(hash.hashInt(.sha1, "object-id->chunk-hashes"));
     const blob_id_to_chunk_hashes = try rp.Repo(.xit).DB.HashMap(.read_write).init(blob_id_to_chunk_hashes_cursor);
     if (null != try blob_id_to_chunk_hashes.getCursor(object_hash)) return;
 
@@ -36,8 +36,8 @@ pub fn writeChunks(
         const chunk = chunk_buffer[0..size];
 
         // hash the chunk
-        var chunk_hash_bytes = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-        try hash.sha1Buffer(chunk, &chunk_hash_bytes);
+        var chunk_hash_bytes = [_]u8{0} ** hash.byteLen(.sha1);
+        try hash.hashBuffer(.sha1, chunk, &chunk_hash_bytes);
 
         // write chunk unless it already exists
         const chunk_hash_hex = std.fmt.bytesToHex(chunk_hash_bytes, .lower);
@@ -61,7 +61,7 @@ pub fn writeChunks(
     try writer.finish();
 
     // write object header
-    const object_id_to_header_cursor = try state.extra.moment.putCursor(hash.hashBuffer("object-id->header"));
+    const object_id_to_header_cursor = try state.extra.moment.putCursor(hash.hashInt(.sha1, "object-id->header"));
     const object_id_to_header = try rp.Repo(.xit).DB.HashMap(.read_write).init(object_id_to_header_cursor);
     try object_id_to_header.put(object_hash, .{ .bytes = object_header });
 }
@@ -73,13 +73,13 @@ pub fn readChunk(
     buf: []u8,
 ) !usize {
     const chunk_index = position / CHUNK_SIZE;
-    const chunk_hash_position = chunk_index * hash.SHA1_BYTES_LEN;
+    const chunk_hash_position = chunk_index * hash.byteLen(.sha1);
     if (chunk_hash_position == chunk_hashes_reader.size) {
         return 0;
     }
 
     try chunk_hashes_reader.seekTo(chunk_hash_position);
-    var chunk_hash_bytes = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+    var chunk_hash_bytes = [_]u8{0} ** hash.byteLen(.sha1);
     try chunk_hashes_reader.readNoEof(&chunk_hash_bytes);
     const chunk_hash_hex = std.fmt.bytesToHex(chunk_hash_bytes, .lower);
 

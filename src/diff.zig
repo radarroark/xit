@@ -14,8 +14,8 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
     return struct {
         allocator: std.mem.Allocator,
         path: []const u8,
-        oid: [hash.SHA1_BYTES_LEN]u8,
-        oid_hex: [hash.SHA1_HEX_LEN]u8,
+        oid: [hash.byteLen(.sha1)]u8,
+        oid_hex: [hash.hexLen(.sha1)]u8,
         mode: ?io.Mode,
         line_offsets: []usize,
         source: union(enum) {
@@ -63,8 +63,8 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
             const file_size = (try file.metadata()).size();
             const header = try std.fmt.allocPrint(allocator, "blob {}\x00", .{file_size});
             defer allocator.free(header);
-            var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-            try hash.sha1Reader(file.reader(), header, &oid);
+            var oid = [_]u8{0} ** hash.byteLen(.sha1);
+            try hash.hashReader(.sha1, file.reader(), header, &oid);
             try file.seekTo(0);
 
             var iter = LineIterator(repo_kind){
@@ -89,8 +89,8 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
             var iter = LineIterator(repo_kind){
                 .allocator = allocator,
                 .path = path,
-                .oid = [_]u8{0} ** hash.SHA1_BYTES_LEN,
-                .oid_hex = [_]u8{0} ** hash.SHA1_HEX_LEN,
+                .oid = [_]u8{0} ** hash.byteLen(.sha1),
+                .oid_hex = [_]u8{0} ** hash.hexLen(.sha1),
                 .mode = null,
                 .line_offsets = undefined,
                 .source = .nothing,
@@ -121,7 +121,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
             return iter;
         }
 
-        pub fn initFromOid(state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator, path: []const u8, oid: *const [hash.SHA1_BYTES_LEN]u8, mode_maybe: ?io.Mode) !LineIterator(repo_kind) {
+        pub fn initFromOid(state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator, path: []const u8, oid: *const [hash.byteLen(.sha1)]u8, mode_maybe: ?io.Mode) !LineIterator(repo_kind) {
             const oid_hex = std.fmt.bytesToHex(oid, .lower);
             var object_reader = try obj.ObjectReader(repo_kind).init(allocator, state, &oid_hex);
             errdefer object_reader.deinit();
@@ -147,8 +147,8 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
             var iter = LineIterator(repo_kind){
                 .allocator = allocator,
                 .path = "",
-                .oid = [_]u8{0} ** hash.SHA1_BYTES_LEN,
-                .oid_hex = [_]u8{0} ** hash.SHA1_HEX_LEN,
+                .oid = [_]u8{0} ** hash.byteLen(.sha1),
+                .oid_hex = [_]u8{0} ** hash.hexLen(.sha1),
                 .mode = null,
                 .line_offsets = undefined,
                 .source = .{
@@ -1251,8 +1251,8 @@ pub const BasicDiffOptions = union(DiffKind) {
     },
     index,
     tree: struct {
-        old: ?[hash.SHA1_HEX_LEN]u8,
-        new: ?[hash.SHA1_HEX_LEN]u8,
+        old: ?[hash.hexLen(.sha1)]u8,
+        new: ?[hash.hexLen(.sha1)]u8,
     },
 };
 

@@ -274,7 +274,7 @@ pub fn HeadTree(comptime repo_kind: rp.RepoKind) type {
             self.allocator.destroy(self.arena);
         }
 
-        fn read(self: *HeadTree(repo_kind), state: rp.Repo(repo_kind).State(.read_only), prefix: []const u8, oid: *const [hash.SHA1_HEX_LEN]u8) !void {
+        fn read(self: *HeadTree(repo_kind), state: rp.Repo(repo_kind).State(.read_only), prefix: []const u8, oid: *const [hash.hexLen(.sha1)]u8) !void {
             const object = try obj.Object(repo_kind, .full).init(self.arena.allocator(), state, oid);
 
             switch (object.content) {

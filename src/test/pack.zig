@@ -177,10 +177,10 @@ test "pack" {
 
     // delete the loose objects
     for (&[_]*c.git_oid{ &commit_oid1, &commit_oid2 }) |commit_oid| {
-        var commit_oid_hex = [_]u8{0} ** hash.SHA1_HEX_LEN;
+        var commit_oid_hex = [_]u8{0} ** hash.hexLen(.sha1);
         try std.testing.expectEqual(0, c.git_oid_fmt(@ptrCast(&commit_oid_hex), commit_oid));
 
-        var path_buf = [_]u8{0} ** (hash.SHA1_HEX_LEN + 1);
+        var path_buf = [_]u8{0} ** (hash.hexLen(.sha1) + 1);
         const path = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ commit_oid_hex[0..2], commit_oid_hex[2..] });
 
         var objects_dir = try repo_dir.openDir(".git/objects", .{});
@@ -194,7 +194,7 @@ test "pack" {
         &[_]*c.git_oid{ &commit_oid1, &commit_oid2 },
         &[_][]const u8{ "let there be light", "add license" },
     ) |commit_oid, message| {
-        var commit_oid_hex = [_]u8{0} ** hash.SHA1_HEX_LEN;
+        var commit_oid_hex = [_]u8{0} ** hash.hexLen(.sha1);
         try std.testing.expectEqual(0, c.git_oid_fmt(@ptrCast(&commit_oid_hex), commit_oid));
 
         var r = try rp.Repo(.git).init(allocator, .{ .cwd = repo_dir });
@@ -234,7 +234,7 @@ test "pack" {
         defer allocator.free(pack_file_path);
 
         for (&[_]*c.git_oid{ &commit_oid1, &commit_oid2 }) |commit_oid| {
-            var commit_oid_hex = [_]u8{0} ** hash.SHA1_HEX_LEN;
+            var commit_oid_hex = [_]u8{0} ** hash.hexLen(.sha1);
             try std.testing.expectEqual(0, c.git_oid_fmt(@ptrCast(&commit_oid_hex), commit_oid));
 
             var pack_reader = try pack.PackObjectReader.initWithPath(allocator, pack_file_path, &commit_oid_hex);

@@ -56,7 +56,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
             uid: u32,
             gid: u32,
             file_size: u32,
-            oid: [hash.SHA1_BYTES_LEN]u8,
+            oid: [hash.byteLen(.sha1)]u8,
             flags: Flags,
             extended_flags: ?ExtendedFlags,
             path: []const u8,
@@ -114,7 +114,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                             .uid = try reader.readInt(u32, .big),
                             .gid = try reader.readInt(u32, .big),
                             .file_size = try reader.readInt(u32, .big),
-                            .oid = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN),
+                            .oid = try reader.readBytesNoEof(hash.byteLen(.sha1)),
                             .flags = @bitCast(try reader.readInt(u16, .big)),
                             .extended_flags = null, // TODO: read this if necessary
                             .path = try reader.readUntilDelimiterAlloc(self.arena.allocator(), 0, std.fs.MAX_PATH_BYTES),
@@ -139,10 +139,10 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     // skipping for now because it will probably require changing
                     // how i read the data above. i need access to the raw bytes
                     // (before the big endian and type conversions) to do the hashing.
-                    _ = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN);
+                    _ = try reader.readBytesNoEof(hash.byteLen(.sha1));
                 },
                 .xit => {
-                    if (try state.extra.moment.getCursor(hash.hashBuffer("index"))) |index_cursor| {
+                    if (try state.extra.moment.getCursor(hash.hashInt(.sha1, "index"))) |index_cursor| {
                         var iter = try index_cursor.iterator();
                         defer iter.deinit();
                         while (try iter.next()) |*next_cursor| {
@@ -165,7 +165,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                     .uid = try reader.readInt(u32, .big),
                                     .gid = try reader.readInt(u32, .big),
                                     .file_size = try reader.readInt(u32, .big),
-                                    .oid = try reader.readBytesNoEof(hash.SHA1_BYTES_LEN),
+                                    .oid = try reader.readBytesNoEof(hash.byteLen(.sha1)),
                                     .flags = @bitCast(try reader.readInt(u16, .big)),
                                     .extended_flags = null, // TODO: read this if necessary
                                     .path = path,
@@ -225,7 +225,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     defer file.close();
 
                     // write the object
-                    var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+                    var oid = [_]u8{0} ** hash.byteLen(.sha1);
                     try obj.writeObject(repo_kind, state, file, .{ .kind = .blob, .size = meta.size() }, &oid);
                     // add the entry
                     const times = io.getTimes(meta);
@@ -472,7 +472,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     self.entries.sort(SortCtx{ .keys = self.entries.keys() });
 
                     // start the checksum
-                    var h = std.crypto.hash.Sha1.init(.{});
+                    var hasher = hash.Hasher(.sha1).init();
 
                     // calculate entry count
                     var entry_count: u32 = 0;
@@ -495,7 +495,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                     });
                     defer allocator.free(header);
                     try lock_file.writeAll(header);
-                    h.update(header);
+                    hasher.update(header);
 
                     // write the entries
                     for (self.entries.values()) |*entries_for_path| {
@@ -524,18 +524,18 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                                     try writer.writeByte(0);
                                 }
                                 try lock_file.writeAll(entry_buffer.items);
-                                h.update(entry_buffer.items);
+                                hasher.update(entry_buffer.items);
                             }
                         }
                     }
 
                     // write the checksum
-                    var overall_sha1_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-                    h.final(&overall_sha1_buffer);
+                    var overall_sha1_buffer = [_]u8{0} ** hash.byteLen(.sha1);
+                    hasher.final(&overall_sha1_buffer);
                     try lock_file.writeAll(&overall_sha1_buffer);
                 },
                 .xit => {
-                    const index_cursor = try state.extra.moment.putCursor(hash.hashBuffer("index"));
+                    const index_cursor = try state.extra.moment.putCursor(hash.hashInt(.sha1, "index"));
                     var index = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(index_cursor);
 
                     // remove items no longer in the index
@@ -547,7 +547,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                         defer allocator.free(path);
 
                         if (!self.entries.contains(path)) {
-                            _ = try index.remove(hash.hashBuffer(path));
+                            _ = try index.remove(hash.hashInt(.sha1, path));
                         }
                     }
 
@@ -573,7 +573,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                             }
                         }
 
-                        const path_hash = hash.hashBuffer(path);
+                        const path_hash = hash.hashInt(.sha1, path);
                         if (try index.getKeyCursor(path_hash)) |existing_entry_cursor| {
                             const existing_entry = try existing_entry_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
                             defer allocator.free(existing_entry);
@@ -582,15 +582,15 @@ pub fn Index(comptime repo_kind: rp.RepoKind) type {
                             }
                         }
 
-                        const path_set_cursor = try state.extra.moment.putCursor(hash.hashBuffer("path-set"));
+                        const path_set_cursor = try state.extra.moment.putCursor(hash.hashInt(.sha1, "path-set"));
                         const path_set = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(path_set_cursor);
                         var path_cursor = try path_set.putKeyCursor(path_hash);
                         try path_cursor.writeIfEmpty(.{ .bytes = path });
                         try index.putKey(path_hash, .{ .slot = path_cursor.slot() });
 
-                        const entry_buffer_set_cursor = try state.extra.moment.putCursor(hash.hashBuffer("entry-buffer-set"));
+                        const entry_buffer_set_cursor = try state.extra.moment.putCursor(hash.hashInt(.sha1, "entry-buffer-set"));
                         const entry_buffer_set = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(entry_buffer_set_cursor);
-                        var entry_buffer_cursor = try entry_buffer_set.putKeyCursor(hash.hashBuffer(entry_buffer.items));
+                        var entry_buffer_cursor = try entry_buffer_set.putKeyCursor(hash.hashInt(.sha1, entry_buffer.items));
                         try entry_buffer_cursor.writeIfEmpty(.{ .bytes = entry_buffer.items });
                         try index.put(path_hash, .{ .slot = entry_buffer_cursor.slot() });
                     }
@@ -615,8 +615,8 @@ pub fn indexDiffersFromWorkspace(comptime repo_kind: rp.RepoKind, entry: Index(r
             var header_buffer = [_]u8{0} ** 256; // should be plenty of space
             const header = try std.fmt.bufPrint(&header_buffer, "blob {}\x00", .{file_size});
 
-            var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-            try hash.sha1Reader(file.reader(), header, &oid);
+            var oid = [_]u8{0} ** hash.byteLen(.sha1);
+            try hash.hashReader(.sha1, file.reader(), header, &oid);
             if (!std.mem.eql(u8, &entry.oid, &oid)) {
                 return true;
             }
