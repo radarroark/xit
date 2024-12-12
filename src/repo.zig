@@ -105,15 +105,38 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime hash_kind: hash.HashKind) typ
         };
 
         pub fn init(allocator: std.mem.Allocator, opts: InitOpts) !Repo(repo_kind, hash_kind) {
+            const cwd_path = try opts.cwd.realpathAlloc(allocator, ".");
+            defer allocator.free(cwd_path);
+
+            // search all parent dirs for one containing the internal dir
+            var dir_path_maybe: ?[]const u8 = cwd_path;
+            while (dir_path_maybe) |dir_path| {
+                var repo_dir = try std.fs.openDirAbsolute(dir_path, .{});
+                defer repo_dir.close();
+
+                const internal_dir_name = switch (repo_kind) {
+                    .git => ".git",
+                    .xit => ".xit",
+                };
+                var internal_dir = repo_dir.openDir(internal_dir_name, .{}) catch |err| switch (err) {
+                    error.FileNotFound => {
+                        dir_path_maybe = std.fs.path.dirname(dir_path);
+                        continue;
+                    },
+                    else => |e| return e,
+                };
+                defer internal_dir.close();
+
+                break;
+            }
+
+            const dir_path = dir_path_maybe orelse return error.RepoNotFound;
+            var repo_dir = try std.fs.openDirAbsolute(dir_path, .{});
+            errdefer repo_dir.close();
+
             switch (repo_kind) {
                 .git => {
-                    var repo_dir = try opts.cwd.openDir(".", .{});
-                    errdefer repo_dir.close();
-
-                    var git_dir = repo_dir.openDir(".git", .{}) catch |err| switch (err) {
-                        error.FileNotFound => return error.RepoNotFound,
-                        else => |e| return e,
-                    };
+                    var git_dir = try repo_dir.openDir(".git", .{});
                     errdefer git_dir.close();
 
                     return .{
@@ -125,13 +148,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime hash_kind: hash.HashKind) typ
                     };
                 },
                 .xit => {
-                    var repo_dir = try opts.cwd.openDir(".", .{});
-                    errdefer repo_dir.close();
-
-                    var xit_dir = repo_dir.openDir(".xit", .{}) catch |err| switch (err) {
-                        error.FileNotFound => return error.RepoNotFound,
-                        else => |e| return e,
-                    };
+                    var xit_dir = try repo_dir.openDir(".xit", .{});
                     errdefer xit_dir.close();
 
                     var db_file = xit_dir.openFile("db", .{ .mode = .read_write, .lock = .exclusive }) catch |err| switch (err) {
