@@ -7,22 +7,23 @@ const Grid = xitui.grid.Grid;
 const Focus = xitui.focus.Focus;
 const ui_diff = @import("./diff.zig");
 const rp = @import("../repo.zig");
+const hash = @import("../hash.zig");
 const df = @import("../diff.zig");
 const ref = @import("../ref.zig");
 const obj = @import("../object.zig");
 
-pub fn LogCommitList(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
+pub fn LogCommitList(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
     return struct {
         allocator: std.mem.Allocator,
         scroll: wgt.Scroll(Widget),
-        repo: *rp.Repo(repo_kind),
-        commit_iter: obj.ObjectIterator(repo_kind, .full),
-        commits: std.ArrayList(obj.Object(repo_kind, .full)),
+        repo: *rp.Repo(repo_kind, hash_kind),
+        commit_iter: obj.ObjectIterator(repo_kind, hash_kind, .full),
+        commits: std.ArrayList(obj.Object(repo_kind, hash_kind, .full)),
 
-        pub fn init(allocator: std.mem.Allocator, repo: *rp.Repo(repo_kind)) !LogCommitList(Widget, repo_kind) {
+        pub fn init(allocator: std.mem.Allocator, repo: *rp.Repo(repo_kind, hash_kind)) !LogCommitList(Widget, repo_kind, hash_kind) {
             var self = blk: {
                 // init commits
-                var commits = std.ArrayList(obj.Object(repo_kind, .full)).init(allocator);
+                var commits = std.ArrayList(obj.Object(repo_kind, hash_kind, .full)).init(allocator);
                 errdefer {
                     for (commits.items) |*commit| {
                         commit.deinit();
@@ -41,7 +42,7 @@ pub fn LogCommitList(comptime Widget: type, comptime repo_kind: rp.RepoKind) typ
                 var scroll = try wgt.Scroll(Widget).init(allocator, .{ .box = inner_box }, .vert);
                 errdefer scroll.deinit();
 
-                break :blk LogCommitList(Widget, repo_kind){
+                break :blk LogCommitList(Widget, repo_kind, hash_kind){
                     .allocator = allocator,
                     .scroll = scroll,
                     .repo = repo,
@@ -59,7 +60,7 @@ pub fn LogCommitList(comptime Widget: type, comptime repo_kind: rp.RepoKind) typ
             return self;
         }
 
-        pub fn deinit(self: *LogCommitList(Widget, repo_kind)) void {
+        pub fn deinit(self: *LogCommitList(Widget, repo_kind, hash_kind)) void {
             for (self.commits.items) |*commit_object| {
                 commit_object.deinit();
             }
@@ -68,7 +69,7 @@ pub fn LogCommitList(comptime Widget: type, comptime repo_kind: rp.RepoKind) typ
             self.scroll.deinit();
         }
 
-        pub fn build(self: *LogCommitList(Widget, repo_kind), constraint: layout.Constraint, root_focus: *Focus) !void {
+        pub fn build(self: *LogCommitList(Widget, repo_kind, hash_kind), constraint: layout.Constraint, root_focus: *Focus) !void {
             self.clearGrid();
             const children = &self.scroll.child.box.children;
             for (children.keys(), children.values()) |id, *commit| {
@@ -93,7 +94,7 @@ pub fn LogCommitList(comptime Widget: type, comptime repo_kind: rp.RepoKind) typ
             }
         }
 
-        pub fn input(self: *LogCommitList(Widget, repo_kind), key: inp.Key, root_focus: *Focus) !void {
+        pub fn input(self: *LogCommitList(Widget, repo_kind, hash_kind), key: inp.Key, root_focus: *Focus) !void {
             if (self.getFocus().child_id) |child_id| {
                 const children = &self.scroll.child.box.children;
                 if (children.getIndex(child_id)) |current_index| {
@@ -141,19 +142,19 @@ pub fn LogCommitList(comptime Widget: type, comptime repo_kind: rp.RepoKind) typ
             }
         }
 
-        pub fn clearGrid(self: *LogCommitList(Widget, repo_kind)) void {
+        pub fn clearGrid(self: *LogCommitList(Widget, repo_kind, hash_kind)) void {
             self.scroll.clearGrid();
         }
 
-        pub fn getGrid(self: LogCommitList(Widget, repo_kind)) ?Grid {
+        pub fn getGrid(self: LogCommitList(Widget, repo_kind, hash_kind)) ?Grid {
             return self.scroll.getGrid();
         }
 
-        pub fn getFocus(self: *LogCommitList(Widget, repo_kind)) *Focus {
+        pub fn getFocus(self: *LogCommitList(Widget, repo_kind, hash_kind)) *Focus {
             return self.scroll.getFocus();
         }
 
-        pub fn getSelectedIndex(self: LogCommitList(Widget, repo_kind)) ?usize {
+        pub fn getSelectedIndex(self: LogCommitList(Widget, repo_kind, hash_kind)) ?usize {
             if (self.scroll.child.box.focus.child_id) |child_id| {
                 const children = &self.scroll.child.box.children;
                 return children.getIndex(child_id);
@@ -162,14 +163,14 @@ pub fn LogCommitList(comptime Widget: type, comptime repo_kind: rp.RepoKind) typ
             }
         }
 
-        fn updateScroll(self: *LogCommitList(Widget, repo_kind), index: usize) void {
+        fn updateScroll(self: *LogCommitList(Widget, repo_kind, hash_kind), index: usize) void {
             const left_box = &self.scroll.child.box;
             if (left_box.children.values()[index].rect) |rect| {
                 self.scroll.scrollToRect(rect);
             }
         }
 
-        fn addCommits(self: *LogCommitList(Widget, repo_kind), max_commits: usize) !void {
+        fn addCommits(self: *LogCommitList(Widget, repo_kind, hash_kind), max_commits: usize) !void {
             for (0..max_commits) |_| {
                 if (try self.commit_iter.next()) |commit_object| {
                     {
@@ -191,32 +192,32 @@ pub fn LogCommitList(comptime Widget: type, comptime repo_kind: rp.RepoKind) typ
     };
 }
 
-pub fn Log(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
+pub fn Log(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
     return struct {
         box: wgt.Box(Widget),
-        repo: *rp.Repo(repo_kind),
+        repo: *rp.Repo(repo_kind, hash_kind),
         allocator: std.mem.Allocator,
 
-        pub fn init(allocator: std.mem.Allocator, repo: *rp.Repo(repo_kind)) !Log(Widget, repo_kind) {
+        pub fn init(allocator: std.mem.Allocator, repo: *rp.Repo(repo_kind, hash_kind)) !Log(Widget, repo_kind, hash_kind) {
             var box = try wgt.Box(Widget).init(allocator, null, .horiz);
             errdefer box.deinit();
 
             // add commit list
             {
-                var commit_list = try LogCommitList(Widget, repo_kind).init(allocator, repo);
+                var commit_list = try LogCommitList(Widget, repo_kind, hash_kind).init(allocator, repo);
                 errdefer commit_list.deinit();
                 try box.children.put(commit_list.getFocus().id, .{ .widget = .{ .ui_log_commit_list = commit_list }, .rect = null, .min_size = .{ .width = 30, .height = null } });
             }
 
             // add diff
             {
-                var diff = Widget{ .ui_diff = try ui_diff.Diff(Widget, repo_kind).init(allocator, repo) };
+                var diff = Widget{ .ui_diff = try ui_diff.Diff(Widget, repo_kind, hash_kind).init(allocator, repo) };
                 errdefer diff.deinit();
                 diff.getFocus().focusable = true;
                 try box.children.put(diff.getFocus().id, .{ .widget = diff, .rect = null, .min_size = .{ .width = 60, .height = null } });
             }
 
-            var git_log = Log(Widget, repo_kind){
+            var git_log = Log(Widget, repo_kind, hash_kind){
                 .box = box,
                 .repo = repo,
                 .allocator = allocator,
@@ -227,16 +228,16 @@ pub fn Log(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
             return git_log;
         }
 
-        pub fn deinit(self: *Log(Widget, repo_kind)) void {
+        pub fn deinit(self: *Log(Widget, repo_kind, hash_kind)) void {
             self.box.deinit();
         }
 
-        pub fn build(self: *Log(Widget, repo_kind), constraint: layout.Constraint, root_focus: *Focus) !void {
+        pub fn build(self: *Log(Widget, repo_kind, hash_kind), constraint: layout.Constraint, root_focus: *Focus) !void {
             self.clearGrid();
             try self.box.build(constraint, root_focus);
         }
 
-        pub fn input(self: *Log(Widget, repo_kind), key: inp.Key, root_focus: *Focus) !void {
+        pub fn input(self: *Log(Widget, repo_kind, hash_kind), key: inp.Key, root_focus: *Focus) !void {
             const diff_scroll_x = self.box.children.values()[1].widget.ui_diff.box.children.values()[0].widget.scroll.x;
 
             if (self.getFocus().child_id) |child_id| {
@@ -286,19 +287,19 @@ pub fn Log(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
             }
         }
 
-        pub fn clearGrid(self: *Log(Widget, repo_kind)) void {
+        pub fn clearGrid(self: *Log(Widget, repo_kind, hash_kind)) void {
             self.box.clearGrid();
         }
 
-        pub fn getGrid(self: Log(Widget, repo_kind)) ?Grid {
+        pub fn getGrid(self: Log(Widget, repo_kind, hash_kind)) ?Grid {
             return self.box.getGrid();
         }
 
-        pub fn getFocus(self: *Log(Widget, repo_kind)) *Focus {
+        pub fn getFocus(self: *Log(Widget, repo_kind, hash_kind)) *Focus {
             return self.box.getFocus();
         }
 
-        pub fn scrolledToTop(self: Log(Widget, repo_kind)) bool {
+        pub fn scrolledToTop(self: Log(Widget, repo_kind, hash_kind)) bool {
             if (self.box.focus.child_id) |child_id| {
                 if (self.box.children.getIndex(child_id)) |current_index| {
                     const child = &self.box.children.values()[current_index].widget;
@@ -320,7 +321,7 @@ pub fn Log(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
             return true;
         }
 
-        fn updateDiff(self: *Log(Widget, repo_kind)) !void {
+        fn updateDiff(self: *Log(Widget, repo_kind, hash_kind)) !void {
             const commit_list = &self.box.children.values()[0].widget.ui_log_commit_list;
             if (commit_list.getSelectedIndex()) |commit_index| {
                 const commit_object = commit_list.commits.items[commit_index];
@@ -335,7 +336,7 @@ pub fn Log(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                 var diff = &self.box.children.values()[1].widget.ui_diff;
                 try diff.clearDiffs();
 
-                const tree_diff = try diff.iter_arena.allocator().create(obj.TreeDiff(repo_kind));
+                const tree_diff = try diff.iter_arena.allocator().create(obj.TreeDiff(repo_kind, hash_kind));
                 tree_diff.* = try self.repo.treeDiff(diff.iter_arena.allocator(), parent_oid_maybe, commit_oid);
 
                 diff.file_iter = try self.repo.filePairs(diff.iter_arena.allocator(), .{ .tree = .{ .tree_diff = tree_diff } });

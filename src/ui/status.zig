@@ -8,6 +8,7 @@ const Focus = xitui.focus.Focus;
 const ui_diff = @import("./diff.zig");
 const ui_root = @import("./root.zig");
 const rp = @import("../repo.zig");
+const hash = @import("../hash.zig");
 const st = @import("../status.zig");
 const df = @import("../diff.zig");
 const io = @import("../io.zig");
@@ -207,7 +208,7 @@ pub fn StatusList(comptime Widget: type) type {
     };
 }
 
-pub fn StatusTabs(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
+pub fn StatusTabs(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
     return struct {
         box: wgt.Box(Widget),
         arena: *std.heap.ArenaAllocator,
@@ -215,7 +216,7 @@ pub fn StatusTabs(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
 
         const tab_count = @typeInfo(st.IndexKind).Enum.fields.len;
 
-        pub fn init(allocator: std.mem.Allocator, status: *st.Status(repo_kind)) !StatusTabs(Widget, repo_kind) {
+        pub fn init(allocator: std.mem.Allocator, status: *st.Status(repo_kind, hash_kind)) !StatusTabs(Widget, repo_kind, hash_kind) {
             var box = try wgt.Box(Widget).init(allocator, null, .horiz);
             errdefer box.deinit();
 
@@ -251,7 +252,7 @@ pub fn StatusTabs(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                 try box.children.put(text_box.getFocus().id, .{ .widget = .{ .text_box = text_box }, .rect = null, .min_size = null });
             }
 
-            var ui_status_tabs = StatusTabs(Widget, repo_kind){
+            var ui_status_tabs = StatusTabs(Widget, repo_kind, hash_kind){
                 .box = box,
                 .arena = arena,
                 .allocator = allocator,
@@ -260,13 +261,13 @@ pub fn StatusTabs(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
             return ui_status_tabs;
         }
 
-        pub fn deinit(self: *StatusTabs(Widget, repo_kind)) void {
+        pub fn deinit(self: *StatusTabs(Widget, repo_kind, hash_kind)) void {
             self.box.deinit();
             self.arena.deinit();
             self.allocator.destroy(self.arena);
         }
 
-        pub fn build(self: *StatusTabs(Widget, repo_kind), constraint: layout.Constraint, root_focus: *Focus) !void {
+        pub fn build(self: *StatusTabs(Widget, repo_kind, hash_kind), constraint: layout.Constraint, root_focus: *Focus) !void {
             self.clearGrid();
             for (self.box.children.keys(), self.box.children.values()) |id, *tab| {
                 tab.widget.text_box.border_style = if (self.getFocus().child_id == id)
@@ -277,7 +278,7 @@ pub fn StatusTabs(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
             try self.box.build(constraint, root_focus);
         }
 
-        pub fn input(self: *StatusTabs(Widget, repo_kind), key: inp.Key, root_focus: *Focus) !void {
+        pub fn input(self: *StatusTabs(Widget, repo_kind, hash_kind), key: inp.Key, root_focus: *Focus) !void {
             if (self.getFocus().child_id) |child_id| {
                 const children = &self.box.children;
                 if (children.getIndex(child_id)) |current_index| {
@@ -303,19 +304,19 @@ pub fn StatusTabs(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
             }
         }
 
-        pub fn clearGrid(self: *StatusTabs(Widget, repo_kind)) void {
+        pub fn clearGrid(self: *StatusTabs(Widget, repo_kind, hash_kind)) void {
             self.box.clearGrid();
         }
 
-        pub fn getGrid(self: StatusTabs(Widget, repo_kind)) ?Grid {
+        pub fn getGrid(self: StatusTabs(Widget, repo_kind, hash_kind)) ?Grid {
             return self.box.getGrid();
         }
 
-        pub fn getFocus(self: *StatusTabs(Widget, repo_kind)) *Focus {
+        pub fn getFocus(self: *StatusTabs(Widget, repo_kind, hash_kind)) *Focus {
             return self.box.getFocus();
         }
 
-        pub fn getSelectedIndex(self: StatusTabs(Widget, repo_kind)) ?usize {
+        pub fn getSelectedIndex(self: StatusTabs(Widget, repo_kind, hash_kind)) ?usize {
             if (self.box.focus.child_id) |child_id| {
                 const children = &self.box.children;
                 return children.getIndex(child_id);
@@ -326,17 +327,17 @@ pub fn StatusTabs(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
     };
 }
 
-pub fn StatusContent(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
+pub fn StatusContent(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
     return struct {
         box: wgt.Box(Widget),
         filtered_statuses: std.ArrayList(StatusItem),
-        repo: *rp.Repo(repo_kind),
-        status: *st.Status(repo_kind),
+        repo: *rp.Repo(repo_kind, hash_kind),
+        status: *st.Status(repo_kind, hash_kind),
         allocator: std.mem.Allocator,
 
         const FocusKind = enum { status_list, diff };
 
-        pub fn init(allocator: std.mem.Allocator, repo: *rp.Repo(repo_kind), status: *st.Status(repo_kind), selected: st.IndexKind) !StatusContent(Widget, repo_kind) {
+        pub fn init(allocator: std.mem.Allocator, repo: *rp.Repo(repo_kind, hash_kind), status: *st.Status(repo_kind, hash_kind), selected: st.IndexKind) !StatusContent(Widget, repo_kind, hash_kind) {
             var filtered_statuses = std.ArrayList(StatusItem).init(allocator);
             errdefer filtered_statuses.deinit();
 
@@ -379,7 +380,7 @@ pub fn StatusContent(comptime Widget: type, comptime repo_kind: rp.RepoKind) typ
                         try box.children.put(status_list.getFocus().id, .{ .widget = .{ .ui_status_list = status_list }, .rect = null, .min_size = .{ .width = 20, .height = null } });
                     },
                     .diff => {
-                        var diff = try ui_diff.Diff(Widget, repo_kind).init(allocator, repo);
+                        var diff = try ui_diff.Diff(Widget, repo_kind, hash_kind).init(allocator, repo);
                         errdefer diff.deinit();
                         diff.getFocus().focusable = true;
                         try box.children.put(diff.getFocus().id, .{ .widget = .{ .ui_diff = diff }, .rect = null, .min_size = .{ .width = 60, .height = null } });
@@ -387,7 +388,7 @@ pub fn StatusContent(comptime Widget: type, comptime repo_kind: rp.RepoKind) typ
                 }
             }
 
-            var status_content = StatusContent(Widget, repo_kind){
+            var status_content = StatusContent(Widget, repo_kind, hash_kind){
                 .box = box,
                 .filtered_statuses = filtered_statuses,
                 .repo = repo,
@@ -399,19 +400,19 @@ pub fn StatusContent(comptime Widget: type, comptime repo_kind: rp.RepoKind) typ
             return status_content;
         }
 
-        pub fn deinit(self: *StatusContent(Widget, repo_kind)) void {
+        pub fn deinit(self: *StatusContent(Widget, repo_kind, hash_kind)) void {
             self.box.deinit();
             self.filtered_statuses.deinit();
         }
 
-        pub fn build(self: *StatusContent(Widget, repo_kind), constraint: layout.Constraint, root_focus: *Focus) !void {
+        pub fn build(self: *StatusContent(Widget, repo_kind, hash_kind), constraint: layout.Constraint, root_focus: *Focus) !void {
             self.clearGrid();
             if (self.filtered_statuses.items.len > 0) {
                 try self.box.build(constraint, root_focus);
             }
         }
 
-        pub fn input(self: *StatusContent(Widget, repo_kind), key: inp.Key, root_focus: *Focus) !void {
+        pub fn input(self: *StatusContent(Widget, repo_kind, hash_kind), key: inp.Key, root_focus: *Focus) !void {
             const diff_scroll_x = self.box.children.values()[1].widget.ui_diff.getScrollX();
 
             if (self.getFocus().child_id) |child_id| {
@@ -465,19 +466,19 @@ pub fn StatusContent(comptime Widget: type, comptime repo_kind: rp.RepoKind) typ
             }
         }
 
-        pub fn clearGrid(self: *StatusContent(Widget, repo_kind)) void {
+        pub fn clearGrid(self: *StatusContent(Widget, repo_kind, hash_kind)) void {
             self.box.clearGrid();
         }
 
-        pub fn getGrid(self: StatusContent(Widget, repo_kind)) ?Grid {
+        pub fn getGrid(self: StatusContent(Widget, repo_kind, hash_kind)) ?Grid {
             return self.box.getGrid();
         }
 
-        pub fn getFocus(self: *StatusContent(Widget, repo_kind)) *Focus {
+        pub fn getFocus(self: *StatusContent(Widget, repo_kind, hash_kind)) *Focus {
             return self.box.getFocus();
         }
 
-        pub fn scrolledToTop(self: StatusContent(Widget, repo_kind)) bool {
+        pub fn scrolledToTop(self: StatusContent(Widget, repo_kind, hash_kind)) bool {
             if (self.box.focus.child_id) |child_id| {
                 if (self.box.children.getIndex(child_id)) |current_index| {
                     const child = &self.box.children.values()[current_index].widget;
@@ -497,7 +498,7 @@ pub fn StatusContent(comptime Widget: type, comptime repo_kind: rp.RepoKind) typ
             return true;
         }
 
-        fn updateDiff(self: *StatusContent(Widget, repo_kind)) !void {
+        fn updateDiff(self: *StatusContent(Widget, repo_kind, hash_kind)) !void {
             const status_list = &self.box.children.values()[0].widget.ui_status_list;
             if (status_list.getSelectedIndex()) |status_index| {
                 const status_item = status_list.statuses[status_index];
@@ -511,32 +512,32 @@ pub fn StatusContent(comptime Widget: type, comptime repo_kind: rp.RepoKind) typ
                     else => |e| return e,
                 };
 
-                const line_iter_a = try diff.iter_arena.allocator().create(df.LineIterator(repo_kind));
+                const line_iter_a = try diff.iter_arena.allocator().create(df.LineIterator(repo_kind, hash_kind));
                 line_iter_a.* = line_iter_pair.a;
 
-                const line_iter_b = try diff.iter_arena.allocator().create(df.LineIterator(repo_kind));
+                const line_iter_b = try diff.iter_arena.allocator().create(df.LineIterator(repo_kind, hash_kind));
                 line_iter_b.* = line_iter_pair.b;
 
-                diff.hunk_iter = try df.HunkIterator(repo_kind).init(diff.iter_arena.allocator(), line_iter_a, line_iter_b);
+                diff.hunk_iter = try df.HunkIterator(repo_kind, hash_kind).init(diff.iter_arena.allocator(), line_iter_a, line_iter_b);
             }
         }
     };
 }
 
-pub fn Status(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
+pub fn Status(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
     return struct {
         box: wgt.Box(Widget),
-        status: *st.Status(repo_kind),
+        status: *st.Status(repo_kind, hash_kind),
         allocator: std.mem.Allocator,
 
         const FocusKind = enum { status_tabs, status_content };
 
-        pub fn init(allocator: std.mem.Allocator, repo: *rp.Repo(repo_kind)) !Status(Widget, repo_kind) {
+        pub fn init(allocator: std.mem.Allocator, repo: *rp.Repo(repo_kind, hash_kind)) !Status(Widget, repo_kind, hash_kind) {
             var status = try repo.status(allocator);
             errdefer status.deinit();
 
             // put Status object on the heap so the pointer is stable
-            const status_ptr = try allocator.create(st.Status(repo_kind));
+            const status_ptr = try allocator.create(st.Status(repo_kind, hash_kind));
             errdefer allocator.destroy(status_ptr);
             status_ptr.* = status;
 
@@ -548,7 +549,7 @@ pub fn Status(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                 const focus_kind: FocusKind = @enumFromInt(focus_kind_field.value);
                 switch (focus_kind) {
                     .status_tabs => {
-                        var status_tabs = try StatusTabs(Widget, repo_kind).init(allocator, status_ptr);
+                        var status_tabs = try StatusTabs(Widget, repo_kind, hash_kind).init(allocator, status_ptr);
                         errdefer status_tabs.deinit();
                         try box.children.put(status_tabs.getFocus().id, .{ .widget = .{ .ui_status_tabs = status_tabs }, .rect = null, .min_size = null });
                     },
@@ -558,7 +559,7 @@ pub fn Status(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
 
                         inline for (@typeInfo(st.IndexKind).Enum.fields) |index_kind_field| {
                             const index_kind: st.IndexKind = @enumFromInt(index_kind_field.value);
-                            var status_content = try StatusContent(Widget, repo_kind).init(allocator, repo, status_ptr, index_kind);
+                            var status_content = try StatusContent(Widget, repo_kind, hash_kind).init(allocator, repo, status_ptr, index_kind);
                             errdefer status_content.deinit();
                             try stack.children.put(status_content.getFocus().id, .{ .ui_status_content = status_content });
                         }
@@ -568,7 +569,7 @@ pub fn Status(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                 }
             }
 
-            var ui_status = Status(Widget, repo_kind){
+            var ui_status = Status(Widget, repo_kind, hash_kind){
                 .box = box,
                 .status = status_ptr,
                 .allocator = allocator,
@@ -577,13 +578,13 @@ pub fn Status(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
             return ui_status;
         }
 
-        pub fn deinit(self: *Status(Widget, repo_kind)) void {
+        pub fn deinit(self: *Status(Widget, repo_kind, hash_kind)) void {
             self.box.deinit();
             self.status.deinit();
             self.allocator.destroy(self.status);
         }
 
-        pub fn build(self: *Status(Widget, repo_kind), constraint: layout.Constraint, root_focus: *Focus) !void {
+        pub fn build(self: *Status(Widget, repo_kind, hash_kind), constraint: layout.Constraint, root_focus: *Focus) !void {
             self.clearGrid();
             const status_tabs = &self.box.children.values()[@intFromEnum(FocusKind.status_tabs)].widget.ui_status_tabs;
             const stack = &self.box.children.values()[@intFromEnum(FocusKind.status_content)].widget.stack;
@@ -593,7 +594,7 @@ pub fn Status(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
             try self.box.build(constraint, root_focus);
         }
 
-        pub fn input(self: *Status(Widget, repo_kind), key: inp.Key, root_focus: *Focus) !void {
+        pub fn input(self: *Status(Widget, repo_kind, hash_kind), key: inp.Key, root_focus: *Focus) !void {
             if (self.getFocus().child_id) |child_id| {
                 if (self.box.children.getIndex(child_id)) |current_index| {
                     const child = &self.box.children.values()[current_index].widget;
@@ -636,19 +637,19 @@ pub fn Status(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
             }
         }
 
-        pub fn clearGrid(self: *Status(Widget, repo_kind)) void {
+        pub fn clearGrid(self: *Status(Widget, repo_kind, hash_kind)) void {
             self.box.clearGrid();
         }
 
-        pub fn getGrid(self: Status(Widget, repo_kind)) ?Grid {
+        pub fn getGrid(self: Status(Widget, repo_kind, hash_kind)) ?Grid {
             return self.box.getGrid();
         }
 
-        pub fn getFocus(self: *Status(Widget, repo_kind)) *Focus {
+        pub fn getFocus(self: *Status(Widget, repo_kind, hash_kind)) *Focus {
             return self.box.getFocus();
         }
 
-        pub fn getSelectedIndex(self: Status(Widget, repo_kind)) ?usize {
+        pub fn getSelectedIndex(self: Status(Widget, repo_kind, hash_kind)) ?usize {
             if (self.box.focus.child_id) |child_id| {
                 const children = &self.box.children;
                 return children.getIndex(child_id);

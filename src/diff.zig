@@ -10,17 +10,17 @@ const MAX_READ_BYTES = 1024; // FIXME: this is arbitrary...
 pub const MAX_LINE_BYTES = 10_000;
 pub const MAX_LINE_COUNT = 10_000_000;
 
-pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
+pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
     return struct {
         allocator: std.mem.Allocator,
         path: []const u8,
-        oid: [hash.byteLen(.sha1)]u8,
-        oid_hex: [hash.hexLen(.sha1)]u8,
+        oid: [hash.byteLen(hash_kind)]u8,
+        oid_hex: [hash.hexLen(hash_kind)]u8,
         mode: ?io.Mode,
         line_offsets: []usize,
         source: union(enum) {
             object: struct {
-                object_reader: obj.ObjectReader(repo_kind),
+                object_reader: obj.ObjectReader(repo_kind, hash_kind),
                 eof: bool,
             },
             workspace: struct {
@@ -34,11 +34,11 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
             binary,
         },
 
-        pub fn initFromIndex(state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator, entry: idx.Index(repo_kind).Entry) !LineIterator(repo_kind) {
+        pub fn initFromIndex(state: rp.Repo(repo_kind, hash_kind).State(.read_only), allocator: std.mem.Allocator, entry: idx.Index(repo_kind, hash_kind).Entry) !LineIterator(repo_kind, hash_kind) {
             const oid_hex = std.fmt.bytesToHex(&entry.oid, .lower);
-            var object_reader = try obj.ObjectReader(repo_kind).init(allocator, state, &oid_hex);
+            var object_reader = try obj.ObjectReader(repo_kind, hash_kind).init(allocator, state, &oid_hex);
             errdefer object_reader.deinit();
-            var iter = LineIterator(repo_kind){
+            var iter = LineIterator(repo_kind, hash_kind){
                 .allocator = allocator,
                 .path = entry.path,
                 .oid = entry.oid,
@@ -56,18 +56,18 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
             return iter;
         }
 
-        pub fn initFromWorkspace(state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator, path: []const u8, mode: io.Mode) !LineIterator(repo_kind) {
+        pub fn initFromWorkspace(state: rp.Repo(repo_kind, hash_kind).State(.read_only), allocator: std.mem.Allocator, path: []const u8, mode: io.Mode) !LineIterator(repo_kind, hash_kind) {
             var file = try state.core.repo_dir.openFile(path, .{ .mode = .read_only });
             errdefer file.close();
 
             const file_size = (try file.metadata()).size();
             const header = try std.fmt.allocPrint(allocator, "blob {}\x00", .{file_size});
             defer allocator.free(header);
-            var oid = [_]u8{0} ** hash.byteLen(.sha1);
-            try hash.hashReader(.sha1, file.reader(), header, &oid);
+            var oid = [_]u8{0} ** hash.byteLen(hash_kind);
+            try hash.hashReader(hash_kind, file.reader(), header, &oid);
             try file.seekTo(0);
 
-            var iter = LineIterator(repo_kind){
+            var iter = LineIterator(repo_kind, hash_kind){
                 .allocator = allocator,
                 .path = path,
                 .oid = oid,
@@ -85,12 +85,12 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
             return iter;
         }
 
-        pub fn initFromNothing(allocator: std.mem.Allocator, path: []const u8) !LineIterator(repo_kind) {
-            var iter = LineIterator(repo_kind){
+        pub fn initFromNothing(allocator: std.mem.Allocator, path: []const u8) !LineIterator(repo_kind, hash_kind) {
+            var iter = LineIterator(repo_kind, hash_kind){
                 .allocator = allocator,
                 .path = path,
-                .oid = [_]u8{0} ** hash.byteLen(.sha1),
-                .oid_hex = [_]u8{0} ** hash.hexLen(.sha1),
+                .oid = [_]u8{0} ** hash.byteLen(hash_kind),
+                .oid_hex = [_]u8{0} ** hash.hexLen(hash_kind),
                 .mode = null,
                 .line_offsets = undefined,
                 .source = .nothing,
@@ -99,11 +99,11 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
             return iter;
         }
 
-        pub fn initFromHead(state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator, path: []const u8, entry: obj.TreeEntry) !LineIterator(repo_kind) {
+        pub fn initFromHead(state: rp.Repo(repo_kind, hash_kind).State(.read_only), allocator: std.mem.Allocator, path: []const u8, entry: obj.TreeEntry(hash_kind)) !LineIterator(repo_kind, hash_kind) {
             const oid_hex = std.fmt.bytesToHex(&entry.oid, .lower);
-            var object_reader = try obj.ObjectReader(repo_kind).init(allocator, state, &oid_hex);
+            var object_reader = try obj.ObjectReader(repo_kind, hash_kind).init(allocator, state, &oid_hex);
             errdefer object_reader.deinit();
-            var iter = LineIterator(repo_kind){
+            var iter = LineIterator(repo_kind, hash_kind){
                 .allocator = allocator,
                 .path = path,
                 .oid = entry.oid,
@@ -121,11 +121,11 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
             return iter;
         }
 
-        pub fn initFromOid(state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator, path: []const u8, oid: *const [hash.byteLen(.sha1)]u8, mode_maybe: ?io.Mode) !LineIterator(repo_kind) {
+        pub fn initFromOid(state: rp.Repo(repo_kind, hash_kind).State(.read_only), allocator: std.mem.Allocator, path: []const u8, oid: *const [hash.byteLen(hash_kind)]u8, mode_maybe: ?io.Mode) !LineIterator(repo_kind, hash_kind) {
             const oid_hex = std.fmt.bytesToHex(oid, .lower);
-            var object_reader = try obj.ObjectReader(repo_kind).init(allocator, state, &oid_hex);
+            var object_reader = try obj.ObjectReader(repo_kind, hash_kind).init(allocator, state, &oid_hex);
             errdefer object_reader.deinit();
-            var iter = LineIterator(repo_kind){
+            var iter = LineIterator(repo_kind, hash_kind){
                 .allocator = allocator,
                 .path = path,
                 .oid = oid.*,
@@ -143,12 +143,12 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
             return iter;
         }
 
-        pub fn initFromBuffer(allocator: std.mem.Allocator, buffer: []const u8) !LineIterator(repo_kind) {
-            var iter = LineIterator(repo_kind){
+        pub fn initFromBuffer(allocator: std.mem.Allocator, buffer: []const u8) !LineIterator(repo_kind, hash_kind) {
+            var iter = LineIterator(repo_kind, hash_kind){
                 .allocator = allocator,
                 .path = "",
-                .oid = [_]u8{0} ** hash.byteLen(.sha1),
-                .oid_hex = [_]u8{0} ** hash.hexLen(.sha1),
+                .oid = [_]u8{0} ** hash.byteLen(hash_kind),
+                .oid_hex = [_]u8{0} ** hash.hexLen(hash_kind),
                 .mode = null,
                 .line_offsets = undefined,
                 .source = .{
@@ -161,7 +161,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
             return iter;
         }
 
-        pub fn next(self: *LineIterator(repo_kind)) !?[]const u8 {
+        pub fn next(self: *LineIterator(repo_kind, hash_kind)) !?[]const u8 {
             switch (self.source) {
                 .object => |*object| {
                     if (object.eof) {
@@ -213,12 +213,12 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
             }
         }
 
-        pub fn get(self: *LineIterator(repo_kind), index: usize) ![]const u8 {
+        pub fn get(self: *LineIterator(repo_kind, hash_kind), index: usize) ![]const u8 {
             try self.seekTo(self.line_offsets[index]);
             return try self.next() orelse return error.ExpectedLine;
         }
 
-        pub fn reset(self: *LineIterator(repo_kind)) !void {
+        pub fn reset(self: *LineIterator(repo_kind, hash_kind)) !void {
             switch (self.source) {
                 .object => |*object| {
                     object.eof = false;
@@ -234,11 +234,11 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
             }
         }
 
-        pub fn count(self: *LineIterator(repo_kind)) usize {
+        pub fn count(self: *LineIterator(repo_kind, hash_kind)) usize {
             return self.line_offsets.len;
         }
 
-        pub fn deinit(self: *LineIterator(repo_kind)) void {
+        pub fn deinit(self: *LineIterator(repo_kind, hash_kind)) void {
             switch (self.source) {
                 .object => |*object| object.object_reader.deinit(),
                 .workspace => |*workspace| workspace.file.close(),
@@ -249,7 +249,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
             self.allocator.free(self.line_offsets);
         }
 
-        fn seekTo(self: *LineIterator(repo_kind), position: u64) !void {
+        fn seekTo(self: *LineIterator(repo_kind, hash_kind), position: u64) !void {
             try self.reset();
             switch (self.source) {
                 .object => |*object| try object.object_reader.seekTo(position),
@@ -270,7 +270,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
 
         /// reads each line to populate line_offsets and ensure
         /// that there is no binary data.
-        fn validateLines(self: *LineIterator(repo_kind)) !void {
+        fn validateLines(self: *LineIterator(repo_kind, hash_kind)) !void {
             var offsets = std.ArrayList(usize).init(self.allocator);
             errdefer offsets.deinit();
             var last_pos: usize = 0;
@@ -314,12 +314,12 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind) type {
     };
 }
 
-pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
+pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
     return struct {
         allocator: std.mem.Allocator,
         points: std.ArrayList([2]Point),
-        line_iter_a: *LineIterator(repo_kind),
-        line_iter_b: *LineIterator(repo_kind),
+        line_iter_a: *LineIterator(repo_kind, hash_kind),
+        line_iter_b: *LineIterator(repo_kind, hash_kind),
         next_index: usize,
 
         pub const Line = struct {
@@ -384,7 +384,7 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
                 return if (i < 0) len - @abs(i) else @intCast(i);
             }
 
-            fn forward(self: Box, vf: []isize, vb: []isize, d: usize, line_iter_a: *LineIterator(repo_kind), line_iter_b: *LineIterator(repo_kind)) !?[2]Point {
+            fn forward(self: Box, vf: []isize, vb: []isize, d: usize, line_iter_a: *LineIterator(repo_kind, hash_kind), line_iter_b: *LineIterator(repo_kind, hash_kind)) !?[2]Point {
                 const line_count_a = line_iter_a.count();
                 const line_count_b = line_iter_b.count();
 
@@ -440,7 +440,7 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
                 return null;
             }
 
-            fn backward(self: Box, vf: []isize, vb: []isize, d: usize, line_iter_a: *LineIterator(repo_kind), line_iter_b: *LineIterator(repo_kind)) !?[2]Point {
+            fn backward(self: Box, vf: []isize, vb: []isize, d: usize, line_iter_a: *LineIterator(repo_kind, hash_kind), line_iter_b: *LineIterator(repo_kind, hash_kind)) !?[2]Point {
                 const line_count_a = line_iter_a.count();
                 const line_count_b = line_iter_b.count();
 
@@ -494,7 +494,7 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
                 return null;
             }
 
-            fn midpoint(self: Box, allocator: std.mem.Allocator, line_iter_a: *LineIterator(repo_kind), line_iter_b: *LineIterator(repo_kind)) !?[2]Point {
+            fn midpoint(self: Box, allocator: std.mem.Allocator, line_iter_a: *LineIterator(repo_kind, hash_kind), line_iter_b: *LineIterator(repo_kind, hash_kind)) !?[2]Point {
                 if (self.size() == 0) {
                     return null;
                 }
@@ -528,7 +528,7 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
                 return null;
             }
 
-            fn findPath(self: Box, allocator: std.mem.Allocator, line_iter_a: *LineIterator(repo_kind), line_iter_b: *LineIterator(repo_kind)) !?std.DoublyLinkedList(Point) {
+            fn findPath(self: Box, allocator: std.mem.Allocator, line_iter_a: *LineIterator(repo_kind, hash_kind), line_iter_b: *LineIterator(repo_kind, hash_kind)) !?std.DoublyLinkedList(Point) {
                 if (try self.midpoint(allocator, line_iter_a, line_iter_b)) |snake| {
                     const start, const finish = snake;
 
@@ -565,7 +565,7 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
             }
         };
 
-        fn walkDiagonal(p1: Point, p2: Point, line_iter_a: *LineIterator(repo_kind), line_iter_b: *LineIterator(repo_kind), out: *std.ArrayList([2]Point)) !Point {
+        fn walkDiagonal(p1: Point, p2: Point, line_iter_a: *LineIterator(repo_kind, hash_kind), line_iter_b: *LineIterator(repo_kind, hash_kind), out: *std.ArrayList([2]Point)) !Point {
             var p = p1;
             while (true) {
                 if (p.x < p2.x and p.y < p2.y) {
@@ -585,7 +585,7 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
             return p;
         }
 
-        pub fn init(allocator: std.mem.Allocator, line_iter_a: *LineIterator(repo_kind), line_iter_b: *LineIterator(repo_kind)) !MyersDiffIterator(repo_kind) {
+        pub fn init(allocator: std.mem.Allocator, line_iter_a: *LineIterator(repo_kind, hash_kind), line_iter_b: *LineIterator(repo_kind, hash_kind)) !MyersDiffIterator(repo_kind, hash_kind) {
             var points = std.ArrayList([2]Point).init(allocator);
             errdefer points.deinit();
 
@@ -613,7 +613,7 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
                 }
             }
 
-            return MyersDiffIterator(repo_kind){
+            return MyersDiffIterator(repo_kind, hash_kind){
                 .allocator = allocator,
                 .points = points,
                 .line_iter_a = line_iter_a,
@@ -622,7 +622,7 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
             };
         }
 
-        pub fn next(self: *MyersDiffIterator(repo_kind)) !?Edit {
+        pub fn next(self: *MyersDiffIterator(repo_kind, hash_kind)) !?Edit {
             if (self.next_index == self.points.items.len) {
                 return null;
             }
@@ -664,7 +664,7 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
             }
         }
 
-        pub fn get(self: *MyersDiffIterator(repo_kind), old_line: usize) !?usize {
+        pub fn get(self: *MyersDiffIterator(repo_kind, hash_kind), old_line: usize) !?usize {
             // TODO: cache result so we don't have to scan the file every time
             try self.reset();
             while (try self.next()) |edit| {
@@ -682,7 +682,7 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
             return null;
         }
 
-        pub fn contains(self: *MyersDiffIterator(repo_kind), old_line: usize) !bool {
+        pub fn contains(self: *MyersDiffIterator(repo_kind, hash_kind), old_line: usize) !bool {
             if (try self.get(old_line)) |_| {
                 return true;
             } else {
@@ -690,13 +690,13 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
             }
         }
 
-        pub fn reset(self: *MyersDiffIterator(repo_kind)) !void {
+        pub fn reset(self: *MyersDiffIterator(repo_kind, hash_kind)) !void {
             try self.line_iter_a.reset();
             try self.line_iter_b.reset();
             self.next_index = 0;
         }
 
-        pub fn deinit(self: *MyersDiffIterator(repo_kind)) void {
+        pub fn deinit(self: *MyersDiffIterator(repo_kind, hash_kind)) void {
             self.points.deinit();
         }
     };
@@ -704,15 +704,16 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind) type {
 
 test "myers diff" {
     const repo_kind = rp.RepoKind.git;
+    const hash_kind = hash.HashKind.sha1;
     const allocator = std.testing.allocator;
     {
         const lines1 = "A\nB\nC\nA\nB\nB\nA";
         const lines2 = "C\nB\nA\nB\nA\nC";
-        var line_iter1 = try LineIterator(repo_kind).initFromBuffer(allocator, lines1);
+        var line_iter1 = try LineIterator(repo_kind, hash_kind).initFromBuffer(allocator, lines1);
         defer line_iter1.deinit();
-        var line_iter2 = try LineIterator(repo_kind).initFromBuffer(allocator, lines2);
+        var line_iter2 = try LineIterator(repo_kind, hash_kind).initFromBuffer(allocator, lines2);
         defer line_iter2.deinit();
-        const expected_diff = [_]MyersDiffIterator(repo_kind).Edit{
+        const expected_diff = [_]MyersDiffIterator(repo_kind, hash_kind).Edit{
             .{ .del = .{ .old_line = .{ .num = 1, .text = "A" } } },
             .{ .del = .{ .old_line = .{ .num = 2, .text = "B" } } },
             .{ .eql = .{ .old_line = .{ .num = 3, .text = "C" }, .new_line = .{ .num = 1, .text = "C" } } },
@@ -723,9 +724,9 @@ test "myers diff" {
             .{ .eql = .{ .old_line = .{ .num = 7, .text = "A" }, .new_line = .{ .num = 5, .text = "A" } } },
             .{ .ins = .{ .new_line = .{ .num = 6, .text = "C" } } },
         };
-        var myers_diff_iter = try MyersDiffIterator(repo_kind).init(allocator, &line_iter1, &line_iter2);
+        var myers_diff_iter = try MyersDiffIterator(repo_kind, hash_kind).init(allocator, &line_iter1, &line_iter2);
         defer myers_diff_iter.deinit();
-        var actual_diff = std.ArrayList(MyersDiffIterator(repo_kind).Edit).init(allocator);
+        var actual_diff = std.ArrayList(MyersDiffIterator(repo_kind, hash_kind).Edit).init(allocator);
         defer {
             for (actual_diff.items) |edit| {
                 edit.deinit(allocator);
@@ -743,17 +744,17 @@ test "myers diff" {
     {
         const lines1 = "hello, world!";
         const lines2 = "goodbye, world!";
-        var line_iter1 = try LineIterator(repo_kind).initFromBuffer(allocator, lines1);
+        var line_iter1 = try LineIterator(repo_kind, hash_kind).initFromBuffer(allocator, lines1);
         defer line_iter1.deinit();
-        var line_iter2 = try LineIterator(repo_kind).initFromBuffer(allocator, lines2);
+        var line_iter2 = try LineIterator(repo_kind, hash_kind).initFromBuffer(allocator, lines2);
         defer line_iter2.deinit();
-        const expected_diff = [_]MyersDiffIterator(repo_kind).Edit{
+        const expected_diff = [_]MyersDiffIterator(repo_kind, hash_kind).Edit{
             .{ .del = .{ .old_line = .{ .num = 1, .text = "hello, world!" } } },
             .{ .ins = .{ .new_line = .{ .num = 1, .text = "goodbye, world!" } } },
         };
-        var myers_diff_iter = try MyersDiffIterator(repo_kind).init(allocator, &line_iter1, &line_iter2);
+        var myers_diff_iter = try MyersDiffIterator(repo_kind, hash_kind).init(allocator, &line_iter1, &line_iter2);
         defer myers_diff_iter.deinit();
-        var actual_diff = std.ArrayList(MyersDiffIterator(repo_kind).Edit).init(allocator);
+        var actual_diff = std.ArrayList(MyersDiffIterator(repo_kind, hash_kind).Edit).init(allocator);
         defer {
             for (actual_diff.items) |edit| {
                 edit.deinit(allocator);
@@ -770,7 +771,7 @@ test "myers diff" {
     }
 }
 
-pub fn Diff3Iterator(comptime repo_kind: rp.RepoKind) type {
+pub fn Diff3Iterator(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
     return struct {
         line_count_o: usize,
         line_count_a: usize,
@@ -778,8 +779,8 @@ pub fn Diff3Iterator(comptime repo_kind: rp.RepoKind) type {
         line_o: usize,
         line_a: usize,
         line_b: usize,
-        myers_diff_iter_a: MyersDiffIterator(repo_kind),
-        myers_diff_iter_b: MyersDiffIterator(repo_kind),
+        myers_diff_iter_a: MyersDiffIterator(repo_kind, hash_kind),
+        myers_diff_iter_b: MyersDiffIterator(repo_kind, hash_kind),
         finished: bool,
 
         pub const Range = struct {
@@ -798,13 +799,13 @@ pub fn Diff3Iterator(comptime repo_kind: rp.RepoKind) type {
 
         pub fn init(
             allocator: std.mem.Allocator,
-            line_iter_o: *LineIterator(repo_kind),
-            line_iter_a: *LineIterator(repo_kind),
-            line_iter_b: *LineIterator(repo_kind),
-        ) !Diff3Iterator(repo_kind) {
-            var myers_diff_iter_a = try MyersDiffIterator(repo_kind).init(allocator, line_iter_o, line_iter_a);
+            line_iter_o: *LineIterator(repo_kind, hash_kind),
+            line_iter_a: *LineIterator(repo_kind, hash_kind),
+            line_iter_b: *LineIterator(repo_kind, hash_kind),
+        ) !Diff3Iterator(repo_kind, hash_kind) {
+            var myers_diff_iter_a = try MyersDiffIterator(repo_kind, hash_kind).init(allocator, line_iter_o, line_iter_a);
             errdefer myers_diff_iter_a.deinit();
-            var myers_diff_iter_b = try MyersDiffIterator(repo_kind).init(allocator, line_iter_o, line_iter_b);
+            var myers_diff_iter_b = try MyersDiffIterator(repo_kind, hash_kind).init(allocator, line_iter_o, line_iter_b);
             errdefer myers_diff_iter_b.deinit();
             return .{
                 .line_count_o = line_iter_o.count(),
@@ -819,7 +820,7 @@ pub fn Diff3Iterator(comptime repo_kind: rp.RepoKind) type {
             };
         }
 
-        pub fn next(self: *Diff3Iterator(repo_kind)) !?Chunk {
+        pub fn next(self: *Diff3Iterator(repo_kind, hash_kind)) !?Chunk {
             if (self.finished) {
                 return null;
             }
@@ -884,7 +885,7 @@ pub fn Diff3Iterator(comptime repo_kind: rp.RepoKind) type {
             );
         }
 
-        pub fn reset(self: *Diff3Iterator(repo_kind)) !void {
+        pub fn reset(self: *Diff3Iterator(repo_kind, hash_kind)) !void {
             self.line_o = 0;
             self.line_a = 0;
             self.line_b = 0;
@@ -893,18 +894,18 @@ pub fn Diff3Iterator(comptime repo_kind: rp.RepoKind) type {
             self.finished = false;
         }
 
-        pub fn deinit(self: *Diff3Iterator(repo_kind)) void {
+        pub fn deinit(self: *Diff3Iterator(repo_kind, hash_kind)) void {
             self.myers_diff_iter_a.deinit();
             self.myers_diff_iter_b.deinit();
         }
 
-        fn inBounds(self: Diff3Iterator(repo_kind), i: usize) bool {
+        fn inBounds(self: Diff3Iterator(repo_kind, hash_kind), i: usize) bool {
             return self.line_o + i <= self.line_count_o or
                 self.line_a + i <= self.line_count_a or
                 self.line_b + i <= self.line_count_b;
         }
 
-        fn isMatch(self: Diff3Iterator(repo_kind), myers_diff_iter: *MyersDiffIterator(repo_kind), offset: usize, i: usize) !bool {
+        fn isMatch(self: Diff3Iterator(repo_kind, hash_kind), myers_diff_iter: *MyersDiffIterator(repo_kind, hash_kind), offset: usize, i: usize) !bool {
             if (try myers_diff_iter.get(self.line_o + i)) |line_num| {
                 return line_num == offset + i;
             } else {
@@ -940,6 +941,7 @@ pub fn Diff3Iterator(comptime repo_kind: rp.RepoKind) type {
 
 test "diff3" {
     const repo_kind = rp.RepoKind.git;
+    const hash_kind = hash.HashKind.sha1;
     const allocator = std.testing.allocator;
 
     const orig_lines =
@@ -969,13 +971,13 @@ test "diff3" {
         \\beer
     ;
 
-    var orig_iter = try LineIterator(repo_kind).initFromBuffer(allocator, orig_lines);
+    var orig_iter = try LineIterator(repo_kind, hash_kind).initFromBuffer(allocator, orig_lines);
     defer orig_iter.deinit();
-    var alice_iter = try LineIterator(repo_kind).initFromBuffer(allocator, alice_lines);
+    var alice_iter = try LineIterator(repo_kind, hash_kind).initFromBuffer(allocator, alice_lines);
     defer alice_iter.deinit();
-    var bob_iter = try LineIterator(repo_kind).initFromBuffer(allocator, bob_lines);
+    var bob_iter = try LineIterator(repo_kind, hash_kind).initFromBuffer(allocator, bob_lines);
     defer bob_iter.deinit();
-    var diff3_iter = try Diff3Iterator(repo_kind).init(allocator, &orig_iter, &alice_iter, &bob_iter);
+    var diff3_iter = try Diff3Iterator(repo_kind, hash_kind).init(allocator, &orig_iter, &alice_iter, &bob_iter);
     defer diff3_iter.deinit();
 
     var chunk = (try diff3_iter.next()) orelse return error.ExpectedChunk;
@@ -1004,12 +1006,12 @@ test "diff3" {
     try std.testing.expect(null == try diff3_iter.next());
 }
 
-pub fn Hunk(comptime repo_kind: rp.RepoKind) type {
+pub fn Hunk(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
     return struct {
-        edits: std.ArrayList(MyersDiffIterator(repo_kind).Edit),
+        edits: std.ArrayList(MyersDiffIterator(repo_kind, hash_kind).Edit),
         allocator: std.mem.Allocator,
 
-        pub fn deinit(self: *Hunk(repo_kind)) void {
+        pub fn deinit(self: *Hunk(repo_kind, hash_kind)) void {
             for (self.edits.items) |edit| {
                 edit.deinit(self.allocator);
             }
@@ -1023,7 +1025,7 @@ pub fn Hunk(comptime repo_kind: rp.RepoKind) type {
             ins_count: usize,
         };
 
-        pub fn offsets(self: Hunk(repo_kind)) Offsets {
+        pub fn offsets(self: Hunk(repo_kind, hash_kind)) Offsets {
             var o = Offsets{
                 .del_start = 0,
                 .del_count = 0,
@@ -1053,20 +1055,20 @@ pub fn Hunk(comptime repo_kind: rp.RepoKind) type {
     };
 }
 
-pub fn HunkIterator(comptime repo_kind: rp.RepoKind) type {
+pub fn HunkIterator(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
     return struct {
         header_lines: std.ArrayList([]const u8),
-        myers_diff: MyersDiffIterator(repo_kind),
+        myers_diff: MyersDiffIterator(repo_kind, hash_kind),
         eof: bool,
         allocator: std.mem.Allocator,
         arena: *std.heap.ArenaAllocator,
-        line_iter_a: *LineIterator(repo_kind),
-        line_iter_b: *LineIterator(repo_kind),
+        line_iter_a: *LineIterator(repo_kind, hash_kind),
+        line_iter_b: *LineIterator(repo_kind, hash_kind),
         found_edit: bool,
         margin: usize,
-        next_hunk: Hunk(repo_kind),
+        next_hunk: Hunk(repo_kind, hash_kind),
 
-        pub fn init(allocator: std.mem.Allocator, line_iter_a: *LineIterator(repo_kind), line_iter_b: *LineIterator(repo_kind)) !HunkIterator(repo_kind) {
+        pub fn init(allocator: std.mem.Allocator, line_iter_a: *LineIterator(repo_kind, hash_kind), line_iter_b: *LineIterator(repo_kind, hash_kind)) !HunkIterator(repo_kind, hash_kind) {
             const arena = try allocator.create(std.heap.ArenaAllocator);
             arena.* = std.heap.ArenaAllocator.init(allocator);
             errdefer {
@@ -1120,10 +1122,10 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind) type {
                 }
             }
 
-            var myers_diff = try MyersDiffIterator(repo_kind).init(allocator, line_iter_a, line_iter_b);
+            var myers_diff = try MyersDiffIterator(repo_kind, hash_kind).init(allocator, line_iter_a, line_iter_b);
             errdefer myers_diff.deinit();
 
-            return HunkIterator(repo_kind){
+            return HunkIterator(repo_kind, hash_kind){
                 .header_lines = header_lines,
                 .myers_diff = myers_diff,
                 .eof = false,
@@ -1133,14 +1135,14 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind) type {
                 .line_iter_b = line_iter_b,
                 .found_edit = false,
                 .margin = 0,
-                .next_hunk = Hunk(repo_kind){
-                    .edits = std.ArrayList(MyersDiffIterator(repo_kind).Edit).init(allocator),
+                .next_hunk = Hunk(repo_kind, hash_kind){
+                    .edits = std.ArrayList(MyersDiffIterator(repo_kind, hash_kind).Edit).init(allocator),
                     .allocator = allocator,
                 },
             };
         }
 
-        pub fn next(self: *HunkIterator(repo_kind)) !?Hunk(repo_kind) {
+        pub fn next(self: *HunkIterator(repo_kind, hash_kind)) !?Hunk(repo_kind, hash_kind) {
             const max_margin: usize = 3;
 
             if (!self.eof) {
@@ -1177,8 +1179,8 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind) type {
                         // (that is, non-eql line)
                         if (self.found_edit) {
                             const hunk = self.next_hunk;
-                            self.next_hunk = Hunk(repo_kind){
-                                .edits = std.ArrayList(MyersDiffIterator(repo_kind).Edit).init(self.allocator),
+                            self.next_hunk = Hunk(repo_kind, hash_kind){
+                                .edits = std.ArrayList(MyersDiffIterator(repo_kind, hash_kind).Edit).init(self.allocator),
                                 .allocator = self.allocator,
                             };
                             self.found_edit = false;
@@ -1193,8 +1195,8 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind) type {
                         if (self.found_edit) {
                             // return the last hunk
                             const hunk = self.next_hunk;
-                            self.next_hunk = Hunk(repo_kind){
-                                .edits = std.ArrayList(MyersDiffIterator(repo_kind).Edit).init(self.allocator),
+                            self.next_hunk = Hunk(repo_kind, hash_kind){
+                                .edits = std.ArrayList(MyersDiffIterator(repo_kind, hash_kind).Edit).init(self.allocator),
                                 .allocator = self.allocator,
                             };
                             self.found_edit = false;
@@ -1210,14 +1212,14 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind) type {
             }
         }
 
-        pub fn deinit(self: *HunkIterator(repo_kind)) void {
+        pub fn deinit(self: *HunkIterator(repo_kind, hash_kind)) void {
             self.myers_diff.deinit();
             self.arena.deinit();
             self.allocator.destroy(self.arena);
             self.next_hunk.deinit();
         }
 
-        pub fn reset(self: *HunkIterator(repo_kind)) !void {
+        pub fn reset(self: *HunkIterator(repo_kind, hash_kind)) !void {
             try self.myers_diff.reset();
             self.eof = false;
             try self.line_iter_a.reset();
@@ -1225,8 +1227,8 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind) type {
             self.found_edit = false;
             self.margin = 0;
             self.next_hunk.deinit();
-            self.next_hunk = Hunk(repo_kind){
-                .edits = std.ArrayList(MyersDiffIterator(repo_kind).Edit).init(self.allocator),
+            self.next_hunk = Hunk(repo_kind, hash_kind){
+                .edits = std.ArrayList(MyersDiffIterator(repo_kind, hash_kind).Edit).init(self.allocator),
                 .allocator = self.allocator,
             };
         }
@@ -1245,58 +1247,60 @@ pub const DiffKind = enum {
     tree,
 };
 
-pub const BasicDiffOptions = union(DiffKind) {
-    workspace: struct {
-        conflict_diff_kind: ConflictDiffKind,
-    },
-    index,
-    tree: struct {
-        old: ?[hash.hexLen(.sha1)]u8,
-        new: ?[hash.hexLen(.sha1)]u8,
-    },
-};
-
-pub fn DiffOptions(comptime repo_kind: rp.RepoKind) type {
+pub fn BasicDiffOptions(comptime hash_kind: hash.HashKind) type {
     return union(DiffKind) {
         workspace: struct {
             conflict_diff_kind: ConflictDiffKind,
-            status: *st.Status(repo_kind),
         },
-        index: struct {
-            status: *st.Status(repo_kind),
-        },
+        index,
         tree: struct {
-            tree_diff: *obj.TreeDiff(repo_kind),
+            old: ?[hash.hexLen(hash_kind)]u8,
+            new: ?[hash.hexLen(hash_kind)]u8,
         },
     };
 }
 
-pub fn LineIteratorPair(comptime repo_kind: rp.RepoKind) type {
+pub fn DiffOptions(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
+    return union(DiffKind) {
+        workspace: struct {
+            conflict_diff_kind: ConflictDiffKind,
+            status: *st.Status(repo_kind, hash_kind),
+        },
+        index: struct {
+            status: *st.Status(repo_kind, hash_kind),
+        },
+        tree: struct {
+            tree_diff: *obj.TreeDiff(repo_kind, hash_kind),
+        },
+    };
+}
+
+pub fn LineIteratorPair(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
     return struct {
         path: []const u8,
-        a: LineIterator(repo_kind),
-        b: LineIterator(repo_kind),
+        a: LineIterator(repo_kind, hash_kind),
+        b: LineIterator(repo_kind, hash_kind),
 
-        pub fn deinit(self: *LineIteratorPair(repo_kind)) void {
+        pub fn deinit(self: *LineIteratorPair(repo_kind, hash_kind)) void {
             self.a.deinit();
             self.b.deinit();
         }
     };
 }
 
-pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
+pub fn FileIterator(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
     return struct {
         allocator: std.mem.Allocator,
-        core: *rp.Repo(repo_kind).Core,
-        moment: rp.Repo(repo_kind).Moment(.read_only),
-        diff_opts: DiffOptions(repo_kind),
+        core: *rp.Repo(repo_kind, hash_kind).Core,
+        moment: rp.Repo(repo_kind, hash_kind).Moment(.read_only),
+        diff_opts: DiffOptions(repo_kind, hash_kind),
         next_index: usize,
 
         pub fn init(
             allocator: std.mem.Allocator,
-            state: rp.Repo(repo_kind).State(.read_only),
-            diff_opts: DiffOptions(repo_kind),
-        ) !FileIterator(repo_kind) {
+            state: rp.Repo(repo_kind, hash_kind).State(.read_only),
+            diff_opts: DiffOptions(repo_kind, hash_kind),
+        ) !FileIterator(repo_kind, hash_kind) {
             return .{
                 .allocator = allocator,
                 .core = state.core,
@@ -1306,8 +1310,8 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
             };
         }
 
-        pub fn next(self: *FileIterator(repo_kind)) !?LineIteratorPair(repo_kind) {
-            const state = rp.Repo(repo_kind).State(.read_only){ .core = self.core, .extra = .{ .moment = &self.moment } };
+        pub fn next(self: *FileIterator(repo_kind, hash_kind)) !?LineIteratorPair(repo_kind, hash_kind) {
+            const state = rp.Repo(repo_kind, hash_kind).State(.read_only){ .core = self.core, .extra = .{ .moment = &self.moment } };
             var next_index = self.next_index;
             switch (self.diff_opts) {
                 .workspace => |workspace| {
@@ -1322,12 +1326,12 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
                         const index_entries_for_path = workspace.status.index.entries.get(path) orelse return error.EntryNotFound;
                         // if there is an entry for the stage we are diffing
                         if (index_entries_for_path[stage]) |index_entry| {
-                            var a = try LineIterator(repo_kind).initFromIndex(state, self.allocator, index_entry);
+                            var a = try LineIterator(repo_kind, hash_kind).initFromIndex(state, self.allocator, index_entry);
                             errdefer a.deinit();
                             var b = switch (meta.kind()) {
-                                .file => try LineIterator(repo_kind).initFromWorkspace(state, self.allocator, path, io.getMode(meta)),
+                                .file => try LineIterator(repo_kind, hash_kind).initFromWorkspace(state, self.allocator, path, io.getMode(meta)),
                                 // in file/dir conflicts, `path` may be a directory which can't be diffed, so just make it nothing
-                                else => try LineIterator(repo_kind).initFromNothing(self.allocator, path),
+                                else => try LineIterator(repo_kind, hash_kind).initFromNothing(self.allocator, path),
                             };
                             errdefer b.deinit();
                             self.next_index += 1;
@@ -1345,9 +1349,9 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
                     if (next_index < workspace.status.workspace_modified.count()) {
                         const entry = workspace.status.workspace_modified.values()[next_index];
                         const index_entries_for_path = workspace.status.index.entries.get(entry.path) orelse return error.EntryNotFound;
-                        var a = try LineIterator(repo_kind).initFromIndex(state, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
+                        var a = try LineIterator(repo_kind, hash_kind).initFromIndex(state, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
                         errdefer a.deinit();
-                        var b = try LineIterator(repo_kind).initFromWorkspace(state, self.allocator, entry.path, io.getMode(entry.meta));
+                        var b = try LineIterator(repo_kind, hash_kind).initFromWorkspace(state, self.allocator, entry.path, io.getMode(entry.meta));
                         errdefer b.deinit();
                         self.next_index += 1;
                         return .{ .path = entry.path, .a = a, .b = b };
@@ -1358,9 +1362,9 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
                     if (next_index < workspace.status.workspace_deleted.count()) {
                         const path = workspace.status.workspace_deleted.keys()[next_index];
                         const index_entries_for_path = workspace.status.index.entries.get(path) orelse return error.EntryNotFound;
-                        var a = try LineIterator(repo_kind).initFromIndex(state, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
+                        var a = try LineIterator(repo_kind, hash_kind).initFromIndex(state, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
                         errdefer a.deinit();
-                        var b = try LineIterator(repo_kind).initFromNothing(self.allocator, path);
+                        var b = try LineIterator(repo_kind, hash_kind).initFromNothing(self.allocator, path);
                         errdefer b.deinit();
                         self.next_index += 1;
                         return .{ .path = path, .a = a, .b = b };
@@ -1369,10 +1373,10 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
                 .index => |index| {
                     if (next_index < index.status.index_added.count()) {
                         const path = index.status.index_added.keys()[next_index];
-                        var a = try LineIterator(repo_kind).initFromNothing(self.allocator, path);
+                        var a = try LineIterator(repo_kind, hash_kind).initFromNothing(self.allocator, path);
                         errdefer a.deinit();
                         const index_entries_for_path = index.status.index.entries.get(path) orelse return error.EntryNotFound;
-                        var b = try LineIterator(repo_kind).initFromIndex(state, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
+                        var b = try LineIterator(repo_kind, hash_kind).initFromIndex(state, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
                         errdefer b.deinit();
                         self.next_index += 1;
                         return .{ .path = path, .a = a, .b = b };
@@ -1382,10 +1386,10 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
 
                     if (next_index < index.status.index_modified.count()) {
                         const path = index.status.index_modified.keys()[next_index];
-                        var a = try LineIterator(repo_kind).initFromHead(state, self.allocator, path, index.status.head_tree.entries.get(path) orelse return error.EntryNotFound);
+                        var a = try LineIterator(repo_kind, hash_kind).initFromHead(state, self.allocator, path, index.status.head_tree.entries.get(path) orelse return error.EntryNotFound);
                         errdefer a.deinit();
                         const index_entries_for_path = index.status.index.entries.get(path) orelse return error.EntryNotFound;
-                        var b = try LineIterator(repo_kind).initFromIndex(state, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
+                        var b = try LineIterator(repo_kind, hash_kind).initFromIndex(state, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
                         errdefer b.deinit();
                         self.next_index += 1;
                         return .{ .path = path, .a = a, .b = b };
@@ -1395,9 +1399,9 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
 
                     if (next_index < index.status.index_deleted.count()) {
                         const path = index.status.index_deleted.keys()[next_index];
-                        var a = try LineIterator(repo_kind).initFromHead(state, self.allocator, path, index.status.head_tree.entries.get(path) orelse return error.EntryNotFound);
+                        var a = try LineIterator(repo_kind, hash_kind).initFromHead(state, self.allocator, path, index.status.head_tree.entries.get(path) orelse return error.EntryNotFound);
                         errdefer a.deinit();
-                        var b = try LineIterator(repo_kind).initFromNothing(self.allocator, path);
+                        var b = try LineIterator(repo_kind, hash_kind).initFromNothing(self.allocator, path);
                         errdefer b.deinit();
                         self.next_index += 1;
                         return .{ .path = path, .a = a, .b = b };
@@ -1408,14 +1412,14 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind) type {
                         const path = tree.tree_diff.changes.keys()[next_index];
                         const change = tree.tree_diff.changes.values()[next_index];
                         var a = if (change.old) |old|
-                            try LineIterator(repo_kind).initFromOid(state, self.allocator, path, &old.oid, old.mode)
+                            try LineIterator(repo_kind, hash_kind).initFromOid(state, self.allocator, path, &old.oid, old.mode)
                         else
-                            try LineIterator(repo_kind).initFromNothing(self.allocator, path);
+                            try LineIterator(repo_kind, hash_kind).initFromNothing(self.allocator, path);
                         errdefer a.deinit();
                         var b = if (change.new) |new|
-                            try LineIterator(repo_kind).initFromOid(state, self.allocator, path, &new.oid, new.mode)
+                            try LineIterator(repo_kind, hash_kind).initFromOid(state, self.allocator, path, &new.oid, new.mode)
                         else
-                            try LineIterator(repo_kind).initFromNothing(self.allocator, path);
+                            try LineIterator(repo_kind, hash_kind).initFromNothing(self.allocator, path);
                         errdefer b.deinit();
                         self.next_index += 1;
                         return .{ .path = path, .a = a, .b = b };

@@ -197,22 +197,22 @@ test "pack" {
         var commit_oid_hex = [_]u8{0} ** hash.hexLen(.sha1);
         try std.testing.expectEqual(0, c.git_oid_fmt(@ptrCast(&commit_oid_hex), commit_oid));
 
-        var r = try rp.Repo(.git).init(allocator, .{ .cwd = repo_dir });
+        var r = try rp.Repo(.git, .sha1).init(allocator, .{ .cwd = repo_dir });
         defer r.deinit();
 
-        var object = try obj.Object(.git, .full).init(allocator, .{ .core = &r.core, .extra = .{} }, &commit_oid_hex);
+        var object = try obj.Object(.git, .sha1, .full).init(allocator, .{ .core = &r.core, .extra = .{} }, &commit_oid_hex);
         defer object.deinit();
         try std.testing.expectEqualStrings(message, object.content.commit.metadata.message);
     }
 
     // write and read a pack object
     {
-        var r = try rp.Repo(.git).init(allocator, .{ .cwd = repo_dir });
+        var r = try rp.Repo(.git, .sha1).init(allocator, .{ .cwd = repo_dir });
         defer r.deinit();
 
-        const head_oid = try ref.readHead(.git, .{ .core = &r.core, .extra = .{} });
+        const head_oid = try ref.readHead(.git, .sha1, .{ .core = &r.core, .extra = .{} });
 
-        var obj_iter = try obj.ObjectIterator(.git, .raw).init(allocator, .{ .core = &r.core, .extra = .{} }, &.{head_oid}, .{ .recursive = true });
+        var obj_iter = try obj.ObjectIterator(.git, .sha1, .raw).init(allocator, .{ .core = &r.core, .extra = .{} }, &.{head_oid}, .{ .recursive = true });
         defer obj_iter.deinit();
 
         var pack_writer = try pack.PackObjectWriter.init(allocator, &obj_iter);

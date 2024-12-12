@@ -13,6 +13,7 @@ const std = @import("std");
 const cmd = @import("./command.zig");
 const rp = @import("./repo.zig");
 const ui = @import("./ui.zig");
+const hash = @import("./hash.zig");
 
 const USAGE =
     \\
@@ -107,12 +108,13 @@ const USAGE =
 /// think about it really often and eventually you'll dream about it.
 pub fn xitMain(
     comptime repo_kind: rp.RepoKind,
+    comptime hash_kind: hash.HashKind,
     allocator: std.mem.Allocator,
     args: []const []const u8,
     cwd: std.fs.Dir,
     writers: anytype,
 ) !void {
-    var command = try cmd.Command.init(allocator, args);
+    var command = try cmd.Command(hash_kind).init(allocator, args);
     defer command.deinit();
 
     switch (command) {
@@ -131,13 +133,13 @@ pub fn xitMain(
             }
         },
         .tui => |sub_cmd_kind_maybe| {
-            var repo = try rp.Repo(repo_kind).init(allocator, .{ .cwd = cwd });
+            var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = cwd });
             defer repo.deinit();
-            try ui.start(repo_kind, &repo, allocator, sub_cmd_kind_maybe);
+            try ui.start(repo_kind, hash_kind, &repo, allocator, sub_cmd_kind_maybe);
         },
         .cli => |sub_cmd_maybe| {
             if (sub_cmd_maybe) |sub_cmd| {
-                var repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = cwd }, sub_cmd, writers);
+                var repo = try rp.Repo(repo_kind, hash_kind).initWithCommand(allocator, .{ .cwd = cwd }, sub_cmd, writers);
                 defer repo.deinit();
             } else {
                 try writers.out.print(USAGE, .{});
@@ -167,6 +169,7 @@ pub fn main() !void {
 
     try xitMain(
         .xit,
+        .sha1,
         allocator,
         args.items,
         std.fs.cwd(),

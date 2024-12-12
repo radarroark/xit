@@ -1,12 +1,13 @@
 const std = @import("std");
 const rp = @import("repo.zig");
+const hash = @import("./hash.zig");
 const net = @import("./net.zig");
 
 const c = @cImport({
     @cInclude("git2.h");
 });
 
-fn testPull(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator) !void {
+fn testPull(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind, allocator: std.mem.Allocator) !void {
     const temp_dir_name = "temp-testnet-pull";
 
     // create the temp dir
@@ -35,7 +36,7 @@ fn testPull(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator) !void
     const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
 
     // init server repo
-    var server_repo = try rp.Repo(.git).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "server" } }, writers);
+    var server_repo = try rp.Repo(.git, hash_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "server" } }, writers);
     defer server_repo.deinit();
 
     // make a commit
@@ -50,7 +51,7 @@ fn testPull(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator) !void
     defer client_dir.close();
 
     // init client repo
-    var client_repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "client" } }, writers);
+    var client_repo = try rp.Repo(repo_kind, hash_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "client" } }, writers);
     defer client_repo.deinit();
     try client_repo.addRemote(allocator, .{ .name = "origin", .value = "git://localhost:3000/server" });
 
@@ -71,11 +72,11 @@ fn testPull(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator) !void
 
 test "pull" {
     const allocator = std.testing.allocator;
-    try testPull(.git, allocator);
-    try testPull(.xit, allocator);
+    try testPull(.git, .sha1, allocator);
+    try testPull(.xit, .sha1, allocator);
 }
 
-fn testPush(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator) !void {
+fn testPush(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind, allocator: std.mem.Allocator) !void {
     const temp_dir_name = "temp-testnet-push";
 
     // create the temp dir
@@ -108,7 +109,7 @@ fn testPush(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator) !void
     const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
 
     // init server repo
-    var server_repo = try rp.Repo(.git).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "server" } }, writers);
+    var server_repo = try rp.Repo(.git, hash_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "server" } }, writers);
     defer server_repo.deinit();
     try server_repo.addConfig(allocator, .{ .name = "core.bare", .value = "false" });
     try server_repo.addConfig(allocator, .{ .name = "receive.denycurrentbranch", .value = "updateinstead" });
@@ -118,7 +119,7 @@ fn testPush(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator) !void
     defer client_dir.close();
 
     // init client repo
-    var client_repo = try rp.Repo(repo_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "client" } }, writers);
+    var client_repo = try rp.Repo(repo_kind, hash_kind).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "client" } }, writers);
     defer client_repo.deinit();
     try client_repo.addRemote(allocator, .{ .name = "origin", .value = "git://localhost:3001/server" });
 
@@ -211,5 +212,5 @@ fn testPush(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator) !void
 
 test "push" {
     const allocator = std.testing.allocator;
-    try testPush(.git, allocator);
+    try testPush(.git, .sha1, allocator);
 }

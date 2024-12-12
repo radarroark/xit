@@ -9,6 +9,7 @@ const ui_log = @import("./log.zig");
 const ui_status = @import("./status.zig");
 const ui_config = @import("./config.zig");
 const rp = @import("../repo.zig");
+const hash = @import("../hash.zig");
 
 pub fn RootTabs(comptime Widget: type) type {
     return struct {
@@ -107,13 +108,13 @@ pub fn RootTabs(comptime Widget: type) type {
     };
 }
 
-pub fn Root(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
+pub fn Root(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
     return struct {
         box: wgt.Box(Widget),
 
         const FocusKind = enum { tabs, stack };
 
-        pub fn init(allocator: std.mem.Allocator, repo: *rp.Repo(repo_kind)) !Root(Widget, repo_kind) {
+        pub fn init(allocator: std.mem.Allocator, repo: *rp.Repo(repo_kind, hash_kind)) !Root(Widget, repo_kind, hash_kind) {
             var box = try wgt.Box(Widget).init(allocator, null, .vert);
             errdefer box.deinit();
 
@@ -130,19 +131,19 @@ pub fn Root(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                         errdefer stack.deinit();
 
                         {
-                            var log = Widget{ .ui_log = try ui_log.Log(Widget, repo_kind).init(allocator, repo) };
+                            var log = Widget{ .ui_log = try ui_log.Log(Widget, repo_kind, hash_kind).init(allocator, repo) };
                             errdefer log.deinit();
                             try stack.children.put(log.getFocus().id, log);
                         }
 
                         {
-                            var status = Widget{ .ui_status = try ui_status.Status(Widget, repo_kind).init(allocator, repo) };
+                            var status = Widget{ .ui_status = try ui_status.Status(Widget, repo_kind, hash_kind).init(allocator, repo) };
                             errdefer status.deinit();
                             try stack.children.put(status.getFocus().id, status);
                         }
 
                         {
-                            var config = Widget{ .ui_config_list = try ui_config.ConfigList(Widget, repo_kind).init(allocator, repo) };
+                            var config = Widget{ .ui_config_list = try ui_config.ConfigList(Widget, repo_kind, hash_kind).init(allocator, repo) };
                             errdefer config.deinit();
                             try stack.children.put(config.getFocus().id, config);
                         }
@@ -152,18 +153,18 @@ pub fn Root(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                 }
             }
 
-            var ui_root = Root(Widget, repo_kind){
+            var ui_root = Root(Widget, repo_kind, hash_kind){
                 .box = box,
             };
             ui_root.getFocus().child_id = box.children.keys()[0];
             return ui_root;
         }
 
-        pub fn deinit(self: *Root(Widget, repo_kind)) void {
+        pub fn deinit(self: *Root(Widget, repo_kind, hash_kind)) void {
             self.box.deinit();
         }
 
-        pub fn build(self: *Root(Widget, repo_kind), constraint: layout.Constraint, root_focus: *Focus) !void {
+        pub fn build(self: *Root(Widget, repo_kind, hash_kind), constraint: layout.Constraint, root_focus: *Focus) !void {
             self.clearGrid();
             const ui_root_tabs = &self.box.children.values()[@intFromEnum(FocusKind.tabs)].widget.ui_root_tabs;
             const ui_root_stack = &self.box.children.values()[@intFromEnum(FocusKind.stack)].widget.stack;
@@ -173,7 +174,7 @@ pub fn Root(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
             try self.box.build(constraint, root_focus);
         }
 
-        pub fn input(self: *Root(Widget, repo_kind), key: inp.Key, root_focus: *Focus) !void {
+        pub fn input(self: *Root(Widget, repo_kind, hash_kind), key: inp.Key, root_focus: *Focus) !void {
             if (self.getFocus().child_id) |child_id| {
                 if (self.box.children.getIndex(child_id)) |current_index| {
                     const child = &self.box.children.values()[current_index].widget;
@@ -239,15 +240,15 @@ pub fn Root(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
             }
         }
 
-        pub fn clearGrid(self: *Root(Widget, repo_kind)) void {
+        pub fn clearGrid(self: *Root(Widget, repo_kind, hash_kind)) void {
             self.box.clearGrid();
         }
 
-        pub fn getGrid(self: Root(Widget, repo_kind)) ?Grid {
+        pub fn getGrid(self: Root(Widget, repo_kind, hash_kind)) ?Grid {
             return self.box.getGrid();
         }
 
-        pub fn getFocus(self: *Root(Widget, repo_kind)) *Focus {
+        pub fn getFocus(self: *Root(Widget, repo_kind, hash_kind)) *Focus {
             return self.box.getFocus();
         }
     };

@@ -6,6 +6,7 @@ const inp = xitui.input;
 const Grid = xitui.grid.Grid;
 const Focus = xitui.focus.Focus;
 const rp = @import("../repo.zig");
+const hash = @import("../hash.zig");
 const cfg = @import("../config.zig");
 
 pub fn ConfigListItem(comptime Widget: type) type {
@@ -91,14 +92,14 @@ pub fn ConfigListItem(comptime Widget: type) type {
     };
 }
 
-pub fn ConfigList(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
+pub fn ConfigList(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
     return struct {
         scroll: wgt.Scroll(Widget),
-        config: cfg.Config(repo_kind),
+        config: cfg.Config(repo_kind, hash_kind),
         allocator: std.mem.Allocator,
         arena: *std.heap.ArenaAllocator,
 
-        pub fn init(allocator: std.mem.Allocator, repo: *rp.Repo(repo_kind)) !ConfigList(Widget, repo_kind) {
+        pub fn init(allocator: std.mem.Allocator, repo: *rp.Repo(repo_kind, hash_kind)) !ConfigList(Widget, repo_kind, hash_kind) {
             var config = try repo.config(allocator);
             errdefer config.deinit();
 
@@ -128,7 +129,7 @@ pub fn ConfigList(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                 scroll.getFocus().child_id = inner_box.children.keys()[0];
             }
 
-            return ConfigList(Widget, repo_kind){
+            return ConfigList(Widget, repo_kind, hash_kind){
                 .scroll = scroll,
                 .config = config,
                 .allocator = allocator,
@@ -136,19 +137,19 @@ pub fn ConfigList(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
             };
         }
 
-        pub fn deinit(self: *ConfigList(Widget, repo_kind)) void {
+        pub fn deinit(self: *ConfigList(Widget, repo_kind, hash_kind)) void {
             self.scroll.deinit();
             self.config.deinit();
             self.arena.deinit();
             self.allocator.destroy(self.arena);
         }
 
-        pub fn build(self: *ConfigList(Widget, repo_kind), constraint: layout.Constraint, root_focus: *Focus) !void {
+        pub fn build(self: *ConfigList(Widget, repo_kind, hash_kind), constraint: layout.Constraint, root_focus: *Focus) !void {
             self.clearGrid();
             try self.scroll.build(constraint, root_focus);
         }
 
-        pub fn input(self: *ConfigList(Widget, repo_kind), key: inp.Key, root_focus: *Focus) !void {
+        pub fn input(self: *ConfigList(Widget, repo_kind, hash_kind), key: inp.Key, root_focus: *Focus) !void {
             if (self.getFocus().child_id) |child_id| {
                 const children = &self.scroll.child.box.children;
                 if (children.getIndex(child_id)) |current_index| {
@@ -198,19 +199,19 @@ pub fn ConfigList(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
             }
         }
 
-        pub fn clearGrid(self: *ConfigList(Widget, repo_kind)) void {
+        pub fn clearGrid(self: *ConfigList(Widget, repo_kind, hash_kind)) void {
             self.scroll.clearGrid();
         }
 
-        pub fn getGrid(self: ConfigList(Widget, repo_kind)) ?Grid {
+        pub fn getGrid(self: ConfigList(Widget, repo_kind, hash_kind)) ?Grid {
             return self.scroll.getGrid();
         }
 
-        pub fn getFocus(self: *ConfigList(Widget, repo_kind)) *Focus {
+        pub fn getFocus(self: *ConfigList(Widget, repo_kind, hash_kind)) *Focus {
             return self.scroll.getFocus();
         }
 
-        pub fn getSelectedIndex(self: ConfigList(Widget, repo_kind)) ?usize {
+        pub fn getSelectedIndex(self: ConfigList(Widget, repo_kind, hash_kind)) ?usize {
             if (self.scroll.child.box.focus.child_id) |child_id| {
                 const children = &self.scroll.child.box.children;
                 return children.getIndex(child_id);
@@ -219,7 +220,7 @@ pub fn ConfigList(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
             }
         }
 
-        fn updateScroll(self: *ConfigList(Widget, repo_kind), index: usize) void {
+        fn updateScroll(self: *ConfigList(Widget, repo_kind, hash_kind), index: usize) void {
             const box = &self.scroll.child.box;
             if (box.children.values()[index].rect) |rect| {
                 self.scroll.scrollToRect(rect);

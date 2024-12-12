@@ -38,7 +38,7 @@ pub const MergeConflictStatus = struct {
     source: bool,
 };
 
-pub fn Status(comptime repo_kind: rp.RepoKind) type {
+pub fn Status(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
     return struct {
         untracked: std.StringArrayHashMap(Entry),
         workspace_modified: std.StringArrayHashMap(Entry),
@@ -47,8 +47,8 @@ pub fn Status(comptime repo_kind: rp.RepoKind) type {
         index_modified: std.StringArrayHashMap(void),
         index_deleted: std.StringArrayHashMap(void),
         conflicts: std.StringArrayHashMap(MergeConflictStatus),
-        index: idx.Index(repo_kind),
-        head_tree: HeadTree(repo_kind),
+        index: idx.Index(repo_kind, hash_kind),
+        head_tree: HeadTree(repo_kind, hash_kind),
         arena: *std.heap.ArenaAllocator,
         allocator: std.mem.Allocator,
 
@@ -57,7 +57,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind) type {
             meta: std.fs.File.Metadata,
         };
 
-        pub fn init(allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State(.read_only)) !Status(repo_kind) {
+        pub fn init(allocator: std.mem.Allocator, state: rp.Repo(repo_kind, hash_kind).State(.read_only)) !Status(repo_kind, hash_kind) {
             var untracked = std.StringArrayHashMap(Entry).init(allocator);
             errdefer untracked.deinit();
 
@@ -86,15 +86,15 @@ pub fn Status(comptime repo_kind: rp.RepoKind) type {
                 allocator.destroy(arena);
             }
 
-            var index = try idx.Index(repo_kind).init(allocator, state);
+            var index = try idx.Index(repo_kind, hash_kind).init(allocator, state);
             errdefer index.deinit();
 
             var index_bools = try allocator.alloc(bool, index.entries.count());
             defer allocator.free(index_bools);
 
-            _ = try addEntries(repo_kind, arena.allocator(), &untracked, &workspace_modified, index, &index_bools, state.core.repo_dir, ".");
+            _ = try addEntries(repo_kind, hash_kind, arena.allocator(), &untracked, &workspace_modified, index, &index_bools, state.core.repo_dir, ".");
 
-            var head_tree = try HeadTree(repo_kind).init(allocator, state);
+            var head_tree = try HeadTree(repo_kind, hash_kind).init(allocator, state);
             errdefer head_tree.deinit();
 
             // for each entry in the index
@@ -128,7 +128,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind) type {
                 }
             }
 
-            return Status(repo_kind){
+            return Status(repo_kind, hash_kind){
                 .untracked = untracked,
                 .workspace_modified = workspace_modified,
                 .workspace_deleted = workspace_deleted,
@@ -143,7 +143,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind) type {
             };
         }
 
-        pub fn deinit(self: *Status(repo_kind)) void {
+        pub fn deinit(self: *Status(repo_kind, hash_kind)) void {
             self.untracked.deinit();
             self.workspace_modified.deinit();
             self.workspace_deleted.deinit();
@@ -161,10 +161,11 @@ pub fn Status(comptime repo_kind: rp.RepoKind) type {
 
 fn addEntries(
     comptime repo_kind: rp.RepoKind,
+    comptime hash_kind: hash.HashKind,
     allocator: std.mem.Allocator,
-    untracked: *std.StringArrayHashMap(Status(repo_kind).Entry),
-    modified: *std.StringArrayHashMap(Status(repo_kind).Entry),
-    index: idx.Index(repo_kind),
+    untracked: *std.StringArrayHashMap(Status(repo_kind, hash_kind).Entry),
+    modified: *std.StringArrayHashMap(Status(repo_kind, hash_kind).Entry),
+    index: idx.Index(repo_kind, hash_kind),
     index_bools: *[]bool,
     repo_dir: std.fs.Dir,
     path: []const u8,
@@ -179,12 +180,12 @@ fn addEntries(
                 index_bools.*[entry_index] = true;
                 const entries_for_path = index.entries.values()[entry_index];
                 if (entries_for_path[0]) |entry| {
-                    if (try idx.indexDiffersFromWorkspace(repo_kind, entry, file, meta)) {
-                        try modified.put(path, Status(repo_kind).Entry{ .path = path, .meta = meta });
+                    if (try idx.indexDiffersFromWorkspace(repo_kind, hash_kind, entry, file, meta)) {
+                        try modified.put(path, Status(repo_kind, hash_kind).Entry{ .path = path, .meta = meta });
                     }
                 }
             } else {
-                try untracked.put(path, Status(repo_kind).Entry{ .path = path, .meta = meta });
+                try untracked.put(path, Status(repo_kind, hash_kind).Entry{ .path = path, .meta = meta });
             }
             return true;
         },
@@ -195,7 +196,7 @@ fn addEntries(
             defer dir.close();
             var iter = dir.iterate();
 
-            var child_untracked = std.ArrayList(Status(repo_kind).Entry).init(allocator);
+            var child_untracked = std.ArrayList(Status(repo_kind, hash_kind).Entry).init(allocator);
             defer child_untracked.deinit();
             var contains_file = false;
 
@@ -214,10 +215,10 @@ fn addEntries(
                 else
                     try io.joinPath(allocator, &.{ path, entry.name });
 
-                var grandchild_untracked = std.StringArrayHashMap(Status(repo_kind).Entry).init(allocator);
+                var grandchild_untracked = std.StringArrayHashMap(Status(repo_kind, hash_kind).Entry).init(allocator);
                 defer grandchild_untracked.deinit();
 
-                const is_file = try addEntries(repo_kind, allocator, &grandchild_untracked, modified, index, index_bools, repo_dir, subpath);
+                const is_file = try addEntries(repo_kind, hash_kind, allocator, &grandchild_untracked, modified, index, index_bools, repo_dir, subpath);
                 contains_file = contains_file or is_file;
                 if (is_file and is_untracked) break; // no need to continue because child_untracked will be discarded anyway
 
@@ -227,7 +228,7 @@ fn addEntries(
             // add the dir if it isn't tracked and contains a file
             if (is_untracked) {
                 if (contains_file) {
-                    try untracked.put(path, Status(repo_kind).Entry{ .path = path, .meta = meta });
+                    try untracked.put(path, Status(repo_kind, hash_kind).Entry{ .path = path, .meta = meta });
                 }
             }
             // add its children
@@ -242,25 +243,25 @@ fn addEntries(
     return false;
 }
 
-pub fn HeadTree(comptime repo_kind: rp.RepoKind) type {
+pub fn HeadTree(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
     return struct {
-        entries: std.StringArrayHashMap(obj.TreeEntry),
+        entries: std.StringArrayHashMap(obj.TreeEntry(hash_kind)),
         arena: *std.heap.ArenaAllocator,
         allocator: std.mem.Allocator,
 
-        pub fn init(allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State(.read_only)) !HeadTree(repo_kind) {
+        pub fn init(allocator: std.mem.Allocator, state: rp.Repo(repo_kind, hash_kind).State(.read_only)) !HeadTree(repo_kind, hash_kind) {
             const arena = try allocator.create(std.heap.ArenaAllocator);
             arena.* = std.heap.ArenaAllocator.init(allocator);
-            var tree = HeadTree(repo_kind){
-                .entries = std.StringArrayHashMap(obj.TreeEntry).init(allocator),
+            var tree = HeadTree(repo_kind, hash_kind){
+                .entries = std.StringArrayHashMap(obj.TreeEntry(hash_kind)).init(allocator),
                 .arena = arena,
                 .allocator = allocator,
             };
             errdefer tree.deinit();
 
             // if head points to a valid object, read it
-            if (try ref.readHeadMaybe(repo_kind, state)) |head_file_buffer| {
-                var commit_object = try obj.Object(repo_kind, .full).init(allocator, state, &head_file_buffer);
+            if (try ref.readHeadMaybe(repo_kind, hash_kind, state)) |head_file_buffer| {
+                var commit_object = try obj.Object(repo_kind, hash_kind, .full).init(allocator, state, &head_file_buffer);
                 defer commit_object.deinit();
                 try tree.read(state, "", &commit_object.content.commit.tree);
             }
@@ -268,21 +269,21 @@ pub fn HeadTree(comptime repo_kind: rp.RepoKind) type {
             return tree;
         }
 
-        pub fn deinit(self: *HeadTree(repo_kind)) void {
+        pub fn deinit(self: *HeadTree(repo_kind, hash_kind)) void {
             self.entries.deinit();
             self.arena.deinit();
             self.allocator.destroy(self.arena);
         }
 
-        fn read(self: *HeadTree(repo_kind), state: rp.Repo(repo_kind).State(.read_only), prefix: []const u8, oid: *const [hash.hexLen(.sha1)]u8) !void {
-            const object = try obj.Object(repo_kind, .full).init(self.arena.allocator(), state, oid);
+        fn read(self: *HeadTree(repo_kind, hash_kind), state: rp.Repo(repo_kind, hash_kind).State(.read_only), prefix: []const u8, oid: *const [hash.hexLen(.sha1)]u8) !void {
+            const object = try obj.Object(repo_kind, hash_kind, .full).init(self.arena.allocator(), state, oid);
 
             switch (object.content) {
                 .blob => {},
                 .tree => |tree| {
                     for (tree.entries.keys(), tree.entries.values()) |name, tree_entry| {
                         const path = try io.joinPath(self.arena.allocator(), &.{ prefix, name });
-                        if (obj.isTree(tree_entry)) {
+                        if (tree_entry.isTree()) {
                             const oid_hex = std.fmt.bytesToHex(tree_entry.oid, .lower);
                             try self.read(state, path, &oid_hex);
                         } else {

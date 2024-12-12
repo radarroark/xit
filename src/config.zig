@@ -19,7 +19,7 @@ pub const ConfigCommand = union(enum) {
     remove: RemoveConfigInput,
 };
 
-pub fn Config(comptime repo_kind: rp.RepoKind) type {
+pub fn Config(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
     return struct {
         allocator: std.mem.Allocator,
         arena: *std.heap.ArenaAllocator,
@@ -27,7 +27,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
 
         const Variables = std.StringArrayHashMap([]const u8);
 
-        pub fn init(state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator) !Config(repo_kind) {
+        pub fn init(state: rp.Repo(repo_kind, hash_kind).State(.read_only), allocator: std.mem.Allocator) !Config(repo_kind, hash_kind) {
             var arena = try allocator.create(std.heap.ArenaAllocator);
             arena.* = std.heap.ArenaAllocator.init(allocator);
             errdefer {
@@ -219,7 +219,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                     }
                 },
                 .xit => {
-                    if (try state.extra.moment.getCursor(hash.hashInt(.sha1, "config"))) |config_cursor| {
+                    if (try state.extra.moment.getCursor(hash.hashInt(hash_kind, "config"))) |config_cursor| {
                         var config_iter = try config_cursor.iterator();
                         defer config_iter.deinit();
                         while (try config_iter.next()) |*section_cursor| {
@@ -250,12 +250,12 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
             };
         }
 
-        pub fn deinit(self: *Config(repo_kind)) void {
+        pub fn deinit(self: *Config(repo_kind, hash_kind)) void {
             self.arena.deinit();
             self.allocator.destroy(self.arena);
         }
 
-        pub fn add(self: *Config(repo_kind), state: rp.Repo(repo_kind).State(.read_write), input: AddConfigInput) !void {
+        pub fn add(self: *Config(repo_kind, hash_kind), state: rp.Repo(repo_kind, hash_kind).State(.read_write), input: AddConfigInput) !void {
             // validate the config name
             for (input.name, 0..) |char, i| {
                 switch (char) {
@@ -285,27 +285,27 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                 switch (repo_kind) {
                     .git => try self.write(state),
                     .xit => {
-                        const config_name_set_cursor = try state.extra.moment.putCursor(hash.hashInt(.sha1, "config-name-set"));
-                        const config_name_set = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(config_name_set_cursor);
+                        const config_name_set_cursor = try state.extra.moment.putCursor(hash.hashInt(hash_kind, "config-name-set"));
+                        const config_name_set = try rp.Repo(repo_kind, hash_kind).DB.HashMap(.read_write).init(config_name_set_cursor);
 
                         // store section name
-                        const section_name_hash = hash.hashInt(.sha1, section_name);
+                        const section_name_hash = hash.hashInt(hash_kind, section_name);
                         var section_name_cursor = try config_name_set.putKeyCursor(section_name_hash);
                         try section_name_cursor.writeIfEmpty(.{ .bytes = section_name });
 
                         // add section name to config
-                        const config_cursor = try state.extra.moment.putCursor(hash.hashInt(.sha1, "config"));
-                        const config = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(config_cursor);
+                        const config_cursor = try state.extra.moment.putCursor(hash.hashInt(hash_kind, "config"));
+                        const config = try rp.Repo(repo_kind, hash_kind).DB.HashMap(.read_write).init(config_cursor);
                         try config.putKey(section_name_hash, .{ .slot = section_name_cursor.slot() });
 
                         // store variable name
-                        const var_name_hash = hash.hashInt(.sha1, var_name);
+                        const var_name_hash = hash.hashInt(hash_kind, var_name);
                         var var_name_cursor = try config_name_set.putKeyCursor(var_name_hash);
                         try var_name_cursor.writeIfEmpty(.{ .bytes = var_name });
 
                         // add var name to config
                         const section_cursor = try config.putCursor(section_name_hash);
-                        const section = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(section_cursor);
+                        const section = try rp.Repo(repo_kind, hash_kind).DB.HashMap(.read_write).init(section_cursor);
                         try section.putKey(var_name_hash, .{ .slot = var_name_cursor.slot() });
 
                         // save the variable
@@ -317,7 +317,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
             }
         }
 
-        pub fn remove(self: *Config(repo_kind), state: rp.Repo(repo_kind).State(.read_write), input: RemoveConfigInput) !void {
+        pub fn remove(self: *Config(repo_kind, hash_kind), state: rp.Repo(repo_kind, hash_kind).State(.read_write), input: RemoveConfigInput) !void {
             if (std.mem.lastIndexOfScalar(u8, input.name, '.')) |index| {
                 const section_name = try self.arena.allocator().dupe(u8, input.name[0..index]);
                 const var_name = try self.arena.allocator().dupe(u8, input.name[index + 1 ..]);
@@ -333,14 +333,14 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                 switch (repo_kind) {
                     .git => try self.write(state),
                     .xit => {
-                        const config_cursor = try state.extra.moment.putCursor(hash.hashInt(.sha1, "config"));
-                        const config = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(config_cursor);
+                        const config_cursor = try state.extra.moment.putCursor(hash.hashInt(hash_kind, "config"));
+                        const config = try rp.Repo(repo_kind, hash_kind).DB.HashMap(.read_write).init(config_cursor);
                         if (!self.sections.contains(section_name)) {
-                            _ = try config.remove(hash.hashInt(.sha1, section_name));
+                            _ = try config.remove(hash.hashInt(hash_kind, section_name));
                         } else {
-                            const section_cursor = try config.putCursor(hash.hashInt(.sha1, section_name));
-                            const section = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(section_cursor);
-                            _ = try section.remove(hash.hashInt(.sha1, var_name));
+                            const section_cursor = try config.putCursor(hash.hashInt(hash_kind, section_name));
+                            const section = try rp.Repo(repo_kind, hash_kind).DB.HashMap(.read_write).init(section_cursor);
+                            _ = try section.remove(hash.hashInt(hash_kind, var_name));
                         }
                     },
                 }
@@ -349,7 +349,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
             }
         }
 
-        fn write(self: *Config(repo_kind), state: rp.Repo(.git).State(.read_write)) !void {
+        fn write(self: *Config(repo_kind, hash_kind), state: rp.Repo(.git, hash_kind).State(.read_write)) !void {
             const lock_file = state.extra.lock_file_maybe orelse return error.NoLockFile;
             try lock_file.setEndPos(0); // truncate file in case this method is called multiple times
 
@@ -379,7 +379,12 @@ pub const RemoteConfig = struct {
 
     const Variables = std.StringArrayHashMap([]const u8);
 
-    pub fn init(comptime repo_kind: rp.RepoKind, config: *Config(repo_kind), allocator: std.mem.Allocator) !RemoteConfig {
+    pub fn init(
+        comptime repo_kind: rp.RepoKind,
+        comptime hash_kind: hash.HashKind,
+        config: *Config(repo_kind, hash_kind),
+        allocator: std.mem.Allocator,
+    ) !RemoteConfig {
         var arena = try allocator.create(std.heap.ArenaAllocator);
         arena.* = std.heap.ArenaAllocator.init(allocator);
         errdefer {

@@ -13,58 +13,59 @@ const ui_diff = @import("./ui/diff.zig");
 const ui_status = @import("./ui/status.zig");
 const ui_config = @import("./ui/config.zig");
 const rp = @import("./repo.zig");
+const hash = @import("./hash.zig");
 
-pub fn Widget(comptime repo_kind: rp.RepoKind) type {
+pub fn Widget(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
     return union(enum) {
-        text: wgt.Text(Widget(repo_kind)),
-        box: wgt.Box(Widget(repo_kind)),
-        text_box: wgt.TextBox(Widget(repo_kind)),
-        scroll: wgt.Scroll(Widget(repo_kind)),
-        stack: wgt.Stack(Widget(repo_kind)),
-        ui_root: ui_root.Root(Widget(repo_kind), repo_kind),
-        ui_root_tabs: ui_root.RootTabs(Widget(repo_kind)),
-        ui_log: ui_log.Log(Widget(repo_kind), repo_kind),
-        ui_log_commit_list: ui_log.LogCommitList(Widget(repo_kind), repo_kind),
-        ui_diff: ui_diff.Diff(Widget(repo_kind), repo_kind),
-        ui_status: ui_status.Status(Widget(repo_kind), repo_kind),
-        ui_status_content: ui_status.StatusContent(Widget(repo_kind), repo_kind),
-        ui_status_tabs: ui_status.StatusTabs(Widget(repo_kind), repo_kind),
-        ui_status_list: ui_status.StatusList(Widget(repo_kind)),
-        ui_status_list_item: ui_status.StatusListItem(Widget(repo_kind)),
-        ui_config_list: ui_config.ConfigList(Widget(repo_kind), repo_kind),
-        ui_config_list_item: ui_config.ConfigListItem(Widget(repo_kind)),
+        text: wgt.Text(Widget(repo_kind, hash_kind)),
+        box: wgt.Box(Widget(repo_kind, hash_kind)),
+        text_box: wgt.TextBox(Widget(repo_kind, hash_kind)),
+        scroll: wgt.Scroll(Widget(repo_kind, hash_kind)),
+        stack: wgt.Stack(Widget(repo_kind, hash_kind)),
+        ui_root: ui_root.Root(Widget(repo_kind, hash_kind), repo_kind, hash_kind),
+        ui_root_tabs: ui_root.RootTabs(Widget(repo_kind, hash_kind)),
+        ui_log: ui_log.Log(Widget(repo_kind, hash_kind), repo_kind, hash_kind),
+        ui_log_commit_list: ui_log.LogCommitList(Widget(repo_kind, hash_kind), repo_kind, hash_kind),
+        ui_diff: ui_diff.Diff(Widget(repo_kind, hash_kind), repo_kind, hash_kind),
+        ui_status: ui_status.Status(Widget(repo_kind, hash_kind), repo_kind, hash_kind),
+        ui_status_content: ui_status.StatusContent(Widget(repo_kind, hash_kind), repo_kind, hash_kind),
+        ui_status_tabs: ui_status.StatusTabs(Widget(repo_kind, hash_kind), repo_kind, hash_kind),
+        ui_status_list: ui_status.StatusList(Widget(repo_kind, hash_kind)),
+        ui_status_list_item: ui_status.StatusListItem(Widget(repo_kind, hash_kind)),
+        ui_config_list: ui_config.ConfigList(Widget(repo_kind, hash_kind), repo_kind, hash_kind),
+        ui_config_list_item: ui_config.ConfigListItem(Widget(repo_kind, hash_kind)),
 
-        pub fn deinit(self: *Widget(repo_kind)) void {
+        pub fn deinit(self: *Widget(repo_kind, hash_kind)) void {
             switch (self.*) {
                 inline else => |*case| case.deinit(),
             }
         }
 
-        pub fn build(self: *Widget(repo_kind), constraint: layout.Constraint, root_focus: *Focus) anyerror!void {
+        pub fn build(self: *Widget(repo_kind, hash_kind), constraint: layout.Constraint, root_focus: *Focus) anyerror!void {
             switch (self.*) {
                 inline else => |*case| try case.build(constraint, root_focus),
             }
         }
 
-        pub fn input(self: *Widget(repo_kind), key: inp.Key, root_focus: *Focus) anyerror!void {
+        pub fn input(self: *Widget(repo_kind, hash_kind), key: inp.Key, root_focus: *Focus) anyerror!void {
             switch (self.*) {
                 inline else => |*case| try case.input(key, root_focus),
             }
         }
 
-        pub fn clearGrid(self: *Widget(repo_kind)) void {
+        pub fn clearGrid(self: *Widget(repo_kind, hash_kind)) void {
             switch (self.*) {
                 inline else => |*case| case.clearGrid(),
             }
         }
 
-        pub fn getGrid(self: Widget(repo_kind)) ?Grid {
+        pub fn getGrid(self: Widget(repo_kind, hash_kind)) ?Grid {
             switch (self) {
                 inline else => |*case| return case.getGrid(),
             }
         }
 
-        pub fn getFocus(self: *Widget(repo_kind)) *Focus {
+        pub fn getFocus(self: *Widget(repo_kind, hash_kind)) *Focus {
             switch (self.*) {
                 inline else => |*case| return case.getFocus(),
             }
@@ -72,9 +73,15 @@ pub fn Widget(comptime repo_kind: rp.RepoKind) type {
     };
 }
 
-pub fn start(comptime repo_kind: rp.RepoKind, repo: *rp.Repo(repo_kind), allocator: std.mem.Allocator, sub_cmd_kind_maybe: ?cmd.SubCommandKind) !void {
+pub fn start(
+    comptime repo_kind: rp.RepoKind,
+    comptime hash_kind: hash.HashKind,
+    repo: *rp.Repo(repo_kind, hash_kind),
+    allocator: std.mem.Allocator,
+    sub_cmd_kind_maybe: ?cmd.SubCommandKind,
+) !void {
     // init root widget
-    var root = Widget(repo_kind){ .ui_root = try ui_root.Root(Widget(repo_kind), repo_kind).init(allocator, repo) };
+    var root = Widget(repo_kind, hash_kind){ .ui_root = try ui_root.Root(Widget(repo_kind, hash_kind), repo_kind, hash_kind).init(allocator, repo) };
     defer root.deinit();
 
     // set initial focus for root widget
