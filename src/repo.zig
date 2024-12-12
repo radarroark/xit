@@ -51,7 +51,10 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime hash_kind: hash.HashKind) typ
 
         pub const DB = switch (repo_kind) {
             .git => void,
-            .xit => @import("xitdb").Database(.file, hash.HashInt(hash_kind)),
+            .xit => switch (hash_kind) {
+                .none => void,
+                else => @import("xitdb").Database(.file, hash.HashInt(hash_kind)),
+            },
         };
 
         pub const WriteMode = switch (repo_kind) {
@@ -142,7 +145,10 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime hash_kind: hash.HashKind) typ
                             .repo_dir = repo_dir,
                             .xit_dir = xit_dir,
                             .db_file = db_file,
-                            .db = try DB.init(allocator, .{ .file = db_file }),
+                            .db = switch (hash_kind) {
+                                .none => {},
+                                else => try DB.init(allocator, .{ .file = db_file, .hash_id = .{ .id = hash.hashId(hash_kind) } }),
+                            },
                         },
                         .init_opts = opts,
                     };
@@ -238,7 +244,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime hash_kind: hash.HashKind) typ
                             .repo_dir = repo_dir,
                             .xit_dir = xit_dir,
                             .db_file = db_file,
-                            .db = try DB.init(allocator, .{ .file = db_file }),
+                            .db = try DB.init(allocator, .{ .file = db_file, .hash_id = .{ .id = hash.hashId(hash_kind) } }),
                         },
                         .init_opts = .{ .cwd = dir },
                     };
@@ -274,6 +280,28 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime hash_kind: hash.HashKind) typ
                     self.core.xit_dir.close();
                     self.core.db_file.close();
                     self.core.repo_dir.close();
+                },
+            }
+        }
+
+        /// returns the hash algorithm used by the given repo.
+        /// the purpose of the `none` HashKind is to allow initializing
+        /// a Repo without knowing its HashKind yet. it won't be able to
+        /// do much, since the HashKind is necessary for most functions,
+        /// but it'll at least be able to read run this function so
+        /// a fully functional Repo can then be constructed.
+        /// that's how you solve a chicken-and-egg problem :P
+        pub fn hashKind(self: *Repo(repo_kind, .none)) !hash.HashKind {
+            switch (repo_kind) {
+                .git => return .sha1,
+                .xit => {
+                    const xitdb = @import("xitdb");
+
+                    try self.core.db_file.seekTo(0);
+                    const header = try xitdb.DatabaseHeader.read(self.core.db_file.reader());
+                    try header.validate();
+
+                    return hash.hashKind(header.hash_id.id) orelse error.InvalidHashKind;
                 },
             }
         }

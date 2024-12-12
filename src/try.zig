@@ -144,5 +144,5 @@ pub fn main() !void {
         try args.append(arg);
     }
 
-    try mn.xitMain(.xit, .sha1, allocator, args.items, temp_dir, writers);
+    try mn.xitMain(.xit, allocator, args.items, temp_dir, writers);
 }

@@ -1,17 +1,36 @@
 const std = @import("std");
 
 pub const HashKind = enum {
+    none,
     sha1,
 };
 
 pub fn HashInt(comptime hash_kind: HashKind) type {
     return switch (hash_kind) {
+        .none => u0,
         .sha1 => u160,
+    };
+}
+
+pub fn hashId(comptime hash_kind: HashKind) u32 {
+    const xitdb = @import("xitdb");
+    return switch (hash_kind) {
+        .none => 0,
+        .sha1 => xitdb.HashId.fromBytes("sha1").id,
+    };
+}
+
+pub fn hashKind(hash_id: u32) ?HashKind {
+    return switch (hash_id) {
+        hashId(.none) => .none,
+        hashId(.sha1) => .sha1,
+        else => null,
     };
 }
 
 pub fn byteLen(comptime hash_kind: HashKind) usize {
     return switch (hash_kind) {
+        .none => 0,
         .sha1 => std.crypto.hash.Sha1.digest_length,
     };
 }
@@ -23,12 +42,14 @@ pub fn hexLen(comptime hash_kind: HashKind) usize {
 pub fn Hasher(comptime hash_kind: HashKind) type {
     return struct {
         hasher: switch (hash_kind) {
+            .none => void,
             .sha1 => std.crypto.hash.Sha1,
         },
 
         pub fn init() Hasher(hash_kind) {
             return .{
                 .hasher = switch (hash_kind) {
+                    .none => @compileError("no hash algorithm"),
                     .sha1 => std.crypto.hash.Sha1.init(.{}),
                 },
             };
