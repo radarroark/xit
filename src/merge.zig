@@ -10,7 +10,7 @@ const df = @import("./diff.zig");
 
 const MAX_READ_BYTES = 1024; // FIXME: this is arbitrary...
 
-fn getDescendent(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State(.read_only), oid1: *const [hash.SHA1_HEX_LEN]u8, oid2: *const [hash.SHA1_HEX_LEN]u8) ![hash.SHA1_HEX_LEN]u8 {
+fn getDescendent(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State(.read_only), oid1: *const [hash.hexLen(.sha1)]u8, oid2: *const [hash.hexLen(.sha1)]u8) ![hash.hexLen(.sha1)]u8 {
     if (std.mem.eql(u8, oid1, oid2)) {
         return oid1.*;
     }
@@ -23,7 +23,7 @@ fn getDescendent(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
         two,
     };
     const Parent = struct {
-        oid: [hash.SHA1_HEX_LEN]u8,
+        oid: [hash.hexLen(.sha1)]u8,
         kind: ParentKind,
     };
     var queue = std.DoublyLinkedList(Parent){};
@@ -77,7 +77,7 @@ fn getDescendent(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
     return error.DescendentNotFound;
 }
 
-pub fn commonAncestor(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State(.read_only), oid1: *const [hash.SHA1_HEX_LEN]u8, oid2: *const [hash.SHA1_HEX_LEN]u8) ![hash.SHA1_HEX_LEN]u8 {
+pub fn commonAncestor(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State(.read_only), oid1: *const [hash.hexLen(.sha1)]u8, oid2: *const [hash.hexLen(.sha1)]u8) ![hash.hexLen(.sha1)]u8 {
     if (std.mem.eql(u8, oid1, oid2)) {
         return oid1.*;
     }
@@ -86,7 +86,7 @@ pub fn commonAncestor(comptime repo_kind: rp.RepoKind, allocator: std.mem.Alloca
     defer arena.deinit();
 
     const Parent = struct {
-        oid: [hash.SHA1_HEX_LEN]u8,
+        oid: [hash.hexLen(.sha1)]u8,
         kind: enum {
             one,
             two,
@@ -166,13 +166,13 @@ pub fn commonAncestor(comptime repo_kind: rp.RepoKind, allocator: std.mem.Alloca
 
     const base_ancestor_count = parents_of_both.count();
     if (base_ancestor_count > 1) {
-        var oid = parents_of_both.keys()[0][0..hash.SHA1_HEX_LEN].*;
+        var oid = parents_of_both.keys()[0][0..comptime hash.hexLen(.sha1)].*;
         for (parents_of_both.keys()[1..]) |next_oid| {
-            oid = try getDescendent(repo_kind, allocator, state, oid[0..hash.SHA1_HEX_LEN], next_oid[0..hash.SHA1_HEX_LEN]);
+            oid = try getDescendent(repo_kind, allocator, state, oid[0..comptime hash.hexLen(.sha1)], next_oid[0..comptime hash.hexLen(.sha1)]);
         }
         return oid;
     } else if (base_ancestor_count == 1) {
-        return parents_of_both.keys()[0][0..hash.SHA1_HEX_LEN].*;
+        return parents_of_both.keys()[0][0..comptime hash.hexLen(.sha1)].*;
     } else {
         return error.NoCommonAncestor;
     }
@@ -193,14 +193,14 @@ fn writeBlobWithDiff3(
     comptime repo_kind: rp.RepoKind,
     state: rp.Repo(repo_kind).State(.read_write),
     allocator: std.mem.Allocator,
-    base_file_oid_maybe: ?*const [hash.SHA1_BYTES_LEN]u8,
-    target_file_oid: *const [hash.SHA1_BYTES_LEN]u8,
-    source_file_oid: *const [hash.SHA1_BYTES_LEN]u8,
-    base_oid: *const [hash.SHA1_HEX_LEN]u8,
+    base_file_oid_maybe: ?*const [hash.byteLen(.sha1)]u8,
+    target_file_oid: *const [hash.byteLen(.sha1)]u8,
+    source_file_oid: *const [hash.byteLen(.sha1)]u8,
+    base_oid: *const [hash.hexLen(.sha1)]u8,
     target_name: []const u8,
     source_name: []const u8,
     has_conflict: *bool,
-) ![hash.SHA1_BYTES_LEN]u8 {
+) ![hash.byteLen(.sha1)]u8 {
     var base_iter = if (base_file_oid_maybe) |base_file_oid|
         try df.LineIterator(repo_kind).initFromOid(state.readOnly(), allocator, "", base_file_oid, null)
     else
@@ -477,7 +477,7 @@ fn writeBlobWithDiff3(
         .has_conflict = false,
     };
 
-    var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+    var oid = [_]u8{0} ** hash.byteLen(.sha1);
     try obj.writeObject(repo_kind, state, &stream, .{ .kind = .blob, .size = try stream.count() }, &oid);
     has_conflict.* = stream.has_conflict;
     return oid;
@@ -486,24 +486,24 @@ fn writeBlobWithDiff3(
 fn writeBlobWithPatches(
     state: rp.Repo(.xit).State(.read_write),
     allocator: std.mem.Allocator,
-    source_file_oid: *const [hash.SHA1_BYTES_LEN]u8,
-    base_oid: *const [hash.SHA1_HEX_LEN]u8,
-    target_oid: *const [hash.SHA1_HEX_LEN]u8,
-    source_oid: *const [hash.SHA1_HEX_LEN]u8,
+    source_file_oid: *const [hash.byteLen(.sha1)]u8,
+    base_oid: *const [hash.hexLen(.sha1)]u8,
+    target_oid: *const [hash.hexLen(.sha1)]u8,
+    source_oid: *const [hash.hexLen(.sha1)]u8,
     target_name: []const u8,
     source_name: []const u8,
     has_conflict: *bool,
     path: []const u8,
-) ![hash.SHA1_BYTES_LEN]u8 {
-    const commit_id_to_path_to_patch_id_cursor_maybe = try state.extra.moment.getCursor(hash.hashBuffer("commit-id->path->patch-id"));
+) ![hash.byteLen(.sha1)]u8 {
+    const commit_id_to_path_to_patch_id_cursor_maybe = try state.extra.moment.getCursor(hash.hashInt(.sha1, "commit-id->path->patch-id"));
 
-    var patch_ids = std.ArrayList(hash.Hash).init(allocator);
+    var patch_ids = std.ArrayList(hash.HashInt(.sha1)).init(allocator);
     defer patch_ids.deinit();
 
     var iter = try obj.ObjectIterator(.xit, .full).init(allocator, state.readOnly(), &.{source_oid.*}, .{ .recursive = false });
     defer iter.deinit();
 
-    const path_hash = hash.hashBuffer(path);
+    const path_hash = hash.hashInt(.sha1, path);
 
     while (try iter.next()) |object| {
         defer object.deinit();
@@ -514,12 +514,12 @@ fn writeBlobWithPatches(
 
         if (commit_id_to_path_to_patch_id_cursor_maybe) |commit_id_to_path_to_patch_id_cursor| {
             const commit_id_to_path_to_patch_id = try rp.Repo(.xit).DB.HashMap(.read_only).init(commit_id_to_path_to_patch_id_cursor);
-            if (try commit_id_to_path_to_patch_id.getCursor(try hash.hexToHash(&object.oid))) |path_to_patch_id_cursor| {
+            if (try commit_id_to_path_to_patch_id.getCursor(try hash.hexToHash(.sha1, &object.oid))) |path_to_patch_id_cursor| {
                 const path_to_patch_id = try rp.Repo(.xit).DB.HashMap(.read_only).init(path_to_patch_id_cursor);
                 if (try path_to_patch_id.getCursor(path_hash)) |patch_id_cursor| {
                     const patch_id_bytes = try patch_id_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
                     defer allocator.free(patch_id_bytes);
-                    const patch_id = hash.bytesToHash(patch_id_bytes[0..hash.SHA1_BYTES_LEN]);
+                    const patch_id = hash.bytesToHash(.sha1, patch_id_bytes[0..comptime hash.byteLen(.sha1)]);
                     try patch_ids.append(patch_id);
                 }
             }
@@ -534,15 +534,15 @@ fn writeBlobWithPatches(
     }
 
     // get branch map
-    const branch_name_hash = hash.hashBuffer(target_name);
-    const branches_cursor = (try state.extra.moment.getCursor(hash.hashBuffer("branches"))) orelse return error.KeyNotFound;
+    const branch_name_hash = hash.hashInt(.sha1, target_name);
+    const branches_cursor = (try state.extra.moment.getCursor(hash.hashInt(.sha1, "branches"))) orelse return error.KeyNotFound;
     const branches = try rp.Repo(.xit).DB.HashMap(.read_only).init(branches_cursor);
     const branch_cursor = (try branches.getCursor(branch_name_hash)) orelse return error.KeyNotFound;
 
     // put branch in temp location
-    const merge_in_progress_cursor = try state.extra.moment.putCursor(hash.hashBuffer("merge-in-progress"));
+    const merge_in_progress_cursor = try state.extra.moment.putCursor(hash.hashInt(.sha1, "merge-in-progress"));
     const merge_in_progress = try rp.Repo(.xit).DB.HashMap(.read_write).init(merge_in_progress_cursor);
-    var merge_branch_cursor = try merge_in_progress.putCursor(hash.hashBuffer("branch"));
+    var merge_branch_cursor = try merge_in_progress.putCursor(hash.hashInt(.sha1, "branch"));
     try merge_branch_cursor.writeIfEmpty(.{ .slot = branch_cursor.slot() });
     const merge_branch = try rp.Repo(.xit).DB.HashMap(.read_write).init(merge_branch_cursor);
 
@@ -553,30 +553,30 @@ fn writeBlobWithPatches(
         try patch.applyPatch(state.readOnly().extra.moment, &merge_branch, allocator, path_hash, patch_id);
     }
 
-    const merge_path_to_live_parent_to_children_cursor = (try merge_branch.getCursor(hash.hashBuffer("path->live-parent->children"))) orelse return error.KeyNotFound;
+    const merge_path_to_live_parent_to_children_cursor = (try merge_branch.getCursor(hash.hashInt(.sha1, "path->live-parent->children"))) orelse return error.KeyNotFound;
     const merge_path_to_live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_only).init(merge_path_to_live_parent_to_children_cursor);
     const merge_live_parent_to_children_cursor = (try merge_path_to_live_parent_to_children.getCursor(path_hash)) orelse return error.KeyNotFound;
     const merge_live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_only).init(merge_live_parent_to_children_cursor);
 
-    const commit_id_to_path_to_live_parent_to_children_cursor = (try state.extra.moment.getCursor(hash.hashBuffer("commit-id->path->live-parent->children"))) orelse return error.KeyNotFound;
+    const commit_id_to_path_to_live_parent_to_children_cursor = (try state.extra.moment.getCursor(hash.hashInt(.sha1, "commit-id->path->live-parent->children"))) orelse return error.KeyNotFound;
     const commit_id_to_path_to_live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_only).init(commit_id_to_path_to_live_parent_to_children_cursor);
 
-    const base_path_to_live_parent_to_children_cursor = (try commit_id_to_path_to_live_parent_to_children.getCursor(try hash.hexToHash(base_oid))) orelse return error.KeyNotFound;
+    const base_path_to_live_parent_to_children_cursor = (try commit_id_to_path_to_live_parent_to_children.getCursor(try hash.hexToHash(.sha1, base_oid))) orelse return error.KeyNotFound;
     const base_path_to_live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_only).init(base_path_to_live_parent_to_children_cursor);
     const base_live_parent_to_children_cursor = (try base_path_to_live_parent_to_children.getCursor(path_hash)) orelse return error.KeyNotFound;
     const base_live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_only).init(base_live_parent_to_children_cursor);
 
-    const target_path_to_live_parent_to_children_cursor = (try commit_id_to_path_to_live_parent_to_children.getCursor(try hash.hexToHash(target_oid))) orelse return error.KeyNotFound;
+    const target_path_to_live_parent_to_children_cursor = (try commit_id_to_path_to_live_parent_to_children.getCursor(try hash.hexToHash(.sha1, target_oid))) orelse return error.KeyNotFound;
     const target_path_to_live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_only).init(target_path_to_live_parent_to_children_cursor);
     const target_live_parent_to_children_cursor = (try target_path_to_live_parent_to_children.getCursor(path_hash)) orelse return error.KeyNotFound;
     const target_live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_only).init(target_live_parent_to_children_cursor);
 
-    const source_path_to_live_parent_to_children_cursor = (try commit_id_to_path_to_live_parent_to_children.getCursor(try hash.hexToHash(source_oid))) orelse return error.KeyNotFound;
+    const source_path_to_live_parent_to_children_cursor = (try commit_id_to_path_to_live_parent_to_children.getCursor(try hash.hexToHash(.sha1, source_oid))) orelse return error.KeyNotFound;
     const source_path_to_live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_only).init(source_path_to_live_parent_to_children_cursor);
     const source_live_parent_to_children_cursor = (try source_path_to_live_parent_to_children.getCursor(path_hash)) orelse return error.KeyNotFound;
     const source_live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_only).init(source_live_parent_to_children_cursor);
 
-    const patch_id_to_change_content_list_cursor = (try state.extra.moment.getCursor(hash.hashBuffer("patch-id->change-content-list"))) orelse return error.KeyNotFound;
+    const patch_id_to_change_content_list_cursor = (try state.extra.moment.getCursor(hash.hashInt(.sha1, "patch-id->change-content-list"))) orelse return error.KeyNotFound;
     const patch_id_to_change_content_list = try rp.Repo(.xit).DB.HashMap(.read_only).init(patch_id_to_change_content_list_cursor);
 
     var line_buffer = std.ArrayList([]const u8).init(allocator);
@@ -648,7 +648,7 @@ fn writeBlobWithPatches(
         patch_id_to_change_content_list: *const rp.Repo(.xit).DB.HashMap(.read_only),
         line_buffer: *std.ArrayList([]const u8),
         current_line: ?[]const u8,
-        current_node_id_hash: ?hash.Hash,
+        current_node_id_hash: ?hash.HashInt(.sha1),
         has_conflict: bool,
 
         const Parent = @This();
@@ -715,7 +715,7 @@ fn writeBlobWithPatches(
                         var node_id_reader = stream.reader();
                         break :blk @bitCast(try node_id_reader.readInt(patch.NodeIdInt, .big));
                     };
-                    const first_node_id_hash = hash.hashBuffer(first_child_slice);
+                    const first_node_id_hash = hash.hashInt(.sha1, first_child_slice);
 
                     if (try children_iter.next()) |second_child_cursor| {
                         if (try children_iter.next() != null) return error.MoreThanTwoChildrenFound;
@@ -728,7 +728,7 @@ fn writeBlobWithPatches(
                             var node_id_reader = stream.reader();
                             break :blk @bitCast(try node_id_reader.readInt(patch.NodeIdInt, .big));
                         };
-                        const second_node_id_hash = hash.hashBuffer(second_child_slice);
+                        const second_node_id_hash = hash.hashInt(.sha1, second_child_slice);
 
                         const target_node_id, const target_node_id_hash, const source_node_id, const source_node_id_hash =
                             if (try self.parent.target_live_parent_to_children.getCursor(first_node_id_hash) != null)
@@ -739,7 +739,7 @@ fn writeBlobWithPatches(
                         var target_node_ids = std.ArrayList(patch.NodeId).init(self.parent.allocator);
                         defer target_node_ids.deinit();
 
-                        var join_node_id_hash_maybe: ?hash.Hash = null;
+                        var join_node_id_hash_maybe: ?hash.HashInt(.sha1) = null;
 
                         // find the target node ids that aren't in source
                         var next_node_id = target_node_id;
@@ -763,7 +763,7 @@ fn writeBlobWithPatches(
                                     var node_id_reader = stream.reader();
                                     break :blk @bitCast(try node_id_reader.readInt(patch.NodeIdInt, .big));
                                 };
-                                next_node_id_hash = hash.hashBuffer(next_child_slice);
+                                next_node_id_hash = hash.hashInt(.sha1, next_child_slice);
                             } else {
                                 break;
                             }
@@ -794,7 +794,7 @@ fn writeBlobWithPatches(
                                     var node_id_reader = stream.reader();
                                     break :blk @bitCast(try node_id_reader.readInt(patch.NodeIdInt, .big));
                                 };
-                                next_node_id_hash = hash.hashBuffer(next_child_slice);
+                                next_node_id_hash = hash.hashInt(.sha1, next_child_slice);
                             } else {
                                 break;
                             }
@@ -819,7 +819,7 @@ fn writeBlobWithPatches(
                                     var node_id_reader = stream.reader();
                                     break :blk @bitCast(try node_id_reader.readInt(patch.NodeIdInt, .big));
                                 };
-                                next_node_id_hash = hash.hashBuffer(next_child_slice);
+                                next_node_id_hash = hash.hashInt(.sha1, next_child_slice);
                                 if (join_node_id_hash_maybe) |join_node_id_hash| {
                                     if (next_node_id_hash != join_node_id_hash) {
                                         try base_node_ids.append(next_node_id);
@@ -845,7 +845,7 @@ fn writeBlobWithPatches(
                                 var node_id_writer = stream.writer();
                                 try node_id_writer.writeInt(patch.NodeIdInt, @bitCast(join_parent_node_id), .big);
                             }
-                            const join_parent_node_id_hash = hash.hashBuffer(&join_parent_bytes);
+                            const join_parent_node_id_hash = hash.hashInt(.sha1, &join_parent_bytes);
                             self.parent.current_node_id_hash = join_parent_node_id_hash;
 
                             // TODO: is it actually guaranteed that the join node is in base?
@@ -944,7 +944,7 @@ fn writeBlobWithPatches(
 
         pub fn seekTo(self: *@This(), offset: usize) !void {
             if (offset == 0) {
-                self.current_node_id_hash = hash.hashBuffer(&patch.FIRST_NODE_ID_BYTES);
+                self.current_node_id_hash = hash.hashInt(.sha1, &patch.FIRST_NODE_ID_BYTES);
             } else {
                 return error.InvalidOffset;
             }
@@ -993,11 +993,11 @@ fn writeBlobWithPatches(
         .patch_id_to_change_content_list = &patch_id_to_change_content_list,
         .line_buffer = &line_buffer,
         .current_line = null,
-        .current_node_id_hash = hash.hashBuffer(&patch.FIRST_NODE_ID_BYTES),
+        .current_node_id_hash = hash.hashInt(.sha1, &patch.FIRST_NODE_ID_BYTES),
         .has_conflict = false,
     };
 
-    var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+    var oid = [_]u8{0} ** hash.byteLen(.sha1);
     try obj.writeObject(.xit, state, &stream, .{ .kind = .blob, .size = try stream.count() }, &oid);
     has_conflict.* = stream.has_conflict;
     return oid;
@@ -1012,9 +1012,9 @@ fn samePathConflict(
     comptime repo_kind: rp.RepoKind,
     state: rp.Repo(repo_kind).State(.read_write),
     allocator: std.mem.Allocator,
-    base_oid: *const [hash.SHA1_HEX_LEN]u8,
-    target_oid: *const [hash.SHA1_HEX_LEN]u8,
-    source_oid: *const [hash.SHA1_HEX_LEN]u8,
+    base_oid: *const [hash.hexLen(.sha1)]u8,
+    target_oid: *const [hash.hexLen(.sha1)]u8,
+    source_oid: *const [hash.hexLen(.sha1)]u8,
     target_name: []const u8,
     source_name: []const u8,
     target_change_maybe: ?obj.Change,
@@ -1198,12 +1198,12 @@ pub const Merge = struct {
     allocator: std.mem.Allocator,
     changes: std.StringArrayHashMap(obj.Change),
     auto_resolved_conflicts: std.StringArrayHashMap(void),
-    base_oid: [hash.SHA1_HEX_LEN]u8,
+    base_oid: [hash.hexLen(.sha1)]u8,
     target_name: []const u8,
     source_name: []const u8,
     data: union(enum) {
         success: struct {
-            oid: [hash.SHA1_HEX_LEN]u8,
+            oid: [hash.hexLen(.sha1)]u8,
         },
         nothing,
         fast_forward,
@@ -1262,7 +1262,7 @@ pub const Merge = struct {
                         }
                     },
                     .xit => {
-                        if (try state.extra.moment.getCursor(hash.hashBuffer("merge-in-progress"))) |_| {
+                        if (try state.extra.moment.getCursor(hash.hashInt(.sha1, "merge-in-progress"))) |_| {
                             return error.UnfinishedMergeAlreadyInProgress;
                         }
                     },
@@ -1296,13 +1296,13 @@ pub const Merge = struct {
                         .allocator = allocator,
                         .changes = clean_diff.changes,
                         .auto_resolved_conflicts = auto_resolved_conflicts,
-                        .base_oid = [_]u8{0} ** hash.SHA1_HEX_LEN,
+                        .base_oid = [_]u8{0} ** hash.hexLen(.sha1),
                         .target_name = target_name,
                         .source_name = source_name,
                         .data = .fast_forward,
                     };
                 };
-                var base_oid: [hash.SHA1_HEX_LEN]u8 = undefined;
+                var base_oid: [hash.hexLen(.sha1)]u8 = undefined;
                 switch (merge_kind) {
                     .merge => base_oid = try commonAncestor(repo_kind, allocator, state.readOnly(), &target_oid, &source_oid),
                     .cherry_pick => {
@@ -1458,13 +1458,13 @@ pub const Merge = struct {
 
                         // exit early if there were conflicts
                         if (conflicts.count() > 0) {
-                            const merge_in_progress_cursor = try state.extra.moment.putCursor(hash.hashBuffer("merge-in-progress"));
+                            const merge_in_progress_cursor = try state.extra.moment.putCursor(hash.hashInt(.sha1, "merge-in-progress"));
                             const merge_in_progress = try rp.Repo(.xit).DB.HashMap(.read_write).init(merge_in_progress_cursor);
 
-                            var merge_head_cursor = try merge_in_progress.putCursor(hash.hashBuffer("source-oid"));
+                            var merge_head_cursor = try merge_in_progress.putCursor(hash.hashInt(.sha1, "source-oid"));
                             try merge_head_cursor.write(.{ .bytes = &source_oid });
 
-                            var message_cursor = try merge_in_progress.putCursor(hash.hashBuffer("message"));
+                            var message_cursor = try merge_in_progress.putCursor(hash.hashInt(.sha1, "message"));
                             try message_cursor.write(.{ .bytes = commit_metadata.message });
 
                             return .{
@@ -1479,7 +1479,7 @@ pub const Merge = struct {
                             };
                         } else {
                             // if any file conflicts were auto-resolved, there will be temporary state that must be cleaned up
-                            _ = try state.extra.moment.remove(hash.hashBuffer("merge-in-progress"));
+                            _ = try state.extra.moment.remove(hash.hashInt(.sha1, "merge-in-progress"));
                         }
                     },
                 }
@@ -1530,7 +1530,7 @@ pub const Merge = struct {
                     }
                 }
 
-                var source_oid: [hash.SHA1_HEX_LEN]u8 = undefined;
+                var source_oid: [hash.hexLen(.sha1)]u8 = undefined;
                 var commit_metadata = obj.CommitMetadata{};
 
                 // read the stored merge state
@@ -1558,16 +1558,16 @@ pub const Merge = struct {
                         commit_metadata.message = try merge_msg.readToEndAlloc(arena.allocator(), MAX_READ_BYTES);
                     },
                     .xit => {
-                        const merge_in_progress_cursor = try state.extra.moment.putCursor(hash.hashBuffer("merge-in-progress"));
+                        const merge_in_progress_cursor = try state.extra.moment.putCursor(hash.hashInt(.sha1, "merge-in-progress"));
                         const merge_in_progress = try rp.Repo(.xit).DB.HashMap(.read_write).init(merge_in_progress_cursor);
 
-                        const source_oid_cursor = (try merge_in_progress.getCursor(hash.hashBuffer("source-oid"))) orelse return error.MergeHeadNotFound;
+                        const source_oid_cursor = (try merge_in_progress.getCursor(hash.hashInt(.sha1, "source-oid"))) orelse return error.MergeHeadNotFound;
                         const source_oid_slice = try source_oid_cursor.readBytes(&source_oid);
                         if (source_oid_slice.len != source_oid.len) {
                             return error.InvalidMergeHead;
                         }
 
-                        const message_cursor = (try merge_in_progress.getCursor(hash.hashBuffer("message"))) orelse return error.MergeMessageNotFound;
+                        const message_cursor = (try merge_in_progress.getCursor(hash.hashInt(.sha1, "message"))) orelse return error.MergeMessageNotFound;
                         commit_metadata.message = try message_cursor.readBytesAlloc(arena.allocator(), MAX_READ_BYTES);
                     },
                 }
@@ -1577,7 +1577,7 @@ pub const Merge = struct {
                 const source_name = try arena.allocator().dupe(u8, &source_oid);
 
                 // get the base oid
-                var base_oid: [hash.SHA1_HEX_LEN]u8 = undefined;
+                var base_oid: [hash.hexLen(.sha1)]u8 = undefined;
                 const target_oid = target_oid_maybe orelse return error.TargetOidNotFound;
                 switch (merge_kind) {
                     .merge => base_oid = try commonAncestor(repo_kind, allocator, state.readOnly(), &target_oid, &source_oid),
@@ -1610,7 +1610,7 @@ pub const Merge = struct {
                         try state.core.git_dir.deleteFile("MERGE_MSG");
                     },
                     .xit => {
-                        _ = try state.extra.moment.remove(hash.hashBuffer("merge-in-progress"));
+                        _ = try state.extra.moment.remove(hash.hashInt(.sha1, "merge-in-progress"));
                     },
                 }
 

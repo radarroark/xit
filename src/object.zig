@@ -50,7 +50,7 @@ pub fn writeObject(
     state: rp.Repo(repo_kind).State(.read_write),
     file: anytype,
     header: ObjectHeader,
-    sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8,
+    sha1_bytes_buffer: *[hash.byteLen(.sha1)]u8,
 ) !void {
     // serialize object header
     var header_bytes = [_]u8{0} ** 32;
@@ -58,7 +58,7 @@ pub fn writeObject(
 
     // calc the sha1 of its contents
     const reader = file.reader();
-    try hash.sha1Reader(reader, header_str, sha1_bytes_buffer);
+    try hash.hashReader(.sha1, reader, header_str, sha1_bytes_buffer);
     const sha1_hex = std.fmt.bytesToHex(sha1_bytes_buffer, .lower);
 
     // reset seek pos so we can reuse the reader for copying
@@ -106,7 +106,7 @@ pub fn writeObject(
             compressed_lock.success = true;
         },
         .xit => {
-            const file_hash = hash.bytesToHash(sha1_bytes_buffer);
+            const file_hash = hash.bytesToHash(.sha1, sha1_bytes_buffer);
             try chunk.writeChunks(state, file, file_hash, header_str);
         },
     }
@@ -117,7 +117,7 @@ fn writeTree(
     state: rp.Repo(repo_kind).State(.read_write),
     allocator: std.mem.Allocator,
     tree: *Tree,
-    sha1_bytes_buffer: *[hash.SHA1_BYTES_LEN]u8,
+    sha1_bytes_buffer: *[hash.byteLen(.sha1)]u8,
 ) !void {
     // sort the entries. this is needed for xit,
     // because its index entries are stored as a
@@ -147,7 +147,7 @@ fn writeTree(
     defer allocator.free(tree_bytes);
 
     // calc the sha1 of its contents
-    try hash.sha1Buffer(tree_bytes, sha1_bytes_buffer);
+    try hash.hashBuffer(.sha1, tree_bytes, sha1_bytes_buffer);
     const tree_sha1_hex = std.fmt.bytesToHex(sha1_bytes_buffer, .lower);
 
     switch (repo_kind) {
@@ -182,7 +182,7 @@ fn writeTree(
             compressed_lock.success = true;
         },
         .xit => {
-            const object_hash = hash.bytesToHash(sha1_bytes_buffer);
+            const object_hash = hash.bytesToHash(.sha1, sha1_bytes_buffer);
             var stream = std.io.fixedBufferStream(tree_contents);
             try chunk.writeChunks(state, &stream, object_hash, header);
         },
@@ -227,7 +227,7 @@ fn addIndexEntries(
                 child_names.items,
             );
 
-            var tree_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+            var tree_sha1_bytes_buffer = [_]u8{0} ** hash.byteLen(.sha1);
             try writeTree(repo_kind, state, allocator, &subtree, &tree_sha1_bytes_buffer);
 
             try tree.addTreeEntry(name, &tree_sha1_bytes_buffer);
@@ -241,15 +241,15 @@ pub const CommitMetadata = struct {
     author: ?[]const u8 = null,
     committer: ?[]const u8 = null,
     message: []const u8 = "",
-    parent_oids: ?[]const [hash.SHA1_HEX_LEN]u8 = null,
+    parent_oids: ?[]const [hash.hexLen(.sha1)]u8 = null,
     allow_empty: bool = false,
 };
 
 fn createCommitContents(
     allocator: std.mem.Allocator,
-    tree_sha1_hex: *const [hash.SHA1_HEX_LEN]u8,
+    tree_sha1_hex: *const [hash.hexLen(.sha1)]u8,
     metadata: CommitMetadata,
-    parent_oids: []const [hash.SHA1_HEX_LEN]u8,
+    parent_oids: []const [hash.hexLen(.sha1)]u8,
 ) ![]const u8 {
     var metadata_lines = std.ArrayList([]const u8).init(allocator);
     defer {
@@ -280,8 +280,8 @@ pub fn writeCommit(
     state: rp.Repo(repo_kind).State(.read_write),
     allocator: std.mem.Allocator,
     metadata: CommitMetadata,
-) ![hash.SHA1_HEX_LEN]u8 {
-    var commit_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+) ![hash.hexLen(.sha1)]u8 {
+    var commit_sha1_bytes_buffer = [_]u8{0} ** hash.byteLen(.sha1);
     const parent_oids = if (metadata.parent_oids) |oids| oids else blk: {
         const head_oid_maybe = try ref.readHeadMaybe(repo_kind, state.readOnly());
         break :blk if (head_oid_maybe) |head_oid| &.{head_oid} else &.{};
@@ -297,7 +297,7 @@ pub fn writeCommit(
     try addIndexEntries(repo_kind, state, allocator, &tree, index, "", index.root_children.keys());
 
     // write and hash tree
-    var tree_sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+    var tree_sha1_bytes_buffer = [_]u8{0} ** hash.byteLen(.sha1);
     try writeTree(repo_kind, state, allocator, &tree, &tree_sha1_bytes_buffer);
     const tree_sha1_hex = std.fmt.bytesToHex(tree_sha1_bytes_buffer, .lower);
 
@@ -329,9 +329,9 @@ pub fn writeCommit(
     defer allocator.free(commit);
 
     // calc the sha1 of its contents
-    try hash.sha1Buffer(commit, &commit_sha1_bytes_buffer);
+    try hash.hashBuffer(.sha1, commit, &commit_sha1_bytes_buffer);
     const commit_sha1_hex = std.fmt.bytesToHex(commit_sha1_bytes_buffer, .lower);
-    const commit_hash = hash.bytesToHash(&commit_sha1_bytes_buffer);
+    const commit_hash = hash.bytesToHash(.sha1, &commit_sha1_bytes_buffer);
 
     switch (repo_kind) {
         .git => {
@@ -392,7 +392,7 @@ pub fn TreeDiff(comptime repo_kind: rp.RepoKind) type {
             self.arena.deinit();
         }
 
-        pub fn compare(self: *TreeDiff(repo_kind), state: rp.Repo(repo_kind).State(.read_only), old_oid_maybe: ?[hash.SHA1_HEX_LEN]u8, new_oid_maybe: ?[hash.SHA1_HEX_LEN]u8, path_list_maybe: ?std.ArrayList([]const u8)) !void {
+        pub fn compare(self: *TreeDiff(repo_kind), state: rp.Repo(repo_kind).State(.read_only), old_oid_maybe: ?[hash.hexLen(.sha1)]u8, new_oid_maybe: ?[hash.hexLen(.sha1)]u8, path_list_maybe: ?std.ArrayList([]const u8)) !void {
             if (old_oid_maybe == null and new_oid_maybe == null) {
                 return;
             }
@@ -445,7 +445,7 @@ pub fn TreeDiff(comptime repo_kind: rp.RepoKind) type {
             }
         }
 
-        fn loadTree(self: *TreeDiff(repo_kind), state: rp.Repo(repo_kind).State(.read_only), oid_maybe: ?[hash.SHA1_HEX_LEN]u8) !std.StringArrayHashMap(TreeEntry) {
+        fn loadTree(self: *TreeDiff(repo_kind), state: rp.Repo(repo_kind).State(.read_only), oid_maybe: ?[hash.hexLen(.sha1)]u8) !std.StringArrayHashMap(TreeEntry) {
             if (oid_maybe) |oid| {
                 const obj = try Object(repo_kind, .full).init(self.arena.allocator(), state, &oid);
                 return switch (obj.content) {
@@ -471,7 +471,7 @@ pub const ObjectKind = enum {
 };
 
 pub const TreeEntry = struct {
-    oid: [hash.SHA1_BYTES_LEN]u8,
+    oid: [hash.byteLen(.sha1)]u8,
     mode: io.Mode,
 
     pub fn eql(self: TreeEntry, other: TreeEntry) bool {
@@ -501,7 +501,7 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
             .xit => chunk.ChunkObjectReader,
         };
 
-        pub fn init(allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State(.read_only), oid: *const [hash.SHA1_HEX_LEN]u8) !@This() {
+        pub fn init(allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State(.read_only), oid: *const [hash.hexLen(.sha1)]u8) !@This() {
             switch (repo_kind) {
                 .git => {
                     const reader = try pack.LooseOrPackObjectReader.init(allocator, state.core, oid);
@@ -514,13 +514,13 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind) type {
                 },
                 .xit => {
                     const chunk_hashes_cursor = (try state.extra.moment.cursor.readPath(void, &.{
-                        .{ .hash_map_get = .{ .value = hash.hashBuffer("object-id->chunk-hashes") } },
-                        .{ .hash_map_get = .{ .value = try hash.hexToHash(oid) } },
+                        .{ .hash_map_get = .{ .value = hash.hashInt(.sha1, "object-id->chunk-hashes") } },
+                        .{ .hash_map_get = .{ .value = try hash.hexToHash(.sha1, oid) } },
                     })) orelse return error.ObjectNotFound;
 
                     const header_cursor = (try state.extra.moment.cursor.readPath(void, &.{
-                        .{ .hash_map_get = .{ .value = hash.hashBuffer("object-id->header") } },
-                        .{ .hash_map_get = .{ .value = try hash.hexToHash(oid) } },
+                        .{ .hash_map_get = .{ .value = hash.hashInt(.sha1, "object-id->header") } },
+                        .{ .hash_map_get = .{ .value = try hash.hexToHash(.sha1, oid) } },
                     })) orelse return error.ObjectNotFound;
 
                     var header_buffer = [_]u8{0} ** 32;
@@ -609,8 +609,8 @@ pub const ObjectContent = union(ObjectKind) {
         entries: std.StringArrayHashMap(TreeEntry),
     },
     commit: struct {
-        tree: [hash.SHA1_HEX_LEN]u8,
-        parents: std.ArrayList([hash.SHA1_HEX_LEN]u8),
+        tree: [hash.hexLen(.sha1)]u8,
+        parents: std.ArrayList([hash.hexLen(.sha1)]u8),
         metadata: CommitMetadata,
     },
 };
@@ -631,11 +631,11 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime load_kind: ObjectLoadKin
             .raw => ObjectKind,
             .full => ObjectContent,
         },
-        oid: [hash.SHA1_HEX_LEN]u8,
+        oid: [hash.hexLen(.sha1)]u8,
         len: u64,
         object_reader: ObjectReader(repo_kind),
 
-        pub fn init(allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State(.read_only), oid: *const [hash.SHA1_HEX_LEN]u8) !Object(repo_kind, load_kind) {
+        pub fn init(allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State(.read_only), oid: *const [hash.hexLen(.sha1)]u8) !Object(repo_kind, load_kind) {
             var obj_rdr = try ObjectReader(repo_kind).init(allocator, state, oid);
             errdefer obj_rdr.deinit();
 
@@ -683,7 +683,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime load_kind: ObjectLoadKin
                                 };
                                 const entry_mode: io.Mode = @bitCast(try std.fmt.parseInt(u32, entry_mode_str, 8));
                                 const entry_name = try reader.readUntilDelimiterAlloc(arena.allocator(), 0, MAX_READ_BYTES);
-                                var entry_oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+                                var entry_oid = [_]u8{0} ** hash.byteLen(.sha1);
                                 try reader.readNoEof(&entry_oid);
                                 try entries.put(entry_name, .{ .oid = entry_oid, .mode = entry_mode });
                             }
@@ -718,17 +718,17 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime load_kind: ObjectLoadKin
                             }
 
                             // read the tree hash
-                            var tree_hash = [_]u8{0} ** (hash.SHA1_HEX_LEN + 1);
+                            var tree_hash = [_]u8{0} ** (hash.hexLen(.sha1) + 1);
                             const tree_hash_slice = try reader.readUntilDelimiter(&tree_hash, '\n');
-                            if (tree_hash_slice.len != hash.SHA1_HEX_LEN) {
+                            if (tree_hash_slice.len != hash.hexLen(.sha1)) {
                                 return error.InvalidCommitTreeHash;
                             }
 
                             // init the content
                             var content = ObjectContent{
                                 .commit = .{
-                                    .tree = tree_hash_slice[0..hash.SHA1_HEX_LEN].*,
-                                    .parents = std.ArrayList([hash.SHA1_HEX_LEN]u8).init(arena.allocator()),
+                                    .tree = tree_hash_slice[0..comptime hash.hexLen(.sha1)].*,
+                                    .parents = std.ArrayList([hash.hexLen(.sha1)]u8).init(arena.allocator()),
                                     .metadata = .{},
                                 },
                             };
@@ -747,10 +747,10 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime load_kind: ObjectLoadKin
                                     const value = line[line_idx + 1 ..];
 
                                     if (std.mem.eql(u8, "parent", key)) {
-                                        if (value.len != hash.SHA1_HEX_LEN) {
+                                        if (value.len != hash.hexLen(.sha1)) {
                                             return error.InvalidCommitParentHash;
                                         }
-                                        try content.commit.parents.append(value[0..hash.SHA1_HEX_LEN].*);
+                                        try content.commit.parents.append(value[0..comptime hash.hexLen(.sha1)].*);
                                     } else if (std.mem.eql(u8, "author", key)) {
                                         content.commit.metadata.author = value;
                                     } else if (std.mem.eql(u8, "committer", key)) {
@@ -789,8 +789,8 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime load_kind: Objec
         allocator: std.mem.Allocator,
         core: *rp.Repo(repo_kind).Core,
         moment: rp.Repo(repo_kind).Moment(.read_only),
-        oid_queue: std.DoublyLinkedList([hash.SHA1_HEX_LEN]u8),
-        oid_excludes: std.AutoHashMap([hash.SHA1_HEX_LEN]u8, void),
+        oid_queue: std.DoublyLinkedList([hash.hexLen(.sha1)]u8),
+        oid_excludes: std.AutoHashMap([hash.hexLen(.sha1)]u8, void),
         object: Object(repo_kind, load_kind),
         options: Options,
 
@@ -801,22 +801,22 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime load_kind: Objec
         pub fn init(
             allocator: std.mem.Allocator,
             state: rp.Repo(repo_kind).State(.read_only),
-            start_oids: []const [hash.SHA1_HEX_LEN]u8,
+            start_oids: []const [hash.hexLen(.sha1)]u8,
             options: Options,
         ) !ObjectIterator(repo_kind, load_kind) {
             var self = ObjectIterator(repo_kind, load_kind){
                 .allocator = allocator,
                 .core = state.core,
                 .moment = state.extra.moment.*,
-                .oid_queue = std.DoublyLinkedList([hash.SHA1_HEX_LEN]u8){},
-                .oid_excludes = std.AutoHashMap([hash.SHA1_HEX_LEN]u8, void).init(allocator),
+                .oid_queue = std.DoublyLinkedList([hash.hexLen(.sha1)]u8){},
+                .oid_excludes = std.AutoHashMap([hash.hexLen(.sha1)]u8, void).init(allocator),
                 .object = undefined,
                 .options = options,
             };
             errdefer self.deinit();
 
             for (start_oids) |start_oid| {
-                var node = try allocator.create(std.DoublyLinkedList([hash.SHA1_HEX_LEN]u8).Node);
+                var node = try allocator.create(std.DoublyLinkedList([hash.hexLen(.sha1)]u8).Node);
                 errdefer allocator.destroy(node);
                 node.data = start_oid;
                 self.oid_queue.append(node);
@@ -871,7 +871,7 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime load_kind: Objec
                         for (tree.entries.values()) |entry| {
                             const entry_oid = std.fmt.bytesToHex(entry.oid, .lower);
                             if (!self.oid_excludes.contains(entry_oid)) {
-                                var new_node = try self.allocator.create(std.DoublyLinkedList([hash.SHA1_HEX_LEN]u8).Node);
+                                var new_node = try self.allocator.create(std.DoublyLinkedList([hash.hexLen(.sha1)]u8).Node);
                                 errdefer self.allocator.destroy(new_node);
                                 new_node.data = entry_oid;
                                 self.oid_queue.append(new_node);
@@ -881,14 +881,14 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime load_kind: Objec
                 },
                 .commit => |commit| {
                     for (commit.parents.items) |parent_oid| {
-                        var new_node = try self.allocator.create(std.DoublyLinkedList([hash.SHA1_HEX_LEN]u8).Node);
+                        var new_node = try self.allocator.create(std.DoublyLinkedList([hash.hexLen(.sha1)]u8).Node);
                         errdefer self.allocator.destroy(new_node);
                         new_node.data = parent_oid;
                         self.oid_queue.append(new_node);
                     }
                     if (self.options.recursive) {
                         if (!self.oid_excludes.contains(commit.tree)) {
-                            var new_node = try self.allocator.create(std.DoublyLinkedList([hash.SHA1_HEX_LEN]u8).Node);
+                            var new_node = try self.allocator.create(std.DoublyLinkedList([hash.hexLen(.sha1)]u8).Node);
                             errdefer self.allocator.destroy(new_node);
                             new_node.data = commit.tree;
                             self.oid_queue.append(new_node);
@@ -898,7 +898,7 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime load_kind: Objec
             }
         }
 
-        pub fn exclude(self: *ObjectIterator(repo_kind, load_kind), oid: *const [hash.SHA1_HEX_LEN]u8) !void {
+        pub fn exclude(self: *ObjectIterator(repo_kind, load_kind), oid: *const [hash.hexLen(.sha1)]u8) !void {
             try self.oid_excludes.put(oid.*, {});
 
             const state = rp.Repo(repo_kind).State(.read_only){ .core = self.core, .extra = .{ .moment = &self.moment } };

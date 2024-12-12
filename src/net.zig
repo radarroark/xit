@@ -51,7 +51,7 @@ pub fn fetch(
     defer arena.deinit();
 
     // read messages
-    var ref_to_oid = std.StringArrayHashMap(*const [hash.SHA1_HEX_LEN]u8).init(arena.allocator());
+    var ref_to_oid = std.StringArrayHashMap(*const [hash.hexLen(.sha1)]u8).init(arena.allocator());
     var capability_set = std.StringArrayHashMap(void).init(arena.allocator());
     while (true) {
         var size_buffer = [_]u8{0} ** 4;
@@ -99,10 +99,10 @@ pub fn fetch(
 
         // populate the map of refs
         if (std.mem.indexOfScalar(u8, msg_buffer, ' ')) |space_index| {
-            if (space_index != hash.SHA1_HEX_LEN) {
+            if (space_index != hash.hexLen(.sha1)) {
                 return error.UnexpectedOidLength;
             }
-            try ref_to_oid.put(msg_buffer[hash.SHA1_HEX_LEN + 1 ..], msg_buffer[0..hash.SHA1_HEX_LEN]);
+            try ref_to_oid.put(msg_buffer[hash.hexLen(.sha1) + 1 ..], msg_buffer[0..comptime hash.hexLen(.sha1)]);
         } else {
             return error.SpaceByteNotFound;
         }
@@ -248,7 +248,7 @@ pub fn fetch(
             .pack_reader = pack_reader,
         };
 
-        var oid = [_]u8{0} ** hash.SHA1_BYTES_LEN;
+        var oid = [_]u8{0} ** hash.byteLen(.sha1);
         switch (pack_reader.internal) {
             .basic => try obj.writeObject(repo_kind, state, &stream, pack_reader.internal.basic.header, &oid),
             .delta => return error.NotImplemented,

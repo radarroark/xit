@@ -18,7 +18,7 @@ const c = @cImport({
     @cInclude("git2.h");
 });
 
-fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
+fn testMain(comptime repo_kind: rp.RepoKind) ![hash.hexLen(.sha1)]u8 {
     const allocator = std.testing.allocator;
     const temp_dir_name = "temp-test-main";
 
@@ -189,8 +189,8 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                     const header = try std.fmt.allocPrint(allocator, "blob {}\x00", .{file_size});
                     defer allocator.free(header);
 
-                    var sha1_bytes_buffer = [_]u8{0} ** hash.SHA1_BYTES_LEN;
-                    try hash.sha1Reader(readme.reader(), header, &sha1_bytes_buffer);
+                    var sha1_bytes_buffer = [_]u8{0} ** hash.byteLen(.sha1);
+                    try hash.hashReader(.sha1, readme.reader(), header, &sha1_bytes_buffer);
                     const sha1_hex = std.fmt.bytesToHex(&sha1_bytes_buffer, .lower);
 
                     var oid: c.git_oid = undefined;
@@ -209,8 +209,8 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 const state = rp.Repo(repo_kind).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
                 const head_file_buffer = try ref.readHead(repo_kind, state);
                 const chunk_hashes_cursor_maybe = try moment.cursor.readPath(void, &.{
-                    .{ .hash_map_get = .{ .value = hash.hashBuffer("object-id->chunk-hashes") } },
-                    .{ .hash_map_get = .{ .value = try hash.hexToHash(&head_file_buffer) } },
+                    .{ .hash_map_get = .{ .value = hash.hashInt(.sha1, "object-id->chunk-hashes") } },
+                    .{ .hash_map_get = .{ .value = try hash.hexToHash(.sha1, &head_file_buffer) } },
                 });
                 try std.testing.expect(chunk_hashes_cursor_maybe != null);
             },
@@ -465,8 +465,8 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 const state = rp.Repo(repo_kind).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
                 const head_file_buffer = try ref.readHead(repo_kind, state);
                 const chunk_hashes_cursor_maybe = try moment.cursor.readPath(void, &.{
-                    .{ .hash_map_get = .{ .value = hash.hashBuffer("object-id->chunk-hashes") } },
-                    .{ .hash_map_get = .{ .value = try hash.hexToHash(&head_file_buffer) } },
+                    .{ .hash_map_get = .{ .value = hash.hashInt(.sha1, "object-id->chunk-hashes") } },
+                    .{ .hash_map_get = .{ .value = try hash.hexToHash(.sha1, &head_file_buffer) } },
                 });
                 try std.testing.expect(chunk_hashes_cursor_maybe != null);
             },
@@ -729,7 +729,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 defer repo.deinit();
                 var count: u32 = 0;
                 var moment = try repo.core.latestMoment();
-                if (try moment.getCursor(hash.hashBuffer("index"))) |index_cursor| {
+                if (try moment.getCursor(hash.hashInt(.sha1, "index"))) |index_cursor| {
                     var iter = try index_cursor.iterator();
                     defer iter.deinit();
                     while (try iter.next()) |_| {
@@ -788,7 +788,7 @@ fn testMain(comptime repo_kind: rp.RepoKind) ![hash.SHA1_HEX_LEN]u8 {
                 defer repo.deinit();
                 var count: u32 = 0;
                 var moment = try repo.core.latestMoment();
-                if (try moment.getCursor(hash.hashBuffer("index"))) |index_cursor| {
+                if (try moment.getCursor(hash.hashInt(.sha1, "index"))) |index_cursor| {
                     var iter = try index_cursor.iterator();
                     defer iter.deinit();
                     while (try iter.next()) |_| {

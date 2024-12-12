@@ -51,7 +51,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
 
         pub const DB = switch (repo_kind) {
             .git => void,
-            .xit => @import("xitdb").Database(.file, hash.Hash),
+            .xit => @import("xitdb").Database(.file, hash.HashInt(.sha1)),
         };
 
         pub const WriteMode = switch (repo_kind) {
@@ -582,19 +582,19 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             }
         }
 
-        pub fn commit(self: *Repo(repo_kind), allocator: std.mem.Allocator, metadata: obj.CommitMetadata) ![hash.SHA1_HEX_LEN]u8 {
+        pub fn commit(self: *Repo(repo_kind), allocator: std.mem.Allocator, metadata: obj.CommitMetadata) ![hash.hexLen(.sha1)]u8 {
             switch (repo_kind) {
                 .git => return try obj.writeCommit(repo_kind, .{ .core = &self.core, .extra = .{} }, allocator, metadata),
                 .xit => {
                     const patch = @import("./patch.zig");
 
-                    var result: [hash.SHA1_HEX_LEN]u8 = undefined;
+                    var result: [hash.hexLen(.sha1)]u8 = undefined;
 
                     const Ctx = struct {
                         core: *Repo(repo_kind).Core,
                         allocator: std.mem.Allocator,
                         metadata: obj.CommitMetadata,
-                        result: *[hash.SHA1_HEX_LEN]u8,
+                        result: *[hash.hexLen(.sha1)]u8,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
@@ -871,7 +871,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             return try df.FileIterator(repo_kind).init(allocator, state, diff_opts);
         }
 
-        pub fn treeDiff(self: *Repo(repo_kind), allocator: std.mem.Allocator, old_oid_maybe: ?[hash.SHA1_HEX_LEN]u8, new_oid_maybe: ?[hash.SHA1_HEX_LEN]u8) !obj.TreeDiff(repo_kind) {
+        pub fn treeDiff(self: *Repo(repo_kind), allocator: std.mem.Allocator, old_oid_maybe: ?[hash.hexLen(.sha1)]u8, new_oid_maybe: ?[hash.hexLen(.sha1)]u8) !obj.TreeDiff(repo_kind) {
             var moment = try self.core.latestMoment();
             const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
             var tree_diff = obj.TreeDiff(repo_kind).init(allocator);
@@ -977,7 +977,7 @@ pub fn Repo(comptime repo_kind: RepoKind) type {
             try cht.restore(repo_kind, state, allocator, path);
         }
 
-        pub fn log(self: *Repo(repo_kind), allocator: std.mem.Allocator, start_oids_maybe: ?[]const [hash.SHA1_HEX_LEN]u8) !obj.ObjectIterator(repo_kind, .full) {
+        pub fn log(self: *Repo(repo_kind), allocator: std.mem.Allocator, start_oids_maybe: ?[]const [hash.hexLen(.sha1)]u8) !obj.ObjectIterator(repo_kind, .full) {
             const options = .{ .recursive = false };
             var moment = try self.core.latestMoment();
             const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };

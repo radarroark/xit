@@ -219,7 +219,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                     }
                 },
                 .xit => {
-                    if (try state.extra.moment.getCursor(hash.hashBuffer("config"))) |config_cursor| {
+                    if (try state.extra.moment.getCursor(hash.hashInt(.sha1, "config"))) |config_cursor| {
                         var config_iter = try config_cursor.iterator();
                         defer config_iter.deinit();
                         while (try config_iter.next()) |*section_cursor| {
@@ -285,21 +285,21 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                 switch (repo_kind) {
                     .git => try self.write(state),
                     .xit => {
-                        const config_name_set_cursor = try state.extra.moment.putCursor(hash.hashBuffer("config-name-set"));
+                        const config_name_set_cursor = try state.extra.moment.putCursor(hash.hashInt(.sha1, "config-name-set"));
                         const config_name_set = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(config_name_set_cursor);
 
                         // store section name
-                        const section_name_hash = hash.hashBuffer(section_name);
+                        const section_name_hash = hash.hashInt(.sha1, section_name);
                         var section_name_cursor = try config_name_set.putKeyCursor(section_name_hash);
                         try section_name_cursor.writeIfEmpty(.{ .bytes = section_name });
 
                         // add section name to config
-                        const config_cursor = try state.extra.moment.putCursor(hash.hashBuffer("config"));
+                        const config_cursor = try state.extra.moment.putCursor(hash.hashInt(.sha1, "config"));
                         const config = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(config_cursor);
                         try config.putKey(section_name_hash, .{ .slot = section_name_cursor.slot() });
 
                         // store variable name
-                        const var_name_hash = hash.hashBuffer(var_name);
+                        const var_name_hash = hash.hashInt(.sha1, var_name);
                         var var_name_cursor = try config_name_set.putKeyCursor(var_name_hash);
                         try var_name_cursor.writeIfEmpty(.{ .bytes = var_name });
 
@@ -333,14 +333,14 @@ pub fn Config(comptime repo_kind: rp.RepoKind) type {
                 switch (repo_kind) {
                     .git => try self.write(state),
                     .xit => {
-                        const config_cursor = try state.extra.moment.putCursor(hash.hashBuffer("config"));
+                        const config_cursor = try state.extra.moment.putCursor(hash.hashInt(.sha1, "config"));
                         const config = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(config_cursor);
                         if (!self.sections.contains(section_name)) {
-                            _ = try config.remove(hash.hashBuffer(section_name));
+                            _ = try config.remove(hash.hashInt(.sha1, section_name));
                         } else {
-                            const section_cursor = try config.putCursor(hash.hashBuffer(section_name));
+                            const section_cursor = try config.putCursor(hash.hashInt(.sha1, section_name));
                             const section = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(section_cursor);
-                            _ = try section.remove(hash.hashBuffer(var_name));
+                            _ = try section.remove(hash.hashInt(.sha1, var_name));
                         }
                     },
                 }

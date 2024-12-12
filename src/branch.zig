@@ -68,25 +68,25 @@ pub fn add(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.rea
             lock.success = true;
         },
         .xit => {
-            const name_hash = hash.hashBuffer(name);
+            const name_hash = hash.hashInt(.sha1, name);
 
             // store ref name
-            const ref_name_set_cursor = try state.extra.moment.putCursor(hash.hashBuffer("ref-name-set"));
+            const ref_name_set_cursor = try state.extra.moment.putCursor(hash.hashInt(.sha1, "ref-name-set"));
             const ref_name_set = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(ref_name_set_cursor);
             var ref_name_cursor = try ref_name_set.putKeyCursor(name_hash);
             try ref_name_cursor.writeIfEmpty(.{ .bytes = name });
 
             // store ref content
             const head_file_buffer = try ref.readHead(repo_kind, state.readOnly());
-            const ref_content_set_cursor = try state.extra.moment.putCursor(hash.hashBuffer("ref-content-set"));
+            const ref_content_set_cursor = try state.extra.moment.putCursor(hash.hashInt(.sha1, "ref-content-set"));
             const ref_content_set = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(ref_content_set_cursor);
-            var ref_content_cursor = try ref_content_set.putKeyCursor(hash.hashBuffer(&head_file_buffer));
+            var ref_content_cursor = try ref_content_set.putKeyCursor(hash.hashInt(.sha1, &head_file_buffer));
             try ref_content_cursor.writeIfEmpty(.{ .bytes = &head_file_buffer });
 
             // add ref name and content to refs/heads/{refname}
-            const refs_cursor = try state.extra.moment.putCursor(hash.hashBuffer("refs"));
+            const refs_cursor = try state.extra.moment.putCursor(hash.hashInt(.sha1, "refs"));
             const refs = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(refs_cursor);
-            const heads_cursor = try refs.putCursor(hash.hashBuffer("heads"));
+            const heads_cursor = try refs.putCursor(hash.hashInt(.sha1, "heads"));
             const heads = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(heads_cursor);
             try heads.putKey(name_hash, .{ .slot = ref_name_cursor.slot() });
             try heads.put(name_hash, .{ .slot = ref_content_cursor.slot() });
@@ -97,10 +97,10 @@ pub fn add(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.rea
 
             // if there is a branch map for the current branch,
             // make one for the new branch with the same value
-            const branches_cursor = try state.extra.moment.putCursor(hash.hashBuffer("branches"));
+            const branches_cursor = try state.extra.moment.putCursor(hash.hashInt(.sha1, "branches"));
             const branches = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(branches_cursor);
             try branches.putKey(name_hash, .{ .slot = ref_name_cursor.slot() });
-            if (try branches.getCursor(hash.hashBuffer(current_branch_name))) |*current_branch_cursor| {
+            if (try branches.getCursor(hash.hashInt(.sha1, current_branch_name))) |*current_branch_cursor| {
                 try branches.put(name_hash, .{ .slot = current_branch_cursor.slot() });
             }
         },
@@ -159,17 +159,17 @@ pub fn remove(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.
                 return error.CannotDeleteCurrentBranch;
             }
 
-            const name_hash = hash.hashBuffer(input.name);
+            const name_hash = hash.hashInt(.sha1, input.name);
 
             // remove from refs/heads/{name}
-            const refs_cursor = try state.extra.moment.putCursor(hash.hashBuffer("refs"));
+            const refs_cursor = try state.extra.moment.putCursor(hash.hashInt(.sha1, "refs"));
             const refs = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(refs_cursor);
-            const heads_cursor = try refs.putCursor(hash.hashBuffer("heads"));
+            const heads_cursor = try refs.putCursor(hash.hashInt(.sha1, "heads"));
             const heads = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(heads_cursor);
             _ = try heads.remove(name_hash);
 
             // remove branch map
-            const branches_cursor = try state.extra.moment.putCursor(hash.hashBuffer("branches"));
+            const branches_cursor = try state.extra.moment.putCursor(hash.hashInt(.sha1, "branches"));
             const branches = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(branches_cursor);
             _ = try branches.remove(name_hash);
         },

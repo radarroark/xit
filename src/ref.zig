@@ -43,7 +43,7 @@ pub const Ref = struct {
 
 pub const RefOrOid = union(enum) {
     ref: Ref,
-    oid: *const [hash.SHA1_HEX_LEN]u8,
+    oid: *const [hash.hexLen(.sha1)]u8,
 
     pub fn initFromDb(content: []const u8) ?RefOrOid {
         if (std.mem.startsWith(u8, content, REF_START_STR)) {
@@ -53,7 +53,7 @@ pub const RefOrOid = union(enum) {
                 return null;
             }
         } else if (isOid(content)) {
-            return .{ .oid = content[0..hash.SHA1_HEX_LEN] };
+            return .{ .oid = content[0..comptime hash.hexLen(.sha1)] };
         } else {
             return null;
         }
@@ -61,14 +61,14 @@ pub const RefOrOid = union(enum) {
 
     pub fn initFromUser(content: []const u8) RefOrOid {
         if (isOid(content)) {
-            return .{ .oid = content[0..hash.SHA1_HEX_LEN] };
+            return .{ .oid = content[0..comptime hash.hexLen(.sha1)] };
         } else {
             return .{ .ref = .{ .kind = .local, .name = content } };
         }
     }
 
     fn isOid(content: []const u8) bool {
-        if (content.len != hash.SHA1_HEX_LEN) {
+        if (content.len != hash.hexLen(.sha1)) {
             return false;
         }
         for (content) |ch| {
@@ -109,8 +109,8 @@ pub const RefList = struct {
             },
             .xit => {
                 if (try state.extra.moment.cursor.readPath(void, &.{
-                    .{ .hash_map_get = .{ .value = hash.hashBuffer("refs") } },
-                    .{ .hash_map_get = .{ .value = hash.hashBuffer("heads") } },
+                    .{ .hash_map_get = .{ .value = hash.hashInt(.sha1, "refs") } },
+                    .{ .hash_map_get = .{ .value = hash.hashInt(.sha1, "heads") } },
                 })) |heads_cursor| {
                     var iter = try heads_cursor.iterator();
                     defer iter.deinit();
@@ -154,7 +154,7 @@ pub const RefList = struct {
     }
 };
 
-pub fn readRecur(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), input: RefOrOid) !?[hash.SHA1_HEX_LEN]u8 {
+pub fn readRecur(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), input: RefOrOid) !?[hash.hexLen(.sha1)]u8 {
     switch (input) {
         .ref => |ref| {
             var ref_path_buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
@@ -192,30 +192,30 @@ pub fn read(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.re
             var ref_name = ref_path;
 
             if (Ref.initFromPath(ref_path)) |ref| {
-                const refs_cursor = (try map.getCursor(hash.hashBuffer("refs"))) orelse return error.RefNotFound;
+                const refs_cursor = (try map.getCursor(hash.hashInt(.sha1, "refs"))) orelse return error.RefNotFound;
                 const refs = try rp.Repo(repo_kind).DB.HashMap(.read_only).init(refs_cursor);
                 switch (ref.kind) {
                     .local => {
-                        const heads_cursor = (try refs.getCursor(hash.hashBuffer("heads"))) orelse return error.RefNotFound;
+                        const heads_cursor = (try refs.getCursor(hash.hashInt(.sha1, "heads"))) orelse return error.RefNotFound;
                         map = try rp.Repo(repo_kind).DB.HashMap(.read_only).init(heads_cursor);
                     },
                     .remote => |remote| {
-                        const remotes_cursor = (try refs.getCursor(hash.hashBuffer("remotes"))) orelse return error.RefNotFound;
+                        const remotes_cursor = (try refs.getCursor(hash.hashInt(.sha1, "remotes"))) orelse return error.RefNotFound;
                         const remotes = try rp.Repo(repo_kind).DB.HashMap(.read_only).init(remotes_cursor);
-                        const remote_cursor = (try remotes.getCursor(hash.hashBuffer(remote))) orelse return error.RefNotFound;
+                        const remote_cursor = (try remotes.getCursor(hash.hashInt(.sha1, remote))) orelse return error.RefNotFound;
                         map = try rp.Repo(repo_kind).DB.HashMap(.read_only).init(remote_cursor);
                     },
                 }
                 ref_name = ref.name;
             }
 
-            const ref_cursor = (try map.getCursor(hash.hashBuffer(ref_name))) orelse return error.RefNotFound;
+            const ref_cursor = (try map.getCursor(hash.hashInt(.sha1, ref_name))) orelse return error.RefNotFound;
             return try ref_cursor.readBytes(buffer);
         },
     }
 }
 
-pub fn readHeadMaybe(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only)) !?[hash.SHA1_HEX_LEN]u8 {
+pub fn readHeadMaybe(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only)) !?[hash.hexLen(.sha1)]u8 {
     var buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
     const content = try read(repo_kind, state, "HEAD", &buffer);
     if (RefOrOid.initFromDb(content)) |input| {
@@ -225,7 +225,7 @@ pub fn readHeadMaybe(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).
     }
 }
 
-pub fn readHead(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only)) ![hash.SHA1_HEX_LEN]u8 {
+pub fn readHead(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only)) ![hash.hexLen(.sha1)]u8 {
     if (try readHeadMaybe(repo_kind, state)) |buffer| {
         return buffer;
     } else {
@@ -270,32 +270,32 @@ pub fn write(
             var ref_name = ref_path;
 
             if (Ref.initFromPath(ref_path)) |ref| {
-                const refs_cursor = try map.putCursor(hash.hashBuffer("refs"));
+                const refs_cursor = try map.putCursor(hash.hashInt(.sha1, "refs"));
                 const refs = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(refs_cursor);
                 switch (ref.kind) {
                     .local => {
-                        const heads_cursor = try refs.putCursor(hash.hashBuffer("heads"));
+                        const heads_cursor = try refs.putCursor(hash.hashInt(.sha1, "heads"));
                         map = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(heads_cursor);
                     },
                     .remote => |remote_name| {
-                        const remotes_cursor = try refs.putCursor(hash.hashBuffer("remotes"));
+                        const remotes_cursor = try refs.putCursor(hash.hashInt(.sha1, "remotes"));
                         const remotes = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(remotes_cursor);
-                        const remote_cursor = try remotes.putCursor(hash.hashBuffer(remote_name));
+                        const remote_cursor = try remotes.putCursor(hash.hashInt(.sha1, remote_name));
                         map = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(remote_cursor);
                     },
                 }
                 ref_name = ref.name;
             }
 
-            const ref_name_hash = hash.hashBuffer(ref_name);
-            const ref_name_set_cursor = try state.extra.moment.putCursor(hash.hashBuffer("ref-name-set"));
+            const ref_name_hash = hash.hashInt(.sha1, ref_name);
+            const ref_name_set_cursor = try state.extra.moment.putCursor(hash.hashInt(.sha1, "ref-name-set"));
             const ref_name_set = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(ref_name_set_cursor);
             var ref_name_cursor = try ref_name_set.putKeyCursor(ref_name_hash);
             try ref_name_cursor.writeIfEmpty(.{ .bytes = ref_name });
             try map.putKey(ref_name_hash, .{ .slot = ref_name_cursor.slot() });
-            const ref_content_set_cursor = try state.extra.moment.putCursor(hash.hashBuffer("ref-content-set"));
+            const ref_content_set_cursor = try state.extra.moment.putCursor(hash.hashInt(.sha1, "ref-content-set"));
             const ref_content_set = try rp.Repo(repo_kind).DB.HashMap(.read_write).init(ref_content_set_cursor);
-            var ref_content_cursor = try ref_content_set.putKeyCursor(hash.hashBuffer(content));
+            var ref_content_cursor = try ref_content_set.putKeyCursor(hash.hashInt(.sha1, content));
             try ref_content_cursor.writeIfEmpty(.{ .bytes = content });
             try map.put(ref_name_hash, .{ .slot = ref_content_cursor.slot() });
         },
@@ -306,7 +306,7 @@ pub fn writeRecur(
     comptime repo_kind: rp.RepoKind,
     state: rp.Repo(repo_kind).State(.read_write),
     ref_path: []const u8,
-    oid_hex: *const [hash.SHA1_HEX_LEN]u8,
+    oid_hex: *const [hash.hexLen(.sha1)]u8,
 ) !void {
     var buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
     const existing_content = read(repo_kind, state.readOnly(), ref_path, &buffer) catch |err| switch (err) {
@@ -330,7 +330,7 @@ pub fn writeRecur(
     }
 }
 
-pub fn writeHead(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_write), target: []const u8, oid_hex_maybe: ?[hash.SHA1_HEX_LEN]u8) !void {
+pub fn writeHead(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_write), target: []const u8, oid_hex_maybe: ?[hash.hexLen(.sha1)]u8) !void {
     var buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
     const content =
         // target is a ref, so make HEAD point to it

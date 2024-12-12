@@ -1,66 +1,96 @@
-//! why are we still using sha1? well, we're stuck with it.
-//! git added support for sha256 but nobody is using it. sha1
-//! collisions have apparently been found, which means people can
-//! theoretically make different commits that have the same hash.
-//! to be fair, the attacks are pretty hard to pull off.
-//! a lot of this is just a social problem...you need
-//! to trust the people you are collabing with, and actually
-//! read the code they share with you. i really don't think it's
-//! a big deal. holy shit, i think i just changed my mind over
-//! the course of writing this comment.
-
 const std = @import("std");
 
-const MAX_READ_BYTES = 1024;
-pub const SHA1_BYTES_LEN = std.crypto.hash.Sha1.digest_length;
-pub const SHA1_HEX_LEN = SHA1_BYTES_LEN * 2;
-pub const Hash = u160;
-const HASH_SIZE = @bitSizeOf(Hash) / 8;
+pub const HashKind = enum {
+    sha1,
+};
 
-pub fn sha1Reader(reader: anytype, header_maybe: ?[]const u8, out: *[SHA1_BYTES_LEN]u8) !void {
-    var h = std.crypto.hash.Sha1.init(.{});
-    var buffer = [_]u8{0} ** MAX_READ_BYTES;
+pub fn HashInt(comptime hash_kind: HashKind) type {
+    return switch (hash_kind) {
+        .sha1 => u160,
+    };
+}
+
+pub fn byteLen(comptime hash_kind: HashKind) usize {
+    return switch (hash_kind) {
+        .sha1 => std.crypto.hash.Sha1.digest_length,
+    };
+}
+
+pub fn hexLen(comptime hash_kind: HashKind) usize {
+    return byteLen(hash_kind) * 2;
+}
+
+pub fn Hasher(comptime hash_kind: HashKind) type {
+    return struct {
+        hasher: switch (hash_kind) {
+            .sha1 => std.crypto.hash.Sha1,
+        },
+
+        pub fn init() Hasher(hash_kind) {
+            return .{
+                .hasher = switch (hash_kind) {
+                    .sha1 => std.crypto.hash.Sha1.init(.{}),
+                },
+            };
+        }
+
+        pub fn update(self: *Hasher(hash_kind), buffer: []const u8) void {
+            self.hasher.update(buffer);
+        }
+
+        pub fn final(self: *Hasher(hash_kind), out: *[byteLen(hash_kind)]u8) void {
+            self.hasher.final(out);
+        }
+    };
+}
+
+pub fn hashReader(comptime hash_kind: HashKind, reader: anytype, header_maybe: ?[]const u8, out: *[byteLen(hash_kind)]u8) !void {
+    var hasher = Hasher(hash_kind).init();
+    var buffer = [_]u8{0} ** 1024;
     if (header_maybe) |header| {
-        h.update(header);
+        hasher.update(header);
     }
     while (true) {
         const size = try reader.read(&buffer);
         if (size == 0) {
             break;
         }
-        h.update(buffer[0..size]);
+        hasher.update(buffer[0..size]);
     }
-    h.final(out);
+    hasher.final(out);
 }
 
-pub fn sha1Buffer(buffer: []const u8, out: *[SHA1_BYTES_LEN]u8) !void {
-    var h = std.crypto.hash.Sha1.init(.{});
-    h.update(buffer);
-    h.final(out);
+pub fn hashBuffer(comptime hash_kind: HashKind, buffer: []const u8, out: *[byteLen(hash_kind)]u8) !void {
+    var hasher = Hasher(hash_kind).init();
+    hasher.update(buffer);
+    hasher.final(out);
 }
 
-pub fn hashBuffer(buffer: []const u8) Hash {
-    var hash = [_]u8{0} ** HASH_SIZE;
-    var h = std.crypto.hash.Sha1.init(.{});
-    h.update(buffer);
-    h.final(&hash);
-    return std.mem.bytesToValue(Hash, &hash);
+pub fn hashInt(comptime hash_kind: HashKind, buffer: []const u8) HashInt(hash_kind) {
+    const hash_size = @bitSizeOf(HashInt(hash_kind)) / 8;
+    var hash_buffer = [_]u8{0} ** hash_size;
+    var hasher = Hasher(hash_kind).init();
+    hasher.update(buffer);
+    hasher.final(&hash_buffer);
+    return std.mem.bytesToValue(HashInt(hash_kind), &hash_buffer);
 }
 
-pub fn hexToHash(hex_buffer: *const [SHA1_HEX_LEN]u8) !Hash {
-    var hash = [_]u8{0} ** HASH_SIZE;
-    _ = try std.fmt.hexToBytes(&hash, hex_buffer);
-    return std.mem.bytesToValue(Hash, &hash);
+pub fn hexToHash(comptime hash_kind: HashKind, hex_buffer: *const [hexLen(hash_kind)]u8) !HashInt(hash_kind) {
+    const hash_size = @bitSizeOf(HashInt(hash_kind)) / 8;
+    var hash_buffer = [_]u8{0} ** hash_size;
+    _ = try std.fmt.hexToBytes(&hash_buffer, hex_buffer);
+    return std.mem.bytesToValue(HashInt(hash_kind), &hash_buffer);
 }
 
-pub fn bytesToHash(bytes_buffer: *const [SHA1_BYTES_LEN]u8) Hash {
-    var hash = [_]u8{0} ** HASH_SIZE;
-    @memcpy(&hash, bytes_buffer);
-    return std.mem.bytesToValue(Hash, &hash);
+pub fn bytesToHash(comptime hash_kind: HashKind, bytes_buffer: *const [byteLen(hash_kind)]u8) HashInt(hash_kind) {
+    const hash_size = @bitSizeOf(HashInt(hash_kind)) / 8;
+    var hash_buffer = [_]u8{0} ** hash_size;
+    @memcpy(&hash_buffer, bytes_buffer);
+    return std.mem.bytesToValue(HashInt(hash_kind), &hash_buffer);
 }
 
-pub fn hexToBytes(hex_buffer: [SHA1_HEX_LEN]u8) ![SHA1_BYTES_LEN]u8 {
-    var bytes = [_]u8{0} ** SHA1_BYTES_LEN;
+pub fn hexToBytes(comptime hash_kind: HashKind, hex_buffer: [hexLen(hash_kind)]u8) ![byteLen(hash_kind)]u8 {
+    var bytes = [_]u8{0} ** byteLen(hash_kind);
     _ = try std.fmt.hexToBytes(&bytes, &hex_buffer);
     return bytes;
 }
