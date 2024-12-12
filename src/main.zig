@@ -102,21 +102,18 @@ const USAGE =
     \\
 ;
 
-/// this is meant to be the main entry point if you wanted to use xit
-/// as a CLI tool. to use xit programmatically, build a Repo struct
-/// and call methods on it directly. to use xit subconsciously, just
-/// think about it really often and eventually you'll dream about it.
-pub fn xitMain(
+/// this is called by xitMain after the HashKind has been determined.
+/// the HashKind is the hashing algorithm used by the repo. for xit
+/// repos, the algorithm being used is encoded in the xitdb header.
+fn xitMainWithHashKind(
     comptime repo_kind: rp.RepoKind,
     comptime hash_kind: hash.HashKind,
     allocator: std.mem.Allocator,
-    args: []const []const u8,
+    sub_cmd_args: *const cmd.SubCommandArgs,
     cwd: std.fs.Dir,
     writers: anytype,
 ) !void {
-    var sub_cmd_args = try cmd.SubCommandArgs.init(allocator, args);
-    defer sub_cmd_args.deinit();
-    var command = try cmd.Command(hash_kind).init(allocator, &sub_cmd_args);
+    var command = try cmd.Command(hash_kind).init(allocator, sub_cmd_args);
     defer command.deinit();
 
     switch (command) {
@@ -150,6 +147,40 @@ pub fn xitMain(
     }
 }
 
+/// this is meant to be the main entry point if you wanted to use xit
+/// as a CLI tool. to use xit programmatically, build a Repo struct
+/// and call methods on it directly. to use xit subconsciously, just
+/// think about it really often and eventually you'll dream about it.
+pub fn xitMain(
+    comptime repo_kind: rp.RepoKind,
+    allocator: std.mem.Allocator,
+    args: []const []const u8,
+    cwd: std.fs.Dir,
+    writers: anytype,
+) !void {
+    var sub_cmd_args = try cmd.SubCommandArgs.init(allocator, args);
+    defer sub_cmd_args.deinit();
+
+    // if we are initing a new repo, just supply a default HashKind
+    if (sub_cmd_args.sub_command_kind) |sub_cmd_kind| {
+        if (sub_cmd_kind == .init) {
+            try xitMainWithHashKind(repo_kind, .sha1, allocator, &sub_cmd_args, cwd, writers);
+            return;
+        }
+    }
+
+    // find the existing HashKind from the repo and execute with it
+    const hash_kind = blk: {
+        var repo = try rp.Repo(repo_kind, .none).init(allocator, .{ .cwd = cwd });
+        defer repo.deinit();
+        break :blk try repo.hashKind();
+    };
+    switch (hash_kind) {
+        .none => return error.HashKindNotFound,
+        .sha1 => try xitMainWithHashKind(repo_kind, .sha1, allocator, &sub_cmd_args, cwd, writers),
+    }
+}
+
 /// this is the main "main". it's even mainier than xitMain.
 /// this is the real deal. there is no main more main than this.
 /// at least, not that i know of. i guess internally zig probably
@@ -171,7 +202,6 @@ pub fn main() !void {
 
     try xitMain(
         .xit,
-        .sha1,
         allocator,
         args.items,
         std.fs.cwd(),
