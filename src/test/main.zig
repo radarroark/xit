@@ -148,7 +148,8 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
         try main.xitMain(repo_kind, allocator, &.{ "add", "." }, repo_dir, writers);
 
         // make a commit
-        try main.xitMain(repo_kind, allocator, &.{ "commit", "-m", "first commit" }, repo_dir, writers);
+        // (the cwd is docs dir, to make sure we can run commands in any sub dir)
+        try main.xitMain(repo_kind, allocator, &.{ "commit", "-m", "first commit" }, docs_dir, writers);
 
         switch (repo_kind) {
             .git => {
