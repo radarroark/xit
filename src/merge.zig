@@ -10,7 +10,14 @@ const df = @import("./diff.zig");
 
 const MAX_READ_BYTES = 1024; // FIXME: this is arbitrary...
 
-fn getDescendent(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State(.read_only), oid1: *const [hash.hexLen(.sha1)]u8, oid2: *const [hash.hexLen(.sha1)]u8) ![hash.hexLen(.sha1)]u8 {
+fn getDescendent(
+    comptime repo_kind: rp.RepoKind,
+    comptime hash_kind: hash.HashKind,
+    allocator: std.mem.Allocator,
+    state: rp.Repo(repo_kind, hash_kind).State(.read_only),
+    oid1: *const [hash.hexLen(hash_kind)]u8,
+    oid2: *const [hash.hexLen(hash_kind)]u8,
+) ![hash.hexLen(hash_kind)]u8 {
     if (std.mem.eql(u8, oid1, oid2)) {
         return oid1.*;
     }
@@ -23,13 +30,13 @@ fn getDescendent(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
         two,
     };
     const Parent = struct {
-        oid: [hash.hexLen(.sha1)]u8,
+        oid: [hash.hexLen(hash_kind)]u8,
         kind: ParentKind,
     };
     var queue = std.DoublyLinkedList(Parent){};
 
     {
-        const object = try obj.Object(repo_kind, .full).init(arena.allocator(), state, oid1);
+        const object = try obj.Object(repo_kind, hash_kind, .full).init(arena.allocator(), state, oid1);
         for (object.content.commit.parents.items) |parent_oid| {
             var node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
             node.data = .{ .oid = parent_oid, .kind = .one };
@@ -38,7 +45,7 @@ fn getDescendent(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
     }
 
     {
-        const object = try obj.Object(repo_kind, .full).init(arena.allocator(), state, oid2);
+        const object = try obj.Object(repo_kind, hash_kind, .full).init(arena.allocator(), state, oid2);
         for (object.content.commit.parents.items) |parent_oid| {
             var node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
             node.data = .{ .oid = parent_oid, .kind = .two };
@@ -66,7 +73,7 @@ fn getDescendent(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
 
         // TODO: instead of appending to the end, append it in descending order of timestamp
         // so we prioritize more recent commits and avoid wasteful traversal deep in the history.
-        const object = try obj.Object(repo_kind, .full).init(arena.allocator(), state, &node.data.oid);
+        const object = try obj.Object(repo_kind, hash_kind, .full).init(arena.allocator(), state, &node.data.oid);
         for (object.content.commit.parents.items) |parent_oid| {
             var new_node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
             new_node.data = .{ .oid = parent_oid, .kind = node.data.kind };
@@ -77,7 +84,14 @@ fn getDescendent(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
     return error.DescendentNotFound;
 }
 
-pub fn commonAncestor(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, state: rp.Repo(repo_kind).State(.read_only), oid1: *const [hash.hexLen(.sha1)]u8, oid2: *const [hash.hexLen(.sha1)]u8) ![hash.hexLen(.sha1)]u8 {
+pub fn commonAncestor(
+    comptime repo_kind: rp.RepoKind,
+    comptime hash_kind: hash.HashKind,
+    allocator: std.mem.Allocator,
+    state: rp.Repo(repo_kind, hash_kind).State(.read_only),
+    oid1: *const [hash.hexLen(hash_kind)]u8,
+    oid2: *const [hash.hexLen(hash_kind)]u8,
+) ![hash.hexLen(hash_kind)]u8 {
     if (std.mem.eql(u8, oid1, oid2)) {
         return oid1.*;
     }
@@ -86,7 +100,7 @@ pub fn commonAncestor(comptime repo_kind: rp.RepoKind, allocator: std.mem.Alloca
     defer arena.deinit();
 
     const Parent = struct {
-        oid: [hash.hexLen(.sha1)]u8,
+        oid: [hash.hexLen(hash_kind)]u8,
         kind: enum {
             one,
             two,
@@ -141,7 +155,7 @@ pub fn commonAncestor(comptime repo_kind: rp.RepoKind, allocator: std.mem.Alloca
 
         // TODO: instead of appending to the end, append it in descending order of timestamp
         // so we prioritize more recent commits and avoid wasteful traversal deep in the history.
-        const object = try obj.Object(repo_kind, .full).init(arena.allocator(), state, &node.data.oid);
+        const object = try obj.Object(repo_kind, hash_kind, .full).init(arena.allocator(), state, &node.data.oid);
         for (object.content.commit.parents.items) |parent_oid| {
             const is_stale = is_base_ancestor or stale_oids.contains(&parent_oid);
             var new_node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
@@ -166,51 +180,57 @@ pub fn commonAncestor(comptime repo_kind: rp.RepoKind, allocator: std.mem.Alloca
 
     const base_ancestor_count = parents_of_both.count();
     if (base_ancestor_count > 1) {
-        var oid = parents_of_both.keys()[0][0..comptime hash.hexLen(.sha1)].*;
+        var oid = parents_of_both.keys()[0][0..comptime hash.hexLen(hash_kind)].*;
         for (parents_of_both.keys()[1..]) |next_oid| {
-            oid = try getDescendent(repo_kind, allocator, state, oid[0..comptime hash.hexLen(.sha1)], next_oid[0..comptime hash.hexLen(.sha1)]);
+            oid = try getDescendent(repo_kind, hash_kind, allocator, state, oid[0..comptime hash.hexLen(hash_kind)], next_oid[0..comptime hash.hexLen(hash_kind)]);
         }
         return oid;
     } else if (base_ancestor_count == 1) {
-        return parents_of_both.keys()[0][0..comptime hash.hexLen(.sha1)].*;
+        return parents_of_both.keys()[0][0..comptime hash.hexLen(hash_kind)].*;
     } else {
         return error.NoCommonAncestor;
     }
 }
 
-pub const RenamedEntry = struct {
-    path: []const u8,
-    tree_entry: obj.TreeEntry,
-};
-pub const MergeConflict = struct {
-    base: ?obj.TreeEntry,
-    target: ?obj.TreeEntry,
-    source: ?obj.TreeEntry,
-    renamed: ?RenamedEntry,
-};
+pub fn RenamedEntry(comptime hash_kind: hash.HashKind) type {
+    return struct {
+        path: []const u8,
+        tree_entry: obj.TreeEntry(hash_kind),
+    };
+}
+
+pub fn MergeConflict(comptime hash_kind: hash.HashKind) type {
+    return struct {
+        base: ?obj.TreeEntry(hash_kind),
+        target: ?obj.TreeEntry(hash_kind),
+        source: ?obj.TreeEntry(hash_kind),
+        renamed: ?RenamedEntry(hash_kind),
+    };
+}
 
 fn writeBlobWithDiff3(
     comptime repo_kind: rp.RepoKind,
-    state: rp.Repo(repo_kind).State(.read_write),
+    comptime hash_kind: hash.HashKind,
+    state: rp.Repo(repo_kind, hash_kind).State(.read_write),
     allocator: std.mem.Allocator,
-    base_file_oid_maybe: ?*const [hash.byteLen(.sha1)]u8,
-    target_file_oid: *const [hash.byteLen(.sha1)]u8,
-    source_file_oid: *const [hash.byteLen(.sha1)]u8,
-    base_oid: *const [hash.hexLen(.sha1)]u8,
+    base_file_oid_maybe: ?*const [hash.byteLen(hash_kind)]u8,
+    target_file_oid: *const [hash.byteLen(hash_kind)]u8,
+    source_file_oid: *const [hash.byteLen(hash_kind)]u8,
+    base_oid: *const [hash.hexLen(hash_kind)]u8,
     target_name: []const u8,
     source_name: []const u8,
     has_conflict: *bool,
-) ![hash.byteLen(.sha1)]u8 {
+) ![hash.byteLen(hash_kind)]u8 {
     var base_iter = if (base_file_oid_maybe) |base_file_oid|
-        try df.LineIterator(repo_kind).initFromOid(state.readOnly(), allocator, "", base_file_oid, null)
+        try df.LineIterator(repo_kind, hash_kind).initFromOid(state.readOnly(), allocator, "", base_file_oid, null)
     else
-        try df.LineIterator(repo_kind).initFromNothing(allocator, "");
+        try df.LineIterator(repo_kind, hash_kind).initFromNothing(allocator, "");
     defer base_iter.deinit();
 
-    var target_iter = try df.LineIterator(repo_kind).initFromOid(state.readOnly(), allocator, "", target_file_oid, null);
+    var target_iter = try df.LineIterator(repo_kind, hash_kind).initFromOid(state.readOnly(), allocator, "", target_file_oid, null);
     defer target_iter.deinit();
 
-    var source_iter = try df.LineIterator(repo_kind).initFromOid(state.readOnly(), allocator, "", source_file_oid, null);
+    var source_iter = try df.LineIterator(repo_kind, hash_kind).initFromOid(state.readOnly(), allocator, "", source_file_oid, null);
     defer source_iter.deinit();
 
     // if any file is binary, just return the source oid because there is no point in trying to merge them
@@ -219,7 +239,7 @@ fn writeBlobWithDiff3(
         return source_file_oid.*;
     }
 
-    var diff3_iter = try df.Diff3Iterator(repo_kind).init(allocator, &base_iter, &target_iter, &source_iter);
+    var diff3_iter = try df.Diff3Iterator(repo_kind, hash_kind).init(allocator, &base_iter, &target_iter, &source_iter);
     defer diff3_iter.deinit();
 
     var line_buffer = std.ArrayList([]const u8).init(allocator);
@@ -234,7 +254,7 @@ fn writeBlobWithDiff3(
         allocator: std.mem.Allocator,
         lines: std.ArrayList([]const u8),
 
-        fn init(alctr: std.mem.Allocator, iter: *df.LineIterator(repo_kind), range_maybe: ?df.Diff3Iterator(repo_kind).Range) !@This() {
+        fn init(alctr: std.mem.Allocator, iter: *df.LineIterator(repo_kind, hash_kind), range_maybe: ?df.Diff3Iterator(repo_kind, hash_kind).Range) !@This() {
             var lines = std.ArrayList([]const u8).init(alctr);
             errdefer {
                 for (lines.items) |line| {
@@ -281,10 +301,10 @@ fn writeBlobWithDiff3(
         base_marker: []u8,
         separate_marker: []u8,
         source_marker: []u8,
-        base_iter: *df.LineIterator(repo_kind),
-        target_iter: *df.LineIterator(repo_kind),
-        source_iter: *df.LineIterator(repo_kind),
-        diff3_iter: *df.Diff3Iterator(repo_kind),
+        base_iter: *df.LineIterator(repo_kind, hash_kind),
+        target_iter: *df.LineIterator(repo_kind, hash_kind),
+        source_iter: *df.LineIterator(repo_kind, hash_kind),
+        diff3_iter: *df.Diff3Iterator(repo_kind, hash_kind),
         line_buffer: *std.ArrayList([]const u8),
         current_line: ?[]const u8,
         has_conflict: bool,
@@ -477,33 +497,34 @@ fn writeBlobWithDiff3(
         .has_conflict = false,
     };
 
-    var oid = [_]u8{0} ** hash.byteLen(.sha1);
-    try obj.writeObject(repo_kind, state, &stream, .{ .kind = .blob, .size = try stream.count() }, &oid);
+    var oid = [_]u8{0} ** hash.byteLen(hash_kind);
+    try obj.writeObject(repo_kind, hash_kind, state, &stream, .{ .kind = .blob, .size = try stream.count() }, &oid);
     has_conflict.* = stream.has_conflict;
     return oid;
 }
 
 fn writeBlobWithPatches(
-    state: rp.Repo(.xit).State(.read_write),
+    comptime hash_kind: hash.HashKind,
+    state: rp.Repo(.xit, hash_kind).State(.read_write),
     allocator: std.mem.Allocator,
-    source_file_oid: *const [hash.byteLen(.sha1)]u8,
-    base_oid: *const [hash.hexLen(.sha1)]u8,
-    target_oid: *const [hash.hexLen(.sha1)]u8,
-    source_oid: *const [hash.hexLen(.sha1)]u8,
+    source_file_oid: *const [hash.byteLen(hash_kind)]u8,
+    base_oid: *const [hash.hexLen(hash_kind)]u8,
+    target_oid: *const [hash.hexLen(hash_kind)]u8,
+    source_oid: *const [hash.hexLen(hash_kind)]u8,
     target_name: []const u8,
     source_name: []const u8,
     has_conflict: *bool,
     path: []const u8,
-) ![hash.byteLen(.sha1)]u8 {
-    const commit_id_to_path_to_patch_id_cursor_maybe = try state.extra.moment.getCursor(hash.hashInt(.sha1, "commit-id->path->patch-id"));
+) ![hash.byteLen(hash_kind)]u8 {
+    const commit_id_to_path_to_patch_id_cursor_maybe = try state.extra.moment.getCursor(hash.hashInt(hash_kind, "commit-id->path->patch-id"));
 
-    var patch_ids = std.ArrayList(hash.HashInt(.sha1)).init(allocator);
+    var patch_ids = std.ArrayList(hash.HashInt(hash_kind)).init(allocator);
     defer patch_ids.deinit();
 
-    var iter = try obj.ObjectIterator(.xit, .full).init(allocator, state.readOnly(), &.{source_oid.*}, .{ .recursive = false });
+    var iter = try obj.ObjectIterator(.xit, hash_kind, .full).init(allocator, state.readOnly(), &.{source_oid.*}, .{ .recursive = false });
     defer iter.deinit();
 
-    const path_hash = hash.hashInt(.sha1, path);
+    const path_hash = hash.hashInt(hash_kind, path);
 
     while (try iter.next()) |object| {
         defer object.deinit();
@@ -513,13 +534,13 @@ fn writeBlobWithPatches(
         }
 
         if (commit_id_to_path_to_patch_id_cursor_maybe) |commit_id_to_path_to_patch_id_cursor| {
-            const commit_id_to_path_to_patch_id = try rp.Repo(.xit).DB.HashMap(.read_only).init(commit_id_to_path_to_patch_id_cursor);
-            if (try commit_id_to_path_to_patch_id.getCursor(try hash.hexToHash(.sha1, &object.oid))) |path_to_patch_id_cursor| {
-                const path_to_patch_id = try rp.Repo(.xit).DB.HashMap(.read_only).init(path_to_patch_id_cursor);
+            const commit_id_to_path_to_patch_id = try rp.Repo(.xit, hash_kind).DB.HashMap(.read_only).init(commit_id_to_path_to_patch_id_cursor);
+            if (try commit_id_to_path_to_patch_id.getCursor(try hash.hexToHash(hash_kind, &object.oid))) |path_to_patch_id_cursor| {
+                const path_to_patch_id = try rp.Repo(.xit, hash_kind).DB.HashMap(.read_only).init(path_to_patch_id_cursor);
                 if (try path_to_patch_id.getCursor(path_hash)) |patch_id_cursor| {
                     const patch_id_bytes = try patch_id_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
                     defer allocator.free(patch_id_bytes);
-                    const patch_id = hash.bytesToHash(.sha1, patch_id_bytes[0..comptime hash.byteLen(.sha1)]);
+                    const patch_id = hash.bytesToHash(hash_kind, patch_id_bytes[0..comptime hash.byteLen(hash_kind)]);
                     try patch_ids.append(patch_id);
                 }
             }
@@ -534,50 +555,50 @@ fn writeBlobWithPatches(
     }
 
     // get branch map
-    const branch_name_hash = hash.hashInt(.sha1, target_name);
-    const branches_cursor = (try state.extra.moment.getCursor(hash.hashInt(.sha1, "branches"))) orelse return error.KeyNotFound;
-    const branches = try rp.Repo(.xit).DB.HashMap(.read_only).init(branches_cursor);
+    const branch_name_hash = hash.hashInt(hash_kind, target_name);
+    const branches_cursor = (try state.extra.moment.getCursor(hash.hashInt(hash_kind, "branches"))) orelse return error.KeyNotFound;
+    const branches = try rp.Repo(.xit, hash_kind).DB.HashMap(.read_only).init(branches_cursor);
     const branch_cursor = (try branches.getCursor(branch_name_hash)) orelse return error.KeyNotFound;
 
     // put branch in temp location
-    const merge_in_progress_cursor = try state.extra.moment.putCursor(hash.hashInt(.sha1, "merge-in-progress"));
-    const merge_in_progress = try rp.Repo(.xit).DB.HashMap(.read_write).init(merge_in_progress_cursor);
-    var merge_branch_cursor = try merge_in_progress.putCursor(hash.hashInt(.sha1, "branch"));
+    const merge_in_progress_cursor = try state.extra.moment.putCursor(hash.hashInt(hash_kind, "merge-in-progress"));
+    const merge_in_progress = try rp.Repo(.xit, hash_kind).DB.HashMap(.read_write).init(merge_in_progress_cursor);
+    var merge_branch_cursor = try merge_in_progress.putCursor(hash.hashInt(hash_kind, "branch"));
     try merge_branch_cursor.writeIfEmpty(.{ .slot = branch_cursor.slot() });
-    const merge_branch = try rp.Repo(.xit).DB.HashMap(.read_write).init(merge_branch_cursor);
+    const merge_branch = try rp.Repo(.xit, hash_kind).DB.HashMap(.read_write).init(merge_branch_cursor);
 
     const patch = @import("./patch.zig");
 
     for (0..patch_ids.items.len) |i| {
         const patch_id = patch_ids.items[patch_ids.items.len - i - 1];
-        try patch.applyPatch(state.readOnly().extra.moment, &merge_branch, allocator, path_hash, patch_id);
+        try patch.applyPatch(hash_kind, state.readOnly().extra.moment, &merge_branch, allocator, path_hash, patch_id);
     }
 
-    const merge_path_to_live_parent_to_children_cursor = (try merge_branch.getCursor(hash.hashInt(.sha1, "path->live-parent->children"))) orelse return error.KeyNotFound;
-    const merge_path_to_live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_only).init(merge_path_to_live_parent_to_children_cursor);
+    const merge_path_to_live_parent_to_children_cursor = (try merge_branch.getCursor(hash.hashInt(hash_kind, "path->live-parent->children"))) orelse return error.KeyNotFound;
+    const merge_path_to_live_parent_to_children = try rp.Repo(.xit, hash_kind).DB.HashMap(.read_only).init(merge_path_to_live_parent_to_children_cursor);
     const merge_live_parent_to_children_cursor = (try merge_path_to_live_parent_to_children.getCursor(path_hash)) orelse return error.KeyNotFound;
-    const merge_live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_only).init(merge_live_parent_to_children_cursor);
+    const merge_live_parent_to_children = try rp.Repo(.xit, hash_kind).DB.HashMap(.read_only).init(merge_live_parent_to_children_cursor);
 
-    const commit_id_to_path_to_live_parent_to_children_cursor = (try state.extra.moment.getCursor(hash.hashInt(.sha1, "commit-id->path->live-parent->children"))) orelse return error.KeyNotFound;
-    const commit_id_to_path_to_live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_only).init(commit_id_to_path_to_live_parent_to_children_cursor);
+    const commit_id_to_path_to_live_parent_to_children_cursor = (try state.extra.moment.getCursor(hash.hashInt(hash_kind, "commit-id->path->live-parent->children"))) orelse return error.KeyNotFound;
+    const commit_id_to_path_to_live_parent_to_children = try rp.Repo(.xit, hash_kind).DB.HashMap(.read_only).init(commit_id_to_path_to_live_parent_to_children_cursor);
 
-    const base_path_to_live_parent_to_children_cursor = (try commit_id_to_path_to_live_parent_to_children.getCursor(try hash.hexToHash(.sha1, base_oid))) orelse return error.KeyNotFound;
-    const base_path_to_live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_only).init(base_path_to_live_parent_to_children_cursor);
+    const base_path_to_live_parent_to_children_cursor = (try commit_id_to_path_to_live_parent_to_children.getCursor(try hash.hexToHash(hash_kind, base_oid))) orelse return error.KeyNotFound;
+    const base_path_to_live_parent_to_children = try rp.Repo(.xit, hash_kind).DB.HashMap(.read_only).init(base_path_to_live_parent_to_children_cursor);
     const base_live_parent_to_children_cursor = (try base_path_to_live_parent_to_children.getCursor(path_hash)) orelse return error.KeyNotFound;
-    const base_live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_only).init(base_live_parent_to_children_cursor);
+    const base_live_parent_to_children = try rp.Repo(.xit, hash_kind).DB.HashMap(.read_only).init(base_live_parent_to_children_cursor);
 
-    const target_path_to_live_parent_to_children_cursor = (try commit_id_to_path_to_live_parent_to_children.getCursor(try hash.hexToHash(.sha1, target_oid))) orelse return error.KeyNotFound;
-    const target_path_to_live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_only).init(target_path_to_live_parent_to_children_cursor);
+    const target_path_to_live_parent_to_children_cursor = (try commit_id_to_path_to_live_parent_to_children.getCursor(try hash.hexToHash(hash_kind, target_oid))) orelse return error.KeyNotFound;
+    const target_path_to_live_parent_to_children = try rp.Repo(.xit, hash_kind).DB.HashMap(.read_only).init(target_path_to_live_parent_to_children_cursor);
     const target_live_parent_to_children_cursor = (try target_path_to_live_parent_to_children.getCursor(path_hash)) orelse return error.KeyNotFound;
-    const target_live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_only).init(target_live_parent_to_children_cursor);
+    const target_live_parent_to_children = try rp.Repo(.xit, hash_kind).DB.HashMap(.read_only).init(target_live_parent_to_children_cursor);
 
-    const source_path_to_live_parent_to_children_cursor = (try commit_id_to_path_to_live_parent_to_children.getCursor(try hash.hexToHash(.sha1, source_oid))) orelse return error.KeyNotFound;
-    const source_path_to_live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_only).init(source_path_to_live_parent_to_children_cursor);
+    const source_path_to_live_parent_to_children_cursor = (try commit_id_to_path_to_live_parent_to_children.getCursor(try hash.hexToHash(hash_kind, source_oid))) orelse return error.KeyNotFound;
+    const source_path_to_live_parent_to_children = try rp.Repo(.xit, hash_kind).DB.HashMap(.read_only).init(source_path_to_live_parent_to_children_cursor);
     const source_live_parent_to_children_cursor = (try source_path_to_live_parent_to_children.getCursor(path_hash)) orelse return error.KeyNotFound;
-    const source_live_parent_to_children = try rp.Repo(.xit).DB.HashMap(.read_only).init(source_live_parent_to_children_cursor);
+    const source_live_parent_to_children = try rp.Repo(.xit, hash_kind).DB.HashMap(.read_only).init(source_live_parent_to_children_cursor);
 
-    const patch_id_to_change_content_list_cursor = (try state.extra.moment.getCursor(hash.hashInt(.sha1, "patch-id->change-content-list"))) orelse return error.KeyNotFound;
-    const patch_id_to_change_content_list = try rp.Repo(.xit).DB.HashMap(.read_only).init(patch_id_to_change_content_list_cursor);
+    const patch_id_to_change_content_list_cursor = (try state.extra.moment.getCursor(hash.hashInt(hash_kind, "patch-id->change-content-list"))) orelse return error.KeyNotFound;
+    const patch_id_to_change_content_list = try rp.Repo(.xit, hash_kind).DB.HashMap(.read_only).init(patch_id_to_change_content_list_cursor);
 
     var line_buffer = std.ArrayList([]const u8).init(allocator);
     defer {
@@ -591,7 +612,7 @@ fn writeBlobWithPatches(
         allocator: std.mem.Allocator,
         lines: std.ArrayList([]const u8),
 
-        fn init(alctr: std.mem.Allocator, patch_id_to_change_content_list_ptr: *const rp.Repo(.xit).DB.HashMap(.read_only), node_ids: []patch.NodeId) !@This() {
+        fn init(alctr: std.mem.Allocator, patch_id_to_change_content_list_ptr: *const rp.Repo(.xit, hash_kind).DB.HashMap(.read_only), node_ids: []patch.NodeId(hash_kind)) !@This() {
             var lines = std.ArrayList([]const u8).init(alctr);
             errdefer {
                 for (lines.items) |line| {
@@ -601,7 +622,7 @@ fn writeBlobWithPatches(
             }
             for (node_ids) |node_id| {
                 const change_content_list_cursor = (try patch_id_to_change_content_list_ptr.getCursor(node_id.patch_id)) orelse return error.KeyNotFound;
-                const change_content_list = try rp.Repo(.xit).DB.ArrayList(.read_only).init(change_content_list_cursor);
+                const change_content_list = try rp.Repo(.xit, hash_kind).DB.ArrayList(.read_only).init(change_content_list_cursor);
                 const change_content_cursor = (try change_content_list.getCursor(node_id.node)) orelse return error.KeyNotFound;
                 const change_content = try change_content_cursor.readBytesAlloc(alctr, MAX_READ_BYTES);
                 {
@@ -641,14 +662,14 @@ fn writeBlobWithPatches(
         base_marker: []u8,
         separate_marker: []u8,
         source_marker: []u8,
-        merge_live_parent_to_children: *const rp.Repo(.xit).DB.HashMap(.read_only),
-        base_live_parent_to_children: *const rp.Repo(.xit).DB.HashMap(.read_only),
-        target_live_parent_to_children: *const rp.Repo(.xit).DB.HashMap(.read_only),
-        source_live_parent_to_children: *const rp.Repo(.xit).DB.HashMap(.read_only),
-        patch_id_to_change_content_list: *const rp.Repo(.xit).DB.HashMap(.read_only),
+        merge_live_parent_to_children: *const rp.Repo(.xit, hash_kind).DB.HashMap(.read_only),
+        base_live_parent_to_children: *const rp.Repo(.xit, hash_kind).DB.HashMap(.read_only),
+        target_live_parent_to_children: *const rp.Repo(.xit, hash_kind).DB.HashMap(.read_only),
+        source_live_parent_to_children: *const rp.Repo(.xit, hash_kind).DB.HashMap(.read_only),
+        patch_id_to_change_content_list: *const rp.Repo(.xit, hash_kind).DB.HashMap(.read_only),
         line_buffer: *std.ArrayList([]const u8),
         current_line: ?[]const u8,
-        current_node_id_hash: ?hash.HashInt(.sha1),
+        current_node_id_hash: ?hash.HashInt(hash_kind),
         has_conflict: bool,
 
         const Parent = @This();
@@ -708,27 +729,27 @@ fn writeBlobWithPatches(
 
                     const first_child_cursor = (try children_iter.next()) orelse return error.ExpectedChild;
                     const first_kv_pair = try first_child_cursor.readKeyValuePair();
-                    var first_child_bytes = [_]u8{0} ** patch.NODE_ID_SIZE;
+                    var first_child_bytes = [_]u8{0} ** patch.NodeId(hash_kind).byte_size;
                     const first_child_slice = try first_kv_pair.key_cursor.readBytes(&first_child_bytes);
-                    const first_node_id: patch.NodeId = blk: {
+                    const first_node_id: patch.NodeId(hash_kind) = blk: {
                         var stream = std.io.fixedBufferStream(first_child_slice);
                         var node_id_reader = stream.reader();
-                        break :blk @bitCast(try node_id_reader.readInt(patch.NodeIdInt, .big));
+                        break :blk @bitCast(try node_id_reader.readInt(patch.NodeId(hash_kind).Int, .big));
                     };
-                    const first_node_id_hash = hash.hashInt(.sha1, first_child_slice);
+                    const first_node_id_hash = hash.hashInt(hash_kind, first_child_slice);
 
                     if (try children_iter.next()) |second_child_cursor| {
                         if (try children_iter.next() != null) return error.MoreThanTwoChildrenFound;
 
                         const second_kv_pair = try second_child_cursor.readKeyValuePair();
-                        var second_child_bytes = [_]u8{0} ** patch.NODE_ID_SIZE;
+                        var second_child_bytes = [_]u8{0} ** patch.NodeId(hash_kind).byte_size;
                         const second_child_slice = try second_kv_pair.key_cursor.readBytes(&second_child_bytes);
-                        const second_node_id: patch.NodeId = blk: {
+                        const second_node_id: patch.NodeId(hash_kind) = blk: {
                             var stream = std.io.fixedBufferStream(second_child_slice);
                             var node_id_reader = stream.reader();
-                            break :blk @bitCast(try node_id_reader.readInt(patch.NodeIdInt, .big));
+                            break :blk @bitCast(try node_id_reader.readInt(patch.NodeId(hash_kind).Int, .big));
                         };
-                        const second_node_id_hash = hash.hashInt(.sha1, second_child_slice);
+                        const second_node_id_hash = hash.hashInt(hash_kind, second_child_slice);
 
                         const target_node_id, const target_node_id_hash, const source_node_id, const source_node_id_hash =
                             if (try self.parent.target_live_parent_to_children.getCursor(first_node_id_hash) != null)
@@ -736,10 +757,10 @@ fn writeBlobWithPatches(
                         else
                             .{ second_node_id, second_node_id_hash, first_node_id, first_node_id_hash };
 
-                        var target_node_ids = std.ArrayList(patch.NodeId).init(self.parent.allocator);
+                        var target_node_ids = std.ArrayList(patch.NodeId(hash_kind)).init(self.parent.allocator);
                         defer target_node_ids.deinit();
 
-                        var join_node_id_hash_maybe: ?hash.HashInt(.sha1) = null;
+                        var join_node_id_hash_maybe: ?hash.HashInt(hash_kind) = null;
 
                         // find the target node ids that aren't in source
                         var next_node_id = target_node_id;
@@ -756,20 +777,20 @@ fn writeBlobWithPatches(
                             if (try next_children_iter.next()) |next_child_cursor| {
                                 if (try next_children_iter.next() != null) return error.ExpectedOneChild;
                                 const next_kv_pair = try next_child_cursor.readKeyValuePair();
-                                var next_child_bytes = [_]u8{0} ** patch.NODE_ID_SIZE;
+                                var next_child_bytes = [_]u8{0} ** patch.NodeId(hash_kind).byte_size;
                                 const next_child_slice = try next_kv_pair.key_cursor.readBytes(&next_child_bytes);
                                 next_node_id = blk: {
                                     var stream = std.io.fixedBufferStream(next_child_slice);
                                     var node_id_reader = stream.reader();
-                                    break :blk @bitCast(try node_id_reader.readInt(patch.NodeIdInt, .big));
+                                    break :blk @bitCast(try node_id_reader.readInt(patch.NodeId(hash_kind).Int, .big));
                                 };
-                                next_node_id_hash = hash.hashInt(.sha1, next_child_slice);
+                                next_node_id_hash = hash.hashInt(hash_kind, next_child_slice);
                             } else {
                                 break;
                             }
                         }
 
-                        var source_node_ids = std.ArrayList(patch.NodeId).init(self.parent.allocator);
+                        var source_node_ids = std.ArrayList(patch.NodeId(hash_kind)).init(self.parent.allocator);
                         defer source_node_ids.deinit();
 
                         // find the source node ids that aren't in target
@@ -787,20 +808,20 @@ fn writeBlobWithPatches(
                             if (try next_children_iter.next()) |next_child_cursor| {
                                 if (try next_children_iter.next() != null) return error.ExpectedOneChild;
                                 const next_kv_pair = try next_child_cursor.readKeyValuePair();
-                                var next_child_bytes = [_]u8{0} ** patch.NODE_ID_SIZE;
+                                var next_child_bytes = [_]u8{0} ** patch.NodeId(hash_kind).byte_size;
                                 const next_child_slice = try next_kv_pair.key_cursor.readBytes(&next_child_bytes);
                                 next_node_id = blk: {
                                     var stream = std.io.fixedBufferStream(next_child_slice);
                                     var node_id_reader = stream.reader();
-                                    break :blk @bitCast(try node_id_reader.readInt(patch.NodeIdInt, .big));
+                                    break :blk @bitCast(try node_id_reader.readInt(patch.NodeId(hash_kind).Int, .big));
                                 };
-                                next_node_id_hash = hash.hashInt(.sha1, next_child_slice);
+                                next_node_id_hash = hash.hashInt(hash_kind, next_child_slice);
                             } else {
                                 break;
                             }
                         }
 
-                        var base_node_ids = std.ArrayList(patch.NodeId).init(self.parent.allocator);
+                        var base_node_ids = std.ArrayList(patch.NodeId(hash_kind)).init(self.parent.allocator);
                         defer base_node_ids.deinit();
 
                         // find the base node ids up to (but not including) the join node id if it exists,
@@ -812,14 +833,14 @@ fn writeBlobWithPatches(
                             if (try next_children_iter.next()) |next_child_cursor| {
                                 if (try next_children_iter.next() != null) return error.ExpectedOneChild;
                                 const next_kv_pair = try next_child_cursor.readKeyValuePair();
-                                var next_child_bytes = [_]u8{0} ** patch.NODE_ID_SIZE;
+                                var next_child_bytes = [_]u8{0} ** patch.NodeId(hash_kind).byte_size;
                                 const next_child_slice = try next_kv_pair.key_cursor.readBytes(&next_child_bytes);
                                 next_node_id = blk: {
                                     var stream = std.io.fixedBufferStream(next_child_slice);
                                     var node_id_reader = stream.reader();
-                                    break :blk @bitCast(try node_id_reader.readInt(patch.NodeIdInt, .big));
+                                    break :blk @bitCast(try node_id_reader.readInt(patch.NodeId(hash_kind).Int, .big));
                                 };
-                                next_node_id_hash = hash.hashInt(.sha1, next_child_slice);
+                                next_node_id_hash = hash.hashInt(hash_kind, next_child_slice);
                                 if (join_node_id_hash_maybe) |join_node_id_hash| {
                                     if (next_node_id_hash != join_node_id_hash) {
                                         try base_node_ids.append(next_node_id);
@@ -839,13 +860,13 @@ fn writeBlobWithPatches(
                         if (join_node_id_hash_maybe) |join_node_id_hash| {
                             if (source_node_ids.items.len == 0) return error.ExpectedAtLeastOneSourceNodeId;
                             const join_parent_node_id = source_node_ids.items[source_node_ids.items.len - 1];
-                            var join_parent_bytes = [_]u8{0} ** patch.NODE_ID_SIZE;
+                            var join_parent_bytes = [_]u8{0} ** patch.NodeId(hash_kind).byte_size;
                             {
                                 var stream = std.io.fixedBufferStream(&join_parent_bytes);
                                 var node_id_writer = stream.writer();
-                                try node_id_writer.writeInt(patch.NodeIdInt, @bitCast(join_parent_node_id), .big);
+                                try node_id_writer.writeInt(patch.NodeId(hash_kind).Int, @bitCast(join_parent_node_id), .big);
                             }
-                            const join_parent_node_id_hash = hash.hashInt(.sha1, &join_parent_bytes);
+                            const join_parent_node_id_hash = hash.hashInt(hash_kind, &join_parent_bytes);
                             self.parent.current_node_id_hash = join_parent_node_id_hash;
 
                             // TODO: is it actually guaranteed that the join node is in base?
@@ -916,7 +937,7 @@ fn writeBlobWithPatches(
                         self.parent.has_conflict = true;
                     } else {
                         const change_content_list_cursor = (try self.parent.patch_id_to_change_content_list.getCursor(first_node_id.patch_id)) orelse return error.KeyNotFound;
-                        const change_content_list = try rp.Repo(.xit).DB.ArrayList(.read_only).init(change_content_list_cursor);
+                        const change_content_list = try rp.Repo(.xit, hash_kind).DB.ArrayList(.read_only).init(change_content_list_cursor);
 
                         const change_content_cursor = (try change_content_list.getCursor(first_node_id.node)) orelse return error.KeyNotFound;
                         const change_content = try change_content_cursor.readBytesAlloc(self.parent.allocator, MAX_READ_BYTES);
@@ -944,7 +965,7 @@ fn writeBlobWithPatches(
 
         pub fn seekTo(self: *@This(), offset: usize) !void {
             if (offset == 0) {
-                self.current_node_id_hash = hash.hashInt(.sha1, &patch.FIRST_NODE_ID_BYTES);
+                self.current_node_id_hash = hash.hashInt(hash_kind, &patch.NodeId(hash_kind).first_bytes);
             } else {
                 return error.InvalidOffset;
             }
@@ -993,35 +1014,38 @@ fn writeBlobWithPatches(
         .patch_id_to_change_content_list = &patch_id_to_change_content_list,
         .line_buffer = &line_buffer,
         .current_line = null,
-        .current_node_id_hash = hash.hashInt(.sha1, &patch.FIRST_NODE_ID_BYTES),
+        .current_node_id_hash = hash.hashInt(hash_kind, &patch.NodeId(hash_kind).first_bytes),
         .has_conflict = false,
     };
 
-    var oid = [_]u8{0} ** hash.byteLen(.sha1);
-    try obj.writeObject(.xit, state, &stream, .{ .kind = .blob, .size = try stream.count() }, &oid);
+    var oid = [_]u8{0} ** hash.byteLen(hash_kind);
+    try obj.writeObject(.xit, hash_kind, state, &stream, .{ .kind = .blob, .size = try stream.count() }, &oid);
     has_conflict.* = stream.has_conflict;
     return oid;
 }
 
-pub const SamePathConflictResult = struct {
-    change: ?obj.Change,
-    conflict: ?MergeConflict,
-};
+pub fn SamePathConflictResult(comptime hash_kind: hash.HashKind) type {
+    return struct {
+        change: ?obj.Change(hash_kind),
+        conflict: ?MergeConflict(hash_kind),
+    };
+}
 
 fn samePathConflict(
     comptime repo_kind: rp.RepoKind,
-    state: rp.Repo(repo_kind).State(.read_write),
+    comptime hash_kind: hash.HashKind,
+    state: rp.Repo(repo_kind, hash_kind).State(.read_write),
     allocator: std.mem.Allocator,
-    base_oid: *const [hash.hexLen(.sha1)]u8,
-    target_oid: *const [hash.hexLen(.sha1)]u8,
-    source_oid: *const [hash.hexLen(.sha1)]u8,
+    base_oid: *const [hash.hexLen(hash_kind)]u8,
+    target_oid: *const [hash.hexLen(hash_kind)]u8,
+    source_oid: *const [hash.hexLen(hash_kind)]u8,
     target_name: []const u8,
     source_name: []const u8,
-    target_change_maybe: ?obj.Change,
-    source_change: obj.Change,
+    target_change_maybe: ?obj.Change(hash_kind),
+    source_change: obj.Change(hash_kind),
     path: []const u8,
     comptime merge_algo: MergeAlgorithm,
-) !SamePathConflictResult {
+) !SamePathConflictResult(hash_kind) {
     if (target_change_maybe) |target_change| {
         const base_entry_maybe = source_change.old;
 
@@ -1065,8 +1089,8 @@ fn samePathConflict(
 
                 const base_file_oid_maybe = if (base_entry_maybe) |base_entry| &base_entry.oid else null;
                 const oid = oid_maybe orelse switch (merge_algo) {
-                    .diff3 => try writeBlobWithDiff3(repo_kind, state, allocator, base_file_oid_maybe, &target_entry.oid, &source_entry.oid, base_oid, target_name, source_name, &has_conflict),
-                    .patch => try writeBlobWithPatches(state, allocator, &source_entry.oid, base_oid, target_oid, source_oid, target_name, source_name, &has_conflict, path),
+                    .diff3 => try writeBlobWithDiff3(repo_kind, hash_kind, state, allocator, base_file_oid_maybe, &target_entry.oid, &source_entry.oid, base_oid, target_name, source_name, &has_conflict),
+                    .patch => try writeBlobWithPatches(hash_kind, state, allocator, &source_entry.oid, base_oid, target_oid, source_oid, target_name, source_name, &has_conflict, path),
                 };
                 const mode = mode_maybe orelse target_entry.mode;
 
@@ -1130,12 +1154,13 @@ fn samePathConflict(
 fn fileDirConflict(
     arena: *std.heap.ArenaAllocator,
     comptime repo_kind: rp.RepoKind,
+    comptime hash_kind: hash.HashKind,
     path: []const u8,
-    diff: *obj.TreeDiff(repo_kind),
+    diff: *obj.TreeDiff(repo_kind, hash_kind),
     diff_kind: enum { target, source },
     branch_name: []const u8,
-    conflicts: *std.StringArrayHashMap(MergeConflict),
-    clean_diff: *obj.TreeDiff(repo_kind),
+    conflicts: *std.StringArrayHashMap(MergeConflict(hash_kind)),
+    clean_diff: *obj.TreeDiff(repo_kind, hash_kind),
 ) !void {
     var parent_path_maybe = std.fs.path.dirname(path);
     while (parent_path_maybe) |parent_path| {
@@ -1183,310 +1208,331 @@ pub const MergeKind = enum {
     cherry_pick,
 };
 
-pub const MergeInput = union(enum) {
-    new: ref.RefOrOid,
-    cont,
-};
+pub fn MergeInput(comptime hash_kind: hash.HashKind) type {
+    return union(enum) {
+        new: ref.RefOrOid(hash_kind),
+        cont,
+    };
+}
 
 pub const MergeAlgorithm = enum {
     diff3, // three-way merge
     patch, // patch-based (xit only)
 };
 
-pub const Merge = struct {
-    arena: *std.heap.ArenaAllocator,
-    allocator: std.mem.Allocator,
-    changes: std.StringArrayHashMap(obj.Change),
-    auto_resolved_conflicts: std.StringArrayHashMap(void),
-    base_oid: [hash.hexLen(.sha1)]u8,
-    target_name: []const u8,
-    source_name: []const u8,
-    data: union(enum) {
-        success: struct {
-            oid: [hash.hexLen(.sha1)]u8,
-        },
-        nothing,
-        fast_forward,
-        conflict: struct {
-            conflicts: std.StringArrayHashMap(MergeConflict),
-        },
-    },
-
-    pub fn init(
-        comptime repo_kind: rp.RepoKind,
-        state: rp.Repo(repo_kind).State(.read_write),
+pub fn Merge(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
+    return struct {
+        arena: *std.heap.ArenaAllocator,
         allocator: std.mem.Allocator,
-        merge_input: MergeInput,
-        comptime merge_kind: MergeKind,
-        comptime merge_algo: MergeAlgorithm,
-    ) !Merge {
-        // TODO: exit early if working tree is dirty
+        changes: std.StringArrayHashMap(obj.Change(hash_kind)),
+        auto_resolved_conflicts: std.StringArrayHashMap(void),
+        base_oid: [hash.hexLen(hash_kind)]u8,
+        target_name: []const u8,
+        source_name: []const u8,
+        data: union(enum) {
+            success: struct {
+                oid: [hash.hexLen(hash_kind)]u8,
+            },
+            nothing,
+            fast_forward,
+            conflict: struct {
+                conflicts: std.StringArrayHashMap(MergeConflict(hash_kind)),
+            },
+        },
 
-        const arena = try allocator.create(std.heap.ArenaAllocator);
-        arena.* = std.heap.ArenaAllocator.init(allocator);
-        errdefer {
-            arena.deinit();
-            allocator.destroy(arena);
-        }
+        pub fn init(
+            state: rp.Repo(repo_kind, hash_kind).State(.read_write),
+            allocator: std.mem.Allocator,
+            merge_input: MergeInput(hash_kind),
+            comptime merge_kind: MergeKind,
+            comptime merge_algo: MergeAlgorithm,
+        ) !Merge(repo_kind, hash_kind) {
+            // TODO: exit early if working tree is dirty
 
-        // get the current branch name and oid
-        const target_name = try ref.readHeadNameAlloc(repo_kind, state.readOnly(), arena.allocator());
-        const target_oid_maybe = try ref.readHeadMaybe(repo_kind, state.readOnly());
+            const arena = try allocator.create(std.heap.ArenaAllocator);
+            arena.* = std.heap.ArenaAllocator.init(allocator);
+            errdefer {
+                arena.deinit();
+                allocator.destroy(arena);
+            }
 
-        // init the diff that we will use for the migration and the conflicts maps.
-        // they're using the arena because they'll be included in the result.
-        var clean_diff = obj.TreeDiff(repo_kind).init(arena.allocator());
-        var auto_resolved_conflicts = std.StringArrayHashMap(void).init(arena.allocator());
-        var conflicts = std.StringArrayHashMap(MergeConflict).init(arena.allocator());
+            // get the current branch name and oid
+            const target_name = try ref.readHeadNameAlloc(repo_kind, hash_kind, state.readOnly(), arena.allocator());
+            const target_oid_maybe = try ref.readHeadMaybe(repo_kind, hash_kind, state.readOnly());
 
-        switch (merge_input) {
-            .new => |ref_or_oid| {
-                // cherry-picking requires an oid
-                if (merge_kind == .cherry_pick and ref_or_oid != .oid) {
-                    return error.OidRequired;
-                }
+            // init the diff that we will use for the migration and the conflicts maps.
+            // they're using the arena because they'll be included in the result.
+            var clean_diff = obj.TreeDiff(repo_kind, hash_kind).init(arena.allocator());
+            var auto_resolved_conflicts = std.StringArrayHashMap(void).init(arena.allocator());
+            var conflicts = std.StringArrayHashMap(MergeConflict(hash_kind)).init(arena.allocator());
 
-                // make sure there is no stored merge state
-                switch (repo_kind) {
-                    .git => {
-                        const merge_head_name = switch (merge_kind) {
-                            .merge => "MERGE_HEAD",
-                            .cherry_pick => "CHERRY_PICK_HEAD",
-                        };
-                        if (state.core.git_dir.openFile(merge_head_name, .{ .mode = .read_only })) |merge_head| {
-                            defer merge_head.close();
-                            return error.UnfinishedMergeAlreadyInProgress;
-                        } else |err| switch (err) {
-                            error.FileNotFound => {},
-                            else => |e| return e,
-                        }
-                    },
-                    .xit => {
-                        if (try state.extra.moment.getCursor(hash.hashInt(.sha1, "merge-in-progress"))) |_| {
-                            return error.UnfinishedMergeAlreadyInProgress;
-                        }
-                    },
-                }
-
-                // we need to return the source name so copy it into a new buffer
-                // so we an ensure it lives as long as the rest of the return struct
-                const source_name = try arena.allocator().dupe(u8, switch (ref_or_oid) {
-                    .ref => |rf| rf.name,
-                    .oid => |oid| oid,
-                });
-
-                // get the oids for the three-way merge
-                const source_oid = try ref.readRecur(repo_kind, state.readOnly(), ref_or_oid) orelse return error.InvalidTarget;
-                const target_oid = target_oid_maybe orelse {
-                    // the target branch is completely empty, so just set it to the source oid
-                    try ref.writeRecur(repo_kind, state, "HEAD", &source_oid);
-
-                    // make a TreeDiff that adds all files from source
-                    try clean_diff.compare(state.readOnly(), null, source_oid, null);
-
-                    // read index
-                    var index = try idx.Index(repo_kind).init(allocator, state.readOnly());
-                    defer index.deinit();
-
-                    // update the working tree
-                    try cht.migrate(repo_kind, state, allocator, clean_diff, &index, null);
-
-                    return .{
-                        .arena = arena,
-                        .allocator = allocator,
-                        .changes = clean_diff.changes,
-                        .auto_resolved_conflicts = auto_resolved_conflicts,
-                        .base_oid = [_]u8{0} ** hash.hexLen(.sha1),
-                        .target_name = target_name,
-                        .source_name = source_name,
-                        .data = .fast_forward,
-                    };
-                };
-                var base_oid: [hash.hexLen(.sha1)]u8 = undefined;
-                switch (merge_kind) {
-                    .merge => base_oid = try commonAncestor(repo_kind, allocator, state.readOnly(), &target_oid, &source_oid),
-                    .cherry_pick => {
-                        var object = try obj.Object(repo_kind, .full).init(allocator, state.readOnly(), &source_oid);
-                        defer object.deinit();
-                        const parent_oid = if (object.content.commit.parents.items.len == 1) object.content.commit.parents.items[0] else return error.CommitMustHaveOneParent;
-                        switch (object.content) {
-                            .commit => base_oid = parent_oid,
-                            else => return error.CommitObjectNotFound,
-                        }
-                    },
-                }
-
-                // if the base ancestor is the source oid, do nothing
-                if (std.mem.eql(u8, &source_oid, &base_oid)) {
-                    return .{
-                        .arena = arena,
-                        .allocator = allocator,
-                        .changes = clean_diff.changes,
-                        .auto_resolved_conflicts = auto_resolved_conflicts,
-                        .base_oid = base_oid,
-                        .target_name = target_name,
-                        .source_name = source_name,
-                        .data = .nothing,
-                    };
-                }
-
-                // diff the base ancestor with the target oid
-                var target_diff = obj.TreeDiff(repo_kind).init(arena.allocator());
-                try target_diff.compare(state.readOnly(), base_oid, target_oid, null);
-
-                // diff the base ancestor with the source oid
-                var source_diff = obj.TreeDiff(repo_kind).init(arena.allocator());
-                try source_diff.compare(state.readOnly(), base_oid, source_oid, null);
-
-                // look for same path conflicts while populating the clean diff
-                for (source_diff.changes.keys(), source_diff.changes.values()) |path, source_change| {
-                    const same_path_result = try samePathConflict(repo_kind, state, allocator, &base_oid, &target_oid, &source_oid, target_name, source_name, target_diff.changes.get(path), source_change, path, merge_algo);
-                    if (same_path_result.change) |change| {
-                        try clean_diff.changes.put(path, change);
+            switch (merge_input) {
+                .new => |ref_or_oid| {
+                    // cherry-picking requires an oid
+                    if (merge_kind == .cherry_pick and ref_or_oid != .oid) {
+                        return error.OidRequired;
                     }
-                    if (same_path_result.conflict) |conflict| {
-                        try conflicts.put(path, conflict);
-                    } else {
-                        try auto_resolved_conflicts.put(path, {});
-                    }
-                }
 
-                // look for file/dir conflicts
-                for (source_diff.changes.keys(), source_diff.changes.values()) |path, source_change| {
-                    if (source_change.new) |_| {
-                        try fileDirConflict(arena, repo_kind, path, &target_diff, .target, target_name, &conflicts, &clean_diff);
-                    }
-                }
-                for (target_diff.changes.keys(), target_diff.changes.values()) |path, target_change| {
-                    if (target_change.new) |_| {
-                        try fileDirConflict(arena, repo_kind, path, &source_diff, .source, source_name, &conflicts, &clean_diff);
-                    }
-                }
-
-                // create commit message
-                var commit_metadata: obj.CommitMetadata = switch (merge_kind) {
-                    .merge => .{
-                        .message = try std.fmt.allocPrint(arena.allocator(), "merge from {s}", .{source_name}),
-                    },
-                    .cherry_pick => blk: {
-                        const object = try obj.Object(repo_kind, .full).init(arena.allocator(), state.readOnly(), &source_oid);
-                        switch (object.content) {
-                            .commit => break :blk object.content.commit.metadata,
-                            else => return error.CommitObjectNotFound,
-                        }
-                    },
-                };
-
-                switch (repo_kind) {
-                    .git => {
-                        // create lock file
-                        var lock = try io.LockFile.init(state.core.git_dir, "index");
-                        defer lock.deinit();
-
-                        // read index
-                        var index = try idx.Index(repo_kind).init(allocator, state.readOnly());
-                        defer index.deinit();
-
-                        // update the working tree
-                        try cht.migrate(repo_kind, state, allocator, clean_diff, &index, null);
-
-                        for (conflicts.keys(), conflicts.values()) |path, conflict| {
-                            // add conflict to index
-                            try index.addConflictEntries(path, .{ conflict.base, conflict.target, conflict.source });
-                            // write renamed file if necessary
-                            if (conflict.renamed) |renamed| {
-                                try cht.objectToFile(repo_kind, state.readOnly(), allocator, renamed.path, renamed.tree_entry);
-                            }
-                        }
-
-                        // update the index
-                        try index.write(allocator, .{ .core = state.core, .extra = .{ .lock_file_maybe = lock.lock_file } });
-
-                        // finish lock
-                        lock.success = true;
-
-                        // exit early if there were conflicts
-                        if (conflicts.count() > 0) {
+                    // make sure there is no stored merge state
+                    switch (repo_kind) {
+                        .git => {
                             const merge_head_name = switch (merge_kind) {
                                 .merge => "MERGE_HEAD",
                                 .cherry_pick => "CHERRY_PICK_HEAD",
                             };
-                            const merge_head = try state.core.git_dir.createFile(merge_head_name, .{ .truncate = true, .lock = .exclusive });
-                            defer merge_head.close();
-                            try merge_head.writeAll(&source_oid);
+                            if (state.core.git_dir.openFile(merge_head_name, .{ .mode = .read_only })) |merge_head| {
+                                defer merge_head.close();
+                                return error.UnfinishedMergeAlreadyInProgress;
+                            } else |err| switch (err) {
+                                error.FileNotFound => {},
+                                else => |e| return e,
+                            }
+                        },
+                        .xit => {
+                            if (try state.extra.moment.getCursor(hash.hashInt(hash_kind, "merge-in-progress"))) |_| {
+                                return error.UnfinishedMergeAlreadyInProgress;
+                            }
+                        },
+                    }
 
-                            const merge_msg = try state.core.git_dir.createFile("MERGE_MSG", .{ .truncate = true, .lock = .exclusive });
-                            defer merge_msg.close();
-                            try merge_msg.writeAll(commit_metadata.message);
+                    // we need to return the source name so copy it into a new buffer
+                    // so we an ensure it lives as long as the rest of the return struct
+                    const source_name = try arena.allocator().dupe(u8, switch (ref_or_oid) {
+                        .ref => |rf| rf.name,
+                        .oid => |oid| oid,
+                    });
 
-                            return .{
-                                .arena = arena,
-                                .allocator = allocator,
-                                .changes = clean_diff.changes,
-                                .auto_resolved_conflicts = auto_resolved_conflicts,
-                                .base_oid = base_oid,
-                                .target_name = target_name,
-                                .source_name = source_name,
-                                .data = .{ .conflict = .{ .conflicts = conflicts } },
-                            };
-                        }
-                    },
-                    .xit => {
+                    // get the oids for the three-way merge
+                    const source_oid = try ref.readRecur(repo_kind, hash_kind, state.readOnly(), ref_or_oid) orelse return error.InvalidTarget;
+                    const target_oid = target_oid_maybe orelse {
+                        // the target branch is completely empty, so just set it to the source oid
+                        try ref.writeRecur(repo_kind, hash_kind, state, "HEAD", &source_oid);
+
+                        // make a TreeDiff that adds all files from source
+                        try clean_diff.compare(state.readOnly(), null, source_oid, null);
+
                         // read index
-                        var index = try idx.Index(repo_kind).init(allocator, state.readOnly());
+                        var index = try idx.Index(repo_kind, hash_kind).init(allocator, state.readOnly());
                         defer index.deinit();
 
                         // update the working tree
-                        try cht.migrate(repo_kind, state, allocator, clean_diff, &index, null);
+                        try cht.migrate(repo_kind, hash_kind, state, allocator, clean_diff, &index, null);
 
-                        for (conflicts.keys(), conflicts.values()) |path, conflict| {
-                            // add conflict to index
-                            try index.addConflictEntries(path, .{ conflict.base, conflict.target, conflict.source });
-                            // write renamed file if necessary
-                            if (conflict.renamed) |renamed| {
-                                try cht.objectToFile(repo_kind, state.readOnly(), allocator, renamed.path, renamed.tree_entry);
+                        return .{
+                            .arena = arena,
+                            .allocator = allocator,
+                            .changes = clean_diff.changes,
+                            .auto_resolved_conflicts = auto_resolved_conflicts,
+                            .base_oid = [_]u8{0} ** hash.hexLen(hash_kind),
+                            .target_name = target_name,
+                            .source_name = source_name,
+                            .data = .fast_forward,
+                        };
+                    };
+                    var base_oid: [hash.hexLen(hash_kind)]u8 = undefined;
+                    switch (merge_kind) {
+                        .merge => base_oid = try commonAncestor(repo_kind, hash_kind, allocator, state.readOnly(), &target_oid, &source_oid),
+                        .cherry_pick => {
+                            var object = try obj.Object(repo_kind, hash_kind, .full).init(allocator, state.readOnly(), &source_oid);
+                            defer object.deinit();
+                            const parent_oid = if (object.content.commit.parents.items.len == 1) object.content.commit.parents.items[0] else return error.CommitMustHaveOneParent;
+                            switch (object.content) {
+                                .commit => base_oid = parent_oid,
+                                else => return error.CommitObjectNotFound,
                             }
+                        },
+                    }
+
+                    // if the base ancestor is the source oid, do nothing
+                    if (std.mem.eql(u8, &source_oid, &base_oid)) {
+                        return .{
+                            .arena = arena,
+                            .allocator = allocator,
+                            .changes = clean_diff.changes,
+                            .auto_resolved_conflicts = auto_resolved_conflicts,
+                            .base_oid = base_oid,
+                            .target_name = target_name,
+                            .source_name = source_name,
+                            .data = .nothing,
+                        };
+                    }
+
+                    // diff the base ancestor with the target oid
+                    var target_diff = obj.TreeDiff(repo_kind, hash_kind).init(arena.allocator());
+                    try target_diff.compare(state.readOnly(), base_oid, target_oid, null);
+
+                    // diff the base ancestor with the source oid
+                    var source_diff = obj.TreeDiff(repo_kind, hash_kind).init(arena.allocator());
+                    try source_diff.compare(state.readOnly(), base_oid, source_oid, null);
+
+                    // look for same path conflicts while populating the clean diff
+                    for (source_diff.changes.keys(), source_diff.changes.values()) |path, source_change| {
+                        const same_path_result = try samePathConflict(repo_kind, hash_kind, state, allocator, &base_oid, &target_oid, &source_oid, target_name, source_name, target_diff.changes.get(path), source_change, path, merge_algo);
+                        if (same_path_result.change) |change| {
+                            try clean_diff.changes.put(path, change);
                         }
-
-                        // add conflicts to index
-                        for (conflicts.keys(), conflicts.values()) |path, conflict| {
-                            try index.addConflictEntries(path, .{ conflict.base, conflict.target, conflict.source });
-                        }
-
-                        // update the index
-                        try index.write(allocator, state);
-
-                        // exit early if there were conflicts
-                        if (conflicts.count() > 0) {
-                            const merge_in_progress_cursor = try state.extra.moment.putCursor(hash.hashInt(.sha1, "merge-in-progress"));
-                            const merge_in_progress = try rp.Repo(.xit).DB.HashMap(.read_write).init(merge_in_progress_cursor);
-
-                            var merge_head_cursor = try merge_in_progress.putCursor(hash.hashInt(.sha1, "source-oid"));
-                            try merge_head_cursor.write(.{ .bytes = &source_oid });
-
-                            var message_cursor = try merge_in_progress.putCursor(hash.hashInt(.sha1, "message"));
-                            try message_cursor.write(.{ .bytes = commit_metadata.message });
-
-                            return .{
-                                .arena = arena,
-                                .allocator = allocator,
-                                .changes = clean_diff.changes,
-                                .auto_resolved_conflicts = auto_resolved_conflicts,
-                                .base_oid = base_oid,
-                                .target_name = target_name,
-                                .source_name = source_name,
-                                .data = .{ .conflict = .{ .conflicts = conflicts } },
-                            };
+                        if (same_path_result.conflict) |conflict| {
+                            try conflicts.put(path, conflict);
                         } else {
-                            // if any file conflicts were auto-resolved, there will be temporary state that must be cleaned up
-                            _ = try state.extra.moment.remove(hash.hashInt(.sha1, "merge-in-progress"));
+                            try auto_resolved_conflicts.put(path, {});
                         }
-                    },
-                }
+                    }
 
-                if (std.mem.eql(u8, &target_oid, &base_oid)) {
-                    // the base ancestor is the target oid, so just update HEAD
-                    try ref.writeRecur(repo_kind, state, "HEAD", &source_oid);
+                    // look for file/dir conflicts
+                    for (source_diff.changes.keys(), source_diff.changes.values()) |path, source_change| {
+                        if (source_change.new) |_| {
+                            try fileDirConflict(arena, repo_kind, hash_kind, path, &target_diff, .target, target_name, &conflicts, &clean_diff);
+                        }
+                    }
+                    for (target_diff.changes.keys(), target_diff.changes.values()) |path, target_change| {
+                        if (target_change.new) |_| {
+                            try fileDirConflict(arena, repo_kind, hash_kind, path, &source_diff, .source, source_name, &conflicts, &clean_diff);
+                        }
+                    }
+
+                    // create commit message
+                    var commit_metadata: obj.CommitMetadata(hash_kind) = switch (merge_kind) {
+                        .merge => .{
+                            .message = try std.fmt.allocPrint(arena.allocator(), "merge from {s}", .{source_name}),
+                        },
+                        .cherry_pick => blk: {
+                            const object = try obj.Object(repo_kind, hash_kind, .full).init(arena.allocator(), state.readOnly(), &source_oid);
+                            switch (object.content) {
+                                .commit => break :blk object.content.commit.metadata,
+                                else => return error.CommitObjectNotFound,
+                            }
+                        },
+                    };
+
+                    switch (repo_kind) {
+                        .git => {
+                            // create lock file
+                            var lock = try io.LockFile.init(state.core.git_dir, "index");
+                            defer lock.deinit();
+
+                            // read index
+                            var index = try idx.Index(repo_kind, hash_kind).init(allocator, state.readOnly());
+                            defer index.deinit();
+
+                            // update the working tree
+                            try cht.migrate(repo_kind, hash_kind, state, allocator, clean_diff, &index, null);
+
+                            for (conflicts.keys(), conflicts.values()) |path, conflict| {
+                                // add conflict to index
+                                try index.addConflictEntries(path, .{ conflict.base, conflict.target, conflict.source });
+                                // write renamed file if necessary
+                                if (conflict.renamed) |renamed| {
+                                    try cht.objectToFile(repo_kind, hash_kind, state.readOnly(), allocator, renamed.path, renamed.tree_entry);
+                                }
+                            }
+
+                            // update the index
+                            try index.write(allocator, .{ .core = state.core, .extra = .{ .lock_file_maybe = lock.lock_file } });
+
+                            // finish lock
+                            lock.success = true;
+
+                            // exit early if there were conflicts
+                            if (conflicts.count() > 0) {
+                                const merge_head_name = switch (merge_kind) {
+                                    .merge => "MERGE_HEAD",
+                                    .cherry_pick => "CHERRY_PICK_HEAD",
+                                };
+                                const merge_head = try state.core.git_dir.createFile(merge_head_name, .{ .truncate = true, .lock = .exclusive });
+                                defer merge_head.close();
+                                try merge_head.writeAll(&source_oid);
+
+                                const merge_msg = try state.core.git_dir.createFile("MERGE_MSG", .{ .truncate = true, .lock = .exclusive });
+                                defer merge_msg.close();
+                                try merge_msg.writeAll(commit_metadata.message);
+
+                                return .{
+                                    .arena = arena,
+                                    .allocator = allocator,
+                                    .changes = clean_diff.changes,
+                                    .auto_resolved_conflicts = auto_resolved_conflicts,
+                                    .base_oid = base_oid,
+                                    .target_name = target_name,
+                                    .source_name = source_name,
+                                    .data = .{ .conflict = .{ .conflicts = conflicts } },
+                                };
+                            }
+                        },
+                        .xit => {
+                            // read index
+                            var index = try idx.Index(repo_kind, hash_kind).init(allocator, state.readOnly());
+                            defer index.deinit();
+
+                            // update the working tree
+                            try cht.migrate(repo_kind, hash_kind, state, allocator, clean_diff, &index, null);
+
+                            for (conflicts.keys(), conflicts.values()) |path, conflict| {
+                                // add conflict to index
+                                try index.addConflictEntries(path, .{ conflict.base, conflict.target, conflict.source });
+                                // write renamed file if necessary
+                                if (conflict.renamed) |renamed| {
+                                    try cht.objectToFile(repo_kind, hash_kind, state.readOnly(), allocator, renamed.path, renamed.tree_entry);
+                                }
+                            }
+
+                            // add conflicts to index
+                            for (conflicts.keys(), conflicts.values()) |path, conflict| {
+                                try index.addConflictEntries(path, .{ conflict.base, conflict.target, conflict.source });
+                            }
+
+                            // update the index
+                            try index.write(allocator, state);
+
+                            // exit early if there were conflicts
+                            if (conflicts.count() > 0) {
+                                const merge_in_progress_cursor = try state.extra.moment.putCursor(hash.hashInt(hash_kind, "merge-in-progress"));
+                                const merge_in_progress = try rp.Repo(.xit, hash_kind).DB.HashMap(.read_write).init(merge_in_progress_cursor);
+
+                                var merge_head_cursor = try merge_in_progress.putCursor(hash.hashInt(hash_kind, "source-oid"));
+                                try merge_head_cursor.write(.{ .bytes = &source_oid });
+
+                                var message_cursor = try merge_in_progress.putCursor(hash.hashInt(hash_kind, "message"));
+                                try message_cursor.write(.{ .bytes = commit_metadata.message });
+
+                                return .{
+                                    .arena = arena,
+                                    .allocator = allocator,
+                                    .changes = clean_diff.changes,
+                                    .auto_resolved_conflicts = auto_resolved_conflicts,
+                                    .base_oid = base_oid,
+                                    .target_name = target_name,
+                                    .source_name = source_name,
+                                    .data = .{ .conflict = .{ .conflicts = conflicts } },
+                                };
+                            } else {
+                                // if any file conflicts were auto-resolved, there will be temporary state that must be cleaned up
+                                _ = try state.extra.moment.remove(hash.hashInt(hash_kind, "merge-in-progress"));
+                            }
+                        },
+                    }
+
+                    if (std.mem.eql(u8, &target_oid, &base_oid)) {
+                        // the base ancestor is the target oid, so just update HEAD
+                        try ref.writeRecur(repo_kind, hash_kind, state, "HEAD", &source_oid);
+                        return .{
+                            .arena = arena,
+                            .allocator = allocator,
+                            .changes = clean_diff.changes,
+                            .auto_resolved_conflicts = auto_resolved_conflicts,
+                            .base_oid = base_oid,
+                            .target_name = target_name,
+                            .source_name = source_name,
+                            .data = .fast_forward,
+                        };
+                    }
+
+                    // commit the change
+                    commit_metadata.parent_oids = switch (merge_kind) {
+                        .merge => &.{ target_oid, source_oid },
+                        .cherry_pick => &.{base_oid},
+                    };
+                    const commit_oid = try obj.writeCommit(repo_kind, hash_kind, state, allocator, commit_metadata);
+
                     return .{
                         .arena = arena,
                         .allocator = allocator,
@@ -1495,141 +1541,123 @@ pub const Merge = struct {
                         .base_oid = base_oid,
                         .target_name = target_name,
                         .source_name = source_name,
-                        .data = .fast_forward,
+                        .data = .{ .success = .{ .oid = commit_oid } },
                     };
-                }
+                },
+                .cont => {
+                    // ensure there are no conflict entries in the index
+                    {
+                        var index = try idx.Index(repo_kind, hash_kind).init(allocator, state.readOnly());
+                        defer index.deinit();
 
-                // commit the change
-                commit_metadata.parent_oids = switch (merge_kind) {
-                    .merge => &.{ target_oid, source_oid },
-                    .cherry_pick => &.{base_oid},
-                };
-                const commit_oid = try obj.writeCommit(repo_kind, state, allocator, commit_metadata);
-
-                return .{
-                    .arena = arena,
-                    .allocator = allocator,
-                    .changes = clean_diff.changes,
-                    .auto_resolved_conflicts = auto_resolved_conflicts,
-                    .base_oid = base_oid,
-                    .target_name = target_name,
-                    .source_name = source_name,
-                    .data = .{ .success = .{ .oid = commit_oid } },
-                };
-            },
-            .cont => {
-                // ensure there are no conflict entries in the index
-                {
-                    var index = try idx.Index(repo_kind).init(allocator, state.readOnly());
-                    defer index.deinit();
-
-                    for (index.entries.values()) |*entries_for_path| {
-                        if (null == entries_for_path[0]) {
-                            return error.CannotContinueMergeWithUnresolvedConflicts;
+                        for (index.entries.values()) |*entries_for_path| {
+                            if (null == entries_for_path[0]) {
+                                return error.CannotContinueMergeWithUnresolvedConflicts;
+                            }
                         }
                     }
-                }
 
-                var source_oid: [hash.hexLen(.sha1)]u8 = undefined;
-                var commit_metadata = obj.CommitMetadata{};
+                    var source_oid: [hash.hexLen(hash_kind)]u8 = undefined;
+                    var commit_metadata = obj.CommitMetadata(hash_kind){};
 
-                // read the stored merge state
-                switch (repo_kind) {
-                    .git => {
-                        const merge_head_name = switch (merge_kind) {
-                            .merge => "MERGE_HEAD",
-                            .cherry_pick => "CHERRY_PICK_HEAD",
-                        };
-                        const merge_head = state.core.git_dir.openFile(merge_head_name, .{ .mode = .read_only }) catch |err| switch (err) {
-                            error.FileNotFound => return error.MergeHeadNotFound,
-                            else => |e| return e,
-                        };
-                        defer merge_head.close();
-                        const merge_head_len = try merge_head.readAll(&source_oid);
-                        if (merge_head_len != source_oid.len) {
-                            return error.InvalidMergeHead;
-                        }
+                    // read the stored merge state
+                    switch (repo_kind) {
+                        .git => {
+                            const merge_head_name = switch (merge_kind) {
+                                .merge => "MERGE_HEAD",
+                                .cherry_pick => "CHERRY_PICK_HEAD",
+                            };
+                            const merge_head = state.core.git_dir.openFile(merge_head_name, .{ .mode = .read_only }) catch |err| switch (err) {
+                                error.FileNotFound => return error.MergeHeadNotFound,
+                                else => |e| return e,
+                            };
+                            defer merge_head.close();
+                            const merge_head_len = try merge_head.readAll(&source_oid);
+                            if (merge_head_len != source_oid.len) {
+                                return error.InvalidMergeHead;
+                            }
 
-                        const merge_msg = state.core.git_dir.openFile("MERGE_MSG", .{ .mode = .read_only }) catch |err| switch (err) {
-                            error.FileNotFound => return error.MergeMessageNotFound,
-                            else => |e| return e,
-                        };
-                        defer merge_msg.close();
-                        commit_metadata.message = try merge_msg.readToEndAlloc(arena.allocator(), MAX_READ_BYTES);
-                    },
-                    .xit => {
-                        const merge_in_progress_cursor = try state.extra.moment.putCursor(hash.hashInt(.sha1, "merge-in-progress"));
-                        const merge_in_progress = try rp.Repo(.xit).DB.HashMap(.read_write).init(merge_in_progress_cursor);
+                            const merge_msg = state.core.git_dir.openFile("MERGE_MSG", .{ .mode = .read_only }) catch |err| switch (err) {
+                                error.FileNotFound => return error.MergeMessageNotFound,
+                                else => |e| return e,
+                            };
+                            defer merge_msg.close();
+                            commit_metadata.message = try merge_msg.readToEndAlloc(arena.allocator(), MAX_READ_BYTES);
+                        },
+                        .xit => {
+                            const merge_in_progress_cursor = try state.extra.moment.putCursor(hash.hashInt(hash_kind, "merge-in-progress"));
+                            const merge_in_progress = try rp.Repo(.xit, hash_kind).DB.HashMap(.read_write).init(merge_in_progress_cursor);
 
-                        const source_oid_cursor = (try merge_in_progress.getCursor(hash.hashInt(.sha1, "source-oid"))) orelse return error.MergeHeadNotFound;
-                        const source_oid_slice = try source_oid_cursor.readBytes(&source_oid);
-                        if (source_oid_slice.len != source_oid.len) {
-                            return error.InvalidMergeHead;
-                        }
+                            const source_oid_cursor = (try merge_in_progress.getCursor(hash.hashInt(hash_kind, "source-oid"))) orelse return error.MergeHeadNotFound;
+                            const source_oid_slice = try source_oid_cursor.readBytes(&source_oid);
+                            if (source_oid_slice.len != source_oid.len) {
+                                return error.InvalidMergeHead;
+                            }
 
-                        const message_cursor = (try merge_in_progress.getCursor(hash.hashInt(.sha1, "message"))) orelse return error.MergeMessageNotFound;
-                        commit_metadata.message = try message_cursor.readBytesAlloc(arena.allocator(), MAX_READ_BYTES);
-                    },
-                }
+                            const message_cursor = (try merge_in_progress.getCursor(hash.hashInt(hash_kind, "message"))) orelse return error.MergeMessageNotFound;
+                            commit_metadata.message = try message_cursor.readBytesAlloc(arena.allocator(), MAX_READ_BYTES);
+                        },
+                    }
 
-                // we need to return the source name but we don't have it,
-                // so just copy the source oid into a buffer and return that instead
-                const source_name = try arena.allocator().dupe(u8, &source_oid);
+                    // we need to return the source name but we don't have it,
+                    // so just copy the source oid into a buffer and return that instead
+                    const source_name = try arena.allocator().dupe(u8, &source_oid);
 
-                // get the base oid
-                var base_oid: [hash.hexLen(.sha1)]u8 = undefined;
-                const target_oid = target_oid_maybe orelse return error.TargetOidNotFound;
-                switch (merge_kind) {
-                    .merge => base_oid = try commonAncestor(repo_kind, allocator, state.readOnly(), &target_oid, &source_oid),
-                    .cherry_pick => {
-                        var object = try obj.Object(repo_kind, .full).init(allocator, state.readOnly(), &source_oid);
-                        defer object.deinit();
-                        const parent_oid = if (object.content.commit.parents.items.len == 1) object.content.commit.parents.items[0] else return error.CommitMustHaveOneParent;
-                        switch (object.content) {
-                            .commit => base_oid = parent_oid,
-                            else => return error.CommitObjectNotFound,
-                        }
-                    },
-                }
+                    // get the base oid
+                    var base_oid: [hash.hexLen(hash_kind)]u8 = undefined;
+                    const target_oid = target_oid_maybe orelse return error.TargetOidNotFound;
+                    switch (merge_kind) {
+                        .merge => base_oid = try commonAncestor(repo_kind, hash_kind, allocator, state.readOnly(), &target_oid, &source_oid),
+                        .cherry_pick => {
+                            var object = try obj.Object(repo_kind, hash_kind, .full).init(allocator, state.readOnly(), &source_oid);
+                            defer object.deinit();
+                            const parent_oid = if (object.content.commit.parents.items.len == 1) object.content.commit.parents.items[0] else return error.CommitMustHaveOneParent;
+                            switch (object.content) {
+                                .commit => base_oid = parent_oid,
+                                else => return error.CommitObjectNotFound,
+                            }
+                        },
+                    }
 
-                // commit the change
-                commit_metadata.parent_oids = switch (merge_kind) {
-                    .merge => &.{ target_oid, source_oid },
-                    .cherry_pick => &.{base_oid},
-                };
-                const commit_oid = try obj.writeCommit(repo_kind, state, allocator, commit_metadata);
+                    // commit the change
+                    commit_metadata.parent_oids = switch (merge_kind) {
+                        .merge => &.{ target_oid, source_oid },
+                        .cherry_pick => &.{base_oid},
+                    };
+                    const commit_oid = try obj.writeCommit(repo_kind, hash_kind, state, allocator, commit_metadata);
 
-                // clean up the stored merge state
-                switch (repo_kind) {
-                    .git => {
-                        const merge_head_name = switch (merge_kind) {
-                            .merge => "MERGE_HEAD",
-                            .cherry_pick => "CHERRY_PICK_HEAD",
-                        };
-                        try state.core.git_dir.deleteFile(merge_head_name);
-                        try state.core.git_dir.deleteFile("MERGE_MSG");
-                    },
-                    .xit => {
-                        _ = try state.extra.moment.remove(hash.hashInt(.sha1, "merge-in-progress"));
-                    },
-                }
+                    // clean up the stored merge state
+                    switch (repo_kind) {
+                        .git => {
+                            const merge_head_name = switch (merge_kind) {
+                                .merge => "MERGE_HEAD",
+                                .cherry_pick => "CHERRY_PICK_HEAD",
+                            };
+                            try state.core.git_dir.deleteFile(merge_head_name);
+                            try state.core.git_dir.deleteFile("MERGE_MSG");
+                        },
+                        .xit => {
+                            _ = try state.extra.moment.remove(hash.hashInt(hash_kind, "merge-in-progress"));
+                        },
+                    }
 
-                return .{
-                    .arena = arena,
-                    .allocator = allocator,
-                    .changes = clean_diff.changes,
-                    .auto_resolved_conflicts = auto_resolved_conflicts,
-                    .base_oid = base_oid,
-                    .target_name = target_name,
-                    .source_name = source_name,
-                    .data = .{ .success = .{ .oid = commit_oid } },
-                };
-            },
+                    return .{
+                        .arena = arena,
+                        .allocator = allocator,
+                        .changes = clean_diff.changes,
+                        .auto_resolved_conflicts = auto_resolved_conflicts,
+                        .base_oid = base_oid,
+                        .target_name = target_name,
+                        .source_name = source_name,
+                        .data = .{ .success = .{ .oid = commit_oid } },
+                    };
+                },
+            }
         }
-    }
 
-    pub fn deinit(self: *Merge) void {
-        self.arena.deinit();
-        self.allocator.destroy(self.arena);
-    }
-};
+        pub fn deinit(self: *Merge(repo_kind, hash_kind)) void {
+            self.arena.deinit();
+            self.allocator.destroy(self.arena);
+        }
+    };
+}

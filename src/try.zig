@@ -60,7 +60,7 @@ pub fn main() !void {
     const writers = .{ .out = std.io.getStdOut().writer(), .err = std.io.getStdErr().writer() };
 
     {
-        var git_repo = try rp.Repo(.git).init(allocator, .{ .cwd = temp_dir });
+        var git_repo = try rp.Repo(.git, .sha1).init(allocator, .{ .cwd = temp_dir });
         defer git_repo.deinit();
 
         // restore all files in working tree
@@ -76,7 +76,7 @@ pub fn main() !void {
             };
         }
 
-        var commits = std.ArrayList(obj.Object(.git, .full)).init(allocator);
+        var commits = std.ArrayList(obj.Object(.git, .sha1, .full)).init(allocator);
         defer {
             for (commits.items) |*commit| {
                 commit.deinit();
@@ -98,7 +98,7 @@ pub fn main() !void {
             }
         }
 
-        var xit_repo = try rp.Repo(.xit).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "." } }, writers);
+        var xit_repo = try rp.Repo(.xit, .sha1).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "." } }, writers);
         defer xit_repo.deinit();
 
         for (0..commits.items.len) |i| {
@@ -144,5 +144,5 @@ pub fn main() !void {
         try args.append(arg);
     }
 
-    try mn.xitMain(.xit, allocator, args.items, temp_dir, writers);
+    try mn.xitMain(.xit, .sha1, allocator, args.items, temp_dir, writers);
 }

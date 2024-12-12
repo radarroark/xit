@@ -256,7 +256,7 @@ pub const PackObjectReader = struct {
 
     pub const Error = compress.ZlibStream.Reader.Error || error{ Unseekable, UnexpectedEndOfStream, InvalidDeltaCache };
 
-    pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(.git).Core, oid_hex: *const [hash.hexLen(.sha1)]u8) !PackObjectReader {
+    pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(.git, .sha1).Core, oid_hex: *const [hash.hexLen(.sha1)]u8) !PackObjectReader {
         var pack_reader = try PackObjectReader.initWithIndex(allocator, core, oid_hex);
         errdefer pack_reader.deinit();
 
@@ -315,7 +315,7 @@ pub const PackObjectReader = struct {
         return error.ObjectNotFound;
     }
 
-    fn initWithIndex(allocator: std.mem.Allocator, core: *rp.Repo(.git).Core, oid_hex: *const [hash.hexLen(.sha1)]u8) !PackObjectReader {
+    fn initWithIndex(allocator: std.mem.Allocator, core: *rp.Repo(.git, .sha1).Core, oid_hex: *const [hash.hexLen(.sha1)]u8) !PackObjectReader {
         var pack_dir = try core.git_dir.openDir("objects/pack", .{ .iterate = true });
         defer pack_dir.close();
 
@@ -485,7 +485,7 @@ pub const PackObjectReader = struct {
         }
     }
 
-    fn initDelta(self: *PackObjectReader, allocator: std.mem.Allocator, core: *rp.Repo(.git).Core) !void {
+    fn initDelta(self: *PackObjectReader, allocator: std.mem.Allocator, core: *rp.Repo(.git, .sha1).Core) !void {
         const reader = self.pack_file.reader();
 
         const base_reader = try allocator.create(PackObjectReader);
@@ -843,7 +843,7 @@ pub const LooseOrPackObjectReader = union(enum) {
 
     pub const Error = PackObjectReader.Error;
 
-    pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(.git).Core, oid_hex: *const [hash.hexLen(.sha1)]u8) !LooseOrPackObjectReader {
+    pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(.git, .sha1).Core, oid_hex: *const [hash.hexLen(.sha1)]u8) !LooseOrPackObjectReader {
         // open the objects dir
         var objects_dir = try core.git_dir.openDir("objects", .{});
         defer objects_dir.close();
@@ -941,7 +941,7 @@ pub const LooseOrPackObjectReader = union(enum) {
 
 pub const PackObjectWriter = struct {
     allocator: std.mem.Allocator,
-    objects: std.ArrayList(obj.Object(.git, .raw)),
+    objects: std.ArrayList(obj.Object(.git, .sha1, .raw)),
     object_index: usize,
     out_bytes: std.ArrayList(u8),
     out_index: usize,
@@ -952,10 +952,10 @@ pub const PackObjectWriter = struct {
         },
     },
 
-    pub fn init(allocator: std.mem.Allocator, obj_iter: *obj.ObjectIterator(.git, .raw)) !PackObjectWriter {
+    pub fn init(allocator: std.mem.Allocator, obj_iter: *obj.ObjectIterator(.git, .sha1, .raw)) !PackObjectWriter {
         var self = PackObjectWriter{
             .allocator = allocator,
-            .objects = std.ArrayList(obj.Object(.git, .raw)).init(allocator),
+            .objects = std.ArrayList(obj.Object(.git, .sha1, .raw)).init(allocator),
             .object_index = 0,
             .out_bytes = std.ArrayList(u8).init(allocator),
             .out_index = 0,

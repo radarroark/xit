@@ -15,7 +15,8 @@ pub const FetchResult = struct {
 
 pub fn fetch(
     comptime repo_kind: rp.RepoKind,
-    state: rp.Repo(repo_kind).State(.read_write),
+    comptime hash_kind: hash.HashKind,
+    state: rp.Repo(repo_kind, hash_kind).State(.read_write),
     allocator: std.mem.Allocator,
     remote_name: []const u8,
     uri: std.Uri,
@@ -51,7 +52,7 @@ pub fn fetch(
     defer arena.deinit();
 
     // read messages
-    var ref_to_oid = std.StringArrayHashMap(*const [hash.hexLen(.sha1)]u8).init(arena.allocator());
+    var ref_to_oid = std.StringArrayHashMap(*const [hash.hexLen(hash_kind)]u8).init(arena.allocator());
     var capability_set = std.StringArrayHashMap(void).init(arena.allocator());
     while (true) {
         var size_buffer = [_]u8{0} ** 4;
@@ -99,10 +100,10 @@ pub fn fetch(
 
         // populate the map of refs
         if (std.mem.indexOfScalar(u8, msg_buffer, ' ')) |space_index| {
-            if (space_index != hash.hexLen(.sha1)) {
+            if (space_index != hash.hexLen(hash_kind)) {
                 return error.UnexpectedOidLength;
             }
-            try ref_to_oid.put(msg_buffer[hash.hexLen(.sha1) + 1 ..], msg_buffer[0..comptime hash.hexLen(.sha1)]);
+            try ref_to_oid.put(msg_buffer[hash.hexLen(hash_kind) + 1 ..], msg_buffer[0..comptime hash.hexLen(hash_kind)]);
         } else {
             return error.SpaceByteNotFound;
         }
@@ -115,7 +116,7 @@ pub fn fetch(
         if (wanted_oids.contains(oid)) {
             continue;
         }
-        var object = obj.Object(repo_kind, .raw).init(allocator, state.readOnly(), oid) catch |err| switch (err) {
+        var object = obj.Object(repo_kind, hash_kind, .raw).init(allocator, state.readOnly(), oid) catch |err| switch (err) {
             error.ObjectNotFound => {
                 try wanted_oids.put(oid, {});
                 continue;
@@ -248,9 +249,9 @@ pub fn fetch(
             .pack_reader = pack_reader,
         };
 
-        var oid = [_]u8{0} ** hash.byteLen(.sha1);
+        var oid = [_]u8{0} ** hash.byteLen(hash_kind);
         switch (pack_reader.internal) {
-            .basic => try obj.writeObject(repo_kind, state, &stream, pack_reader.internal.basic.header, &oid),
+            .basic => try obj.writeObject(repo_kind, hash_kind, state, &stream, pack_reader.internal.basic.header, &oid),
             .delta => return error.NotImplemented,
         }
     }
@@ -262,7 +263,7 @@ pub fn fetch(
             try std.fmt.bufPrint(&buffer, "refs/remotes/{s}/{s}", .{ remote_name, rf.name })
         else
             try std.fmt.bufPrint(&buffer, "refs/remotes/{s}/{s}", .{ remote_name, remote_ref_path });
-        try ref.writeRecur(repo_kind, state, ref_path, oid);
+        try ref.writeRecur(repo_kind, hash_kind, state, ref_path, oid);
     }
 
     return .{

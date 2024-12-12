@@ -21,13 +21,20 @@ const rp = @import("./repo.zig");
 
 const MAX_FILE_READ_BYTES = 1024; // FIXME: this is arbitrary...
 
-pub fn objectToFile(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator, path: []const u8, tree_entry: obj.TreeEntry) !void {
+pub fn objectToFile(
+    comptime repo_kind: rp.RepoKind,
+    comptime hash_kind: hash.HashKind,
+    state: rp.Repo(repo_kind, hash_kind).State(.read_only),
+    allocator: std.mem.Allocator,
+    path: []const u8,
+    tree_entry: obj.TreeEntry(hash_kind),
+) !void {
     const oid_hex = std.fmt.bytesToHex(tree_entry.oid, .lower);
 
     switch (tree_entry.mode.object_type) {
         .regular_file => {
             // open the reader
-            var obj_rdr = try obj.ObjectReader(repo_kind).init(allocator, state, &oid_hex);
+            var obj_rdr = try obj.ObjectReader(repo_kind, hash_kind).init(allocator, state, &oid_hex);
             defer obj_rdr.deinit();
 
             // create parent dir(s)
@@ -56,14 +63,14 @@ pub fn objectToFile(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).S
         },
         .tree => {
             // load the tree
-            var tree_object = try obj.Object(repo_kind, .full).init(allocator, state, &oid_hex);
+            var tree_object = try obj.Object(repo_kind, hash_kind, .full).init(allocator, state, &oid_hex);
             defer tree_object.deinit();
 
             // update each entry recursively
             for (tree_object.content.tree.entries.keys(), tree_object.content.tree.entries.values()) |sub_path, entry| {
                 const new_path = try io.joinPath(allocator, &.{ path, sub_path });
                 defer allocator.free(new_path);
-                try objectToFile(repo_kind, state, allocator, new_path, entry);
+                try objectToFile(repo_kind, hash_kind, state, allocator, new_path, entry);
             }
         },
         // TODO: handle symlinks
@@ -71,7 +78,14 @@ pub fn objectToFile(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).S
     }
 }
 
-fn pathToTreeEntry(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator, parent: obj.Object(repo_kind, .full), path_parts: []const []const u8) !?obj.TreeEntry {
+fn pathToTreeEntry(
+    comptime repo_kind: rp.RepoKind,
+    comptime hash_kind: hash.HashKind,
+    state: rp.Repo(repo_kind, hash_kind).State(.read_only),
+    allocator: std.mem.Allocator,
+    parent: obj.Object(repo_kind, hash_kind, .full),
+    path_parts: []const []const u8,
+) !?obj.TreeEntry(hash_kind) {
     const path_part = path_parts[0];
     const tree_entry = parent.content.tree.entries.get(path_part) orelse return null;
 
@@ -80,12 +94,12 @@ fn pathToTreeEntry(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).St
     }
 
     const oid_hex = std.fmt.bytesToHex(tree_entry.oid, .lower);
-    var tree_object = try obj.Object(repo_kind, .full).init(allocator, state, &oid_hex);
+    var tree_object = try obj.Object(repo_kind, hash_kind, .full).init(allocator, state, &oid_hex);
     defer tree_object.deinit();
 
     switch (tree_object.content) {
         .blob => return null,
-        .tree => return pathToTreeEntry(repo_kind, state, allocator, tree_object, path_parts[1..]),
+        .tree => return pathToTreeEntry(repo_kind, hash_kind, state, allocator, tree_object, path_parts[1..]),
         .commit => return error.ObjectInvalid,
     }
 }
@@ -97,10 +111,15 @@ pub const TreeToWorkspaceChange = enum {
     modified,
 };
 
-fn compareIndexToWorkspace(comptime repo_kind: rp.RepoKind, entry_maybe: ?idx.Index(repo_kind).Entry, file_maybe: ?std.fs.File) !TreeToWorkspaceChange {
+fn compareIndexToWorkspace(
+    comptime repo_kind: rp.RepoKind,
+    comptime hash_kind: hash.HashKind,
+    entry_maybe: ?idx.Index(repo_kind, hash_kind).Entry,
+    file_maybe: ?std.fs.File,
+) !TreeToWorkspaceChange {
     if (entry_maybe) |entry| {
         if (file_maybe) |file| {
-            if (try idx.indexDiffersFromWorkspace(repo_kind, entry, file, try file.metadata())) {
+            if (try idx.indexDiffersFromWorkspace(repo_kind, hash_kind, entry, file, try file.metadata())) {
                 return .modified;
             } else {
                 return .none;
@@ -120,7 +139,12 @@ pub const TreeToIndexChange = enum {
     modified,
 };
 
-fn compareTreeToIndex(comptime repo_kind: rp.RepoKind, item_maybe: ?obj.TreeEntry, entry_maybe: ?idx.Index(repo_kind).Entry) TreeToIndexChange {
+fn compareTreeToIndex(
+    comptime repo_kind: rp.RepoKind,
+    comptime hash_kind: hash.HashKind,
+    item_maybe: ?obj.TreeEntry(hash_kind),
+    entry_maybe: ?idx.Index(repo_kind, hash_kind).Entry,
+) TreeToIndexChange {
     if (item_maybe) |item| {
         if (entry_maybe) |entry| {
             if (!entry.mode.eql(item.mode) or !std.mem.eql(u8, &entry.oid, &item.oid)) {
@@ -142,7 +166,13 @@ fn compareTreeToIndex(comptime repo_kind: rp.RepoKind, item_maybe: ?obj.TreeEntr
 
 /// returns any parent of the given path that is a file and isn't
 /// tracked by the index, so it cannot be safely removed by checkout.
-fn untrackedParent(comptime repo_kind: rp.RepoKind, repo_dir: std.fs.Dir, path: []const u8, index: idx.Index(repo_kind)) ?[]const u8 {
+fn untrackedParent(
+    comptime repo_kind: rp.RepoKind,
+    comptime hash_kind: hash.HashKind,
+    repo_dir: std.fs.Dir,
+    path: []const u8,
+    index: idx.Index(repo_kind, hash_kind),
+) ?[]const u8 {
     var parent = path;
     while (std.fs.path.dirname(parent)) |next_parent| {
         parent = next_parent;
@@ -157,7 +187,14 @@ fn untrackedParent(comptime repo_kind: rp.RepoKind, repo_dir: std.fs.Dir, path: 
 
 /// returns true if the given file or one of its descendents (if a dir)
 /// isn't tracked by the index, so it cannot be safely removed by checkout
-fn untrackedFile(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, repo_dir: std.fs.Dir, path: []const u8, index: idx.Index(repo_kind)) !bool {
+fn untrackedFile(
+    comptime repo_kind: rp.RepoKind,
+    comptime hash_kind: hash.HashKind,
+    allocator: std.mem.Allocator,
+    repo_dir: std.fs.Dir,
+    path: []const u8,
+    index: idx.Index(repo_kind, hash_kind),
+) !bool {
     const meta = try io.getMetadata(repo_dir, path);
     switch (meta.kind()) {
         .file => {
@@ -170,7 +207,7 @@ fn untrackedFile(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
             while (try iter.next()) |dir_entry| {
                 const subpath = try io.joinPath(allocator, &.{ path, dir_entry.name });
                 defer allocator.free(subpath);
-                if (try untrackedFile(repo_kind, allocator, repo_dir, subpath, index)) {
+                if (try untrackedFile(repo_kind, hash_kind, allocator, repo_dir, subpath, index)) {
                     return true;
                 }
             }
@@ -182,15 +219,16 @@ fn untrackedFile(comptime repo_kind: rp.RepoKind, allocator: std.mem.Allocator, 
 
 pub fn migrate(
     comptime repo_kind: rp.RepoKind,
-    state: rp.Repo(repo_kind).State(.read_write),
+    comptime hash_kind: hash.HashKind,
+    state: rp.Repo(repo_kind, hash_kind).State(.read_write),
     allocator: std.mem.Allocator,
-    tree_diff: obj.TreeDiff(repo_kind),
-    index: *idx.Index(repo_kind),
+    tree_diff: obj.TreeDiff(repo_kind, hash_kind),
+    index: *idx.Index(repo_kind, hash_kind),
     result_maybe: ?*Switch,
 ) !void {
-    var add_files = std.StringArrayHashMap(obj.TreeEntry).init(allocator);
+    var add_files = std.StringArrayHashMap(obj.TreeEntry(hash_kind)).init(allocator);
     defer add_files.deinit();
-    var edit_files = std.StringArrayHashMap(obj.TreeEntry).init(allocator);
+    var edit_files = std.StringArrayHashMap(obj.TreeEntry(hash_kind)).init(allocator);
     defer edit_files.deinit();
     var remove_files = std.StringArrayHashMap(void).init(allocator);
     defer remove_files.deinit();
@@ -213,7 +251,7 @@ pub fn migrate(
         // check for conflicts
         if (result_maybe) |result| {
             const entry_maybe = if (index.entries.get(path)) |*entries_for_path| (entries_for_path[0] orelse return error.NullEntry) else null;
-            if (compareTreeToIndex(repo_kind, change.old, entry_maybe) != .none and compareTreeToIndex(repo_kind, change.new, entry_maybe) != .none) {
+            if (compareTreeToIndex(repo_kind, hash_kind, change.old, entry_maybe) != .none and compareTreeToIndex(repo_kind, hash_kind, change.new, entry_maybe) != .none) {
                 result.conflict(allocator);
                 try result.data.conflict.stale_files.put(path, {});
             } else {
@@ -221,7 +259,7 @@ pub fn migrate(
                     error.FileNotFound, error.NotDir => {
                         // if the path doesn't exist in the workspace,
                         // but one of its parents *does* exist and isn't tracked
-                        if (untrackedParent(repo_kind, state.core.repo_dir, path, index.*)) |_| {
+                        if (untrackedParent(repo_kind, hash_kind, state.core.repo_dir, path, index.*)) |_| {
                             result.conflict(allocator);
                             if (entry_maybe) |_| {
                                 try result.data.conflict.stale_files.put(path, {});
@@ -240,7 +278,7 @@ pub fn migrate(
                         const file = try state.core.repo_dir.openFile(path, .{ .mode = .read_only });
                         defer file.close();
                         // if the path is a file that differs from the index
-                        if (try compareIndexToWorkspace(repo_kind, entry_maybe, file) != .none) {
+                        if (try compareIndexToWorkspace(repo_kind, hash_kind, entry_maybe, file) != .none) {
                             result.conflict(allocator);
                             if (entry_maybe) |_| {
                                 try result.data.conflict.stale_files.put(path, {});
@@ -253,7 +291,7 @@ pub fn migrate(
                     },
                     .directory => {
                         // if the path is a dir with a descendent that isn't in the index
-                        if (try untrackedFile(repo_kind, allocator, state.core.repo_dir, path, index.*)) {
+                        if (try untrackedFile(repo_kind, hash_kind, allocator, state.core.repo_dir, path, index.*)) {
                             result.conflict(allocator);
                             if (entry_maybe) |_| {
                                 try result.data.conflict.stale_files.put(path, {});
@@ -295,27 +333,33 @@ pub fn migrate(
 
     for (add_files.keys(), add_files.values()) |path, tree_entry| {
         // update working tree
-        try objectToFile(repo_kind, state.readOnly(), allocator, path, tree_entry);
+        try objectToFile(repo_kind, hash_kind, state.readOnly(), allocator, path, tree_entry);
         // update index
         try index.addPath(state, path);
     }
 
     for (edit_files.keys(), edit_files.values()) |path, tree_entry| {
         // update working tree
-        try objectToFile(repo_kind, state.readOnly(), allocator, path, tree_entry);
+        try objectToFile(repo_kind, hash_kind, state.readOnly(), allocator, path, tree_entry);
         // update index
         try index.addPath(state, path);
     }
 }
 
-pub fn restore(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_only), allocator: std.mem.Allocator, path: []const u8) !void {
+pub fn restore(
+    comptime repo_kind: rp.RepoKind,
+    comptime hash_kind: hash.HashKind,
+    state: rp.Repo(repo_kind, hash_kind).State(.read_only),
+    allocator: std.mem.Allocator,
+    path: []const u8,
+) !void {
     // get the current commit
-    const current_oid = try ref.readHead(repo_kind, state);
-    var commit_object = try obj.Object(repo_kind, .full).init(allocator, state, &current_oid);
+    const current_oid = try ref.readHead(repo_kind, hash_kind, state);
+    var commit_object = try obj.Object(repo_kind, hash_kind, .full).init(allocator, state, &current_oid);
     defer commit_object.deinit();
 
     // get the tree of the current commit
-    var tree_object = try obj.Object(repo_kind, .full).init(allocator, state, &commit_object.content.commit.tree);
+    var tree_object = try obj.Object(repo_kind, hash_kind, .full).init(allocator, state, &commit_object.content.commit.tree);
     defer tree_object.deinit();
 
     // get the entry for the given path
@@ -329,10 +373,10 @@ pub fn restore(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(
         }
     }
     try path_parts.append(path[start..]);
-    const tree_entry = try pathToTreeEntry(repo_kind, state, allocator, tree_object, path_parts.items) orelse return error.ObjectNotFound;
+    const tree_entry = try pathToTreeEntry(repo_kind, hash_kind, state, allocator, tree_object, path_parts.items) orelse return error.ObjectNotFound;
 
     // restore file in the working tree
-    try objectToFile(repo_kind, state, allocator, path, tree_entry);
+    try objectToFile(repo_kind, hash_kind, state, allocator, path, tree_entry);
 }
 
 pub const Switch = struct {
@@ -350,13 +394,20 @@ pub const Switch = struct {
         force: bool,
     };
 
-    pub fn init(comptime repo_kind: rp.RepoKind, state: rp.Repo(repo_kind).State(.read_write), allocator: std.mem.Allocator, target: []const u8, options: Options) !Switch {
+    pub fn init(
+        comptime repo_kind: rp.RepoKind,
+        comptime hash_kind: hash.HashKind,
+        state: rp.Repo(repo_kind, hash_kind).State(.read_write),
+        allocator: std.mem.Allocator,
+        target: []const u8,
+        options: Options,
+    ) !Switch {
         // get the current commit and target oid
-        const current_oid = try ref.readHead(repo_kind, state.readOnly());
-        const target_oid = try ref.readRecur(repo_kind, state.readOnly(), ref.RefOrOid.initFromUser(target)) orelse return error.InvalidTarget;
+        const current_oid = try ref.readHead(repo_kind, hash_kind, state.readOnly());
+        const target_oid = try ref.readRecur(repo_kind, hash_kind, state.readOnly(), ref.RefOrOid(hash_kind).initFromUser(target)) orelse return error.InvalidTarget;
 
         // compare the commits
-        var tree_diff = obj.TreeDiff(repo_kind).init(allocator);
+        var tree_diff = obj.TreeDiff(repo_kind, hash_kind).init(allocator);
         defer tree_diff.deinit();
         try tree_diff.compare(state.readOnly(), current_oid, target_oid, null);
 
@@ -370,11 +421,11 @@ pub const Switch = struct {
                 defer lock.deinit();
 
                 // read index
-                var index = try idx.Index(repo_kind).init(allocator, state.readOnly());
+                var index = try idx.Index(repo_kind, hash_kind).init(allocator, state.readOnly());
                 defer index.deinit();
 
                 // update the working tree
-                try migrate(repo_kind, state, allocator, tree_diff, &index, if (options.force) null else &result);
+                try migrate(repo_kind, hash_kind, state, allocator, tree_diff, &index, if (options.force) null else &result);
 
                 // return early if conflict
                 if (result.data == .conflict) {
@@ -385,18 +436,18 @@ pub const Switch = struct {
                 try index.write(allocator, .{ .core = state.core, .extra = .{ .lock_file_maybe = lock.lock_file } });
 
                 // update HEAD
-                try ref.writeHead(repo_kind, state, target, target_oid);
+                try ref.writeHead(repo_kind, hash_kind, state, target, target_oid);
 
                 // finish lock
                 lock.success = true;
             },
             .xit => {
                 // read index
-                var index = try idx.Index(repo_kind).init(allocator, state.readOnly());
+                var index = try idx.Index(repo_kind, hash_kind).init(allocator, state.readOnly());
                 defer index.deinit();
 
                 // update the working tree
-                try migrate(repo_kind, state, allocator, tree_diff, &index, if (options.force) null else &result);
+                try migrate(repo_kind, hash_kind, state, allocator, tree_diff, &index, if (options.force) null else &result);
 
                 // return early if conflict
                 if (result.data == .conflict) {
@@ -407,7 +458,7 @@ pub const Switch = struct {
                 try index.write(allocator, state);
 
                 // update HEAD
-                try ref.writeHead(repo_kind, state, target, target_oid);
+                try ref.writeHead(repo_kind, hash_kind, state, target, target_oid);
             },
         }
 
