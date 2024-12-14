@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const rp = @import("./repo.zig");
 const hash = @import("./hash.zig");
+const net_remote = @import("./net/remote.zig");
 
 const c = @cImport({
     @cInclude("git2.h");
@@ -432,8 +433,7 @@ fn testPull(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     try std.testing.expectEqual(0, c.git_fetch_options_init(&options, c.GIT_FETCH_OPTIONS_VERSION));
     options.callbacks = callbacks;
 
-    const fetch_result = c.git_remote_fetch(remote, &refspecs, &options, null);
-    if (fetch_result != 0) {
+    net_remote.fetch(remote, &refspecs, &options, null) catch |err| {
         if (protocol == .ssh) return; // ssh test doesn't work right now
         const last_err = c.giterr_last();
         std.debug.print("client error:\n{s}\n", .{last_err.*.message});
@@ -449,8 +449,8 @@ fn testPull(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             },
             .http => {},
         }
-    }
-    try std.testing.expectEqual(0, fetch_result);
+        return err;
+    };
 
     // update the working dir
     var head_ref: ?*c.git_reference = null;
