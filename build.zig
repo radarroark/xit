@@ -124,7 +124,7 @@ pub fn build(b: *std.Build) !void {
 
     // testnet
     {
-        const libgit2 = @import("deps/test/libgit2.zig");
+        const libgit2 = @import("deps/test/libgit2_alt.zig");
 
         const z = zlib.create(b, target, optimize);
         const tls = mbedtls.create(b, target, optimize);
@@ -150,7 +150,9 @@ pub fn build(b: *std.Build) !void {
         unit_tests.root_module.addImport("xitui", b.dependency("xitui", .{}).module("xitui"));
         unit_tests.root_module.addImport("network", b.dependency("network", .{}).module("network"));
         unit_tests.linkLibC();
-        unit_tests.addIncludePath(b.path("deps/test/libgit2/include"));
+        unit_tests.addIncludePath(b.path("deps/test/libgit2_alt/include"));
+        unit_tests.addIncludePath(b.path("deps/test/libgit2_alt/src"));
+        unit_tests.addIncludePath(b.path("deps/test/libgit2_alt/src/util"));
         unit_tests.linkLibrary(git2.step);
 
         const run_unit_tests = b.addRunArtifact(unit_tests);
