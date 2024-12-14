@@ -1258,7 +1258,7 @@ static int connect_or_reset_options(
 }
 
 /* Download from an already connected remote. */
-static int git_remote__download(
+int git_remote__download(
 	git_remote *remote,
 	const git_strarray *refspecs,
 	const git_fetch_options *opts)
