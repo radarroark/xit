@@ -119,14 +119,6 @@ pub fn run(
         // the hash kind that is being used by the repo. this will be useful
         // in the future when we need to support multiple hash algorithms.
 
-        const set_hash = struct {
-            fn set_hash(new_hash_kind: hash.HashKind) rp.RepoOpts(repo_kind) {
-                var new_repo_opts = repo_opts;
-                new_repo_opts.hash = new_hash_kind;
-                return new_repo_opts;
-            }
-        }.set_hash;
-
         // if we are initing a new repo, just use the default hash kind
         {
             var sub_cmd_args = try cmd.SubCommandArgs.init(allocator, args);
@@ -135,7 +127,7 @@ pub fn run(
             if (sub_cmd_args.sub_command_kind) |sub_cmd_kind| {
                 if (sub_cmd_kind == .init) {
                     const default_hash = (rp.RepoOpts(repo_kind){}).hash;
-                    try run(repo_kind, set_hash(default_hash), allocator, args, cwd, writers);
+                    try run(repo_kind, repo_opts.withHash(default_hash), allocator, args, cwd, writers);
                     return;
                 }
             }
@@ -149,7 +141,7 @@ pub fn run(
         };
         switch (hash_kind) {
             .none => return error.HashKindNotFound,
-            .sha1 => try run(repo_kind, set_hash(.sha1), allocator, args, cwd, writers),
+            .sha1 => try run(repo_kind, repo_opts.withHash(.sha1), allocator, args, cwd, writers),
         }
     } else {
         var sub_cmd_args = try cmd.SubCommandArgs.init(allocator, args);
