@@ -188,58 +188,56 @@ pub fn Command(comptime hash_kind: hash.HashKind) type {
         pub fn init(sub_cmd_args: *const SubCommandArgs) !Command(hash_kind) {
             if (sub_cmd_args.sub_command_kind) |sub_command_kind| {
                 const extra_args = sub_cmd_args.positional_args.items[1..];
-
-                if (extra_args.len == 0 and sub_cmd_args.map_args.count() == 0) {
-                    return switch (sub_command_kind) {
-                        .status, .diff, .log => .{ .tui = sub_command_kind },
-                        else => .{ .help = sub_command_kind },
-                    };
-                }
+                const show_help = sub_cmd_args.map_args.contains("--help");
 
                 switch (sub_command_kind) {
                     .init => {
-                        if (sub_cmd_args.map_args.contains("help")) {
-                            return .{ .help = .init };
+                        if (extra_args.len == 0) {
+                            return .{ .cli = .{ .init = .{ .dir = "." } } };
+                        } else if (extra_args.len == 1) {
+                            return .{ .cli = .{ .init = .{ .dir = extra_args[0] } } };
                         } else {
-                            return .{ .cli = .{ .init = .{ .dir = if (extra_args.len > 0) extra_args[0] else "." } } };
+                            return .{ .help = .init };
                         }
                     },
                     .add => {
-                        if (extra_args.len == 0) {
-                            return error.AddPathsNotFound;
+                        if (extra_args.len == 0 or show_help) {
+                            return .{ .help = .add };
+                        } else {
+                            return .{ .cli = .{ .add = .{ .paths = extra_args } } };
                         }
-                        return .{ .cli = .{ .add = .{ .paths = extra_args } } };
                     },
                     .unadd => {
-                        if (extra_args.len == 0) {
-                            return error.UnaddPathsNotFound;
+                        if (extra_args.len == 0 or show_help) {
+                            return .{ .help = .unadd };
+                        } else {
+                            return .{ .cli = .{ .unadd = .{
+                                .paths = extra_args,
+                                .opts = .{
+                                    .force = sub_cmd_args.map_args.contains("-f"),
+                                },
+                            } } };
                         }
-                        return .{ .cli = .{ .unadd = .{
-                            .paths = extra_args,
-                            .opts = .{
-                                .force = sub_cmd_args.map_args.contains("-f"),
-                            },
-                        } } };
                     },
                     .rm => {
-                        if (extra_args.len == 0) {
-                            return error.RmPathsNotFound;
+                        if (extra_args.len == 0 or show_help) {
+                            return .{ .help = .rm };
+                        } else {
+                            return .{ .cli = .{ .rm = .{
+                                .paths = extra_args,
+                                .opts = .{
+                                    .force = sub_cmd_args.map_args.contains("-f"),
+                                    .remove_from_workspace = true,
+                                },
+                            } } };
                         }
-                        return .{ .cli = .{ .rm = .{
-                            .paths = extra_args,
-                            .opts = .{
-                                .force = sub_cmd_args.map_args.contains("-f"),
-                                .remove_from_workspace = true,
-                            },
-                        } } };
                     },
                     .reset => {
-                        if (extra_args.len == 0) {
-                            return error.ResetPathNotFound;
-                        } else if (extra_args.len > 1) {
-                            return error.TooManyArgs;
+                        if (extra_args.len != 1 or show_help) {
+                            return .{ .help = .reset };
+                        } else {
+                            return .{ .cli = .{ .reset = .{ .path = extra_args[0] } } };
                         }
-                        return .{ .cli = .{ .reset = .{ .path = extra_args[0] } } };
                     },
                     .commit => {
                         // if a message is included, it must have a non-null value
@@ -247,18 +245,18 @@ pub fn Command(comptime hash_kind: hash.HashKind) type {
                         return .{ .cli = .{ .commit = .{ .message = message } } };
                     },
                     .status => {
-                        if (sub_cmd_args.map_args.contains("help")) {
+                        if (extra_args.len > 0 or show_help) {
                             return .{ .help = .status };
-                        } else if (sub_cmd_args.map_args.contains("cli")) {
+                        } else if (sub_cmd_args.map_args.contains("--cli")) {
                             return .{ .cli = .status };
                         } else {
-                            return .{ .cli = .{ .status = {} } };
+                            return .{ .tui = .status };
                         }
                     },
                     .diff => {
-                        if (sub_cmd_args.map_args.contains("help")) {
+                        if (extra_args.len > 0 or show_help) {
                             return .{ .help = .diff };
-                        } else {
+                        } else if (sub_cmd_args.map_args.contains("--cli")) {
                             const diff_opts: df.BasicDiffOptions(hash_kind) = if (sub_cmd_args.map_args.contains("--staged"))
                                 .index
                             else
@@ -271,158 +269,183 @@ pub fn Command(comptime hash_kind: hash.HashKind) type {
                                 else
                                     .{ .workspace = .{ .conflict_diff_kind = .target } });
                             return .{ .cli = .{ .diff = .{ .diff_opts = diff_opts } } };
+                        } else {
+                            return .{ .tui = .diff };
                         }
                     },
                     .branch => {
-                        const cmd_name = extra_args[0];
-
-                        var cmd: bch.BranchCommand = undefined;
-                        if (std.mem.eql(u8, "list", cmd_name)) {
-                            cmd = .list;
-                        } else if (std.mem.eql(u8, "add", cmd_name)) {
-                            if (extra_args.len != 2) {
-                                return error.WrongNumberOfBranchArgs;
-                            }
-                            cmd = .{ .add = .{ .name = extra_args[1] } };
-                        } else if (std.mem.eql(u8, "rm", cmd_name)) {
-                            if (extra_args.len != 2) {
-                                return error.WrongNumberOfBranchArgs;
-                            }
-                            cmd = .{ .remove = .{ .name = extra_args[1] } };
+                        if (extra_args.len == 0 or show_help) {
+                            return .{ .help = .branch };
                         } else {
-                            return error.InvalidBranchCommand;
-                        }
+                            const cmd_name = extra_args[0];
 
-                        return .{ .cli = .{ .branch = cmd } };
+                            var cmd: bch.BranchCommand = undefined;
+                            if (std.mem.eql(u8, "list", cmd_name)) {
+                                cmd = .list;
+                            } else if (std.mem.eql(u8, "add", cmd_name)) {
+                                if (extra_args.len != 2) {
+                                    return error.WrongNumberOfBranchArgs;
+                                }
+                                cmd = .{ .add = .{ .name = extra_args[1] } };
+                            } else if (std.mem.eql(u8, "rm", cmd_name)) {
+                                if (extra_args.len != 2) {
+                                    return error.WrongNumberOfBranchArgs;
+                                }
+                                cmd = .{ .remove = .{ .name = extra_args[1] } };
+                            } else {
+                                return error.InvalidBranchCommand;
+                            }
+
+                            return .{ .cli = .{ .branch = cmd } };
+                        }
                     },
                     .switch_head => {
-                        if (extra_args.len == 0) {
-                            return error.SwitchTargetNotFound;
+                        if (extra_args.len != 1 or show_help) {
+                            return .{ .help = .switch_head };
+                        } else {
+                            return .{ .cli = .{ .switch_head = .{ .target = extra_args[0] } } };
                         }
-                        return .{ .cli = .{ .switch_head = .{ .target = extra_args[0] } } };
                     },
                     .restore => {
-                        if (extra_args.len == 0) {
-                            return error.RestorePathNotFound;
-                        } else if (extra_args.len > 1) {
-                            return error.TooManyArgs;
+                        if (extra_args.len != 1 or show_help) {
+                            return .{ .help = .restore };
+                        } else {
+                            return .{ .cli = .{ .restore = .{ .path = extra_args[0] } } };
                         }
-                        return .{ .cli = .{ .restore = .{ .path = extra_args[0] } } };
                     },
                     .log => {
-                        if (sub_cmd_args.map_args.contains("help")) {
+                        if (extra_args.len != 0 or show_help) {
                             return .{ .help = .log };
-                        } else {
+                        } else if (sub_cmd_args.map_args.contains("--cli")) {
                             return .{ .cli = .log };
+                        } else {
+                            return .{ .tui = .log };
                         }
                     },
                     .merge => {
-                        var merge_input_maybe: ?mrg.MergeInput(hash_kind) = switch (extra_args.len) {
-                            0 => null,
-                            1 => .{ .new = ref.RefOrOid(hash_kind).initFromUser(extra_args[0]) },
-                            2 => .{ .new = .{ .ref = .{ .kind = .{ .remote = extra_args[0] }, .name = extra_args[1] } } },
-                            else => return error.TooManyArgs,
-                        };
-                        if (sub_cmd_args.map_args.contains("--continue")) {
-                            if (merge_input_maybe != null) {
-                                return error.ConflictingMergeArgs;
-                            }
-                            merge_input_maybe = .cont;
-                        }
-                        if (merge_input_maybe) |merge_input| {
-                            return .{ .cli = .{ .merge = merge_input } };
+                        if (show_help) {
+                            return .{ .help = .merge };
                         } else {
-                            return error.InsufficientMergeArgs;
+                            var merge_input_maybe: ?mrg.MergeInput(hash_kind) = switch (extra_args.len) {
+                                0 => null,
+                                1 => .{ .new = ref.RefOrOid(hash_kind).initFromUser(extra_args[0]) },
+                                2 => .{ .new = .{ .ref = .{ .kind = .{ .remote = extra_args[0] }, .name = extra_args[1] } } },
+                                else => return error.TooManyArgs,
+                            };
+                            if (sub_cmd_args.map_args.contains("--continue")) {
+                                if (merge_input_maybe != null) {
+                                    return error.ConflictingMergeArgs;
+                                }
+                                merge_input_maybe = .cont;
+                            }
+                            if (merge_input_maybe) |merge_input| {
+                                return .{ .cli = .{ .merge = merge_input } };
+                            } else {
+                                return error.InsufficientMergeArgs;
+                            }
                         }
                     },
                     .cherry_pick => {
-                        var merge_input_maybe: ?mrg.MergeInput(hash_kind) = switch (extra_args.len) {
-                            0 => null,
-                            1 => .{ .new = ref.RefOrOid(hash_kind).initFromUser(extra_args[0]) },
-                            else => return error.TooManyArgs,
-                        };
-                        if (sub_cmd_args.map_args.contains("--continue")) {
-                            if (merge_input_maybe != null) {
-                                return error.ConflictingCherryPickArgs;
-                            }
-                            merge_input_maybe = .cont;
-                        }
-                        if (merge_input_maybe) |merge_input| {
-                            return .{ .cli = .{ .cherry_pick = merge_input } };
+                        if (show_help) {
+                            return .{ .help = .cherry_pick };
                         } else {
-                            return error.InsufficientCherryPickArgs;
+                            var merge_input_maybe: ?mrg.MergeInput(hash_kind) = switch (extra_args.len) {
+                                0 => null,
+                                1 => .{ .new = ref.RefOrOid(hash_kind).initFromUser(extra_args[0]) },
+                                else => return error.TooManyArgs,
+                            };
+                            if (sub_cmd_args.map_args.contains("--continue")) {
+                                if (merge_input_maybe != null) {
+                                    return error.ConflictingCherryPickArgs;
+                                }
+                                merge_input_maybe = .cont;
+                            }
+                            if (merge_input_maybe) |merge_input| {
+                                return .{ .cli = .{ .cherry_pick = merge_input } };
+                            } else {
+                                return error.InsufficientCherryPickArgs;
+                            }
                         }
                     },
                     .config => {
-                        const cmd_name = extra_args[0];
-
-                        var cmd: cfg.ConfigCommand = undefined;
-                        if (std.mem.eql(u8, "list", cmd_name)) {
-                            cmd = .list;
-                        } else if (std.mem.eql(u8, "add", cmd_name)) {
-                            if (extra_args.len != 3) {
-                                return error.WrongNumberOfConfigArgs;
-                            }
-                            cmd = .{ .add = .{
-                                .name = extra_args[1],
-                                .value = extra_args[2],
-                            } };
-                        } else if (std.mem.eql(u8, "rm", cmd_name)) {
-                            if (extra_args.len != 2) {
-                                return error.WrongNumberOfConfigArgs;
-                            }
-                            cmd = .{ .remove = .{
-                                .name = extra_args[1],
-                            } };
+                        if (extra_args.len == 0 or show_help) {
+                            return .{ .help = .config };
                         } else {
-                            return error.InvalidConfigCommand;
-                        }
+                            const cmd_name = extra_args[0];
 
-                        return .{ .cli = .{ .config = cmd } };
+                            var cmd: cfg.ConfigCommand = undefined;
+                            if (std.mem.eql(u8, "list", cmd_name)) {
+                                cmd = .list;
+                            } else if (std.mem.eql(u8, "add", cmd_name)) {
+                                if (extra_args.len != 3) {
+                                    return error.WrongNumberOfConfigArgs;
+                                }
+                                cmd = .{ .add = .{
+                                    .name = extra_args[1],
+                                    .value = extra_args[2],
+                                } };
+                            } else if (std.mem.eql(u8, "rm", cmd_name)) {
+                                if (extra_args.len != 2) {
+                                    return error.WrongNumberOfConfigArgs;
+                                }
+                                cmd = .{ .remove = .{
+                                    .name = extra_args[1],
+                                } };
+                            } else {
+                                return error.InvalidConfigCommand;
+                            }
+
+                            return .{ .cli = .{ .config = cmd } };
+                        }
                     },
                     .remote => {
-                        const cmd_name = extra_args[0];
-
-                        var cmd: cfg.ConfigCommand = undefined;
-                        if (std.mem.eql(u8, "list", cmd_name)) {
-                            cmd = .list;
-                        } else if (std.mem.eql(u8, "add", cmd_name)) {
-                            if (extra_args.len != 3) {
-                                return error.WrongNumberOfRemoteArgs;
-                            }
-                            cmd = .{ .add = .{
-                                .name = extra_args[1],
-                                .value = extra_args[2],
-                            } };
-                        } else if (std.mem.eql(u8, "rm", cmd_name)) {
-                            if (extra_args.len != 2) {
-                                return error.WrongNumberofRemoteArgs;
-                            }
-                            cmd = .{ .remove = .{
-                                .name = extra_args[1],
-                            } };
+                        if (extra_args.len == 0 or show_help) {
+                            return .{ .help = .remote };
                         } else {
-                            return error.InvalidRemoteCommand;
+                            const cmd_name = extra_args[0];
+
+                            var cmd: cfg.ConfigCommand = undefined;
+                            if (std.mem.eql(u8, "list", cmd_name)) {
+                                cmd = .list;
+                            } else if (std.mem.eql(u8, "add", cmd_name)) {
+                                if (extra_args.len != 3) {
+                                    return error.WrongNumberOfRemoteArgs;
+                                }
+                                cmd = .{ .add = .{
+                                    .name = extra_args[1],
+                                    .value = extra_args[2],
+                                } };
+                            } else if (std.mem.eql(u8, "rm", cmd_name)) {
+                                if (extra_args.len != 2) {
+                                    return error.WrongNumberofRemoteArgs;
+                                }
+                                cmd = .{ .remove = .{
+                                    .name = extra_args[1],
+                                } };
+                            } else {
+                                return error.InvalidRemoteCommand;
+                            }
+
+                            return .{ .cli = .{ .remote = cmd } };
                         }
-                        return .{ .cli = .{ .remote = cmd } };
                     },
                     .fetch => {
-                        if (extra_args.len == 1) {
+                        if (extra_args.len != 1 or show_help) {
+                            return .{ .help = .fetch };
+                        } else {
                             return .{ .cli = .{ .fetch = .{
                                 .remote_name = extra_args[0],
                             } } };
-                        } else {
-                            return error.WrongNumberOfFetchArgs;
                         }
                     },
                     .pull => {
-                        if (extra_args.len == 2) {
+                        if (extra_args.len != 2 or show_help) {
+                            return .{ .help = .pull };
+                        } else {
                             return .{ .cli = .{ .pull = .{
                                 .remote_name = extra_args[0],
                                 .remote_ref_name = extra_args[1],
                             } } };
-                        } else {
-                            return error.WrongNumberOfPullArgs;
                         }
                     },
                 }
@@ -449,12 +472,8 @@ test "command" {
     {
         var sub_cmd_args = try SubCommandArgs.init(allocator, &.{ "add", "--cli" });
         defer sub_cmd_args.deinit();
-        const command_or_err = Command(hash_kind).init(&sub_cmd_args);
-        if (command_or_err) |_| {
-            return error.ExpectedError;
-        } else |err| {
-            try std.testing.expect(error.AddPathsNotFound == err);
-        }
+        const command = try Command(hash_kind).init(&sub_cmd_args);
+        try std.testing.expect(command == .help);
     }
 
     {
