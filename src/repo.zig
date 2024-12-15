@@ -22,11 +22,13 @@ pub fn RepoOpts(comptime repo_kind: RepoKind) type {
     return switch (repo_kind) {
         .git => struct {
             hash: hash.HashKind = .sha1,
-            read_size: usize = 1024,
+            stack_read_size: usize = 1024,
+            heap_read_size: usize = 1024,
         },
         .xit => struct {
             hash: hash.HashKind = .sha1,
-            read_size: usize = 1024,
+            stack_read_size: usize = 1024,
+            heap_read_size: usize = 1024,
             chunk_size: usize = 2048,
         },
     };
