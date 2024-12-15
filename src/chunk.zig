@@ -23,7 +23,7 @@ pub fn writeChunks(
     var chunks_dir = try state.core.xit_dir.makeOpenPath("chunks", .{});
     defer chunks_dir.close();
 
-    var chunk_buffer = [_]u8{0} ** repo_opts.chunk_size;
+    var chunk_buffer = [_]u8{0} ** repo_opts.extra.chunk_size;
     const reader = file.reader();
 
     while (true) {
@@ -72,7 +72,7 @@ pub fn readChunk(
     position: u64,
     buf: []u8,
 ) !usize {
-    const chunk_index = position / repo_opts.chunk_size;
+    const chunk_index = position / repo_opts.extra.chunk_size;
     const chunk_hash_position = chunk_index * hash.byteLen(repo_opts.hash);
     if (chunk_hash_position == chunk_hashes_reader.size) {
         return 0;
@@ -88,7 +88,7 @@ pub fn readChunk(
 
     const chunk_file = try chunks_dir.openFile(&chunk_hash_hex, .{});
     defer chunk_file.close();
-    try chunk_file.seekTo(position % repo_opts.chunk_size);
+    try chunk_file.seekTo(position % repo_opts.extra.chunk_size);
     return try chunk_file.read(buf);
 }
 

@@ -19,18 +19,24 @@ pub const RepoKind = enum {
 };
 
 pub fn RepoOpts(comptime repo_kind: RepoKind) type {
-    return switch (repo_kind) {
-        .git => struct {
-            hash: hash.HashKind = .sha1,
-            stack_read_size: usize = 1024,
-            heap_read_size: usize = 1024,
-        },
-        .xit => struct {
-            hash: hash.HashKind = .sha1,
-            stack_read_size: usize = 1024,
-            heap_read_size: usize = 1024,
-            chunk_size: usize = 2048,
-        },
+    return struct {
+        hash: hash.HashKind = .sha1,
+        stack_read_size: usize = 1024,
+        heap_read_size: usize = 1024,
+        extra: Extra = .{},
+
+        pub const Extra = switch (repo_kind) {
+            .git => struct {},
+            .xit => struct {
+                chunk_size: usize = 2048,
+            },
+        };
+
+        pub fn withHash(self: RepoOpts(repo_kind), hash_kind: hash.HashKind) RepoOpts(repo_kind) {
+            var new_self = self;
+            new_self.hash = hash_kind;
+            return new_self;
+        }
     };
 }
 

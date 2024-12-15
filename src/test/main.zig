@@ -146,9 +146,9 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         try mn.run(repo_kind, repo_opts, allocator, &.{ "add", "." }, repo_dir, .{});
 
         // make a commit
-        // we are using `.hash = .none` just to ensure it works (it will autodetect the repo's hash).
+        // setting the hash to `.none` causes it to autodetect the repo's hash.
         // also, the cwd is docs_dir, to make sure we can run commands in any sub dir.
-        try mn.run(repo_kind, .{ .hash = .none }, allocator, &.{ "commit", "-m", "first commit" }, docs_dir, .{});
+        try mn.run(repo_kind, repo_opts.withHash(.none), allocator, &.{ "commit", "-m", "first commit" }, docs_dir, .{});
 
         switch (repo_kind) {
             .git => {
