@@ -144,5 +144,5 @@ pub fn main() !void {
         try args.append(arg);
     }
 
-    try mn.run(.xit, .{}, allocator, args.items, temp_dir, .{ .writers = writers });
+    try mn.run(.xit, .{}, allocator, args.items, temp_dir, writers);
 }
