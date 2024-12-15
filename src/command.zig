@@ -136,14 +136,14 @@ pub fn SubCommand(comptime hash_kind: hash.HashKind) type {
             dir: []const u8,
         },
         add: struct {
-            paths: std.ArrayList([]const u8),
+            paths: []const []const u8,
         },
         unadd: struct {
-            paths: std.ArrayList([]const u8),
+            paths: []const []const u8,
             opts: idx.IndexUnaddOptions,
         },
         rm: struct {
-            paths: std.ArrayList([]const u8),
+            paths: []const []const u8,
             opts: idx.IndexRemoveOptions,
         },
         reset: struct {
@@ -173,21 +173,6 @@ pub fn SubCommand(comptime hash_kind: hash.HashKind) type {
             remote_name: []const u8,
             remote_ref_name: []const u8,
         },
-
-        pub fn deinit(self: *SubCommand(hash_kind)) void {
-            switch (self.*) {
-                .add => |*add| {
-                    add.paths.deinit();
-                },
-                .unadd => |*unadd| {
-                    unadd.paths.deinit();
-                },
-                .rm => |*rm| {
-                    rm.paths.deinit();
-                },
-                else => {},
-            }
-        }
     };
 }
 
@@ -200,7 +185,7 @@ pub fn Command(comptime hash_kind: hash.HashKind) type {
         tui: ?SubCommandKind,
         cli: ?SubCommand(hash_kind),
 
-        pub fn init(allocator: std.mem.Allocator, sub_cmd_args: *const SubCommandArgs) !Command(hash_kind) {
+        pub fn init(sub_cmd_args: *const SubCommandArgs) !Command(hash_kind) {
             if (sub_cmd_args.sub_command_kind) |sub_command_kind| {
                 const extra_args = sub_cmd_args.positional_args.items[1..];
 
@@ -223,20 +208,14 @@ pub fn Command(comptime hash_kind: hash.HashKind) type {
                         if (extra_args.len == 0) {
                             return error.AddPathsNotFound;
                         }
-                        var paths = try std.ArrayList([]const u8).initCapacity(allocator, extra_args.len);
-                        errdefer paths.deinit();
-                        paths.appendSliceAssumeCapacity(extra_args);
-                        return .{ .cli = .{ .add = .{ .paths = paths } } };
+                        return .{ .cli = .{ .add = .{ .paths = extra_args } } };
                     },
                     .unadd => {
                         if (extra_args.len == 0) {
                             return error.UnaddPathsNotFound;
                         }
-                        var paths = try std.ArrayList([]const u8).initCapacity(allocator, extra_args.len);
-                        errdefer paths.deinit();
-                        paths.appendSliceAssumeCapacity(extra_args);
                         return .{ .cli = .{ .unadd = .{
-                            .paths = paths,
+                            .paths = extra_args,
                             .opts = .{
                                 .force = sub_cmd_args.map_args.contains("-f"),
                             },
@@ -246,11 +225,8 @@ pub fn Command(comptime hash_kind: hash.HashKind) type {
                         if (extra_args.len == 0) {
                             return error.RmPathsNotFound;
                         }
-                        var paths = try std.ArrayList([]const u8).initCapacity(allocator, extra_args.len);
-                        errdefer paths.deinit();
-                        paths.appendSliceAssumeCapacity(extra_args);
                         return .{ .cli = .{ .rm = .{
-                            .paths = paths,
+                            .paths = extra_args,
                             .opts = .{
                                 .force = sub_cmd_args.map_args.contains("-f"),
                                 .remove_from_workspace = true,
@@ -460,17 +436,6 @@ pub fn Command(comptime hash_kind: hash.HashKind) type {
                 }
             }
         }
-
-        pub fn deinit(self: *Command(hash_kind)) void {
-            switch (self.*) {
-                .cli => |*cli| {
-                    if (cli.*) |*sub_command| {
-                        sub_command.deinit();
-                    }
-                },
-                else => {},
-            }
-        }
     };
 }
 
@@ -484,9 +449,8 @@ test "command" {
     {
         var sub_cmd_args = try SubCommandArgs.init(allocator, &.{ "add", "--cli" });
         defer sub_cmd_args.deinit();
-        var command_or_err = Command(hash_kind).init(allocator, &sub_cmd_args);
-        if (command_or_err) |*command| {
-            defer command.deinit();
+        const command_or_err = Command(hash_kind).init(&sub_cmd_args);
+        if (command_or_err) |_| {
             return error.ExpectedError;
         } else |err| {
             try std.testing.expect(error.AddPathsNotFound == err);
@@ -496,17 +460,15 @@ test "command" {
     {
         var sub_cmd_args = try SubCommandArgs.init(allocator, &.{ "add", "file.txt" });
         defer sub_cmd_args.deinit();
-        var command = try Command(hash_kind).init(allocator, &sub_cmd_args);
-        defer command.deinit();
+        const command = try Command(hash_kind).init(&sub_cmd_args);
         try std.testing.expect(command == .cli and command.cli.? == .add);
     }
 
     {
         var sub_cmd_args = try SubCommandArgs.init(allocator, &.{ "commit", "-m" });
         defer sub_cmd_args.deinit();
-        var command_or_err = Command(hash_kind).init(allocator, &sub_cmd_args);
-        if (command_or_err) |*command| {
-            defer command.deinit();
+        const command_or_err = Command(hash_kind).init(&sub_cmd_args);
+        if (command_or_err) |_| {
             return error.ExpectedError;
         } else |err| {
             try std.testing.expect(error.CommitMessageNotFound == err);
@@ -516,8 +478,7 @@ test "command" {
     {
         var sub_cmd_args = try SubCommandArgs.init(allocator, &.{ "commit", "-m", "let there be light" });
         defer sub_cmd_args.deinit();
-        var command = try Command(hash_kind).init(allocator, &sub_cmd_args);
-        defer command.deinit();
+        const command = try Command(hash_kind).init(&sub_cmd_args);
         try std.testing.expect(command == .cli and command.cli.? == .commit);
         try std.testing.expect(std.mem.eql(u8, "let there be light", command.cli.?.commit.message));
     }

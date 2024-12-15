@@ -1,5 +1,5 @@
 const std = @import("std");
-const rp = @import("repo.zig");
+const rp = @import("./repo.zig");
 const hash = @import("./hash.zig");
 const net = @import("./net.zig");
 
@@ -33,10 +33,8 @@ fn testPull(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     defer _ = process.kill() catch {};
     std.time.sleep(std.time.ns_per_s * 0.5);
 
-    const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
-
     // init server repo
-    var server_repo = try rp.Repo(.git, .{}).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "server" } }, writers);
+    var server_repo = try rp.Repo(.git, .{}).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "server" } }, .{});
     defer server_repo.deinit();
 
     // make a commit
@@ -51,7 +49,7 @@ fn testPull(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     defer client_dir.close();
 
     // init client repo
-    var client_repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "client" } }, writers);
+    var client_repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "client" } }, .{});
     defer client_repo.deinit();
     try client_repo.addRemote(allocator, .{ .name = "origin", .value = "git://localhost:3000/server" });
 
@@ -106,10 +104,8 @@ fn testPush(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     _ = c.git_libgit2_init();
     defer _ = c.git_libgit2_shutdown();
 
-    const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
-
     // init server repo
-    var server_repo = try rp.Repo(.git, .{}).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "server" } }, writers);
+    var server_repo = try rp.Repo(.git, .{}).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "server" } }, .{});
     defer server_repo.deinit();
     try server_repo.addConfig(allocator, .{ .name = "core.bare", .value = "false" });
     try server_repo.addConfig(allocator, .{ .name = "receive.denycurrentbranch", .value = "updateinstead" });
@@ -119,7 +115,7 @@ fn testPush(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     defer client_dir.close();
 
     // init client repo
-    var client_repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "client" } }, writers);
+    var client_repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "client" } }, .{});
     defer client_repo.deinit();
     try client_repo.addRemote(allocator, .{ .name = "origin", .value = "git://localhost:3001/server" });
 

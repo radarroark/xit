@@ -1,11 +1,11 @@
-//! end-to-end test using the main entrypoint (xitMain).
+//! end-to-end test using the main entrypoint: `mn.run`.
 //! runs with both git and xit modes, using libgit2 to
 //! validate git mode.
 
 const std = @import("std");
 const xitdb = @import("xitdb");
 const builtin = @import("builtin");
-const main = @import("../main.zig");
+const mn = @import("../main.zig");
 const hash = @import("../hash.zig");
 const idx = @import("../index.zig");
 const obj = @import("../object.zig");
@@ -20,7 +20,7 @@ const c = @cImport({
 
 fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) ![hash.hexLen(repo_opts.hash)]u8 {
     const allocator = std.testing.allocator;
-    const temp_dir_name = "temp-test-main";
+    const temp_dir_name = "temp-test-mn";
 
     // start libgit
     if (repo_kind == .git) _ = c.git_libgit2_init();
@@ -37,12 +37,10 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
-    const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
-
     // init repo
-    try main.xitMain(repo_kind, allocator, &.{ "init", "repo" }, temp_dir, writers);
+    try mn.run(repo_kind, repo_opts, allocator, &.{ "init", "repo" }, temp_dir, .{});
 
-    // get the main dir
+    // get the mn dir
     var repo_dir = try temp_dir.openDir("repo", .{});
     defer repo_dir.close();
 
@@ -145,11 +143,12 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         try design_md.writeAll("design stuff");
 
         // add the files
-        try main.xitMain(repo_kind, allocator, &.{ "add", "." }, repo_dir, writers);
+        try mn.run(repo_kind, repo_opts, allocator, &.{ "add", "." }, repo_dir, .{});
 
         // make a commit
-        // (the cwd is docs dir, to make sure we can run commands in any sub dir)
-        try main.xitMain(repo_kind, allocator, &.{ "commit", "-m", "first commit" }, docs_dir, writers);
+        // we are using `detect_hash = true` just to ensure it works.
+        // also, the cwd is docs_dir, to make sure we can run commands in any sub dir.
+        try mn.run(repo_kind, repo_opts, allocator, &.{ "commit", "-m", "first commit" }, docs_dir, .{ .detect_hash = true });
 
         switch (repo_kind) {
             .git => {
@@ -261,8 +260,8 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         try repo_dir.deleteFile("tests");
         var tests_dir = try repo_dir.makeOpenPath("tests", .{});
         defer tests_dir.close();
-        var main_test_zig = try tests_dir.createFile("main_test.zig", .{});
-        defer main_test_zig.close();
+        var mn_test_zig = try tests_dir.createFile("mn_test.zig", .{});
+        defer mn_test_zig.close();
 
         // make a few dirs
         var src_dir = try repo_dir.makeOpenPath("src", .{});
@@ -271,9 +270,9 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         defer src_zig_dir.close();
 
         // make a file in the dir
-        var main_zig = try src_zig_dir.createFile("main.zig", .{});
-        defer main_zig.close();
-        try main_zig.writeAll("pub fn main() !void {}");
+        var mn_zig = try src_zig_dir.createFile("mn.zig", .{});
+        defer mn_zig.close();
+        try mn_zig.writeAll("pub fn mn() !void {}");
 
         // make file in a nested dir
         var two_dir = try repo_dir.makeOpenPath("one/two", .{});
@@ -370,14 +369,14 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
         // delete a file
         try repo_dir.deleteFile("LICENSE");
-        try main.xitMain(repo_kind, allocator, &.{ "add", "LICENSE" }, repo_dir, writers);
+        try mn.run(repo_kind, repo_opts, allocator, &.{ "add", "LICENSE" }, repo_dir, .{});
 
         // delete a file and dir
         try repo_dir.deleteTree("docs");
-        try main.xitMain(repo_kind, allocator, &.{ "add", "docs/design.md" }, repo_dir, writers);
+        try mn.run(repo_kind, repo_opts, allocator, &.{ "add", "docs/design.md" }, repo_dir, .{});
 
         // add new and modified files
-        try main.xitMain(repo_kind, allocator, &.{ "add", "hello.txt", "run.sh", "src/zig/main.zig" }, repo_dir, writers);
+        try mn.run(repo_kind, repo_opts, allocator, &.{ "add", "hello.txt", "run.sh", "src/zig/mn.zig" }, repo_dir, .{});
 
         // index diff
         {
@@ -406,8 +405,8 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                     try std.testing.expectEqualStrings("diff --git a/run.sh b/run.sh", hunk_iter.header_lines.items[0]);
                     try std.testing.expectEqualStrings("old mode 100644", hunk_iter.header_lines.items[1]);
                     try std.testing.expectEqualStrings("new mode 100755", hunk_iter.header_lines.items[2]);
-                } else if (std.mem.eql(u8, "src/zig/main.zig", line_iter_pair.path)) {
-                    try std.testing.expectEqualStrings("diff --git a/src/zig/main.zig b/src/zig/main.zig", hunk_iter.header_lines.items[0]);
+                } else if (std.mem.eql(u8, "src/zig/mn.zig", line_iter_pair.path)) {
+                    try std.testing.expectEqualStrings("diff --git a/src/zig/mn.zig b/src/zig/mn.zig", hunk_iter.header_lines.items[0]);
                     try std.testing.expectEqualStrings("new file mode 100644", hunk_iter.header_lines.items[1]);
                 } else {
                     return error.EntryNotExpected;
@@ -421,11 +420,11 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             }
         }
 
-        // add the remaining files
-        try main.xitMain(repo_kind, allocator, &.{ "add", "." }, repo_dir, writers);
+        // add the remning files
+        try mn.run(repo_kind, repo_opts, allocator, &.{ "add", "." }, repo_dir, .{});
 
         // make another commit
-        try main.xitMain(repo_kind, allocator, &.{ "commit", "-m", "second commit" }, repo_dir, writers);
+        try mn.run(repo_kind, repo_opts, allocator, &.{ "commit", "-m", "second commit" }, repo_dir, .{});
 
         switch (repo_kind) {
             .git => {
@@ -510,11 +509,11 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                 try std.testing.expectEqualStrings("diff --git a/run.sh b/run.sh", hunk_iter.header_lines.items[0]);
                 try std.testing.expectEqualStrings("old mode 100644", hunk_iter.header_lines.items[1]);
                 try std.testing.expectEqualStrings("new mode 100755", hunk_iter.header_lines.items[2]);
-            } else if (std.mem.eql(u8, "src/zig/main.zig", line_iter_pair.path)) {
-                try std.testing.expectEqualStrings("diff --git a/src/zig/main.zig b/src/zig/main.zig", hunk_iter.header_lines.items[0]);
+            } else if (std.mem.eql(u8, "src/zig/mn.zig", line_iter_pair.path)) {
+                try std.testing.expectEqualStrings("diff --git a/src/zig/mn.zig b/src/zig/mn.zig", hunk_iter.header_lines.items[0]);
                 try std.testing.expectEqualStrings("new file mode 100644", hunk_iter.header_lines.items[1]);
-            } else if (std.mem.eql(u8, "tests/main_test.zig", line_iter_pair.path)) {
-                try std.testing.expectEqualStrings("diff --git a/tests/main_test.zig b/tests/main_test.zig", hunk_iter.header_lines.items[0]);
+            } else if (std.mem.eql(u8, "tests/mn_test.zig", line_iter_pair.path)) {
+                try std.testing.expectEqualStrings("diff --git a/tests/mn_test.zig b/tests/mn_test.zig", hunk_iter.header_lines.items[0]);
                 try std.testing.expectEqualStrings("new file mode 100644", hunk_iter.header_lines.items[1]);
             } else if (std.mem.eql(u8, "tests", line_iter_pair.path)) {
                 try std.testing.expectEqualStrings("diff --git a/tests b/tests", hunk_iter.header_lines.items[0]);
@@ -542,7 +541,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                 var license = try repo_dir.createFile("LICENSE", .{});
                 defer license.close();
                 try license.writeAll("different license");
-                try main.xitMain(repo_kind, allocator, &.{ "add", "LICENSE" }, repo_dir, writers);
+                try mn.run(repo_kind, repo_opts, allocator, &.{ "add", "LICENSE" }, repo_dir, .{});
             }
 
             // check out commit1 and make sure the conflict is found
@@ -558,7 +557,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             // delete the file
             {
                 try repo_dir.deleteFile("LICENSE");
-                try main.xitMain(repo_kind, allocator, &.{ "add", "LICENSE" }, repo_dir, writers);
+                try mn.run(repo_kind, repo_opts, allocator, &.{ "add", "LICENSE" }, repo_dir, .{});
             }
         }
 
@@ -638,7 +637,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     }
 
     // switch to first commit
-    try main.xitMain(repo_kind, allocator, &.{ "switch", &commit1 }, repo_dir, writers);
+    try mn.run(repo_kind, repo_opts, allocator, &.{ "switch", &commit1 }, repo_dir, .{});
 
     // the working tree was updated
     {
@@ -665,7 +664,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     }
 
     // switch to master
-    try main.xitMain(repo_kind, allocator, &.{ "switch", "master" }, repo_dir, writers);
+    try mn.run(repo_kind, repo_opts, allocator, &.{ "switch", "master" }, repo_dir, .{});
 
     // the working tree was updated
     {
@@ -693,7 +692,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         }
 
         // add the new dir
-        try main.xitMain(repo_kind, allocator, &.{ "add", "hello.txt" }, repo_dir, writers);
+        try mn.run(repo_kind, repo_opts, allocator, &.{ "add", "hello.txt" }, repo_dir, .{});
 
         // read index
         {
@@ -705,8 +704,8 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             defer index.deinit();
             try std.testing.expectEqual(7, index.entries.count());
             try std.testing.expect(index.entries.contains("README"));
-            try std.testing.expect(index.entries.contains("src/zig/main.zig"));
-            try std.testing.expect(index.entries.contains("tests/main_test.zig"));
+            try std.testing.expect(index.entries.contains("src/zig/mn.zig"));
+            try std.testing.expect(index.entries.contains("tests/mn_test.zig"));
             try std.testing.expect(index.entries.contains("hello.txt/nested.txt"));
             try std.testing.expect(index.entries.contains("hello.txt/nested2.txt"));
             try std.testing.expect(index.entries.contains("run.sh"));
@@ -753,7 +752,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         defer hello_txt2.close();
 
         // add the new file
-        try main.xitMain(repo_kind, allocator, &.{ "add", "hello.txt" }, repo_dir, writers);
+        try mn.run(repo_kind, repo_opts, allocator, &.{ "add", "hello.txt" }, repo_dir, .{});
 
         // read index
         {
@@ -765,8 +764,8 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             defer index.deinit();
             try std.testing.expectEqual(6, index.entries.count());
             try std.testing.expect(index.entries.contains("README"));
-            try std.testing.expect(index.entries.contains("src/zig/main.zig"));
-            try std.testing.expect(index.entries.contains("tests/main_test.zig"));
+            try std.testing.expect(index.entries.contains("src/zig/mn.zig"));
+            try std.testing.expect(index.entries.contains("tests/mn_test.zig"));
             try std.testing.expect(index.entries.contains("hello.txt"));
             try std.testing.expect(index.entries.contains("run.sh"));
             try std.testing.expect(index.entries.contains("one/two/three.txt"));
@@ -810,10 +809,10 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     // changing the index
     {
         // can't add a non-existent file
-        try std.testing.expectEqual(error.FileNotFound, main.xitMain(repo_kind, allocator, &.{ "add", "no-such-file" }, repo_dir, writers));
+        try std.testing.expectEqual(error.FileNotFound, mn.run(repo_kind, repo_opts, allocator, &.{ "add", "no-such-file" }, repo_dir, .{}));
 
         // can't remove non-existent file
-        try std.testing.expectEqual(error.FileNotFound, main.xitMain(repo_kind, allocator, &.{ "rm", "no-such-file" }, repo_dir, writers));
+        try std.testing.expectEqual(error.FileNotFound, mn.run(repo_kind, repo_opts, allocator, &.{ "rm", "no-such-file" }, repo_dir, .{}));
 
         // create a new file
         var new_file_txt = try repo_dir.createFile("new-file.txt", .{});
@@ -824,7 +823,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         try new_file_txt.writeAll("this is a new file");
 
         // can't remove unindexed file
-        try std.testing.expectEqual(error.CannotRemoveUnindexedFile, main.xitMain(repo_kind, allocator, &.{ "rm", "new-file.txt" }, repo_dir, writers));
+        try std.testing.expectEqual(error.CannotRemoveUnindexedFile, mn.run(repo_kind, repo_opts, allocator, &.{ "rm", "new-file.txt" }, repo_dir, .{}));
 
         // modify a file
         {
@@ -836,18 +835,18 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         }
 
         // can't remove a file with unstaged changes
-        try std.testing.expectEqual(error.CannotRemoveFileWithUnstagedChanges, main.xitMain(repo_kind, allocator, &.{ "rm", "one/two/three.txt" }, repo_dir, writers));
+        try std.testing.expectEqual(error.CannotRemoveFileWithUnstagedChanges, mn.run(repo_kind, repo_opts, allocator, &.{ "rm", "one/two/three.txt" }, repo_dir, .{}));
 
         // add file
-        try main.xitMain(repo_kind, allocator, &.{ "add", "new-file.txt" }, repo_dir, writers);
+        try mn.run(repo_kind, repo_opts, allocator, &.{ "add", "new-file.txt" }, repo_dir, .{});
 
         // unadd file
-        try main.xitMain(repo_kind, allocator, &.{ "unadd", "one/two/three.txt" }, repo_dir, writers);
+        try mn.run(repo_kind, repo_opts, allocator, &.{ "unadd", "one/two/three.txt" }, repo_dir, .{});
 
         // reset will undo index changes
         {
-            try main.xitMain(repo_kind, allocator, &.{ "reset", "new-file.txt" }, repo_dir, writers);
-            try main.xitMain(repo_kind, allocator, &.{ "reset", "one/two/three.txt" }, repo_dir, writers);
+            try mn.run(repo_kind, repo_opts, allocator, &.{ "reset", "new-file.txt" }, repo_dir, .{});
+            try mn.run(repo_kind, repo_opts, allocator, &.{ "reset", "one/two/three.txt" }, repo_dir, .{});
 
             var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
@@ -861,13 +860,13 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         }
 
         // stage the changes to the file
-        try main.xitMain(repo_kind, allocator, &.{ "add", "one/two/three.txt" }, repo_dir, writers);
+        try mn.run(repo_kind, repo_opts, allocator, &.{ "add", "one/two/three.txt" }, repo_dir, .{});
 
         // can't remove a file with staged changes
-        try std.testing.expectEqual(error.CannotRemoveFileWithStagedChanges, main.xitMain(repo_kind, allocator, &.{ "rm", "one/two/three.txt" }, repo_dir, writers));
+        try std.testing.expectEqual(error.CannotRemoveFileWithStagedChanges, mn.run(repo_kind, repo_opts, allocator, &.{ "rm", "one/two/three.txt" }, repo_dir, .{}));
 
         // remove file by force
-        try main.xitMain(repo_kind, allocator, &.{ "rm", "one/two/three.txt", "-f" }, repo_dir, writers);
+        try mn.run(repo_kind, repo_opts, allocator, &.{ "rm", "one/two/three.txt", "-f" }, repo_dir, .{});
 
         // restore file's original content
         {
@@ -877,12 +876,12 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             try three_txt.writeAll("one, two, three!");
             try three_txt.setEndPos(try three_txt.getPos());
 
-            try main.xitMain(repo_kind, allocator, &.{ "add", "one/two/three.txt" }, repo_dir, writers);
+            try mn.run(repo_kind, repo_opts, allocator, &.{ "add", "one/two/three.txt" }, repo_dir, .{});
         }
 
         // remove a file
         {
-            try main.xitMain(repo_kind, allocator, &.{ "rm", "one/two/three.txt" }, repo_dir, writers);
+            try mn.run(repo_kind, repo_opts, allocator, &.{ "rm", "one/two/three.txt" }, repo_dir, .{});
 
             var file_or_err = repo_dir.openFile("one/two/three.txt", .{ .mode = .read_only });
             if (file_or_err) |*file| {
@@ -926,7 +925,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             defer src_dir.close();
             var zig_dir = try src_dir.openDir("zig", .{});
             defer zig_dir.close();
-            try zig_dir.deleteFile("main.zig");
+            try zig_dir.deleteFile("mn.zig");
         }
 
         // workspace changes
@@ -949,7 +948,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
             // check the workspace_deleted entries
             try std.testing.expectEqual(1, status.workspace_deleted.count());
-            try std.testing.expect(status.workspace_deleted.contains("src/zig/main.zig"));
+            try std.testing.expect(status.workspace_deleted.contains("src/zig/mn.zig"));
         }
 
         // get status with libgit
@@ -972,10 +971,10 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             // add file to index
             var d_txt = try c_dir.createFile("d.txt", .{});
             defer d_txt.close();
-            try main.xitMain(repo_kind, allocator, &.{ "add", "c/d.txt" }, repo_dir, writers);
+            try mn.run(repo_kind, repo_opts, allocator, &.{ "add", "c/d.txt" }, repo_dir, .{});
 
             // remove file from index
-            try main.xitMain(repo_kind, allocator, &.{ "add", "src/zig/main.zig" }, repo_dir, writers);
+            try mn.run(repo_kind, repo_opts, allocator, &.{ "add", "src/zig/mn.zig" }, repo_dir, .{});
 
             // get status
             var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
@@ -993,14 +992,14 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
             // check the index_deleted entries
             try std.testing.expectEqual(2, status.index_deleted.count());
-            try std.testing.expect(status.index_deleted.contains("src/zig/main.zig"));
+            try std.testing.expect(status.index_deleted.contains("src/zig/mn.zig"));
             try std.testing.expect(status.index_deleted.contains("one/two/three.txt"));
         }
     }
 
     // restore
     {
-        // there are two modified and two deleted files remaining
+        // there are two modified and two deleted files remning
         {
             var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
@@ -1011,20 +1010,20 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             try std.testing.expectEqual(2, status.index_deleted.count());
         }
 
-        try main.xitMain(repo_kind, allocator, &.{ "restore", "README" }, repo_dir, writers);
+        try mn.run(repo_kind, repo_opts, allocator, &.{ "restore", "README" }, repo_dir, .{});
 
-        try main.xitMain(repo_kind, allocator, &.{ "restore", "hello.txt" }, repo_dir, writers);
+        try mn.run(repo_kind, repo_opts, allocator, &.{ "restore", "hello.txt" }, repo_dir, .{});
 
         // directories can be restored
-        try main.xitMain(repo_kind, allocator, &.{ "restore", "src" }, repo_dir, writers);
+        try mn.run(repo_kind, repo_opts, allocator, &.{ "restore", "src" }, repo_dir, .{});
 
         // nested paths can be restored
-        try main.xitMain(repo_kind, allocator, &.{ "restore", "one/two/three.txt" }, repo_dir, writers);
+        try mn.run(repo_kind, repo_opts, allocator, &.{ "restore", "one/two/three.txt" }, repo_dir, .{});
 
         // remove changes to index
-        try main.xitMain(repo_kind, allocator, &.{ "add", "hello.txt", "src", "one" }, repo_dir, writers);
+        try mn.run(repo_kind, repo_opts, allocator, &.{ "add", "hello.txt", "src", "one" }, repo_dir, .{});
 
-        // there are no modified or deleted files remaining
+        // there are no modified or deleted files remning
         {
             var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
@@ -1055,10 +1054,10 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     }
 
     // create a branch
-    try main.xitMain(repo_kind, allocator, &.{ "branch", "add", "stuff" }, repo_dir, writers);
+    try mn.run(repo_kind, repo_opts, allocator, &.{ "branch", "add", "stuff" }, repo_dir, .{});
 
     // switch to the branch
-    try main.xitMain(repo_kind, allocator, &.{ "switch", "stuff" }, repo_dir, writers);
+    try mn.run(repo_kind, repo_opts, allocator, &.{ "switch", "stuff" }, repo_dir, .{});
 
     // check the refs
     {
@@ -1117,20 +1116,20 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         try hello_txt.setEndPos(try hello_txt.getPos());
 
         // add the files
-        try main.xitMain(repo_kind, allocator, &.{ "add", "hello.txt" }, repo_dir, writers);
+        try mn.run(repo_kind, repo_opts, allocator, &.{ "add", "hello.txt" }, repo_dir, .{});
 
         // make a commit
-        try main.xitMain(repo_kind, allocator, &.{ "commit", "-m", "third commit" }, repo_dir, writers);
+        try mn.run(repo_kind, repo_opts, allocator, &.{ "commit", "-m", "third commit" }, repo_dir, .{});
 
         try hello_txt.seekTo(0);
         try hello_txt.writeAll("hello, world on the stuff branch, commit 4!");
         try hello_txt.setEndPos(try hello_txt.getPos());
 
         // add the files
-        try main.xitMain(repo_kind, allocator, &.{ "add", "hello.txt" }, repo_dir, writers);
+        try mn.run(repo_kind, repo_opts, allocator, &.{ "add", "hello.txt" }, repo_dir, .{});
 
         // make a commit
-        try main.xitMain(repo_kind, allocator, &.{ "commit", "-m", "fourth commit" }, repo_dir, writers);
+        try mn.run(repo_kind, repo_opts, allocator, &.{ "commit", "-m", "fourth commit" }, repo_dir, .{});
     }
 
     // get HEAD contents
@@ -1143,7 +1142,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     };
 
     // create a branch with slashes
-    try main.xitMain(repo_kind, allocator, &.{ "branch", "add", "a/b/c" }, repo_dir, writers);
+    try mn.run(repo_kind, repo_opts, allocator, &.{ "branch", "add", "a/b/c" }, repo_dir, .{});
 
     // make sure the ref is created with subdirs
     if (repo_kind == .git) {
@@ -1164,7 +1163,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     }
 
     // remove the branch
-    try main.xitMain(repo_kind, allocator, &.{ "branch", "rm", "a/b/c" }, repo_dir, writers);
+    try mn.run(repo_kind, repo_opts, allocator, &.{ "branch", "rm", "a/b/c" }, repo_dir, .{});
 
     // make sure the subdirs are deleted
     if (repo_kind == .git) {
@@ -1174,7 +1173,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     }
 
     // switch to master
-    try main.xitMain(repo_kind, allocator, &.{ "switch", "master" }, repo_dir, writers);
+    try mn.run(repo_kind, repo_opts, allocator, &.{ "switch", "master" }, repo_dir, .{});
 
     // modify file and commit
     {
@@ -1183,10 +1182,10 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         try goodbye_txt.writeAll("goodbye, world once again!");
 
         // add the files
-        try main.xitMain(repo_kind, allocator, &.{ "add", "goodbye.txt" }, repo_dir, writers);
+        try mn.run(repo_kind, repo_opts, allocator, &.{ "add", "goodbye.txt" }, repo_dir, .{});
 
         // make a commit
-        try main.xitMain(repo_kind, allocator, &.{ "commit", "-m", "third commit" }, repo_dir, writers);
+        try mn.run(repo_kind, repo_opts, allocator, &.{ "commit", "-m", "third commit" }, repo_dir, .{});
     }
 
     // get HEAD contents
@@ -1241,7 +1240,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // merge
     {
-        try main.xitMain(repo_kind, allocator, &.{ "merge", "stuff" }, repo_dir, writers);
+        try mn.run(repo_kind, repo_opts, allocator, &.{ "merge", "stuff" }, repo_dir, .{});
 
         // change from stuff exists
         {
@@ -1273,8 +1272,8 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // config
     {
-        try main.xitMain(repo_kind, allocator, &.{ "config", "add", "core.editor", "vim" }, repo_dir, writers);
-        try main.xitMain(repo_kind, allocator, &.{ "config", "add", "branch.master.remote", "origin" }, repo_dir, writers);
+        try mn.run(repo_kind, repo_opts, allocator, &.{ "config", "add", "core.editor", "vim" }, repo_dir, .{});
+        try mn.run(repo_kind, repo_opts, allocator, &.{ "config", "add", "branch.master.remote", "origin" }, repo_dir, .{});
 
         {
             var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
@@ -1290,7 +1289,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             try std.testing.expectEqual(1, branch_master_section.count());
         }
 
-        try main.xitMain(repo_kind, allocator, &.{ "config", "rm", "branch.master.remote" }, repo_dir, writers);
+        try mn.run(repo_kind, repo_opts, allocator, &.{ "config", "rm", "branch.master.remote" }, repo_dir, .{});
 
         {
             var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
@@ -1303,10 +1302,10 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         }
 
         // don't allow invalid names
-        try std.testing.expectEqual(error.InvalidConfigName, main.xitMain(repo_kind, allocator, &.{ "config", "add", "core#editor", "vim" }, repo_dir, writers));
+        try std.testing.expectEqual(error.InvalidConfigName, mn.run(repo_kind, repo_opts, allocator, &.{ "config", "add", "core#editor", "vim" }, repo_dir, .{}));
 
         // do allow values with spaces
-        try main.xitMain(repo_kind, allocator, &.{ "config", "add", "user.name", "radar roark" }, repo_dir, writers);
+        try mn.run(repo_kind, repo_opts, allocator, &.{ "config", "add", "user.name", "radar roark" }, repo_dir, .{});
 
         {
             var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
@@ -1320,12 +1319,12 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             try std.testing.expectEqualStrings("radar roark", user_section.get("name").?);
         }
 
-        try main.xitMain(repo_kind, allocator, &.{ "config", "list" }, repo_dir, writers);
+        try mn.run(repo_kind, repo_opts, allocator, &.{ "config", "list" }, repo_dir, .{});
     }
 
     // remote
     {
-        try main.xitMain(repo_kind, allocator, &.{ "remote", "add", "origin", "http://localhost:3000" }, repo_dir, writers);
+        try mn.run(repo_kind, repo_opts, allocator, &.{ "remote", "add", "origin", "http://localhost:3000" }, repo_dir, .{});
 
         {
             var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
@@ -1338,7 +1337,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             try std.testing.expectEqual(1, origin_section.count());
         }
 
-        try main.xitMain(repo_kind, allocator, &.{ "remote", "rm", "origin" }, repo_dir, writers);
+        try mn.run(repo_kind, repo_opts, allocator, &.{ "remote", "rm", "origin" }, repo_dir, .{});
 
         {
             var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
@@ -1350,7 +1349,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             try std.testing.expectEqual(null, remote.sections.get("origin"));
         }
 
-        try main.xitMain(repo_kind, allocator, &.{ "remote", "list" }, repo_dir, writers);
+        try mn.run(repo_kind, repo_opts, allocator, &.{ "remote", "list" }, repo_dir, .{});
     }
 
     return commit4;
