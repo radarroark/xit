@@ -89,7 +89,7 @@ pub fn writeObject(
             try lock.lock_file.writeAll(header_str);
 
             // copy file into temp file
-            var read_buffer = [_]u8{0} ** repo_opts.read_size;
+            var read_buffer = [_]u8{0} ** repo_opts.stack_read_size;
             while (true) {
                 const size = try reader.read(&read_buffer);
                 if (size == 0) {
@@ -101,7 +101,7 @@ pub fn writeObject(
             // create compressed lock file
             var compressed_lock = try io.LockFile.init(hash_prefix_dir, hash_suffix);
             defer compressed_lock.deinit();
-            try compress.compress(repo_opts.read_size, lock.lock_file, compressed_lock.lock_file);
+            try compress.compress(repo_opts.stack_read_size, lock.lock_file, compressed_lock.lock_file);
             compressed_lock.success = true;
         },
         .xit => {
@@ -178,7 +178,7 @@ fn writeTree(
             // create compressed lock file
             var compressed_lock = try io.LockFile.init(tree_hash_prefix_dir, tree_hash_suffix);
             defer compressed_lock.deinit();
-            try compress.compress(repo_opts.read_size, lock.lock_file, compressed_lock.lock_file);
+            try compress.compress(repo_opts.stack_read_size, lock.lock_file, compressed_lock.lock_file);
             compressed_lock.success = true;
         },
         .xit => {
@@ -359,7 +359,7 @@ pub fn writeCommit(
             // create compressed lock file
             var compressed_lock = try io.LockFile.init(commit_hash_prefix_dir, commit_hash_suffix);
             defer compressed_lock.deinit();
-            try compress.compress(repo_opts.read_size, lock.lock_file, compressed_lock.lock_file);
+            try compress.compress(repo_opts.stack_read_size, lock.lock_file, compressed_lock.lock_file);
             compressed_lock.success = true;
 
             // write commit id to HEAD
@@ -704,12 +704,12 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                             var entries = std.StringArrayHashMap(TreeEntry(repo_opts.hash)).init(arena.allocator());
 
                             while (true) {
-                                const entry_mode_str = reader.readUntilDelimiterAlloc(arena.allocator(), ' ', repo_opts.read_size) catch |err| switch (err) {
+                                const entry_mode_str = reader.readUntilDelimiterAlloc(arena.allocator(), ' ', repo_opts.heap_read_size) catch |err| switch (err) {
                                     error.EndOfStream => break,
                                     else => |e| return e,
                                 };
                                 const entry_mode: io.Mode = @bitCast(try std.fmt.parseInt(u32, entry_mode_str, 8));
-                                const entry_name = try reader.readUntilDelimiterAlloc(arena.allocator(), 0, repo_opts.read_size);
+                                const entry_name = try reader.readUntilDelimiterAlloc(arena.allocator(), 0, repo_opts.heap_read_size);
                                 var entry_oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
                                 try reader.readNoEof(&entry_oid);
                                 try entries.put(entry_name, .{ .oid = entry_oid, .mode = entry_mode });
@@ -738,7 +738,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                         },
                         .full => {
                             // read the content kind
-                            const content_kind = try reader.readUntilDelimiterAlloc(allocator, ' ', repo_opts.read_size);
+                            const content_kind = try reader.readUntilDelimiterAlloc(allocator, ' ', repo_opts.heap_read_size);
                             defer allocator.free(content_kind);
                             if (!std.mem.eql(u8, "tree", content_kind)) {
                                 return error.InvalidCommitContentKind;
@@ -762,7 +762,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
                             // read the metadata
                             while (true) {
-                                const line = try reader.readUntilDelimiterAlloc(arena.allocator(), '\n', repo_opts.read_size);
+                                const line = try reader.readUntilDelimiterAlloc(arena.allocator(), '\n', repo_opts.heap_read_size);
                                 if (line.len == 0) {
                                     break;
                                 }
@@ -787,7 +787,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                             }
 
                             // read the message
-                            content.commit.metadata.message = try reader.readAllAlloc(arena.allocator(), repo_opts.read_size);
+                            content.commit.metadata.message = try reader.readAllAlloc(arena.allocator(), repo_opts.heap_read_size);
 
                             return .{
                                 .allocator = allocator,

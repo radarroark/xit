@@ -458,7 +458,7 @@ fn writeBlobWithDiff3(
 
         pub fn count(self: *@This()) !usize {
             var n: usize = 0;
-            var read_buffer = [_]u8{0} ** repo_opts.read_size;
+            var read_buffer = [_]u8{0} ** repo_opts.stack_read_size;
             try self.seekTo(0);
             while (true) {
                 const size = try self.reader().read(&read_buffer);
@@ -536,7 +536,7 @@ fn writeBlobWithPatches(
             if (try commit_id_to_path_to_patch_id.getCursor(try hash.hexToHash(repo_opts.hash, &object.oid))) |path_to_patch_id_cursor| {
                 const path_to_patch_id = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(path_to_patch_id_cursor);
                 if (try path_to_patch_id.getCursor(path_hash)) |patch_id_cursor| {
-                    const patch_id_bytes = try patch_id_cursor.readBytesAlloc(allocator, repo_opts.read_size);
+                    const patch_id_bytes = try patch_id_cursor.readBytesAlloc(allocator, repo_opts.heap_read_size);
                     defer allocator.free(patch_id_bytes);
                     const patch_id = hash.bytesToHash(repo_opts.hash, patch_id_bytes[0..comptime hash.byteLen(repo_opts.hash)]);
                     try patch_ids.append(patch_id);
@@ -622,7 +622,7 @@ fn writeBlobWithPatches(
                 const change_content_list_cursor = (try patch_id_to_change_content_list_ptr.getCursor(node_id.patch_id)) orelse return error.KeyNotFound;
                 const change_content_list = try rp.Repo(.xit, repo_opts).DB.ArrayList(.read_only).init(change_content_list_cursor);
                 const change_content_cursor = (try change_content_list.getCursor(node_id.node)) orelse return error.KeyNotFound;
-                const change_content = try change_content_cursor.readBytesAlloc(alctr, repo_opts.read_size);
+                const change_content = try change_content_cursor.readBytesAlloc(alctr, repo_opts.heap_read_size);
                 {
                     errdefer alctr.free(change_content);
                     try lines.append(change_content);
@@ -938,7 +938,7 @@ fn writeBlobWithPatches(
                         const change_content_list = try rp.Repo(.xit, repo_opts).DB.ArrayList(.read_only).init(change_content_list_cursor);
 
                         const change_content_cursor = (try change_content_list.getCursor(first_node_id.node)) orelse return error.KeyNotFound;
-                        const change_content = try change_content_cursor.readBytesAlloc(self.parent.allocator, repo_opts.read_size);
+                        const change_content = try change_content_cursor.readBytesAlloc(self.parent.allocator, repo_opts.heap_read_size);
                         {
                             errdefer self.parent.allocator.free(change_content);
                             try self.parent.line_buffer.append(change_content);
@@ -977,7 +977,7 @@ fn writeBlobWithPatches(
 
         pub fn count(self: *@This()) !usize {
             var n: usize = 0;
-            var read_buffer = [_]u8{0} ** repo_opts.read_size;
+            var read_buffer = [_]u8{0} ** repo_opts.stack_read_size;
             try self.seekTo(0);
             while (true) {
                 const size = try self.reader().read(&read_buffer);
@@ -1580,7 +1580,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                                 else => |e| return e,
                             };
                             defer merge_msg.close();
-                            commit_metadata.message = try merge_msg.readToEndAlloc(arena.allocator(), repo_opts.read_size);
+                            commit_metadata.message = try merge_msg.readToEndAlloc(arena.allocator(), repo_opts.heap_read_size);
                         },
                         .xit => {
                             const merge_in_progress_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "merge-in-progress"));
@@ -1593,7 +1593,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                             }
 
                             const message_cursor = (try merge_in_progress.getCursor(hash.hashInt(repo_opts.hash, "message"))) orelse return error.MergeMessageNotFound;
-                            commit_metadata.message = try message_cursor.readBytesAlloc(arena.allocator(), repo_opts.read_size);
+                            commit_metadata.message = try message_cursor.readBytesAlloc(arena.allocator(), repo_opts.heap_read_size);
                         },
                     }
 

@@ -124,7 +124,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     defer config_file.close();
 
                     const reader = config_file.reader();
-                    var buf = [_]u8{0} ** repo_opts.read_size;
+                    var buf = [_]u8{0} ** repo_opts.stack_read_size;
 
                     // for each line...
                     while (try reader.readUntilDelimiterOrEof(&buf, '\n')) |line| {
@@ -222,7 +222,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                         defer config_iter.deinit();
                         while (try config_iter.next()) |*section_cursor| {
                             const section_kv_pair = try section_cursor.readKeyValuePair();
-                            const section_name = try section_kv_pair.key_cursor.readBytesAlloc(arena.allocator(), repo_opts.read_size);
+                            const section_name = try section_kv_pair.key_cursor.readBytesAlloc(arena.allocator(), repo_opts.heap_read_size);
 
                             var variables = Variables.init(arena.allocator());
 
@@ -230,8 +230,8 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                             defer var_iter.deinit();
                             while (try var_iter.next()) |*var_cursor| {
                                 const var_kv_pair = try var_cursor.readKeyValuePair();
-                                const var_name = try var_kv_pair.key_cursor.readBytesAlloc(arena.allocator(), repo_opts.read_size);
-                                const var_value = try var_kv_pair.value_cursor.readBytesAlloc(arena.allocator(), repo_opts.read_size);
+                                const var_name = try var_kv_pair.key_cursor.readBytesAlloc(arena.allocator(), repo_opts.heap_read_size);
+                                const var_value = try var_kv_pair.value_cursor.readBytesAlloc(arena.allocator(), repo_opts.heap_read_size);
                                 try variables.put(var_name, var_value);
                             }
 
