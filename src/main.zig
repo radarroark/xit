@@ -102,18 +102,6 @@ const USAGE =
     \\
 ;
 
-pub const RunOpts = struct {
-    // the writers that will be used to print output and error messages.
-    // by default, null writers will be used, so they won't print anywhere.
-    writers: rp.Writers = .{},
-    // if true, and the repo already exists, we will attempt to detect the
-    // hash currently used by the repo and include it in the `repo_opts`
-    // that we pass to it. this will be important later when there is more
-    // than one hash algorithm supported, but for now it's false because we
-    // only have one.
-    detect_hash: bool = false,
-};
-
 /// this is meant to be the main entry point if you wanted to use xit
 /// as a CLI tool. to use xit programmatically, build a Repo struct
 /// and call methods on it directly. to use xit subconsciously, just
@@ -124,31 +112,13 @@ pub fn run(
     allocator: std.mem.Allocator,
     args: []const []const u8,
     cwd: std.fs.Dir,
-    run_opts: RunOpts,
+    writers: rp.Writers,
 ) !void {
-    if (run_opts.detect_hash) {
-        var new_run_opts = run_opts;
-        new_run_opts.detect_hash = false;
+    if (repo_opts.hash == .none) {
+        // if the hash is set to none, it means we should try to auto-detect
+        // the hash kind that is being used by the repo. this will be useful
+        // in the future when we need to support multiple hash algorithms.
 
-        // if we are initing a new repo, just use the default repo opts
-        {
-            var sub_cmd_args = try cmd.SubCommandArgs.init(allocator, args);
-            defer sub_cmd_args.deinit();
-
-            if (sub_cmd_args.sub_command_kind) |sub_cmd_kind| {
-                if (sub_cmd_kind == .init) {
-                    try run(repo_kind, repo_opts, allocator, args, cwd, new_run_opts);
-                    return;
-                }
-            }
-        }
-
-        // find the existing HashKind from the repo and include it in the repo opts
-        const hash_kind = blk: {
-            var repo = try rp.Repo(repo_kind, .{ .hash = .none }).init(allocator, .{ .cwd = cwd });
-            defer repo.deinit();
-            break :blk try repo.hashKind();
-        };
         const set_hash = struct {
             fn set_hash(new_hash_kind: hash.HashKind) rp.RepoOpts(repo_kind) {
                 var new_repo_opts = repo_opts;
@@ -156,9 +126,30 @@ pub fn run(
                 return new_repo_opts;
             }
         }.set_hash;
+
+        // if we are initing a new repo, just use the default hash kind
+        {
+            var sub_cmd_args = try cmd.SubCommandArgs.init(allocator, args);
+            defer sub_cmd_args.deinit();
+
+            if (sub_cmd_args.sub_command_kind) |sub_cmd_kind| {
+                if (sub_cmd_kind == .init) {
+                    const default_hash = (rp.RepoOpts(repo_kind){}).hash;
+                    try run(repo_kind, set_hash(default_hash), allocator, args, cwd, writers);
+                    return;
+                }
+            }
+        }
+
+        // find the existing hash kind from the repo and include it in the repo opts
+        const hash_kind = blk: {
+            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = cwd });
+            defer repo.deinit();
+            break :blk try repo.hashKind();
+        };
         switch (hash_kind) {
             .none => return error.HashKindNotFound,
-            .sha1 => try run(repo_kind, set_hash(.sha1), allocator, args, cwd, new_run_opts),
+            .sha1 => try run(repo_kind, set_hash(.sha1), allocator, args, cwd, writers),
         }
     } else {
         var sub_cmd_args = try cmd.SubCommandArgs.init(allocator, args);
@@ -167,17 +158,17 @@ pub fn run(
         const command = try cmd.Command(repo_opts.hash).init(&sub_cmd_args);
         switch (command) {
             .invalid => |invalid| {
-                try run_opts.writers.err.print("\"{s}\" is not a valid command\n", .{invalid.name});
-                try run_opts.writers.out.print(USAGE, .{});
+                try writers.err.print("\"{s}\" is not a valid command\n", .{invalid.name});
+                try writers.out.print(USAGE, .{});
             },
             .help => |sub_cmd_kind_maybe| {
                 if (sub_cmd_kind_maybe) |sub_cmd_kind| {
                     // TODO: print usage for each sub command
                     switch (sub_cmd_kind) {
-                        else => try run_opts.writers.out.print(USAGE, .{}),
+                        else => try writers.out.print(USAGE, .{}),
                     }
                 } else {
-                    try run_opts.writers.out.print(USAGE, .{});
+                    try writers.out.print(USAGE, .{});
                 }
             },
             .tui => |sub_cmd_kind_maybe| {
@@ -187,10 +178,10 @@ pub fn run(
             },
             .cli => |sub_cmd_maybe| {
                 if (sub_cmd_maybe) |sub_cmd| {
-                    var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = cwd }, sub_cmd, run_opts.writers);
+                    var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = cwd }, sub_cmd, writers);
                     defer repo.deinit();
                 } else {
-                    try run_opts.writers.out.print(USAGE, .{});
+                    try writers.out.print(USAGE, .{});
                 }
             },
         }
@@ -214,5 +205,5 @@ pub fn main() !void {
     }
 
     const writers = rp.Writers{ .out = std.io.getStdOut().writer().any(), .err = std.io.getStdErr().writer().any() };
-    try run(.xit, .{}, allocator, args.items, std.fs.cwd(), .{ .writers = writers });
+    try run(.xit, .{}, allocator, args.items, std.fs.cwd(), writers);
 }
