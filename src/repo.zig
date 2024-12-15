@@ -634,14 +634,17 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
         pub fn hashKind(self: *Repo(repo_kind, repo_opts)) !hash.HashKind {
             switch (repo_kind) {
                 .git => return .sha1,
-                .xit => {
-                    const xitdb = @import("xitdb");
+                .xit => switch (repo_opts.hash) {
+                    .none => {
+                        const xitdb = @import("xitdb");
 
-                    try self.core.db_file.seekTo(0);
-                    const header = try xitdb.DatabaseHeader.read(self.core.db_file.reader());
-                    try header.validate();
+                        try self.core.db_file.seekTo(0);
+                        const header = try xitdb.DatabaseHeader.read(self.core.db_file.reader());
+                        try header.validate();
 
-                    return hash.hashKind(header.hash_id.id) orelse error.InvalidHashKind;
+                        return hash.hashKind(header.hash_id.id) orelse error.InvalidHashKind;
+                    },
+                    else => return self.core.db.header.hash_id.id,
                 },
             }
         }
