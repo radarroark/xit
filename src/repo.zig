@@ -34,6 +34,11 @@ pub fn RepoOpts(comptime repo_kind: RepoKind) type {
     };
 }
 
+pub const Writers = struct {
+    out: std.io.AnyWriter = std.io.null_writer.any(),
+    err: std.io.AnyWriter = std.io.null_writer.any(),
+};
+
 pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind)) type {
     return struct {
         core: Core,
@@ -180,7 +185,12 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             .db_file = db_file,
                             .db = switch (repo_opts.hash) {
                                 .none => {},
-                                else => try DB.init(allocator, .{ .file = db_file, .hash_id = .{ .id = hash.hashId(repo_opts.hash) } }),
+                                else => blk: {
+                                    const hash_id = hash.hashId(repo_opts.hash);
+                                    const db = try DB.init(allocator, .{ .file = db_file, .hash_id = .{ .id = hash_id } });
+                                    if (db.header.hash_id.id != hash_id) return error.InvalidHashId;
+                                    break :blk db;
+                                },
                             },
                         },
                         .init_opts = opts,
@@ -189,7 +199,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
-        pub fn initWithCommand(allocator: std.mem.Allocator, opts: InitOpts, sub_command: cmd.SubCommand(repo_opts.hash), writers: anytype) !Repo(repo_kind, repo_opts) {
+        pub fn initWithCommand(allocator: std.mem.Allocator, opts: InitOpts, sub_command: cmd.SubCommand(repo_opts.hash), writers: Writers) !Repo(repo_kind, repo_opts) {
             var repo = Repo(repo_kind, repo_opts).init(allocator, opts) catch |err| switch (err) {
                 error.RepoNotFound => {
                     if (sub_command == .init) {
@@ -317,7 +327,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
-        fn runCommand(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, sub_command: cmd.SubCommand(repo_opts.hash), writers: anytype) !void {
+        fn runCommand(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, sub_command: cmd.SubCommand(repo_opts.hash), writers: Writers) !void {
             switch (sub_command) {
                 .init => |init_cmd| {
                     self.* = Repo(repo_kind, repo_opts).initNew(allocator, self.init_opts.cwd, init_cmd.dir) catch |err| switch (err) {
@@ -329,13 +339,13 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     };
                 },
                 .add => |add_cmd| {
-                    try self.add(allocator, add_cmd.paths.items);
+                    try self.add(allocator, add_cmd.paths);
                 },
                 .unadd => |unadd_cmd| {
-                    try self.unadd(allocator, unadd_cmd.paths.items, unadd_cmd.opts);
+                    try self.unadd(allocator, unadd_cmd.paths, unadd_cmd.opts);
                 },
                 .rm => |rm_cmd| {
-                    try self.rm(allocator, rm_cmd.paths.items, rm_cmd.opts);
+                    try self.rm(allocator, rm_cmd.paths, rm_cmd.opts);
                 },
                 .reset => |reset_cmd| {
                     try self.reset(allocator, reset_cmd.path);

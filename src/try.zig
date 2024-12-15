@@ -57,7 +57,7 @@ pub fn main() !void {
         try copyDir(src_git_dir, dest_git_dir);
     }
 
-    const writers = .{ .out = std.io.getStdOut().writer(), .err = std.io.getStdErr().writer() };
+    const writers = rp.Writers{ .out = std.io.getStdOut().writer().any(), .err = std.io.getStdErr().writer().any() };
 
     {
         var git_repo = try rp.Repo(.git, .{}).init(allocator, .{ .cwd = temp_dir });
@@ -144,5 +144,5 @@ pub fn main() !void {
         try args.append(arg);
     }
 
-    try mn.xitMain(.xit, allocator, args.items, temp_dir, writers);
+    try mn.run(.xit, .{}, allocator, args.items, temp_dir, .{ .writers = writers });
 }

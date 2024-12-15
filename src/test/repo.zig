@@ -40,8 +40,7 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
     defer temp_dir.close();
 
     {
-        const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
-        var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, writers);
+        var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, .{});
         defer repo.deinit();
     }
 
@@ -102,8 +101,7 @@ fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
     defer temp_dir.close();
 
     {
-        const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
-        var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, writers);
+        var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, .{});
         defer repo.deinit();
     }
 
@@ -258,8 +256,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
     // same file conflict
     {
         {
-            const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
-            var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "same-file-conflict" } }, writers);
+            var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "same-file-conflict" } }, .{});
             defer repo.deinit();
         }
 
@@ -368,8 +365,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
     // same file conflict (autoresolved)
     {
         {
-            const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
-            var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "same-file-conflict-autoresolved" } }, writers);
+            var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "same-file-conflict-autoresolved" } }, .{});
             defer repo.deinit();
         }
 
@@ -456,8 +452,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
     // modify/delete conflict (target modifies, source deletes)
     {
         {
-            const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
-            var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "modify-delete-conflict" } }, writers);
+            var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "modify-delete-conflict" } }, .{});
             defer repo.deinit();
         }
 
@@ -532,8 +527,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
     // delete/modify conflict (target deletes, source modifies)
     {
         {
-            const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
-            var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "delete-modify-conflict" } }, writers);
+            var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "delete-modify-conflict" } }, .{});
             defer repo.deinit();
         }
 
@@ -606,8 +600,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
     // file/dir conflict (target has file, source has dir)
     {
         {
-            const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
-            var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "file-dir-conflict" } }, writers);
+            var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "file-dir-conflict" } }, .{});
             defer repo.deinit();
         }
 
@@ -686,8 +679,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
     // dir/file conflict (target has dir, source has file)
     {
         {
-            const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
-            var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "dir-file-conflict" } }, writers);
+            var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "dir-file-conflict" } }, .{});
             defer repo.deinit();
         }
 
@@ -786,8 +778,7 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind, comptime repo_op
     defer temp_dir.close();
 
     {
-        const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
-        var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, writers);
+        var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, .{});
         defer repo.deinit();
     }
 
@@ -919,12 +910,10 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
-    const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
-
     // from https://pijul.org/manual/why_pijul.html
     {
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "simple" } }, writers);
+            var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "simple" } }, .{});
             defer repo.deinit();
         }
 
@@ -1035,7 +1024,7 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
     // from https://tahoe-lafs.org/~zooko/badmerge/concrete-good-semantics.html
     {
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "concrete" } }, writers);
+            var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "concrete" } }, .{});
             defer repo.deinit();
         }
 
@@ -1231,8 +1220,7 @@ fn testCherryPick(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOp
     defer temp_dir.close();
 
     {
-        const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
-        var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, writers);
+        var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, .{});
         defer repo.deinit();
     }
 
@@ -1339,8 +1327,7 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
     }.run;
 
     {
-        const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
-        var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, writers);
+        var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, .{});
         defer repo.deinit();
     }
 
@@ -1448,8 +1435,7 @@ fn testLog(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo
     defer temp_dir.close();
 
     {
-        const writers = .{ .out = std.io.null_writer, .err = std.io.null_writer };
-        var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, writers);
+        var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, .{});
         defer repo.deinit();
     }
 
