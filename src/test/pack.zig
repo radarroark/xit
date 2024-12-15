@@ -12,6 +12,7 @@ const c = @cImport({
 test "pack" {
     const allocator = std.testing.allocator;
     const temp_dir_name = "temp-test-pack";
+    const repo_opts = rp.RepoOpts(.git){};
 
     // start libgit
     _ = c.git_libgit2_init();
@@ -177,10 +178,10 @@ test "pack" {
 
     // delete the loose objects
     for (&[_]*c.git_oid{ &commit_oid1, &commit_oid2 }) |commit_oid| {
-        var commit_oid_hex = [_]u8{0} ** hash.hexLen(.sha1);
+        var commit_oid_hex = [_]u8{0} ** hash.hexLen(repo_opts.hash);
         try std.testing.expectEqual(0, c.git_oid_fmt(@ptrCast(&commit_oid_hex), commit_oid));
 
-        var path_buf = [_]u8{0} ** (hash.hexLen(.sha1) + 1);
+        var path_buf = [_]u8{0} ** (hash.hexLen(repo_opts.hash) + 1);
         const path = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ commit_oid_hex[0..2], commit_oid_hex[2..] });
 
         var objects_dir = try repo_dir.openDir(".git/objects", .{});
@@ -194,25 +195,25 @@ test "pack" {
         &[_]*c.git_oid{ &commit_oid1, &commit_oid2 },
         &[_][]const u8{ "let there be light", "add license" },
     ) |commit_oid, message| {
-        var commit_oid_hex = [_]u8{0} ** hash.hexLen(.sha1);
+        var commit_oid_hex = [_]u8{0} ** hash.hexLen(repo_opts.hash);
         try std.testing.expectEqual(0, c.git_oid_fmt(@ptrCast(&commit_oid_hex), commit_oid));
 
-        var r = try rp.Repo(.git, .sha1).init(allocator, .{ .cwd = repo_dir });
+        var r = try rp.Repo(.git, repo_opts).init(allocator, .{ .cwd = repo_dir });
         defer r.deinit();
 
-        var object = try obj.Object(.git, .sha1, .full).init(allocator, .{ .core = &r.core, .extra = .{} }, &commit_oid_hex);
+        var object = try obj.Object(.git, repo_opts, .full).init(allocator, .{ .core = &r.core, .extra = .{} }, &commit_oid_hex);
         defer object.deinit();
         try std.testing.expectEqualStrings(message, object.content.commit.metadata.message);
     }
 
     // write and read a pack object
     {
-        var r = try rp.Repo(.git, .sha1).init(allocator, .{ .cwd = repo_dir });
+        var r = try rp.Repo(.git, repo_opts).init(allocator, .{ .cwd = repo_dir });
         defer r.deinit();
 
-        const head_oid = try ref.readHead(.git, .sha1, .{ .core = &r.core, .extra = .{} });
+        const head_oid = try ref.readHead(.git, repo_opts, .{ .core = &r.core, .extra = .{} });
 
-        var obj_iter = try obj.ObjectIterator(.git, .sha1, .raw).init(allocator, .{ .core = &r.core, .extra = .{} }, &.{head_oid}, .{ .recursive = true });
+        var obj_iter = try obj.ObjectIterator(.git, repo_opts, .raw).init(allocator, .{ .core = &r.core, .extra = .{} }, &.{head_oid}, .{ .recursive = true });
         defer obj_iter.deinit();
 
         var pack_writer = try pack.PackObjectWriter.init(allocator, &obj_iter);
@@ -234,7 +235,7 @@ test "pack" {
         defer allocator.free(pack_file_path);
 
         for (&[_]*c.git_oid{ &commit_oid1, &commit_oid2 }) |commit_oid| {
-            var commit_oid_hex = [_]u8{0} ** hash.hexLen(.sha1);
+            var commit_oid_hex = [_]u8{0} ** hash.hexLen(repo_opts.hash);
             try std.testing.expectEqual(0, c.git_oid_fmt(@ptrCast(&commit_oid_hex), commit_oid));
 
             var pack_reader = try pack.PackObjectReader.initWithPath(allocator, pack_file_path, &commit_oid_hex);

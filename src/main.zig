@@ -102,18 +102,15 @@ const USAGE =
     \\
 ;
 
-/// this is called by xitMain after the HashKind has been determined.
-/// the HashKind is the hashing algorithm used by the repo. for xit
-/// repos, the algorithm being used is encoded in the xitdb header.
-fn xitMainWithHashKind(
+fn xitMainWithRepoOpts(
     comptime repo_kind: rp.RepoKind,
-    comptime hash_kind: hash.HashKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
     allocator: std.mem.Allocator,
     sub_cmd_args: *const cmd.SubCommandArgs,
     cwd: std.fs.Dir,
     writers: anytype,
 ) !void {
-    var command = try cmd.Command(hash_kind).init(allocator, sub_cmd_args);
+    var command = try cmd.Command(repo_opts.hash).init(allocator, sub_cmd_args);
     defer command.deinit();
 
     switch (command) {
@@ -132,13 +129,13 @@ fn xitMainWithHashKind(
             }
         },
         .tui => |sub_cmd_kind_maybe| {
-            var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = cwd });
+            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = cwd });
             defer repo.deinit();
-            try ui.start(repo_kind, hash_kind, &repo, allocator, sub_cmd_kind_maybe);
+            try ui.start(repo_kind, repo_opts, &repo, allocator, sub_cmd_kind_maybe);
         },
         .cli => |sub_cmd_maybe| {
             if (sub_cmd_maybe) |sub_cmd| {
-                var repo = try rp.Repo(repo_kind, hash_kind).initWithCommand(allocator, .{ .cwd = cwd }, sub_cmd, writers);
+                var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = cwd }, sub_cmd, writers);
                 defer repo.deinit();
             } else {
                 try writers.out.print(USAGE, .{});
@@ -161,23 +158,23 @@ pub fn xitMain(
     var sub_cmd_args = try cmd.SubCommandArgs.init(allocator, args);
     defer sub_cmd_args.deinit();
 
-    // if we are initing a new repo, just supply a default HashKind
+    // if we are initing a new repo, just use the default repo opts
     if (sub_cmd_args.sub_command_kind) |sub_cmd_kind| {
         if (sub_cmd_kind == .init) {
-            try xitMainWithHashKind(repo_kind, .sha1, allocator, &sub_cmd_args, cwd, writers);
+            try xitMainWithRepoOpts(repo_kind, .{}, allocator, &sub_cmd_args, cwd, writers);
             return;
         }
     }
 
-    // find the existing HashKind from the repo and execute with it
+    // find the existing HashKind from the repo and include it in the repo opts
     const hash_kind = blk: {
-        var repo = try rp.Repo(repo_kind, .none).init(allocator, .{ .cwd = cwd });
+        var repo = try rp.Repo(repo_kind, .{ .hash = .none }).init(allocator, .{ .cwd = cwd });
         defer repo.deinit();
         break :blk try repo.hashKind();
     };
     switch (hash_kind) {
         .none => return error.HashKindNotFound,
-        .sha1 => try xitMainWithHashKind(repo_kind, .sha1, allocator, &sub_cmd_args, cwd, writers),
+        .sha1 => try xitMainWithRepoOpts(repo_kind, .{ .hash = .sha1 }, allocator, &sub_cmd_args, cwd, writers),
     }
 }
 

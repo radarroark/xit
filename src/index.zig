@@ -8,8 +8,6 @@ const io = @import("./io.zig");
 const rp = @import("./repo.zig");
 const st = @import("./status.zig");
 
-const MAX_READ_BYTES = 1024; // FIXME: this is arbitrary...
-
 pub const IndexUnaddOptions = struct {
     force: bool = false,
 };
@@ -19,7 +17,7 @@ pub const IndexRemoveOptions = struct {
     remove_from_workspace: bool = true,
 };
 
-pub fn Index(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
+pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return struct {
         version: u32,
         // TODO: maybe store pointers to save space,
@@ -56,16 +54,16 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind)
             uid: u32,
             gid: u32,
             file_size: u32,
-            oid: [hash.byteLen(hash_kind)]u8,
+            oid: [hash.byteLen(repo_opts.hash)]u8,
             flags: Flags,
             extended_flags: ?ExtendedFlags,
             path: []const u8,
         };
 
-        pub fn init(allocator: std.mem.Allocator, state: rp.Repo(repo_kind, hash_kind).State(.read_only)) !Index(repo_kind, hash_kind) {
+        pub fn init(allocator: std.mem.Allocator, state: rp.Repo(repo_kind, repo_opts).State(.read_only)) !Index(repo_kind, repo_opts) {
             const arena = try allocator.create(std.heap.ArenaAllocator);
             arena.* = std.heap.ArenaAllocator.init(allocator);
-            var self = Index(repo_kind, hash_kind){
+            var self = Index(repo_kind, repo_opts){
                 .version = 2,
                 .entries = std.StringArrayHashMap([4]?Entry).init(allocator),
                 .dir_to_paths = std.StringArrayHashMap(std.StringArrayHashMap(void)).init(allocator),
@@ -114,7 +112,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind)
                             .uid = try reader.readInt(u32, .big),
                             .gid = try reader.readInt(u32, .big),
                             .file_size = try reader.readInt(u32, .big),
-                            .oid = try reader.readBytesNoEof(hash.byteLen(hash_kind)),
+                            .oid = try reader.readBytesNoEof(hash.byteLen(repo_opts.hash)),
                             .flags = @bitCast(try reader.readInt(u16, .big)),
                             .extended_flags = null, // TODO: read this if necessary
                             .path = try reader.readUntilDelimiterAlloc(self.arena.allocator(), 0, std.fs.MAX_PATH_BYTES),
@@ -142,13 +140,13 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind)
                     _ = try reader.readBytesNoEof(hash.byteLen(.sha1));
                 },
                 .xit => {
-                    if (try state.extra.moment.getCursor(hash.hashInt(hash_kind, "index"))) |index_cursor| {
+                    if (try state.extra.moment.getCursor(hash.hashInt(repo_opts.hash, "index"))) |index_cursor| {
                         var iter = try index_cursor.iterator();
                         defer iter.deinit();
                         while (try iter.next()) |*next_cursor| {
                             const kv_pair = try next_cursor.readKeyValuePair();
-                            const path = try kv_pair.key_cursor.readBytesAlloc(self.arena.allocator(), MAX_READ_BYTES);
-                            const buffer = try kv_pair.value_cursor.readBytesAlloc(self.allocator, MAX_READ_BYTES);
+                            const path = try kv_pair.key_cursor.readBytesAlloc(self.arena.allocator(), repo_opts.read_size);
+                            const buffer = try kv_pair.value_cursor.readBytesAlloc(self.allocator, repo_opts.read_size);
                             defer self.allocator.free(buffer);
 
                             var stream = std.io.fixedBufferStream(buffer);
@@ -165,7 +163,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind)
                                     .uid = try reader.readInt(u32, .big),
                                     .gid = try reader.readInt(u32, .big),
                                     .file_size = try reader.readInt(u32, .big),
-                                    .oid = try reader.readBytesNoEof(hash.byteLen(hash_kind)),
+                                    .oid = try reader.readBytesNoEof(hash.byteLen(repo_opts.hash)),
                                     .flags = @bitCast(try reader.readInt(u16, .big)),
                                     .extended_flags = null, // TODO: read this if necessary
                                     .path = path,
@@ -186,7 +184,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind)
             return self;
         }
 
-        pub fn deinit(self: *Index(repo_kind, hash_kind)) void {
+        pub fn deinit(self: *Index(repo_kind, repo_opts)) void {
             self.arena.deinit();
             self.allocator.destroy(self.arena);
             self.entries.deinit();
@@ -204,7 +202,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind)
         /// if path is a file, adds it as an entry to the index struct.
         /// if path is a dir, adds its children recursively.
         /// ignoring symlinks for now but will add that later.
-        pub fn addPath(self: *Index(repo_kind, hash_kind), state: rp.Repo(repo_kind, hash_kind).State(.read_write), path: []const u8) !void {
+        pub fn addPath(self: *Index(repo_kind, repo_opts), state: rp.Repo(repo_kind, repo_opts).State(.read_write), path: []const u8) !void {
             // remove entries that are parents of this path (directory replaces file)
             {
                 var parent_path_maybe = std.fs.path.dirname(path);
@@ -225,8 +223,8 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind)
                     defer file.close();
 
                     // write the object
-                    var oid = [_]u8{0} ** hash.byteLen(hash_kind);
-                    try obj.writeObject(repo_kind, hash_kind, state, file, .{ .kind = .blob, .size = meta.size() }, &oid);
+                    var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
+                    try obj.writeObject(repo_kind, repo_opts, state, file, .{ .kind = .blob, .size = meta.size() }, &oid);
                     // add the entry
                     const times = io.getTimes(meta);
                     const stat = try io.getStat(file);
@@ -278,7 +276,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind)
             }
         }
 
-        fn addEntry(self: *Index(repo_kind, hash_kind), entry: Entry) !void {
+        fn addEntry(self: *Index(repo_kind, repo_opts), entry: Entry) !void {
             if (self.entries.getEntry(entry.path)) |map_entry| {
                 // there is an existing slot for the given path,
                 // so evict entries to ensure zero and non-zero stages don't coexist
@@ -330,7 +328,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind)
             try self.root_children.put(child, {});
         }
 
-        pub fn addConflictEntries(self: *Index(repo_kind, hash_kind), path: []const u8, tree_entries: [3]?obj.TreeEntry(hash_kind)) !void {
+        pub fn addConflictEntries(self: *Index(repo_kind, repo_opts), path: []const u8, tree_entries: [3]?obj.TreeEntry(repo_opts.hash)) !void {
             // add the conflict entries
             const owned_path = try self.arena.allocator().dupe(u8, path);
             for (tree_entries, 1..) |tree_entry_maybe, stage| {
@@ -361,7 +359,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind)
             }
         }
 
-        pub fn removePath(self: *Index(repo_kind, hash_kind), path: []const u8) void {
+        pub fn removePath(self: *Index(repo_kind, repo_opts), path: []const u8) void {
             _ = self.entries.orderedRemove(path);
             var parent_path_maybe = std.fs.path.dirname(path);
             while (parent_path_maybe) |parent_path| {
@@ -373,7 +371,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind)
             }
         }
 
-        pub fn removeChildren(self: *Index(repo_kind, hash_kind), path: []const u8) !void {
+        pub fn removeChildren(self: *Index(repo_kind, repo_opts), path: []const u8) !void {
             const child_paths_maybe = self.dir_to_paths.getEntry(path);
             if (child_paths_maybe) |child_paths| {
                 const child_paths_array = child_paths.value_ptr.*.keys();
@@ -390,8 +388,8 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind)
         }
 
         pub fn addOrRemovePath(
-            self: *Index(repo_kind, hash_kind),
-            state: rp.Repo(repo_kind, hash_kind).State(.read_write),
+            self: *Index(repo_kind, repo_opts),
+            state: rp.Repo(repo_kind, repo_opts).State(.read_write),
             cwd: std.fs.Dir,
             path: []const u8,
             action: enum { add, rm },
@@ -459,7 +457,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind)
             }
         }
 
-        pub fn write(self: *Index(repo_kind, hash_kind), allocator: std.mem.Allocator, state: rp.Repo(repo_kind, hash_kind).State(.read_write)) !void {
+        pub fn write(self: *Index(repo_kind, repo_opts), allocator: std.mem.Allocator, state: rp.Repo(repo_kind, repo_opts).State(.read_write)) !void {
             switch (repo_kind) {
                 .git => {
                     // sort the entries
@@ -535,19 +533,19 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind)
                     try lock_file.writeAll(&overall_sha1_buffer);
                 },
                 .xit => {
-                    const index_cursor = try state.extra.moment.putCursor(hash.hashInt(hash_kind, "index"));
-                    var index = try rp.Repo(repo_kind, hash_kind).DB.HashMap(.read_write).init(index_cursor);
+                    const index_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "index"));
+                    var index = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(index_cursor);
 
                     // remove items no longer in the index
                     var iter = try index.cursor.iterator();
                     defer iter.deinit();
                     while (try iter.next()) |*next_cursor| {
                         const kv_pair = try next_cursor.readKeyValuePair();
-                        const path = try kv_pair.key_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
+                        const path = try kv_pair.key_cursor.readBytesAlloc(allocator, repo_opts.read_size);
                         defer allocator.free(path);
 
                         if (!self.entries.contains(path)) {
-                            _ = try index.remove(hash.hashInt(hash_kind, path));
+                            _ = try index.remove(hash.hashInt(repo_opts.hash, path));
                         }
                     }
 
@@ -573,24 +571,24 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind)
                             }
                         }
 
-                        const path_hash = hash.hashInt(hash_kind, path);
+                        const path_hash = hash.hashInt(repo_opts.hash, path);
                         if (try index.getKeyCursor(path_hash)) |existing_entry_cursor| {
-                            const existing_entry = try existing_entry_cursor.readBytesAlloc(allocator, MAX_READ_BYTES);
+                            const existing_entry = try existing_entry_cursor.readBytesAlloc(allocator, repo_opts.read_size);
                             defer allocator.free(existing_entry);
                             if (std.mem.eql(u8, entry_buffer.items, existing_entry)) {
                                 continue;
                             }
                         }
 
-                        const path_set_cursor = try state.extra.moment.putCursor(hash.hashInt(hash_kind, "path-set"));
-                        const path_set = try rp.Repo(repo_kind, hash_kind).DB.HashMap(.read_write).init(path_set_cursor);
+                        const path_set_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "path-set"));
+                        const path_set = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(path_set_cursor);
                         var path_cursor = try path_set.putKeyCursor(path_hash);
                         try path_cursor.writeIfEmpty(.{ .bytes = path });
                         try index.putKey(path_hash, .{ .slot = path_cursor.slot() });
 
-                        const entry_buffer_set_cursor = try state.extra.moment.putCursor(hash.hashInt(hash_kind, "entry-buffer-set"));
-                        const entry_buffer_set = try rp.Repo(repo_kind, hash_kind).DB.HashMap(.read_write).init(entry_buffer_set_cursor);
-                        var entry_buffer_cursor = try entry_buffer_set.putKeyCursor(hash.hashInt(hash_kind, entry_buffer.items));
+                        const entry_buffer_set_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "entry-buffer-set"));
+                        const entry_buffer_set = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(entry_buffer_set_cursor);
+                        var entry_buffer_cursor = try entry_buffer_set.putKeyCursor(hash.hashInt(repo_opts.hash, entry_buffer.items));
                         try entry_buffer_cursor.writeIfEmpty(.{ .bytes = entry_buffer.items });
                         try index.put(path_hash, .{ .slot = entry_buffer_cursor.slot() });
                     }
@@ -602,8 +600,8 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind)
 
 pub fn indexDiffersFromWorkspace(
     comptime repo_kind: rp.RepoKind,
-    comptime hash_kind: hash.HashKind,
-    entry: Index(repo_kind, hash_kind).Entry,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    entry: Index(repo_kind, repo_opts).Entry,
     file: std.fs.File,
     meta: std.fs.File.Metadata,
 ) !bool {
@@ -621,8 +619,8 @@ pub fn indexDiffersFromWorkspace(
             var header_buffer = [_]u8{0} ** 256; // should be plenty of space
             const header = try std.fmt.bufPrint(&header_buffer, "blob {}\x00", .{file_size});
 
-            var oid = [_]u8{0} ** hash.byteLen(hash_kind);
-            try hash.hashReader(hash_kind, file.reader(), header, &oid);
+            var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
+            try hash.hashReader(repo_opts.hash, file.reader(), header, &oid);
             if (!std.mem.eql(u8, &entry.oid, &oid)) {
                 return true;
             }
@@ -638,10 +636,10 @@ pub const DiffersFrom = struct {
 
 pub fn indexDiffersFrom(
     comptime repo_kind: rp.RepoKind,
-    comptime hash_kind: hash.HashKind,
-    core: *rp.Repo(repo_kind, hash_kind).Core,
-    index: Index(repo_kind, hash_kind),
-    head_tree: st.HeadTree(repo_kind, hash_kind),
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    core: *rp.Repo(repo_kind, repo_opts).Core,
+    index: Index(repo_kind, repo_opts),
+    head_tree: st.HeadTree(repo_kind, repo_opts),
     path: []const u8,
     meta: std.fs.File.Metadata,
 ) !DiffersFrom {
@@ -659,7 +657,7 @@ pub fn indexDiffersFrom(
 
             const file = try core.repo_dir.openFile(path, .{ .mode = .read_only });
             defer file.close();
-            if (try indexDiffersFromWorkspace(repo_kind, hash_kind, index_entry, file, meta)) {
+            if (try indexDiffersFromWorkspace(repo_kind, repo_opts, index_entry, file, meta)) {
                 ret.workspace = true;
             }
         }

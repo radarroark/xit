@@ -2,8 +2,6 @@ const std = @import("std");
 const rp = @import("./repo.zig");
 const hash = @import("./hash.zig");
 
-const MAX_READ_BYTES = 1024; // FIXME: this is arbitrary...
-
 pub const AddConfigInput = struct {
     name: []const u8,
     value: []const u8,
@@ -19,7 +17,7 @@ pub const ConfigCommand = union(enum) {
     remove: RemoveConfigInput,
 };
 
-pub fn Config(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
+pub fn Config(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return struct {
         allocator: std.mem.Allocator,
         arena: *std.heap.ArenaAllocator,
@@ -27,7 +25,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind
 
         const Variables = std.StringArrayHashMap([]const u8);
 
-        pub fn init(state: rp.Repo(repo_kind, hash_kind).State(.read_only), allocator: std.mem.Allocator) !Config(repo_kind, hash_kind) {
+        pub fn init(state: rp.Repo(repo_kind, repo_opts).State(.read_only), allocator: std.mem.Allocator) !Config(repo_kind, repo_opts) {
             var arena = try allocator.create(std.heap.ArenaAllocator);
             arena.* = std.heap.ArenaAllocator.init(allocator);
             errdefer {
@@ -126,7 +124,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind
                     defer config_file.close();
 
                     const reader = config_file.reader();
-                    var buf = [_]u8{0} ** MAX_READ_BYTES;
+                    var buf = [_]u8{0} ** repo_opts.read_size;
 
                     // for each line...
                     while (try reader.readUntilDelimiterOrEof(&buf, '\n')) |line| {
@@ -219,12 +217,12 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind
                     }
                 },
                 .xit => {
-                    if (try state.extra.moment.getCursor(hash.hashInt(hash_kind, "config"))) |config_cursor| {
+                    if (try state.extra.moment.getCursor(hash.hashInt(repo_opts.hash, "config"))) |config_cursor| {
                         var config_iter = try config_cursor.iterator();
                         defer config_iter.deinit();
                         while (try config_iter.next()) |*section_cursor| {
                             const section_kv_pair = try section_cursor.readKeyValuePair();
-                            const section_name = try section_kv_pair.key_cursor.readBytesAlloc(arena.allocator(), MAX_READ_BYTES);
+                            const section_name = try section_kv_pair.key_cursor.readBytesAlloc(arena.allocator(), repo_opts.read_size);
 
                             var variables = Variables.init(arena.allocator());
 
@@ -232,8 +230,8 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind
                             defer var_iter.deinit();
                             while (try var_iter.next()) |*var_cursor| {
                                 const var_kv_pair = try var_cursor.readKeyValuePair();
-                                const var_name = try var_kv_pair.key_cursor.readBytesAlloc(arena.allocator(), MAX_READ_BYTES);
-                                const var_value = try var_kv_pair.value_cursor.readBytesAlloc(arena.allocator(), MAX_READ_BYTES);
+                                const var_name = try var_kv_pair.key_cursor.readBytesAlloc(arena.allocator(), repo_opts.read_size);
+                                const var_value = try var_kv_pair.value_cursor.readBytesAlloc(arena.allocator(), repo_opts.read_size);
                                 try variables.put(var_name, var_value);
                             }
 
@@ -250,12 +248,12 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind
             };
         }
 
-        pub fn deinit(self: *Config(repo_kind, hash_kind)) void {
+        pub fn deinit(self: *Config(repo_kind, repo_opts)) void {
             self.arena.deinit();
             self.allocator.destroy(self.arena);
         }
 
-        pub fn add(self: *Config(repo_kind, hash_kind), state: rp.Repo(repo_kind, hash_kind).State(.read_write), input: AddConfigInput) !void {
+        pub fn add(self: *Config(repo_kind, repo_opts), state: rp.Repo(repo_kind, repo_opts).State(.read_write), input: AddConfigInput) !void {
             // validate the config name
             for (input.name, 0..) |char, i| {
                 switch (char) {
@@ -285,27 +283,27 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind
                 switch (repo_kind) {
                     .git => try self.write(state),
                     .xit => {
-                        const config_name_set_cursor = try state.extra.moment.putCursor(hash.hashInt(hash_kind, "config-name-set"));
-                        const config_name_set = try rp.Repo(repo_kind, hash_kind).DB.HashMap(.read_write).init(config_name_set_cursor);
+                        const config_name_set_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "config-name-set"));
+                        const config_name_set = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(config_name_set_cursor);
 
                         // store section name
-                        const section_name_hash = hash.hashInt(hash_kind, section_name);
+                        const section_name_hash = hash.hashInt(repo_opts.hash, section_name);
                         var section_name_cursor = try config_name_set.putKeyCursor(section_name_hash);
                         try section_name_cursor.writeIfEmpty(.{ .bytes = section_name });
 
                         // add section name to config
-                        const config_cursor = try state.extra.moment.putCursor(hash.hashInt(hash_kind, "config"));
-                        const config = try rp.Repo(repo_kind, hash_kind).DB.HashMap(.read_write).init(config_cursor);
+                        const config_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "config"));
+                        const config = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(config_cursor);
                         try config.putKey(section_name_hash, .{ .slot = section_name_cursor.slot() });
 
                         // store variable name
-                        const var_name_hash = hash.hashInt(hash_kind, var_name);
+                        const var_name_hash = hash.hashInt(repo_opts.hash, var_name);
                         var var_name_cursor = try config_name_set.putKeyCursor(var_name_hash);
                         try var_name_cursor.writeIfEmpty(.{ .bytes = var_name });
 
                         // add var name to config
                         const section_cursor = try config.putCursor(section_name_hash);
-                        const section = try rp.Repo(repo_kind, hash_kind).DB.HashMap(.read_write).init(section_cursor);
+                        const section = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(section_cursor);
                         try section.putKey(var_name_hash, .{ .slot = var_name_cursor.slot() });
 
                         // save the variable
@@ -317,7 +315,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind
             }
         }
 
-        pub fn remove(self: *Config(repo_kind, hash_kind), state: rp.Repo(repo_kind, hash_kind).State(.read_write), input: RemoveConfigInput) !void {
+        pub fn remove(self: *Config(repo_kind, repo_opts), state: rp.Repo(repo_kind, repo_opts).State(.read_write), input: RemoveConfigInput) !void {
             if (std.mem.lastIndexOfScalar(u8, input.name, '.')) |index| {
                 const section_name = try self.arena.allocator().dupe(u8, input.name[0..index]);
                 const var_name = try self.arena.allocator().dupe(u8, input.name[index + 1 ..]);
@@ -333,14 +331,14 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind
                 switch (repo_kind) {
                     .git => try self.write(state),
                     .xit => {
-                        const config_cursor = try state.extra.moment.putCursor(hash.hashInt(hash_kind, "config"));
-                        const config = try rp.Repo(repo_kind, hash_kind).DB.HashMap(.read_write).init(config_cursor);
+                        const config_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "config"));
+                        const config = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(config_cursor);
                         if (!self.sections.contains(section_name)) {
-                            _ = try config.remove(hash.hashInt(hash_kind, section_name));
+                            _ = try config.remove(hash.hashInt(repo_opts.hash, section_name));
                         } else {
-                            const section_cursor = try config.putCursor(hash.hashInt(hash_kind, section_name));
-                            const section = try rp.Repo(repo_kind, hash_kind).DB.HashMap(.read_write).init(section_cursor);
-                            _ = try section.remove(hash.hashInt(hash_kind, var_name));
+                            const section_cursor = try config.putCursor(hash.hashInt(repo_opts.hash, section_name));
+                            const section = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(section_cursor);
+                            _ = try section.remove(hash.hashInt(repo_opts.hash, var_name));
                         }
                     },
                 }
@@ -349,7 +347,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind
             }
         }
 
-        fn write(self: *Config(repo_kind, hash_kind), state: rp.Repo(.git, hash_kind).State(.read_write)) !void {
+        fn write(self: *Config(repo_kind, repo_opts), state: rp.Repo(.git, repo_opts).State(.read_write)) !void {
             const lock_file = state.extra.lock_file_maybe orelse return error.NoLockFile;
             try lock_file.setEndPos(0); // truncate file in case this method is called multiple times
 
@@ -381,8 +379,8 @@ pub const RemoteConfig = struct {
 
     pub fn init(
         comptime repo_kind: rp.RepoKind,
-        comptime hash_kind: hash.HashKind,
-        config: *Config(repo_kind, hash_kind),
+        comptime repo_opts: rp.RepoOpts(repo_kind),
+        config: *Config(repo_kind, repo_opts),
         allocator: std.mem.Allocator,
     ) !RemoteConfig {
         var arena = try allocator.create(std.heap.ArenaAllocator);
