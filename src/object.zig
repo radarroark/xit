@@ -12,8 +12,6 @@ const rp = @import("./repo.zig");
 const pack = @import("./pack.zig");
 const chunk = @import("./chunk.zig");
 
-const MAX_READ_BYTES = 1024; // FIXME: this is arbitrary...
-
 pub const Tree = struct {
     entries: std.StringArrayHashMap([]const u8),
     allocator: std.mem.Allocator,
@@ -47,11 +45,11 @@ pub const Tree = struct {
 
 pub fn writeObject(
     comptime repo_kind: rp.RepoKind,
-    comptime hash_kind: hash.HashKind,
-    state: rp.Repo(repo_kind, hash_kind).State(.read_write),
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    state: rp.Repo(repo_kind, repo_opts).State(.read_write),
     file: anytype,
     header: ObjectHeader,
-    hash_bytes_buffer: *[hash.byteLen(hash_kind)]u8,
+    hash_bytes_buffer: *[hash.byteLen(repo_opts.hash)]u8,
 ) !void {
     // serialize object header
     var header_bytes = [_]u8{0} ** 32;
@@ -59,7 +57,7 @@ pub fn writeObject(
 
     // calc the hash of its contents
     const reader = file.reader();
-    try hash.hashReader(hash_kind, reader, header_str, hash_bytes_buffer);
+    try hash.hashReader(repo_opts.hash, reader, header_str, hash_bytes_buffer);
     const hash_hex = std.fmt.bytesToHex(hash_bytes_buffer, .lower);
 
     // reset seek pos so we can reuse the reader for copying
@@ -91,7 +89,7 @@ pub fn writeObject(
             try lock.lock_file.writeAll(header_str);
 
             // copy file into temp file
-            var read_buffer = [_]u8{0} ** MAX_READ_BYTES;
+            var read_buffer = [_]u8{0} ** repo_opts.read_size;
             while (true) {
                 const size = try reader.read(&read_buffer);
                 if (size == 0) {
@@ -103,23 +101,23 @@ pub fn writeObject(
             // create compressed lock file
             var compressed_lock = try io.LockFile.init(hash_prefix_dir, hash_suffix);
             defer compressed_lock.deinit();
-            try compress.compress(lock.lock_file, compressed_lock.lock_file);
+            try compress.compress(repo_opts.read_size, lock.lock_file, compressed_lock.lock_file);
             compressed_lock.success = true;
         },
         .xit => {
-            const file_hash = hash.bytesToHash(hash_kind, hash_bytes_buffer);
-            try chunk.writeChunks(hash_kind, state, file, file_hash, header_str);
+            const file_hash = hash.bytesToHash(repo_opts.hash, hash_bytes_buffer);
+            try chunk.writeChunks(repo_opts, state, file, file_hash, header_str);
         },
     }
 }
 
 fn writeTree(
     comptime repo_kind: rp.RepoKind,
-    comptime hash_kind: hash.HashKind,
-    state: rp.Repo(repo_kind, hash_kind).State(.read_write),
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    state: rp.Repo(repo_kind, repo_opts).State(.read_write),
     allocator: std.mem.Allocator,
     tree: *Tree,
-    hash_bytes_buffer: *[hash.byteLen(hash_kind)]u8,
+    hash_bytes_buffer: *[hash.byteLen(repo_opts.hash)]u8,
 ) !void {
     // sort the entries. this is needed for xit,
     // because its index entries are stored as a
@@ -149,7 +147,7 @@ fn writeTree(
     defer allocator.free(tree_bytes);
 
     // calc the hash of its contents
-    try hash.hashBuffer(hash_kind, tree_bytes, hash_bytes_buffer);
+    try hash.hashBuffer(repo_opts.hash, tree_bytes, hash_bytes_buffer);
     const tree_hash_hex = std.fmt.bytesToHex(hash_bytes_buffer, .lower);
 
     switch (repo_kind) {
@@ -180,13 +178,13 @@ fn writeTree(
             // create compressed lock file
             var compressed_lock = try io.LockFile.init(tree_hash_prefix_dir, tree_hash_suffix);
             defer compressed_lock.deinit();
-            try compress.compress(lock.lock_file, compressed_lock.lock_file);
+            try compress.compress(repo_opts.read_size, lock.lock_file, compressed_lock.lock_file);
             compressed_lock.success = true;
         },
         .xit => {
-            const object_hash = hash.bytesToHash(hash_kind, hash_bytes_buffer);
+            const object_hash = hash.bytesToHash(repo_opts.hash, hash_bytes_buffer);
             var stream = std.io.fixedBufferStream(tree_contents);
-            try chunk.writeChunks(hash_kind, state, &stream, object_hash, header);
+            try chunk.writeChunks(repo_opts, state, &stream, object_hash, header);
         },
     }
 }
@@ -196,11 +194,11 @@ fn writeTree(
 // for it and add that as an entry to the original tree.
 fn addIndexEntries(
     comptime repo_kind: rp.RepoKind,
-    comptime hash_kind: hash.HashKind,
-    state: rp.Repo(repo_kind, hash_kind).State(.read_write),
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    state: rp.Repo(repo_kind, repo_opts).State(.read_write),
     allocator: std.mem.Allocator,
     tree: *Tree,
-    index: idx.Index(repo_kind, hash_kind),
+    index: idx.Index(repo_kind, repo_opts),
     prefix: []const u8,
     entries: [][]const u8,
 ) !void {
@@ -222,7 +220,7 @@ fn addIndexEntries(
 
             try addIndexEntries(
                 repo_kind,
-                hash_kind,
+                repo_opts,
                 state,
                 allocator,
                 &subtree,
@@ -231,8 +229,8 @@ fn addIndexEntries(
                 child_names.items,
             );
 
-            var tree_hash_bytes_buffer = [_]u8{0} ** hash.byteLen(hash_kind);
-            try writeTree(repo_kind, hash_kind, state, allocator, &subtree, &tree_hash_bytes_buffer);
+            var tree_hash_bytes_buffer = [_]u8{0} ** hash.byteLen(repo_opts.hash);
+            try writeTree(repo_kind, repo_opts, state, allocator, &subtree, &tree_hash_bytes_buffer);
 
             try tree.addTreeEntry(name, &tree_hash_bytes_buffer);
         } else {
@@ -252,11 +250,12 @@ pub fn CommitMetadata(comptime hash_kind: hash.HashKind) type {
 }
 
 fn createCommitContents(
-    comptime hash_kind: hash.HashKind,
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
     allocator: std.mem.Allocator,
-    tree_hash_hex: *const [hash.hexLen(hash_kind)]u8,
-    metadata: CommitMetadata(hash_kind),
-    parent_oids: []const [hash.hexLen(hash_kind)]u8,
+    tree_hash_hex: *const [hash.hexLen(repo_opts.hash)]u8,
+    metadata: CommitMetadata(repo_opts.hash),
+    parent_oids: []const [hash.hexLen(repo_opts.hash)]u8,
 ) ![]const u8 {
     var metadata_lines = std.ArrayList([]const u8).init(allocator);
     defer {
@@ -284,29 +283,29 @@ fn createCommitContents(
 
 pub fn writeCommit(
     comptime repo_kind: rp.RepoKind,
-    comptime hash_kind: hash.HashKind,
-    state: rp.Repo(repo_kind, hash_kind).State(.read_write),
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    state: rp.Repo(repo_kind, repo_opts).State(.read_write),
     allocator: std.mem.Allocator,
-    metadata: CommitMetadata(hash_kind),
-) ![hash.hexLen(hash_kind)]u8 {
-    var commit_hash_bytes_buffer = [_]u8{0} ** hash.byteLen(hash_kind);
+    metadata: CommitMetadata(repo_opts.hash),
+) ![hash.hexLen(repo_opts.hash)]u8 {
+    var commit_hash_bytes_buffer = [_]u8{0} ** hash.byteLen(repo_opts.hash);
     const parent_oids = if (metadata.parent_oids) |oids| oids else blk: {
-        const head_oid_maybe = try ref.readHeadMaybe(repo_kind, hash_kind, state.readOnly());
+        const head_oid_maybe = try ref.readHeadMaybe(repo_kind, repo_opts, state.readOnly());
         break :blk if (head_oid_maybe) |head_oid| &.{head_oid} else &.{};
     };
 
     // read index
-    var index = try idx.Index(repo_kind, hash_kind).init(allocator, state.readOnly());
+    var index = try idx.Index(repo_kind, repo_opts).init(allocator, state.readOnly());
     defer index.deinit();
 
     // create tree and add index entries
     var tree = Tree.init(allocator);
     defer tree.deinit();
-    try addIndexEntries(repo_kind, hash_kind, state, allocator, &tree, index, "", index.root_children.keys());
+    try addIndexEntries(repo_kind, repo_opts, state, allocator, &tree, index, "", index.root_children.keys());
 
     // write and hash tree
-    var tree_hash_bytes_buffer = [_]u8{0} ** hash.byteLen(hash_kind);
-    try writeTree(repo_kind, hash_kind, state, allocator, &tree, &tree_hash_bytes_buffer);
+    var tree_hash_bytes_buffer = [_]u8{0} ** hash.byteLen(repo_opts.hash);
+    try writeTree(repo_kind, repo_opts, state, allocator, &tree, &tree_hash_bytes_buffer);
     const tree_hash_hex = std.fmt.bytesToHex(tree_hash_bytes_buffer, .lower);
 
     // don't allow commit if the tree hasn't changed
@@ -316,7 +315,7 @@ pub fn writeCommit(
                 return error.EmptyCommit;
             }
         } else if (parent_oids.len == 1) {
-            var first_parent = try Object(repo_kind, hash_kind, .full).init(allocator, state.readOnly(), &parent_oids[0]);
+            var first_parent = try Object(repo_kind, repo_opts, .full).init(allocator, state.readOnly(), &parent_oids[0]);
             defer first_parent.deinit();
             if (std.mem.eql(u8, &first_parent.content.commit.tree, &tree_hash_hex)) {
                 return error.EmptyCommit;
@@ -325,7 +324,7 @@ pub fn writeCommit(
     }
 
     // create commit contents
-    const commit_contents = try createCommitContents(hash_kind, allocator, &tree_hash_hex, metadata, parent_oids);
+    const commit_contents = try createCommitContents(repo_kind, repo_opts, allocator, &tree_hash_hex, metadata, parent_oids);
     defer allocator.free(commit_contents);
 
     // create commit header
@@ -337,9 +336,9 @@ pub fn writeCommit(
     defer allocator.free(commit);
 
     // calc the hash of its contents
-    try hash.hashBuffer(hash_kind, commit, &commit_hash_bytes_buffer);
+    try hash.hashBuffer(repo_opts.hash, commit, &commit_hash_bytes_buffer);
     const commit_hash_hex = std.fmt.bytesToHex(commit_hash_bytes_buffer, .lower);
-    const commit_hash = hash.bytesToHash(hash_kind, &commit_hash_bytes_buffer);
+    const commit_hash = hash.bytesToHash(repo_opts.hash, &commit_hash_bytes_buffer);
 
     switch (repo_kind) {
         .git => {
@@ -360,18 +359,18 @@ pub fn writeCommit(
             // create compressed lock file
             var compressed_lock = try io.LockFile.init(commit_hash_prefix_dir, commit_hash_suffix);
             defer compressed_lock.deinit();
-            try compress.compress(lock.lock_file, compressed_lock.lock_file);
+            try compress.compress(repo_opts.read_size, lock.lock_file, compressed_lock.lock_file);
             compressed_lock.success = true;
 
             // write commit id to HEAD
-            try ref.writeRecur(repo_kind, hash_kind, state, "HEAD", &commit_hash_hex);
+            try ref.writeRecur(repo_kind, repo_opts, state, "HEAD", &commit_hash_hex);
         },
         .xit => {
             var stream = std.io.fixedBufferStream(commit_contents);
-            try chunk.writeChunks(hash_kind, state, &stream, commit_hash, header);
+            try chunk.writeChunks(repo_opts, state, &stream, commit_hash, header);
 
             // write commit id to HEAD
-            try ref.writeRecur(repo_kind, hash_kind, state, "HEAD", &commit_hash_hex);
+            try ref.writeRecur(repo_kind, repo_opts, state, "HEAD", &commit_hash_hex);
         },
     }
 
@@ -385,24 +384,30 @@ pub fn Change(comptime hash_kind: hash.HashKind) type {
     };
 }
 
-pub fn TreeDiff(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
+pub fn TreeDiff(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return struct {
-        changes: std.StringArrayHashMap(Change(hash_kind)),
+        changes: std.StringArrayHashMap(Change(repo_opts.hash)),
         arena: std.heap.ArenaAllocator,
 
-        pub fn init(allocator: std.mem.Allocator) TreeDiff(repo_kind, hash_kind) {
+        pub fn init(allocator: std.mem.Allocator) TreeDiff(repo_kind, repo_opts) {
             return .{
-                .changes = std.StringArrayHashMap(Change(hash_kind)).init(allocator),
+                .changes = std.StringArrayHashMap(Change(repo_opts.hash)).init(allocator),
                 .arena = std.heap.ArenaAllocator.init(allocator),
             };
         }
 
-        pub fn deinit(self: *TreeDiff(repo_kind, hash_kind)) void {
+        pub fn deinit(self: *TreeDiff(repo_kind, repo_opts)) void {
             self.changes.deinit();
             self.arena.deinit();
         }
 
-        pub fn compare(self: *TreeDiff(repo_kind, hash_kind), state: rp.Repo(repo_kind, hash_kind).State(.read_only), old_oid_maybe: ?[hash.hexLen(hash_kind)]u8, new_oid_maybe: ?[hash.hexLen(hash_kind)]u8, path_list_maybe: ?std.ArrayList([]const u8)) !void {
+        pub fn compare(
+            self: *TreeDiff(repo_kind, repo_opts),
+            state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+            old_oid_maybe: ?[hash.hexLen(repo_opts.hash)]u8,
+            new_oid_maybe: ?[hash.hexLen(repo_opts.hash)]u8,
+            path_list_maybe: ?std.ArrayList([]const u8),
+        ) !void {
             if (old_oid_maybe == null and new_oid_maybe == null) {
                 return;
             }
@@ -423,14 +428,14 @@ pub fn TreeDiff(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKi
                             const new_value_tree = new_value.isTree();
                             try self.compare(state, if (old_value_tree) std.fmt.bytesToHex(&old_value.oid, .lower) else null, if (new_value_tree) std.fmt.bytesToHex(&new_value.oid, .lower) else null, path_list);
                             if (!old_value_tree or !new_value_tree) {
-                                try self.changes.put(path, Change(hash_kind){ .old = if (old_value_tree) null else old_value, .new = if (new_value_tree) null else new_value });
+                                try self.changes.put(path, Change(repo_opts.hash){ .old = if (old_value_tree) null else old_value, .new = if (new_value_tree) null else new_value });
                             }
                         }
                     } else {
                         if (old_value.isTree()) {
                             try self.compare(state, std.fmt.bytesToHex(&old_value.oid, .lower), null, path_list);
                         } else {
-                            try self.changes.put(path, Change(hash_kind){ .old = old_value, .new = null });
+                            try self.changes.put(path, Change(repo_opts.hash){ .old = old_value, .new = null });
                         }
                     }
                 }
@@ -449,22 +454,26 @@ pub fn TreeDiff(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKi
                     } else if (new_value.isTree()) {
                         try self.compare(state, null, std.fmt.bytesToHex(&new_value.oid, .lower), path_list);
                     } else {
-                        try self.changes.put(path, Change(hash_kind){ .old = null, .new = new_value });
+                        try self.changes.put(path, Change(repo_opts.hash){ .old = null, .new = new_value });
                     }
                 }
             }
         }
 
-        fn loadTree(self: *TreeDiff(repo_kind, hash_kind), state: rp.Repo(repo_kind, hash_kind).State(.read_only), oid_maybe: ?[hash.hexLen(hash_kind)]u8) !std.StringArrayHashMap(TreeEntry(hash_kind)) {
+        fn loadTree(
+            self: *TreeDiff(repo_kind, repo_opts),
+            state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+            oid_maybe: ?[hash.hexLen(repo_opts.hash)]u8,
+        ) !std.StringArrayHashMap(TreeEntry(repo_opts.hash)) {
             if (oid_maybe) |oid| {
-                const obj = try Object(repo_kind, hash_kind, .full).init(self.arena.allocator(), state, &oid);
+                const obj = try Object(repo_kind, repo_opts, .full).init(self.arena.allocator(), state, &oid);
                 return switch (obj.content) {
-                    .blob => std.StringArrayHashMap(TreeEntry(hash_kind)).init(self.arena.allocator()),
+                    .blob => std.StringArrayHashMap(TreeEntry(repo_opts.hash)).init(self.arena.allocator()),
                     .tree => |tree| tree.entries,
                     .commit => |commit| self.loadTree(state, commit.tree),
                 };
             } else {
-                return std.StringArrayHashMap(TreeEntry(hash_kind)).init(self.arena.allocator());
+                return std.StringArrayHashMap(TreeEntry(repo_opts.hash)).init(self.arena.allocator());
             }
         }
     };
@@ -495,7 +504,7 @@ pub fn TreeEntry(comptime hash_kind: hash.HashKind) type {
     };
 }
 
-pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
+pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     const BUFFER_SIZE = 2048;
     return struct {
         allocator: std.mem.Allocator,
@@ -504,16 +513,16 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.Ha
         internal: switch (repo_kind) {
             .git => void,
             .xit => struct {
-                cursor: *rp.Repo(repo_kind, hash_kind).DB.Cursor(.read_only),
+                cursor: *rp.Repo(repo_kind, repo_opts).DB.Cursor(.read_only),
             },
         },
 
         pub const Reader = switch (repo_kind) {
             .git => pack.LooseOrPackObjectReader,
-            .xit => chunk.ChunkObjectReader(hash_kind),
+            .xit => chunk.ChunkObjectReader(repo_opts),
         };
 
-        pub fn init(allocator: std.mem.Allocator, state: rp.Repo(repo_kind, hash_kind).State(.read_only), oid: *const [hash.hexLen(hash_kind)]u8) !@This() {
+        pub fn init(allocator: std.mem.Allocator, state: rp.Repo(repo_kind, repo_opts).State(.read_only), oid: *const [hash.hexLen(repo_opts.hash)]u8) !@This() {
             switch (repo_kind) {
                 .git => {
                     const reader = try pack.LooseOrPackObjectReader.init(allocator, state.core, oid);
@@ -526,13 +535,13 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.Ha
                 },
                 .xit => {
                     const chunk_hashes_cursor = (try state.extra.moment.cursor.readPath(void, &.{
-                        .{ .hash_map_get = .{ .value = hash.hashInt(hash_kind, "object-id->chunk-hashes") } },
-                        .{ .hash_map_get = .{ .value = try hash.hexToHash(hash_kind, oid) } },
+                        .{ .hash_map_get = .{ .value = hash.hashInt(repo_opts.hash, "object-id->chunk-hashes") } },
+                        .{ .hash_map_get = .{ .value = try hash.hexToHash(repo_opts.hash, oid) } },
                     })) orelse return error.ObjectNotFound;
 
                     const header_cursor = (try state.extra.moment.cursor.readPath(void, &.{
-                        .{ .hash_map_get = .{ .value = hash.hashInt(hash_kind, "object-id->header") } },
-                        .{ .hash_map_get = .{ .value = try hash.hexToHash(hash_kind, oid) } },
+                        .{ .hash_map_get = .{ .value = hash.hashInt(repo_opts.hash, "object-id->header") } },
+                        .{ .hash_map_get = .{ .value = try hash.hexToHash(repo_opts.hash, oid) } },
                     })) orelse return error.ObjectNotFound;
 
                     var header_buffer = [_]u8{0} ** 32;
@@ -541,7 +550,7 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.Ha
                     const header = try readObjectHeader(stream.reader());
 
                     // put cursor on the heap so the pointer is stable (the reader uses it internally)
-                    const chunk_hashes_ptr = try allocator.create(rp.Repo(repo_kind, hash_kind).DB.Cursor(.read_only));
+                    const chunk_hashes_ptr = try allocator.create(rp.Repo(repo_kind, repo_opts).DB.Cursor(.read_only));
                     errdefer allocator.destroy(chunk_hashes_ptr);
                     chunk_hashes_ptr.* = chunk_hashes_cursor;
 
@@ -561,19 +570,19 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.Ha
             }
         }
 
-        pub fn deinit(self: *ObjectReader(repo_kind, hash_kind)) void {
+        pub fn deinit(self: *ObjectReader(repo_kind, repo_opts)) void {
             switch (repo_kind) {
                 .git => self.reader.unbuffered_reader.deinit(),
                 .xit => self.allocator.destroy(self.internal.cursor),
             }
         }
 
-        pub fn reset(self: *ObjectReader(repo_kind, hash_kind)) !void {
+        pub fn reset(self: *ObjectReader(repo_kind, repo_opts)) !void {
             try self.reader.unbuffered_reader.reset();
             self.reader = std.io.bufferedReaderSize(BUFFER_SIZE, self.reader.unbuffered_reader);
         }
 
-        pub fn seekTo(self: *ObjectReader(repo_kind, hash_kind), position: u64) !void {
+        pub fn seekTo(self: *ObjectReader(repo_kind, repo_opts), position: u64) !void {
             switch (repo_kind) {
                 .git => try self.reader.unbuffered_reader.skipBytes(position), // assumes that reset() has just been called!
                 .xit => try self.reader.unbuffered_reader.seekTo(position),
@@ -637,20 +646,24 @@ pub const ObjectLoadKind = enum {
     full,
 };
 
-pub fn Object(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind, comptime load_kind: ObjectLoadKind) type {
+pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind), comptime load_kind: ObjectLoadKind) type {
     return struct {
         allocator: std.mem.Allocator,
         arena: *std.heap.ArenaAllocator,
         content: switch (load_kind) {
             .raw => ObjectKind,
-            .full => ObjectContent(hash_kind),
+            .full => ObjectContent(repo_opts.hash),
         },
-        oid: [hash.hexLen(hash_kind)]u8,
+        oid: [hash.hexLen(repo_opts.hash)]u8,
         len: u64,
-        object_reader: ObjectReader(repo_kind, hash_kind),
+        object_reader: ObjectReader(repo_kind, repo_opts),
 
-        pub fn init(allocator: std.mem.Allocator, state: rp.Repo(repo_kind, hash_kind).State(.read_only), oid: *const [hash.hexLen(hash_kind)]u8) !Object(repo_kind, hash_kind, load_kind) {
-            var obj_rdr = try ObjectReader(repo_kind, hash_kind).init(allocator, state, oid);
+        pub fn init(
+            allocator: std.mem.Allocator,
+            state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+            oid: *const [hash.hexLen(repo_opts.hash)]u8,
+        ) !Object(repo_kind, repo_opts, load_kind) {
+            var obj_rdr = try ObjectReader(repo_kind, repo_opts).init(allocator, state, oid);
             errdefer obj_rdr.deinit();
 
             // to turn off the buffered reader, just replace the
@@ -688,16 +701,16 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind
                             .object_reader = obj_rdr,
                         },
                         .full => {
-                            var entries = std.StringArrayHashMap(TreeEntry(hash_kind)).init(arena.allocator());
+                            var entries = std.StringArrayHashMap(TreeEntry(repo_opts.hash)).init(arena.allocator());
 
                             while (true) {
-                                const entry_mode_str = reader.readUntilDelimiterAlloc(arena.allocator(), ' ', MAX_READ_BYTES) catch |err| switch (err) {
+                                const entry_mode_str = reader.readUntilDelimiterAlloc(arena.allocator(), ' ', repo_opts.read_size) catch |err| switch (err) {
                                     error.EndOfStream => break,
                                     else => |e| return e,
                                 };
                                 const entry_mode: io.Mode = @bitCast(try std.fmt.parseInt(u32, entry_mode_str, 8));
-                                const entry_name = try reader.readUntilDelimiterAlloc(arena.allocator(), 0, MAX_READ_BYTES);
-                                var entry_oid = [_]u8{0} ** hash.byteLen(hash_kind);
+                                const entry_name = try reader.readUntilDelimiterAlloc(arena.allocator(), 0, repo_opts.read_size);
+                                var entry_oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
                                 try reader.readNoEof(&entry_oid);
                                 try entries.put(entry_name, .{ .oid = entry_oid, .mode = entry_mode });
                             }
@@ -705,7 +718,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind
                             return .{
                                 .allocator = allocator,
                                 .arena = arena,
-                                .content = ObjectContent(hash_kind){ .tree = .{ .entries = entries } },
+                                .content = ObjectContent(repo_opts.hash){ .tree = .{ .entries = entries } },
                                 .oid = oid.*,
                                 .len = obj_rdr.header.size,
                                 .object_reader = obj_rdr,
@@ -725,31 +738,31 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind
                         },
                         .full => {
                             // read the content kind
-                            const content_kind = try reader.readUntilDelimiterAlloc(allocator, ' ', MAX_READ_BYTES);
+                            const content_kind = try reader.readUntilDelimiterAlloc(allocator, ' ', repo_opts.read_size);
                             defer allocator.free(content_kind);
                             if (!std.mem.eql(u8, "tree", content_kind)) {
                                 return error.InvalidCommitContentKind;
                             }
 
                             // read the tree hash
-                            var tree_hash = [_]u8{0} ** (hash.hexLen(hash_kind) + 1);
+                            var tree_hash = [_]u8{0} ** (hash.hexLen(repo_opts.hash) + 1);
                             const tree_hash_slice = try reader.readUntilDelimiter(&tree_hash, '\n');
-                            if (tree_hash_slice.len != hash.hexLen(hash_kind)) {
+                            if (tree_hash_slice.len != hash.hexLen(repo_opts.hash)) {
                                 return error.InvalidCommitTreeHash;
                             }
 
                             // init the content
-                            var content = ObjectContent(hash_kind){
+                            var content = ObjectContent(repo_opts.hash){
                                 .commit = .{
-                                    .tree = tree_hash_slice[0..comptime hash.hexLen(hash_kind)].*,
-                                    .parents = std.ArrayList([hash.hexLen(hash_kind)]u8).init(arena.allocator()),
+                                    .tree = tree_hash_slice[0..comptime hash.hexLen(repo_opts.hash)].*,
+                                    .parents = std.ArrayList([hash.hexLen(repo_opts.hash)]u8).init(arena.allocator()),
                                     .metadata = .{},
                                 },
                             };
 
                             // read the metadata
                             while (true) {
-                                const line = try reader.readUntilDelimiterAlloc(arena.allocator(), '\n', MAX_READ_BYTES);
+                                const line = try reader.readUntilDelimiterAlloc(arena.allocator(), '\n', repo_opts.read_size);
                                 if (line.len == 0) {
                                     break;
                                 }
@@ -761,10 +774,10 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind
                                     const value = line[line_idx + 1 ..];
 
                                     if (std.mem.eql(u8, "parent", key)) {
-                                        if (value.len != hash.hexLen(hash_kind)) {
+                                        if (value.len != hash.hexLen(repo_opts.hash)) {
                                             return error.InvalidCommitParentHash;
                                         }
-                                        try content.commit.parents.append(value[0..comptime hash.hexLen(hash_kind)].*);
+                                        try content.commit.parents.append(value[0..comptime hash.hexLen(repo_opts.hash)].*);
                                     } else if (std.mem.eql(u8, "author", key)) {
                                         content.commit.metadata.author = value;
                                     } else if (std.mem.eql(u8, "committer", key)) {
@@ -774,7 +787,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind
                             }
 
                             // read the message
-                            content.commit.metadata.message = try reader.readAllAlloc(arena.allocator(), MAX_READ_BYTES);
+                            content.commit.metadata.message = try reader.readAllAlloc(arena.allocator(), repo_opts.read_size);
 
                             return .{
                                 .allocator = allocator,
@@ -790,7 +803,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind
             }
         }
 
-        pub fn deinit(self: *Object(repo_kind, hash_kind, load_kind)) void {
+        pub fn deinit(self: *Object(repo_kind, repo_opts, load_kind)) void {
             self.arena.deinit();
             self.allocator.destroy(self.arena);
             self.object_reader.deinit();
@@ -798,14 +811,14 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind
     };
 }
 
-pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind, comptime load_kind: ObjectLoadKind) type {
+pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind), comptime load_kind: ObjectLoadKind) type {
     return struct {
         allocator: std.mem.Allocator,
-        core: *rp.Repo(repo_kind, hash_kind).Core,
-        moment: rp.Repo(repo_kind, hash_kind).Moment(.read_only),
-        oid_queue: std.DoublyLinkedList([hash.hexLen(hash_kind)]u8),
-        oid_excludes: std.AutoHashMap([hash.hexLen(hash_kind)]u8, void),
-        object: Object(repo_kind, hash_kind, load_kind),
+        core: *rp.Repo(repo_kind, repo_opts).Core,
+        moment: rp.Repo(repo_kind, repo_opts).Moment(.read_only),
+        oid_queue: std.DoublyLinkedList([hash.hexLen(repo_opts.hash)]u8),
+        oid_excludes: std.AutoHashMap([hash.hexLen(repo_opts.hash)]u8, void),
+        object: Object(repo_kind, repo_opts, load_kind),
         options: Options,
 
         pub const Options = struct {
@@ -814,23 +827,23 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.
 
         pub fn init(
             allocator: std.mem.Allocator,
-            state: rp.Repo(repo_kind, hash_kind).State(.read_only),
-            start_oids: []const [hash.hexLen(hash_kind)]u8,
+            state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+            start_oids: []const [hash.hexLen(repo_opts.hash)]u8,
             options: Options,
-        ) !ObjectIterator(repo_kind, hash_kind, load_kind) {
-            var self = ObjectIterator(repo_kind, hash_kind, load_kind){
+        ) !ObjectIterator(repo_kind, repo_opts, load_kind) {
+            var self = ObjectIterator(repo_kind, repo_opts, load_kind){
                 .allocator = allocator,
                 .core = state.core,
                 .moment = state.extra.moment.*,
-                .oid_queue = std.DoublyLinkedList([hash.hexLen(hash_kind)]u8){},
-                .oid_excludes = std.AutoHashMap([hash.hexLen(hash_kind)]u8, void).init(allocator),
+                .oid_queue = std.DoublyLinkedList([hash.hexLen(repo_opts.hash)]u8){},
+                .oid_excludes = std.AutoHashMap([hash.hexLen(repo_opts.hash)]u8, void).init(allocator),
                 .object = undefined,
                 .options = options,
             };
             errdefer self.deinit();
 
             for (start_oids) |start_oid| {
-                var node = try allocator.create(std.DoublyLinkedList([hash.hexLen(hash_kind)]u8).Node);
+                var node = try allocator.create(std.DoublyLinkedList([hash.hexLen(repo_opts.hash)]u8).Node);
                 errdefer allocator.destroy(node);
                 node.data = start_oid;
                 self.oid_queue.append(node);
@@ -839,15 +852,15 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.
             return self;
         }
 
-        pub fn deinit(self: *ObjectIterator(repo_kind, hash_kind, load_kind)) void {
+        pub fn deinit(self: *ObjectIterator(repo_kind, repo_opts, load_kind)) void {
             while (self.oid_queue.popFirst()) |node| {
                 self.allocator.destroy(node);
             }
             self.oid_excludes.deinit();
         }
 
-        pub fn next(self: *ObjectIterator(repo_kind, hash_kind, load_kind)) !?*Object(repo_kind, hash_kind, load_kind) {
-            const state = rp.Repo(repo_kind, hash_kind).State(.read_only){ .core = self.core, .extra = .{ .moment = &self.moment } };
+        pub fn next(self: *ObjectIterator(repo_kind, repo_opts, load_kind)) !?*Object(repo_kind, repo_opts, load_kind) {
+            const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = self.core, .extra = .{ .moment = &self.moment } };
             while (self.oid_queue.popFirst()) |node| {
                 const next_oid = node.data;
                 self.allocator.destroy(node);
@@ -855,17 +868,17 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.
                     try self.oid_excludes.put(next_oid, {});
                     switch (load_kind) {
                         .raw => {
-                            var object = try Object(repo_kind, hash_kind, .full).init(self.allocator, state, &next_oid);
+                            var object = try Object(repo_kind, repo_opts, .full).init(self.allocator, state, &next_oid);
                             defer object.deinit();
                             try self.addToQueue(object.content);
 
-                            var raw_object = try Object(repo_kind, hash_kind, .raw).init(self.allocator, state, &next_oid);
+                            var raw_object = try Object(repo_kind, repo_opts, .raw).init(self.allocator, state, &next_oid);
                             errdefer raw_object.deinit();
                             self.object = raw_object;
                             return &self.object;
                         },
                         .full => {
-                            var object = try Object(repo_kind, hash_kind, .full).init(self.allocator, state, &next_oid);
+                            var object = try Object(repo_kind, repo_opts, .full).init(self.allocator, state, &next_oid);
                             errdefer object.deinit();
                             try self.addToQueue(object.content);
                             self.object = object;
@@ -877,7 +890,7 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.
             return null;
         }
 
-        fn addToQueue(self: *ObjectIterator(repo_kind, hash_kind, load_kind), content: ObjectContent(hash_kind)) !void {
+        fn addToQueue(self: *ObjectIterator(repo_kind, repo_opts, load_kind), content: ObjectContent(repo_opts.hash)) !void {
             switch (content) {
                 .blob => {},
                 .tree => |tree| {
@@ -885,7 +898,7 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.
                         for (tree.entries.values()) |entry| {
                             const entry_oid = std.fmt.bytesToHex(entry.oid, .lower);
                             if (!self.oid_excludes.contains(entry_oid)) {
-                                var new_node = try self.allocator.create(std.DoublyLinkedList([hash.hexLen(hash_kind)]u8).Node);
+                                var new_node = try self.allocator.create(std.DoublyLinkedList([hash.hexLen(repo_opts.hash)]u8).Node);
                                 errdefer self.allocator.destroy(new_node);
                                 new_node.data = entry_oid;
                                 self.oid_queue.append(new_node);
@@ -895,14 +908,14 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.
                 },
                 .commit => |commit| {
                     for (commit.parents.items) |parent_oid| {
-                        var new_node = try self.allocator.create(std.DoublyLinkedList([hash.hexLen(hash_kind)]u8).Node);
+                        var new_node = try self.allocator.create(std.DoublyLinkedList([hash.hexLen(repo_opts.hash)]u8).Node);
                         errdefer self.allocator.destroy(new_node);
                         new_node.data = parent_oid;
                         self.oid_queue.append(new_node);
                     }
                     if (self.options.recursive) {
                         if (!self.oid_excludes.contains(commit.tree)) {
-                            var new_node = try self.allocator.create(std.DoublyLinkedList([hash.hexLen(hash_kind)]u8).Node);
+                            var new_node = try self.allocator.create(std.DoublyLinkedList([hash.hexLen(repo_opts.hash)]u8).Node);
                             errdefer self.allocator.destroy(new_node);
                             new_node.data = commit.tree;
                             self.oid_queue.append(new_node);
@@ -912,11 +925,11 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.
             }
         }
 
-        pub fn exclude(self: *ObjectIterator(repo_kind, hash_kind, load_kind), oid: *const [hash.hexLen(hash_kind)]u8) !void {
+        pub fn exclude(self: *ObjectIterator(repo_kind, repo_opts, load_kind), oid: *const [hash.hexLen(repo_opts.hash)]u8) !void {
             try self.oid_excludes.put(oid.*, {});
 
-            const state = rp.Repo(repo_kind, hash_kind).State(.read_only){ .core = self.core, .extra = .{ .moment = &self.moment } };
-            var object = try Object(repo_kind, hash_kind, .full).init(self.allocator, state, oid);
+            const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = self.core, .extra = .{ .moment = &self.moment } };
+            var object = try Object(repo_kind, repo_opts, .full).init(self.allocator, state, oid);
             defer object.deinit();
             switch (object.content) {
                 .blob => {},

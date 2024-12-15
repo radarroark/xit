@@ -18,7 +18,7 @@ const c = @cImport({
     @cInclude("git2.h");
 });
 
-fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) ![hash.hexLen(hash_kind)]u8 {
+fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) ![hash.hexLen(repo_opts.hash)]u8 {
     const allocator = std.testing.allocator;
     const temp_dir_name = "temp-test-main";
 
@@ -82,7 +82,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
 
     // make sure we can get status before first commit
     {
-        var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var status = try repo.status(allocator);
         defer status.deinit();
@@ -155,9 +155,9 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
             .git => {
                 // check that the commit object was created
                 {
-                    var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+                    var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
                     defer repo.deinit();
-                    const head_file_buffer = try ref.readHead(repo_kind, hash_kind, .{ .core = &repo.core, .extra = .{} });
+                    const head_file_buffer = try ref.readHead(repo_kind, repo_opts, .{ .core = &repo.core, .extra = .{} });
                     var objects_dir = try test_state.git_dir.openDir("objects", .{});
                     defer objects_dir.close();
                     var hash_prefix_dir = try objects_dir.openDir(head_file_buffer[0..2], .{});
@@ -190,8 +190,8 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
                     const header = try std.fmt.allocPrint(allocator, "blob {}\x00", .{file_size});
                     defer allocator.free(header);
 
-                    var sha1_bytes_buffer = [_]u8{0} ** hash.byteLen(hash_kind);
-                    try hash.hashReader(hash_kind, readme.reader(), header, &sha1_bytes_buffer);
+                    var sha1_bytes_buffer = [_]u8{0} ** hash.byteLen(repo_opts.hash);
+                    try hash.hashReader(repo_opts.hash, readme.reader(), header, &sha1_bytes_buffer);
                     const sha1_hex = std.fmt.bytesToHex(&sha1_bytes_buffer, .lower);
 
                     var oid: c.git_oid = undefined;
@@ -204,14 +204,14 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
             },
             .xit => {
                 // check that the commit object was created
-                var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+                var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
                 var moment = try repo.core.latestMoment();
-                const state = rp.Repo(repo_kind, hash_kind).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-                const head_file_buffer = try ref.readHead(repo_kind, hash_kind, state);
+                const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
+                const head_file_buffer = try ref.readHead(repo_kind, repo_opts, state);
                 const chunk_hashes_cursor_maybe = try moment.cursor.readPath(void, &.{
-                    .{ .hash_map_get = .{ .value = hash.hashInt(hash_kind, "object-id->chunk-hashes") } },
-                    .{ .hash_map_get = .{ .value = try hash.hexToHash(hash_kind, &head_file_buffer) } },
+                    .{ .hash_map_get = .{ .value = hash.hashInt(repo_opts.hash, "object-id->chunk-hashes") } },
+                    .{ .hash_map_get = .{ .value = try hash.hexToHash(repo_opts.hash, &head_file_buffer) } },
                 });
                 try std.testing.expect(chunk_hashes_cursor_maybe != null);
             },
@@ -220,11 +220,11 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
 
     // get HEAD contents
     const commit1 = blk: {
-        var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
-        const state = rp.Repo(repo_kind, hash_kind).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-        break :blk try ref.readHead(repo_kind, hash_kind, state);
+        const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
+        break :blk try ref.readHead(repo_kind, repo_opts, state);
     };
 
     const new_hello_txt_content =
@@ -291,7 +291,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
 
         // workspace diff
         {
-            var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
             var status = try repo.status(allocator);
             defer status.deinit();
@@ -305,12 +305,12 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
             while (try file_iter.next()) |*line_iter_pair_ptr| {
                 var line_iter_pair = line_iter_pair_ptr.*;
                 defer line_iter_pair.deinit();
-                var hunk_iter = try df.HunkIterator(repo_kind, hash_kind).init(allocator, &line_iter_pair.a, &line_iter_pair.b);
+                var hunk_iter = try df.HunkIterator(repo_kind, repo_opts).init(allocator, &line_iter_pair.a, &line_iter_pair.b);
                 defer hunk_iter.deinit();
                 if (std.mem.eql(u8, "hello.txt", line_iter_pair.path)) {
                     try std.testing.expectEqualStrings("diff --git a/hello.txt b/hello.txt", hunk_iter.header_lines.items[0]);
-                    const expected_hunks = &[_][]const df.MyersDiffIterator(repo_kind, hash_kind).Edit{
-                        &[_]df.MyersDiffIterator(repo_kind, hash_kind).Edit{
+                    const expected_hunks = &[_][]const df.MyersDiffIterator(repo_kind, repo_opts).Edit{
+                        &[_]df.MyersDiffIterator(repo_kind, repo_opts).Edit{
                             .{ .eql = .{ .old_line = .{ .num = 2, .text = "2" }, .new_line = .{ .num = 2, .text = "2" } } },
                             .{ .eql = .{ .old_line = .{ .num = 3, .text = "3" }, .new_line = .{ .num = 3, .text = "3" } } },
                             .{ .eql = .{ .old_line = .{ .num = 4, .text = "4" }, .new_line = .{ .num = 4, .text = "4" } } },
@@ -320,7 +320,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
                             .{ .eql = .{ .old_line = .{ .num = 7, .text = "7" }, .new_line = .{ .num = 7, .text = "7" } } },
                             .{ .eql = .{ .old_line = .{ .num = 8, .text = "8" }, .new_line = .{ .num = 8, .text = "8" } } },
                         },
-                        &[_]df.MyersDiffIterator(repo_kind, hash_kind).Edit{
+                        &[_]df.MyersDiffIterator(repo_kind, repo_opts).Edit{
                             .{ .del = .{ .old_line = .{ .num = 9, .text = "9" } } },
                             .{ .del = .{ .old_line = .{ .num = 10, .text = "10" } } },
                             .{ .ins = .{ .new_line = .{ .num = 9, .text = "9.0" } } },
@@ -329,7 +329,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
                             .{ .eql = .{ .old_line = .{ .num = 12, .text = "12" }, .new_line = .{ .num = 12, .text = "12" } } },
                             .{ .eql = .{ .old_line = .{ .num = 13, .text = "13" }, .new_line = .{ .num = 13, .text = "13" } } },
                         },
-                        &[_]df.MyersDiffIterator(repo_kind, hash_kind).Edit{
+                        &[_]df.MyersDiffIterator(repo_kind, repo_opts).Edit{
                             .{ .eql = .{ .old_line = .{ .num = 14, .text = "14" }, .new_line = .{ .num = 14, .text = "14" } } },
                             .{ .del = .{ .old_line = .{ .num = 15, .text = "15" } } },
                             .{ .ins = .{ .new_line = .{ .num = 15, .text = "15.0" } } },
@@ -381,7 +381,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
 
         // index diff
         {
-            var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
             var status = try repo.status(allocator);
             defer status.deinit();
@@ -392,7 +392,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
             while (try file_iter.next()) |*line_iter_pair_ptr| {
                 var line_iter_pair = line_iter_pair_ptr.*;
                 defer line_iter_pair.deinit();
-                var hunk_iter = try df.HunkIterator(repo_kind, hash_kind).init(allocator, &line_iter_pair.a, &line_iter_pair.b);
+                var hunk_iter = try df.HunkIterator(repo_kind, repo_opts).init(allocator, &line_iter_pair.a, &line_iter_pair.b);
                 defer hunk_iter.deinit();
                 if (std.mem.eql(u8, "LICENSE", line_iter_pair.path)) {
                     try std.testing.expectEqualStrings("diff --git a/LICENSE b/LICENSE", hunk_iter.header_lines.items[0]);
@@ -431,9 +431,9 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
             .git => {
                 // check that the commit object was created
                 {
-                    var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+                    var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
                     defer repo.deinit();
-                    const head_file_buffer = try ref.readHead(repo_kind, hash_kind, .{ .core = &repo.core, .extra = .{} });
+                    const head_file_buffer = try ref.readHead(repo_kind, repo_opts, .{ .core = &repo.core, .extra = .{} });
                     var objects_dir = try test_state.git_dir.openDir("objects", .{});
                     defer objects_dir.close();
                     var hash_prefix_dir = try objects_dir.openDir(head_file_buffer[0..2], .{});
@@ -460,14 +460,14 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
             },
             .xit => {
                 // check that the commit object was created
-                var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+                var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
                 var moment = try repo.core.latestMoment();
-                const state = rp.Repo(repo_kind, hash_kind).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-                const head_file_buffer = try ref.readHead(repo_kind, hash_kind, state);
+                const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
+                const head_file_buffer = try ref.readHead(repo_kind, repo_opts, state);
                 const chunk_hashes_cursor_maybe = try moment.cursor.readPath(void, &.{
-                    .{ .hash_map_get = .{ .value = hash.hashInt(hash_kind, "object-id->chunk-hashes") } },
-                    .{ .hash_map_get = .{ .value = try hash.hexToHash(hash_kind, &head_file_buffer) } },
+                    .{ .hash_map_get = .{ .value = hash.hashInt(repo_opts.hash, "object-id->chunk-hashes") } },
+                    .{ .hash_map_get = .{ .value = try hash.hexToHash(repo_opts.hash, &head_file_buffer) } },
                 });
                 try std.testing.expect(chunk_hashes_cursor_maybe != null);
             },
@@ -476,16 +476,16 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
 
     // get HEAD contents
     const commit2 = blk: {
-        var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
-        const state = rp.Repo(repo_kind, hash_kind).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-        break :blk try ref.readHead(repo_kind, hash_kind, state);
+        const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
+        break :blk try ref.readHead(repo_kind, repo_opts, state);
     };
 
     // tree diff
     {
-        var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var tree_diff = try repo.treeDiff(allocator, commit1, commit2);
         defer tree_diff.deinit();
@@ -496,7 +496,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
         while (try file_iter.next()) |*line_iter_pair_ptr| {
             var line_iter_pair = line_iter_pair_ptr.*;
             defer line_iter_pair.deinit();
-            var hunk_iter = try df.HunkIterator(repo_kind, hash_kind).init(allocator, &line_iter_pair.a, &line_iter_pair.b);
+            var hunk_iter = try df.HunkIterator(repo_kind, repo_opts).init(allocator, &line_iter_pair.a, &line_iter_pair.b);
             defer hunk_iter.deinit();
             if (std.mem.eql(u8, "LICENSE", line_iter_pair.path)) {
                 try std.testing.expectEqualStrings("diff --git a/LICENSE b/LICENSE", hunk_iter.header_lines.items[0]);
@@ -547,7 +547,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
 
             // check out commit1 and make sure the conflict is found
             {
-                var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+                var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
                 var result = try repo.switchHead(allocator, &commit1, .{ .force = false });
                 defer result.deinit();
@@ -572,7 +572,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
 
             // check out commit1 and make sure the conflict is found
             {
-                var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+                var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
                 var result = try repo.switchHead(allocator, &commit1, .{ .force = false });
                 defer result.deinit();
@@ -595,7 +595,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
 
             // check out commit1 and make sure the conflict is found
             {
-                var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+                var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
                 var result = try repo.switchHead(allocator, &commit1, .{ .force = false });
                 defer result.deinit();
@@ -624,7 +624,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
 
             // check out commit1 and make sure the conflict is found
             {
-                var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+                var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
                 var result = try repo.switchHead(allocator, &commit1, .{ .force = false });
                 defer result.deinit();
@@ -697,11 +697,11 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
 
         // read index
         {
-            var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
             var moment = try repo.core.latestMoment();
-            const state = rp.Repo(repo_kind, hash_kind).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-            var index = try idx.Index(repo_kind, hash_kind).init(allocator, state);
+            const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
+            var index = try idx.Index(repo_kind, repo_opts).init(allocator, state);
             defer index.deinit();
             try std.testing.expectEqual(7, index.entries.count());
             try std.testing.expect(index.entries.contains("README"));
@@ -726,11 +726,11 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
             },
             .xit => {
                 // read the index in xitdb
-                var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+                var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
                 var count: u32 = 0;
                 var moment = try repo.core.latestMoment();
-                if (try moment.getCursor(hash.hashInt(hash_kind, "index"))) |index_cursor| {
+                if (try moment.getCursor(hash.hashInt(repo_opts.hash, "index"))) |index_cursor| {
                     var iter = try index_cursor.iterator();
                     defer iter.deinit();
                     while (try iter.next()) |_| {
@@ -757,11 +757,11 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
 
         // read index
         {
-            var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
             var moment = try repo.core.latestMoment();
-            const state = rp.Repo(repo_kind, hash_kind).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-            var index = try idx.Index(repo_kind, hash_kind).init(allocator, state);
+            const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
+            var index = try idx.Index(repo_kind, repo_opts).init(allocator, state);
             defer index.deinit();
             try std.testing.expectEqual(6, index.entries.count());
             try std.testing.expect(index.entries.contains("README"));
@@ -785,11 +785,11 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
             },
             .xit => {
                 // read the index in xitdb
-                var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+                var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
                 var count: u32 = 0;
                 var moment = try repo.core.latestMoment();
-                if (try moment.getCursor(hash.hashInt(hash_kind, "index"))) |index_cursor| {
+                if (try moment.getCursor(hash.hashInt(repo_opts.hash, "index"))) |index_cursor| {
                     var iter = try index_cursor.iterator();
                     defer iter.deinit();
                     while (try iter.next()) |_| {
@@ -849,11 +849,11 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
             try main.xitMain(repo_kind, allocator, &.{ "reset", "new-file.txt" }, repo_dir, writers);
             try main.xitMain(repo_kind, allocator, &.{ "reset", "one/two/three.txt" }, repo_dir, writers);
 
-            var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
             var moment = try repo.core.latestMoment();
-            const state = rp.Repo(repo_kind, hash_kind).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-            var index = try idx.Index(repo_kind, hash_kind).init(allocator, state);
+            const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
+            var index = try idx.Index(repo_kind, repo_opts).init(allocator, state);
             defer index.deinit();
 
             try std.testing.expect(!index.entries.contains("new-file.txt"));
@@ -932,7 +932,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
         // workspace changes
         {
             // get status
-            var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
             var status = try repo.status(allocator);
             defer status.deinit();
@@ -978,7 +978,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
             try main.xitMain(repo_kind, allocator, &.{ "add", "src/zig/main.zig" }, repo_dir, writers);
 
             // get status
-            var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
             var status = try repo.status(allocator);
             defer status.deinit();
@@ -1002,7 +1002,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
     {
         // there are two modified and two deleted files remaining
         {
-            var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
             var status = try repo.status(allocator);
             defer status.deinit();
@@ -1026,7 +1026,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
 
         // there are no modified or deleted files remaining
         {
-            var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
             var status = try repo.status(allocator);
             defer status.deinit();
@@ -1038,18 +1038,18 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
 
     // parse objects
     {
-        var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
-        const state = rp.Repo(repo_kind, hash_kind).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
+        const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
 
         // read commit
-        var commit_object = try obj.Object(repo_kind, hash_kind, .full).init(allocator, state, &commit2);
+        var commit_object = try obj.Object(repo_kind, repo_opts, .full).init(allocator, state, &commit2);
         defer commit_object.deinit();
         try std.testing.expectEqualStrings("second commit", commit_object.content.commit.metadata.message);
 
         // read tree
-        var tree_object = try obj.Object(repo_kind, hash_kind, .full).init(allocator, state, &commit_object.content.commit.tree);
+        var tree_object = try obj.Object(repo_kind, repo_opts, .full).init(allocator, state, &commit_object.content.commit.tree);
         defer tree_object.deinit();
         try std.testing.expectEqual(6, tree_object.content.tree.entries.count());
     }
@@ -1062,17 +1062,17 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
 
     // check the refs
     {
-        var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
-        const state = rp.Repo(repo_kind, hash_kind).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-        try std.testing.expectEqual(commit2, try ref.readHead(repo_kind, hash_kind, state));
-        try std.testing.expectEqual(commit2, try ref.readRecur(repo_kind, hash_kind, state, ref.RefOrOid(hash_kind).initFromUser("stuff")));
+        const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
+        try std.testing.expectEqual(commit2, try ref.readHead(repo_kind, repo_opts, state));
+        try std.testing.expectEqual(commit2, try ref.readRecur(repo_kind, repo_opts, state, ref.RefOrOid(repo_opts.hash).initFromUser("stuff")));
     }
 
     // list all branches
     {
-        var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var ref_list = try repo.listBranches(allocator);
         defer ref_list.deinit();
@@ -1081,7 +1081,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
 
     // get the current branch
     {
-        var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         const current_branch = try repo.currentBranch(allocator);
         defer allocator.free(current_branch);
@@ -1102,7 +1102,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
 
     // can't delete current branch
     {
-        var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         try std.testing.expectEqual(error.CannotDeleteCurrentBranch, repo.removeBranch(.{ .name = "stuff" }));
     }
@@ -1135,11 +1135,11 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
 
     // get HEAD contents
     const commit4_stuff = blk: {
-        var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
-        const state = rp.Repo(repo_kind, hash_kind).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-        break :blk try ref.readHead(repo_kind, hash_kind, state);
+        const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
+        break :blk try ref.readHead(repo_kind, repo_opts, state);
     };
 
     // create a branch with slashes
@@ -1153,7 +1153,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
 
     // list all branches
     {
-        var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var ref_list = try repo.listBranches(allocator);
         defer ref_list.deinit();
@@ -1191,25 +1191,25 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
 
     // get HEAD contents
     const commit3 = blk: {
-        var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
-        const state = rp.Repo(repo_kind, hash_kind).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-        break :blk try ref.readHead(repo_kind, hash_kind, state);
+        const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
+        break :blk try ref.readHead(repo_kind, repo_opts, state);
     };
 
     // make sure the most recent branch name points to the most recent commit
     {
-        var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
-        const state = rp.Repo(repo_kind, hash_kind).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-        try std.testing.expectEqual(commit3, try ref.readRecur(repo_kind, hash_kind, state, ref.RefOrOid(hash_kind).initFromUser("master")));
+        const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
+        try std.testing.expectEqual(commit3, try ref.readRecur(repo_kind, repo_opts, state, ref.RefOrOid(repo_opts.hash).initFromUser("master")));
     }
 
     // log
     {
-        var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var iter = try repo.log(allocator, &.{commit3});
         defer iter.deinit();
@@ -1231,11 +1231,11 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
 
     // common ancestor
     {
-        var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
-        const state = rp.Repo(repo_kind, hash_kind).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-        const ancestor_commit = try mrg.commonAncestor(repo_kind, hash_kind, allocator, state, &commit3, &commit4_stuff);
+        const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
+        const ancestor_commit = try mrg.commonAncestor(repo_kind, repo_opts, allocator, state, &commit3, &commit4_stuff);
         try std.testing.expectEqualStrings(&commit2, &ancestor_commit);
     }
 
@@ -1264,11 +1264,11 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
 
     // get HEAD contents
     const commit4 = blk: {
-        var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
-        const state = rp.Repo(repo_kind, hash_kind).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-        break :blk try ref.readHead(repo_kind, hash_kind, state);
+        const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
+        break :blk try ref.readHead(repo_kind, repo_opts, state);
     };
 
     // config
@@ -1277,7 +1277,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
         try main.xitMain(repo_kind, allocator, &.{ "config", "add", "branch.master.remote", "origin" }, repo_dir, writers);
 
         {
-            var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
 
             var config = try repo.config(allocator);
@@ -1293,7 +1293,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
         try main.xitMain(repo_kind, allocator, &.{ "config", "rm", "branch.master.remote" }, repo_dir, writers);
 
         {
-            var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
 
             var config = try repo.config(allocator);
@@ -1309,7 +1309,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
         try main.xitMain(repo_kind, allocator, &.{ "config", "add", "user.name", "radar roark" }, repo_dir, writers);
 
         {
-            var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
 
             var config = try repo.config(allocator);
@@ -1328,7 +1328,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
         try main.xitMain(repo_kind, allocator, &.{ "remote", "add", "origin", "http://localhost:3000" }, repo_dir, writers);
 
         {
-            var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
 
             var remote = try repo.remote(allocator);
@@ -1341,7 +1341,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
         try main.xitMain(repo_kind, allocator, &.{ "remote", "rm", "origin" }, repo_dir, writers);
 
         {
-            var repo = try rp.Repo(repo_kind, hash_kind).init(allocator, .{ .cwd = repo_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
 
             var remote = try repo.remote(allocator);
@@ -1357,7 +1357,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) 
 }
 
 test "main" {
-    const last_hash_git = try testMain(.git, .sha1);
-    const last_hash_xit = try testMain(.xit, .sha1);
+    const last_hash_git = try testMain(.git, .{});
+    const last_hash_xit = try testMain(.xit, .{});
     try std.testing.expectEqualStrings(&last_hash_git, &last_hash_xit);
 }

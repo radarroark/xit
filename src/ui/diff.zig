@@ -10,17 +10,17 @@ const rp = @import("../repo.zig");
 const hash = @import("../hash.zig");
 const df = @import("../diff.zig");
 
-pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
+pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return struct {
         box: wgt.Box(Widget),
         allocator: std.mem.Allocator,
-        repo: *rp.Repo(repo_kind, hash_kind),
+        repo: *rp.Repo(repo_kind, repo_opts),
         iter_arena: std.heap.ArenaAllocator,
-        file_iter: ?df.FileIterator(repo_kind, hash_kind),
-        hunk_iter: ?df.HunkIterator(repo_kind, hash_kind),
+        file_iter: ?df.FileIterator(repo_kind, repo_opts),
+        hunk_iter: ?df.HunkIterator(repo_kind, repo_opts),
         bufs: std.ArrayList([]const u8),
 
-        pub fn init(allocator: std.mem.Allocator, repo: *rp.Repo(repo_kind, hash_kind)) !Diff(Widget, repo_kind, hash_kind) {
+        pub fn init(allocator: std.mem.Allocator, repo: *rp.Repo(repo_kind, repo_opts)) !Diff(Widget, repo_kind, repo_opts) {
             var inner_box = try wgt.Box(Widget).init(allocator, null, .vert);
             errdefer inner_box.deinit();
 
@@ -42,7 +42,7 @@ pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime has
             };
         }
 
-        pub fn deinit(self: *Diff(Widget, repo_kind, hash_kind)) void {
+        pub fn deinit(self: *Diff(Widget, repo_kind, repo_opts)) void {
             for (self.bufs.items) |buf| {
                 self.allocator.free(buf);
             }
@@ -51,7 +51,7 @@ pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime has
             self.box.deinit();
         }
 
-        pub fn build(self: *Diff(Widget, repo_kind, hash_kind), constraint: layout.Constraint, root_focus: *Focus) !void {
+        pub fn build(self: *Diff(Widget, repo_kind, repo_opts), constraint: layout.Constraint, root_focus: *Focus) !void {
             self.clearGrid();
             self.box.border_style = if (root_focus.grandchild_id == self.getFocus().id) .double else .single;
             try self.box.build(constraint, root_focus);
@@ -82,13 +82,13 @@ pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime has
                         if (self.hunk_iter == null) {
                             if (self.file_iter) |*file_iter| {
                                 if (try file_iter.next()) |line_iter_pair| {
-                                    const line_iter_a = try self.iter_arena.allocator().create(df.LineIterator(repo_kind, hash_kind));
+                                    const line_iter_a = try self.iter_arena.allocator().create(df.LineIterator(repo_kind, repo_opts));
                                     line_iter_a.* = line_iter_pair.a;
 
-                                    const line_iter_b = try self.iter_arena.allocator().create(df.LineIterator(repo_kind, hash_kind));
+                                    const line_iter_b = try self.iter_arena.allocator().create(df.LineIterator(repo_kind, repo_opts));
                                     line_iter_b.* = line_iter_pair.b;
 
-                                    self.hunk_iter = try df.HunkIterator(repo_kind, hash_kind).init(self.iter_arena.allocator(), line_iter_a, line_iter_b);
+                                    self.hunk_iter = try df.HunkIterator(repo_kind, repo_opts).init(self.iter_arena.allocator(), line_iter_a, line_iter_b);
                                 } else {
                                     self.file_iter = null;
                                 }
@@ -99,7 +99,7 @@ pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime has
             }
         }
 
-        pub fn input(self: *Diff(Widget, repo_kind, hash_kind), key: inp.Key, root_focus: *Focus) !void {
+        pub fn input(self: *Diff(Widget, repo_kind, repo_opts), key: inp.Key, root_focus: *Focus) !void {
             _ = root_focus;
             switch (key) {
                 .arrow_up => {
@@ -175,19 +175,19 @@ pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime has
             }
         }
 
-        pub fn clearGrid(self: *Diff(Widget, repo_kind, hash_kind)) void {
+        pub fn clearGrid(self: *Diff(Widget, repo_kind, repo_opts)) void {
             self.box.clearGrid();
         }
 
-        pub fn getGrid(self: Diff(Widget, repo_kind, hash_kind)) ?Grid {
+        pub fn getGrid(self: Diff(Widget, repo_kind, repo_opts)) ?Grid {
             return self.box.getGrid();
         }
 
-        pub fn getFocus(self: *Diff(Widget, repo_kind, hash_kind)) *Focus {
+        pub fn getFocus(self: *Diff(Widget, repo_kind, repo_opts)) *Focus {
             return self.box.getFocus();
         }
 
-        pub fn clearDiffs(self: *Diff(Widget, repo_kind, hash_kind)) !void {
+        pub fn clearDiffs(self: *Diff(Widget, repo_kind, repo_opts)) !void {
             // clear buffers
             for (self.bufs.items) |buf| {
                 self.allocator.free(buf);
@@ -211,7 +211,7 @@ pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime has
             widget.scroll.y = 0;
         }
 
-        pub fn addLines(self: *Diff(Widget, repo_kind, hash_kind), lines: []const []const u8) !void {
+        pub fn addLines(self: *Diff(Widget, repo_kind, repo_opts), lines: []const []const u8) !void {
             const buf = blk: {
                 var arr = std.ArrayList(u8).init(self.allocator);
                 errdefer arr.deinit();
@@ -237,7 +237,7 @@ pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime has
             try self.box.children.values()[0].widget.scroll.child.box.children.put(text_box.getFocus().id, .{ .widget = .{ .text_box = text_box }, .rect = null, .min_size = null });
         }
 
-        pub fn addHunk(self: *Diff(Widget, repo_kind, hash_kind), hunk: df.Hunk(repo_kind, hash_kind)) !void {
+        pub fn addHunk(self: *Diff(Widget, repo_kind, repo_opts), hunk: df.Hunk(repo_kind, repo_opts)) !void {
             const buf = blk: {
                 var arr = std.ArrayList(u8).init(self.allocator);
                 errdefer arr.deinit();
@@ -281,15 +281,15 @@ pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime has
             try self.box.children.values()[0].widget.scroll.child.box.children.put(text_box.getFocus().id, .{ .widget = .{ .text_box = text_box }, .rect = null, .min_size = null });
         }
 
-        pub fn getScrollX(self: Diff(Widget, repo_kind, hash_kind)) isize {
+        pub fn getScrollX(self: Diff(Widget, repo_kind, repo_opts)) isize {
             return self.box.children.values()[0].widget.scroll.x;
         }
 
-        pub fn getScrollY(self: Diff(Widget, repo_kind, hash_kind)) isize {
+        pub fn getScrollY(self: Diff(Widget, repo_kind, repo_opts)) isize {
             return self.box.children.values()[0].widget.scroll.y;
         }
 
-        pub fn isEmpty(self: Diff(Widget, repo_kind, hash_kind)) bool {
+        pub fn isEmpty(self: Diff(Widget, repo_kind, repo_opts)) bool {
             return self.bufs.items.len == 0;
         }
     };

@@ -3,16 +3,14 @@
 
 const std = @import("std");
 
-const MAX_FILE_READ_BYTES = 1024; // FIXME: this is arbitrary...
-
-pub fn compress(in: std.fs.File, out: std.fs.File) !void {
+pub fn compress(comptime read_size: usize, in: std.fs.File, out: std.fs.File) !void {
     // init stream from input file
     var zlib_stream = try std.compress.zlib.compressor(out.writer(), .{ .level = .default });
 
     // write the compressed data to the output file
     try in.seekTo(0);
     const reader = in.reader();
-    var buf = [_]u8{0} ** MAX_FILE_READ_BYTES;
+    var buf = [_]u8{0} ** read_size;
     while (true) {
         // read from file
         const size = try reader.read(&buf);
@@ -23,7 +21,7 @@ pub fn compress(in: std.fs.File, out: std.fs.File) !void {
     try zlib_stream.finish();
 }
 
-pub fn decompress(in: std.fs.File, out: std.fs.File, skip_header: bool) !void {
+pub fn decompress(comptime read_size: usize, in: std.fs.File, out: std.fs.File, skip_header: bool) !void {
     // init stream from input file
     try in.seekTo(0);
     var zlib_stream = std.compress.zlib.decompressor(in.reader());
@@ -34,7 +32,7 @@ pub fn decompress(in: std.fs.File, out: std.fs.File, skip_header: bool) !void {
 
     // write the decompressed data to the output file
     const writer = out.writer();
-    var buf = [_]u8{0} ** MAX_FILE_READ_BYTES;
+    var buf = [_]u8{0} ** read_size;
     while (true) {
         // read from file
         const size = try zlib_stream.read(&buf);
@@ -48,6 +46,7 @@ pub const ZlibStream = std.compress.flate.inflate.Decompressor(.zlib, std.fs.Fil
 
 test "compress and decompress" {
     const temp_dir_name = "temp-test-compress";
+    const read_size = 1024;
 
     const allocator = std.testing.allocator;
     var args = std.ArrayList([]const u8).init(allocator);
@@ -68,12 +67,12 @@ test "compress and decompress" {
     // compress the file
     var out_compressed = try temp_dir.createFile("hello.txt.compressed", .{ .read = true });
     defer out_compressed.close();
-    try compress(hello_txt, out_compressed);
+    try compress(read_size, hello_txt, out_compressed);
 
     // decompress it so we know it works
     var out_decompressed = try temp_dir.createFile("out_decompressed", .{ .read = true });
     defer out_decompressed.close();
-    try decompress(out_compressed, out_decompressed, false);
+    try decompress(read_size, out_compressed, out_decompressed, false);
 
     // read the decompressed file into memory and check that it's the same
     var read_buffer = [_]u8{0} ** 1024;
