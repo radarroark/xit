@@ -50,7 +50,7 @@ pub fn objectToFile(
 
             // write the decompressed data to the output file
             const writer = out_file.writer();
-            var buf = [_]u8{0} ** repo_opts.stack_read_size;
+            var buf = [_]u8{0} ** repo_opts.read_size;
             while (true) {
                 // read from file
                 const size = try obj_rdr.reader.read(&buf);

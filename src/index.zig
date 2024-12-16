@@ -145,8 +145,8 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                         defer iter.deinit();
                         while (try iter.next()) |*next_cursor| {
                             const kv_pair = try next_cursor.readKeyValuePair();
-                            const path = try kv_pair.key_cursor.readBytesAlloc(self.arena.allocator(), repo_opts.heap_read_size);
-                            const buffer = try kv_pair.value_cursor.readBytesAlloc(self.allocator, repo_opts.heap_read_size);
+                            const path = try kv_pair.key_cursor.readBytesAlloc(self.arena.allocator(), repo_opts.max_read_size);
+                            const buffer = try kv_pair.value_cursor.readBytesAlloc(self.allocator, repo_opts.max_read_size);
                             defer self.allocator.free(buffer);
 
                             var stream = std.io.fixedBufferStream(buffer);
@@ -541,7 +541,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     defer iter.deinit();
                     while (try iter.next()) |*next_cursor| {
                         const kv_pair = try next_cursor.readKeyValuePair();
-                        const path = try kv_pair.key_cursor.readBytesAlloc(allocator, repo_opts.heap_read_size);
+                        const path = try kv_pair.key_cursor.readBytesAlloc(allocator, repo_opts.max_read_size);
                         defer allocator.free(path);
 
                         if (!self.entries.contains(path)) {
@@ -573,7 +573,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 
                         const path_hash = hash.hashInt(repo_opts.hash, path);
                         if (try index.getKeyCursor(path_hash)) |existing_entry_cursor| {
-                            const existing_entry = try existing_entry_cursor.readBytesAlloc(allocator, repo_opts.heap_read_size);
+                            const existing_entry = try existing_entry_cursor.readBytesAlloc(allocator, repo_opts.max_read_size);
                             defer allocator.free(existing_entry);
                             if (std.mem.eql(u8, entry_buffer.items, existing_entry)) {
                                 continue;
