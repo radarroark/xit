@@ -1356,7 +1356,8 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 }
 
 test "main" {
-    const last_hash_git = try testMain(.git, .{});
-    const last_hash_xit = try testMain(.xit, .{});
+    // read and write objects one byte at a time to help uncover bugs
+    const last_hash_git = try testMain(.git, .{ .read_size = 1 });
+    const last_hash_xit = try testMain(.xit, .{ .read_size = 1, .extra = .{ .chunk_size = 1 } });
     try std.testing.expectEqualStrings(&last_hash_git, &last_hash_xit);
 }

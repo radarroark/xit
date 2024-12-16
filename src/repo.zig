@@ -21,8 +21,8 @@ pub const RepoKind = enum {
 pub fn RepoOpts(comptime repo_kind: RepoKind) type {
     return struct {
         hash: hash.HashKind = .sha1,
-        stack_read_size: usize = 1024,
-        heap_read_size: usize = 1024,
+        read_size: usize = 1024,
+        max_read_size: usize = 2048,
         extra: Extra = .{},
 
         pub const Extra = switch (repo_kind) {

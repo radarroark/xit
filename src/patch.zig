@@ -266,7 +266,7 @@ pub fn applyPatch(
     var iter = try change_list_cursor.iterator();
     defer iter.deinit();
     while (try iter.next()) |*next_cursor| {
-        const change_buffer = try next_cursor.readBytesAlloc(allocator, repo_opts.heap_read_size);
+        const change_buffer = try next_cursor.readBytesAlloc(allocator, repo_opts.max_read_size);
         defer allocator.free(change_buffer);
 
         var stream = std.io.fixedBufferStream(change_buffer);
@@ -282,7 +282,7 @@ pub fn applyPatch(
 
                 // if child has an existing parent, remove it
                 if (try child_to_parent.getCursor(node_id_hash)) |*existing_parent_cursor| {
-                    const existing_parent_node_id_bytes = try existing_parent_cursor.readBytesAlloc(allocator, repo_opts.heap_read_size);
+                    const existing_parent_node_id_bytes = try existing_parent_cursor.readBytesAlloc(allocator, repo_opts.max_read_size);
                     defer allocator.free(existing_parent_node_id_bytes);
                     if (null != try live_parent_to_children.getCursor(hash.hashInt(repo_opts.hash, existing_parent_node_id_bytes))) {
                         const old_live_children_cursor = try live_parent_to_children.putCursor(hash.hashInt(repo_opts.hash, existing_parent_node_id_bytes));

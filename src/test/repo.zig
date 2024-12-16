@@ -756,8 +756,8 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
 
 test "merge conflict" {
     // read and write objects one byte at a time to help uncover bugs
-    try testMergeConflict(.git, .{ .stack_read_size = 1 });
-    try testMergeConflict(.xit, .{ .stack_read_size = 1, .extra = .{ .chunk_size = 1 } });
+    try testMergeConflict(.git, .{ .read_size = 1 });
+    try testMergeConflict(.xit, .{ .read_size = 1, .extra = .{ .chunk_size = 1 } });
 }
 
 /// creates a merge conflict with binary files, asserting that
