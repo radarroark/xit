@@ -53,10 +53,13 @@ pub fn writeChunks(
             else => |e| return e,
         }
 
-        // write hash to db
+        // write offset and hash to db
+        // note: we are storing the offset at the *end* of this chunk.
+        // this is useful so we can find the total size of the file
+        // by looking at the offset of the last chunk.
+        total_size += size;
         try writer.writeInt(u64, total_size, .big);
         try writer.writeAll(&chunk_hash_bytes);
-        total_size += size;
     }
 
     // finish writing to db
@@ -68,6 +71,57 @@ pub fn writeChunks(
     try object_id_to_header.put(object_hash, .{ .bytes = object_header });
 }
 
+fn findChunkIndex(
+    comptime repo_opts: rp.RepoOpts(.xit),
+    chunk_info_reader: *rp.Repo(.xit, repo_opts).DB.Cursor(.read_only).Reader,
+    position: u64,
+) !?usize {
+    const chunk_info_size = ((@bitSizeOf(u64) / 8) + hash.byteLen(repo_opts.hash));
+    const chunk_count = chunk_info_reader.size / chunk_info_size;
+    if (chunk_count == 0) {
+        return null;
+    }
+
+    var left: usize = 0;
+    var right: usize = chunk_count - 1;
+
+    // binary search for the chunk
+    while (left < right) {
+        const mid = left + ((right - left) / 2);
+
+        // note: we are storing the *end* offsets of each chunk
+        try chunk_info_reader.seekTo(mid * chunk_info_size);
+        const end_offset = try chunk_info_reader.readInt(u64, .big);
+
+        if (position < end_offset) {
+            if (mid > 0) {
+                // since we store end offsets, the offset of the previous
+                // chunk is the actual offset of `mid`
+                try chunk_info_reader.seekTo((mid - 1) * chunk_info_size);
+                const mid_offset = try chunk_info_reader.readInt(u64, .big);
+
+                if (position >= mid_offset) {
+                    return mid;
+                } else {
+                    right = mid - 1;
+                }
+            } else {
+                return mid;
+            }
+        } else {
+            left = mid + 1;
+        }
+    }
+
+    try chunk_info_reader.seekTo(right * chunk_info_size);
+    const right_offset = try chunk_info_reader.readInt(u64, .big);
+    if (position < right_offset) {
+        return right;
+    }
+
+    return null;
+}
+
 pub fn readChunk(
     comptime repo_opts: rp.RepoOpts(.xit),
     xit_dir: std.fs.Dir,
@@ -75,11 +129,9 @@ pub fn readChunk(
     position: u64,
     buf: []u8,
 ) !usize {
-    const chunk_index = position / repo_opts.extra.chunk_size;
-    const chunk_info_position = (chunk_index * ((@bitSizeOf(u64) / 8) + hash.byteLen(repo_opts.hash)));
-    if (chunk_info_position == chunk_info_reader.size) {
-        return 0;
-    }
+    const chunk_index = (try findChunkIndex(repo_opts, chunk_info_reader, position)) orelse return 0;
+    const chunk_info_size = ((@bitSizeOf(u64) / 8) + hash.byteLen(repo_opts.hash));
+    const chunk_info_position = chunk_index * chunk_info_size;
     const chunk_hash_position = chunk_info_position + (@bitSizeOf(u64) / 8);
 
     try chunk_info_reader.seekTo(chunk_hash_position);
