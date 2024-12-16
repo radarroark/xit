@@ -105,7 +105,7 @@ pub fn writeObject(
             compressed_lock.success = true;
         },
         .xit => {
-            const file_hash = hash.bytesToHash(repo_opts.hash, hash_bytes_buffer);
+            const file_hash = hash.bytesToInt(repo_opts.hash, hash_bytes_buffer);
             try chunk.writeChunks(repo_opts, state, file, file_hash, header_str);
         },
     }
@@ -182,7 +182,7 @@ fn writeTree(
             compressed_lock.success = true;
         },
         .xit => {
-            const object_hash = hash.bytesToHash(repo_opts.hash, hash_bytes_buffer);
+            const object_hash = hash.bytesToInt(repo_opts.hash, hash_bytes_buffer);
             var stream = std.io.fixedBufferStream(tree_contents);
             try chunk.writeChunks(repo_opts, state, &stream, object_hash, header);
         },
@@ -338,7 +338,7 @@ pub fn writeCommit(
     // calc the hash of its contents
     try hash.hashBuffer(repo_opts.hash, commit, &commit_hash_bytes_buffer);
     const commit_hash_hex = std.fmt.bytesToHex(commit_hash_bytes_buffer, .lower);
-    const commit_hash = hash.bytesToHash(repo_opts.hash, &commit_hash_bytes_buffer);
+    const commit_hash = hash.bytesToInt(repo_opts.hash, &commit_hash_bytes_buffer);
 
     switch (repo_kind) {
         .git => {
@@ -536,12 +536,12 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                 .xit => {
                     const chunk_info_cursor = (try state.extra.moment.cursor.readPath(void, &.{
                         .{ .hash_map_get = .{ .value = hash.hashInt(repo_opts.hash, "object-id->chunk-info") } },
-                        .{ .hash_map_get = .{ .value = try hash.hexToHash(repo_opts.hash, oid) } },
+                        .{ .hash_map_get = .{ .value = try hash.hexToInt(repo_opts.hash, oid) } },
                     })) orelse return error.ObjectNotFound;
 
                     const header_cursor = (try state.extra.moment.cursor.readPath(void, &.{
                         .{ .hash_map_get = .{ .value = hash.hashInt(repo_opts.hash, "object-id->header") } },
-                        .{ .hash_map_get = .{ .value = try hash.hexToHash(repo_opts.hash, oid) } },
+                        .{ .hash_map_get = .{ .value = try hash.hexToInt(repo_opts.hash, oid) } },
                     })) orelse return error.ObjectNotFound;
 
                     var header_buffer = [_]u8{0} ** 32;

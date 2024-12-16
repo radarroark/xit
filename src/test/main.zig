@@ -210,7 +210,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                 const head_file_buffer = try ref.readHead(repo_kind, repo_opts, state);
                 const chunk_info_cursor_maybe = try moment.cursor.readPath(void, &.{
                     .{ .hash_map_get = .{ .value = hash.hashInt(repo_opts.hash, "object-id->chunk-info") } },
-                    .{ .hash_map_get = .{ .value = try hash.hexToHash(repo_opts.hash, &head_file_buffer) } },
+                    .{ .hash_map_get = .{ .value = try hash.hexToInt(repo_opts.hash, &head_file_buffer) } },
                 });
                 try std.testing.expect(chunk_info_cursor_maybe != null);
             },
@@ -466,7 +466,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                 const head_file_buffer = try ref.readHead(repo_kind, repo_opts, state);
                 const chunk_info_cursor_maybe = try moment.cursor.readPath(void, &.{
                     .{ .hash_map_get = .{ .value = hash.hashInt(repo_opts.hash, "object-id->chunk-info") } },
-                    .{ .hash_map_get = .{ .value = try hash.hexToHash(repo_opts.hash, &head_file_buffer) } },
+                    .{ .hash_map_get = .{ .value = try hash.hexToInt(repo_opts.hash, &head_file_buffer) } },
                 });
                 try std.testing.expect(chunk_info_cursor_maybe != null);
             },
