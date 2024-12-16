@@ -208,11 +208,11 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                 var moment = try repo.core.latestMoment();
                 const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
                 const head_file_buffer = try ref.readHead(repo_kind, repo_opts, state);
-                const chunk_hashes_cursor_maybe = try moment.cursor.readPath(void, &.{
-                    .{ .hash_map_get = .{ .value = hash.hashInt(repo_opts.hash, "object-id->chunk-hashes") } },
+                const chunk_info_cursor_maybe = try moment.cursor.readPath(void, &.{
+                    .{ .hash_map_get = .{ .value = hash.hashInt(repo_opts.hash, "object-id->chunk-info") } },
                     .{ .hash_map_get = .{ .value = try hash.hexToHash(repo_opts.hash, &head_file_buffer) } },
                 });
-                try std.testing.expect(chunk_hashes_cursor_maybe != null);
+                try std.testing.expect(chunk_info_cursor_maybe != null);
             },
         }
     }
@@ -464,11 +464,11 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                 var moment = try repo.core.latestMoment();
                 const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
                 const head_file_buffer = try ref.readHead(repo_kind, repo_opts, state);
-                const chunk_hashes_cursor_maybe = try moment.cursor.readPath(void, &.{
-                    .{ .hash_map_get = .{ .value = hash.hashInt(repo_opts.hash, "object-id->chunk-hashes") } },
+                const chunk_info_cursor_maybe = try moment.cursor.readPath(void, &.{
+                    .{ .hash_map_get = .{ .value = hash.hashInt(repo_opts.hash, "object-id->chunk-info") } },
                     .{ .hash_map_get = .{ .value = try hash.hexToHash(repo_opts.hash, &head_file_buffer) } },
                 });
-                try std.testing.expect(chunk_hashes_cursor_maybe != null);
+                try std.testing.expect(chunk_info_cursor_maybe != null);
             },
         }
     }

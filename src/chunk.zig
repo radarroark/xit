@@ -11,13 +11,13 @@ pub fn writeChunks(
     object_header: []const u8,
 ) !void {
     // exit early if the chunks for this object already exist
-    const blob_id_to_chunk_hashes_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "object-id->chunk-hashes"));
-    const blob_id_to_chunk_hashes = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(blob_id_to_chunk_hashes_cursor);
-    if (null != try blob_id_to_chunk_hashes.getCursor(object_hash)) return;
+    const blob_id_to_chunk_info_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "object-id->chunk-info"));
+    const blob_id_to_chunk_info = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(blob_id_to_chunk_info_cursor);
+    if (null != try blob_id_to_chunk_info.getCursor(object_hash)) return;
 
     // get the writer
-    var chunk_hashes_cursor = try blob_id_to_chunk_hashes.putCursor(object_hash);
-    var writer = try chunk_hashes_cursor.writer();
+    var chunk_info_cursor = try blob_id_to_chunk_info.putCursor(object_hash);
+    var writer = try chunk_info_cursor.writer();
 
     // make the .xit/chunks dir
     var chunks_dir = try state.core.xit_dir.makeOpenPath("chunks", .{});
@@ -26,6 +26,7 @@ pub fn writeChunks(
     var chunk_buffer = [_]u8{0} ** repo_opts.extra.chunk_size;
     const reader = file.reader();
 
+    var total_size: u64 = 0;
     while (true) {
         // read chunk
         const size = try reader.read(&chunk_buffer);
@@ -53,7 +54,9 @@ pub fn writeChunks(
         }
 
         // write hash to db
+        try writer.writeInt(u64, total_size, .big);
         try writer.writeAll(&chunk_hash_bytes);
+        total_size += size;
     }
 
     // finish writing to db
@@ -68,19 +71,20 @@ pub fn writeChunks(
 pub fn readChunk(
     comptime repo_opts: rp.RepoOpts(.xit),
     xit_dir: std.fs.Dir,
-    chunk_hashes_reader: *rp.Repo(.xit, repo_opts).DB.Cursor(.read_only).Reader,
+    chunk_info_reader: *rp.Repo(.xit, repo_opts).DB.Cursor(.read_only).Reader,
     position: u64,
     buf: []u8,
 ) !usize {
     const chunk_index = position / repo_opts.extra.chunk_size;
-    const chunk_hash_position = chunk_index * hash.byteLen(repo_opts.hash);
-    if (chunk_hash_position == chunk_hashes_reader.size) {
+    const chunk_info_position = (chunk_index * ((@bitSizeOf(u64) / 8) + hash.byteLen(repo_opts.hash)));
+    if (chunk_info_position == chunk_info_reader.size) {
         return 0;
     }
+    const chunk_hash_position = chunk_info_position + (@bitSizeOf(u64) / 8);
 
-    try chunk_hashes_reader.seekTo(chunk_hash_position);
+    try chunk_info_reader.seekTo(chunk_hash_position);
     var chunk_hash_bytes = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-    try chunk_hashes_reader.readNoEof(&chunk_hash_bytes);
+    try chunk_info_reader.readNoEof(&chunk_hash_bytes);
     const chunk_hash_hex = std.fmt.bytesToHex(chunk_hash_bytes, .lower);
 
     var chunks_dir = try xit_dir.openDir("chunks", .{});
@@ -95,7 +99,7 @@ pub fn readChunk(
 pub fn ChunkObjectReader(comptime repo_opts: rp.RepoOpts(.xit)) type {
     return struct {
         xit_dir: std.fs.Dir,
-        chunk_hashes_reader: rp.Repo(.xit, repo_opts).DB.Cursor(.read_only).Reader,
+        chunk_info_reader: rp.Repo(.xit, repo_opts).DB.Cursor(.read_only).Reader,
         position: u64,
 
         pub const Error = std.fs.File.OpenError || rp.Repo(.xit, repo_opts).DB.Cursor(.read_only).Reader.Error || error{InvalidOffset};
@@ -114,7 +118,7 @@ pub fn ChunkObjectReader(comptime repo_opts: rp.RepoOpts(.xit)) type {
         }
 
         fn readStep(self: *@This(), buf: []u8) !usize {
-            return try readChunk(repo_opts, self.xit_dir, &self.chunk_hashes_reader, self.position, buf);
+            return try readChunk(repo_opts, self.xit_dir, &self.chunk_info_reader, self.position, buf);
         }
 
         pub fn reset(self: *@This()) !void {
