@@ -88,8 +88,7 @@ pub fn hashBuffer(comptime hash_kind: HashKind, buffer: []const u8, out: *[byteL
 }
 
 pub fn hashInt(comptime hash_kind: HashKind, buffer: []const u8) HashInt(hash_kind) {
-    const hash_size = @bitSizeOf(HashInt(hash_kind)) / 8;
-    var hash_buffer = [_]u8{0} ** hash_size;
+    var hash_buffer = [_]u8{0} ** byteLen(hash_kind);
     var hasher = Hasher(hash_kind).init();
     hasher.update(buffer);
     hasher.final(&hash_buffer);
@@ -97,15 +96,13 @@ pub fn hashInt(comptime hash_kind: HashKind, buffer: []const u8) HashInt(hash_ki
 }
 
 pub fn hexToHash(comptime hash_kind: HashKind, hex_buffer: *const [hexLen(hash_kind)]u8) !HashInt(hash_kind) {
-    const hash_size = @bitSizeOf(HashInt(hash_kind)) / 8;
-    var hash_buffer = [_]u8{0} ** hash_size;
+    var hash_buffer = [_]u8{0} ** byteLen(hash_kind);
     _ = try std.fmt.hexToBytes(&hash_buffer, hex_buffer);
     return std.mem.bytesToValue(HashInt(hash_kind), &hash_buffer);
 }
 
 pub fn bytesToHash(comptime hash_kind: HashKind, bytes_buffer: *const [byteLen(hash_kind)]u8) HashInt(hash_kind) {
-    const hash_size = @bitSizeOf(HashInt(hash_kind)) / 8;
-    var hash_buffer = [_]u8{0} ** hash_size;
+    var hash_buffer = [_]u8{0} ** byteLen(hash_kind);
     @memcpy(&hash_buffer, bytes_buffer);
     return std.mem.bytesToValue(HashInt(hash_kind), &hash_buffer);
 }
