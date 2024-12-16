@@ -534,8 +534,8 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                     };
                 },
                 .xit => {
-                    const chunk_hashes_cursor = (try state.extra.moment.cursor.readPath(void, &.{
-                        .{ .hash_map_get = .{ .value = hash.hashInt(repo_opts.hash, "object-id->chunk-hashes") } },
+                    const chunk_info_cursor = (try state.extra.moment.cursor.readPath(void, &.{
+                        .{ .hash_map_get = .{ .value = hash.hashInt(repo_opts.hash, "object-id->chunk-info") } },
                         .{ .hash_map_get = .{ .value = try hash.hexToHash(repo_opts.hash, oid) } },
                     })) orelse return error.ObjectNotFound;
 
@@ -550,20 +550,20 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                     const header = try readObjectHeader(stream.reader());
 
                     // put cursor on the heap so the pointer is stable (the reader uses it internally)
-                    const chunk_hashes_ptr = try allocator.create(rp.Repo(repo_kind, repo_opts).DB.Cursor(.read_only));
-                    errdefer allocator.destroy(chunk_hashes_ptr);
-                    chunk_hashes_ptr.* = chunk_hashes_cursor;
+                    const chunk_info_ptr = try allocator.create(rp.Repo(repo_kind, repo_opts).DB.Cursor(.read_only));
+                    errdefer allocator.destroy(chunk_info_ptr);
+                    chunk_info_ptr.* = chunk_info_cursor;
 
                     return .{
                         .allocator = allocator,
                         .header = header,
                         .reader = std.io.bufferedReaderSize(BUFFER_SIZE, Reader{
                             .xit_dir = state.core.xit_dir,
-                            .chunk_hashes_reader = try chunk_hashes_ptr.reader(),
+                            .chunk_info_reader = try chunk_info_ptr.reader(),
                             .position = 0,
                         }),
                         .internal = .{
-                            .cursor = chunk_hashes_ptr,
+                            .cursor = chunk_info_ptr,
                         },
                     };
                 },
