@@ -170,7 +170,7 @@ fn writePatch(
     path_hash: hash.HashInt(repo_opts.hash),
 ) ![hash.byteLen(repo_opts.hash)]u8 {
     const patch_hash_bytes = try patchHash(repo_opts, moment, branch, allocator, line_iter_pair, path_hash);
-    const patch_hash = hash.bytesToHash(repo_opts.hash, &patch_hash_bytes);
+    const patch_hash = hash.bytesToInt(repo_opts.hash, &patch_hash_bytes);
 
     // exit early if patch already exists
     if (try moment.cursor.readPath(void, &.{
@@ -502,7 +502,7 @@ pub fn writeAndApplyPatches(
 
             // create patch
             const patch_hash_bytes = try writePatch(repo_opts, state.extra.moment, &branch, allocator, &line_iter_pair, path_hash);
-            const patch_hash = hash.bytesToHash(repo_opts.hash, &patch_hash_bytes);
+            const patch_hash = hash.bytesToInt(repo_opts.hash, &patch_hash_bytes);
 
             // apply patch
             try applyPatch(repo_opts, state.readOnly().extra.moment, &branch, allocator, path_hash, patch_hash);
@@ -510,7 +510,7 @@ pub fn writeAndApplyPatches(
             // associate patch hash with path/commit
             const commit_id_to_path_to_patch_id_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "commit-id->path->patch-id"));
             const commit_id_to_path_to_patch_id = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(commit_id_to_path_to_patch_id_cursor);
-            const path_to_patch_id_cursor = try commit_id_to_path_to_patch_id.putCursor(try hash.hexToHash(repo_opts.hash, commit_oid));
+            const path_to_patch_id_cursor = try commit_id_to_path_to_patch_id.putCursor(try hash.hexToInt(repo_opts.hash, commit_oid));
             const path_to_patch_id = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(path_to_patch_id_cursor);
             try path_to_patch_id.putKey(path_hash, .{ .slot = path_cursor.slot() });
             try path_to_patch_id.put(path_hash, .{ .bytes = &patch_hash_bytes });
@@ -520,7 +520,7 @@ pub fn writeAndApplyPatches(
     // associate the path->live-parent->children map with commit
     const commit_id_to_path_to_live_parent_to_children_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "commit-id->path->live-parent->children"));
     const commit_id_to_path_to_live_parent_to_children = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(commit_id_to_path_to_live_parent_to_children_cursor);
-    const commit_hash = try hash.hexToHash(repo_opts.hash, commit_oid);
+    const commit_hash = try hash.hexToInt(repo_opts.hash, commit_oid);
     if (try branch.getCursor(hash.hashInt(repo_opts.hash, "path->live-parent->children"))) |path_to_live_parent_to_children_cursor| {
         try commit_id_to_path_to_live_parent_to_children.put(commit_hash, .{ .slot = path_to_live_parent_to_children_cursor.slot() });
     } else {

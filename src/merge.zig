@@ -533,12 +533,12 @@ fn writeBlobWithPatches(
 
         if (commit_id_to_path_to_patch_id_cursor_maybe) |commit_id_to_path_to_patch_id_cursor| {
             const commit_id_to_path_to_patch_id = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(commit_id_to_path_to_patch_id_cursor);
-            if (try commit_id_to_path_to_patch_id.getCursor(try hash.hexToHash(repo_opts.hash, &object.oid))) |path_to_patch_id_cursor| {
+            if (try commit_id_to_path_to_patch_id.getCursor(try hash.hexToInt(repo_opts.hash, &object.oid))) |path_to_patch_id_cursor| {
                 const path_to_patch_id = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(path_to_patch_id_cursor);
                 if (try path_to_patch_id.getCursor(path_hash)) |patch_id_cursor| {
                     const patch_id_bytes = try patch_id_cursor.readBytesAlloc(allocator, repo_opts.heap_read_size);
                     defer allocator.free(patch_id_bytes);
-                    const patch_id = hash.bytesToHash(repo_opts.hash, patch_id_bytes[0..comptime hash.byteLen(repo_opts.hash)]);
+                    const patch_id = hash.bytesToInt(repo_opts.hash, patch_id_bytes[0..comptime hash.byteLen(repo_opts.hash)]);
                     try patch_ids.append(patch_id);
                 }
             }
@@ -580,17 +580,17 @@ fn writeBlobWithPatches(
     const commit_id_to_path_to_live_parent_to_children_cursor = (try state.extra.moment.getCursor(hash.hashInt(repo_opts.hash, "commit-id->path->live-parent->children"))) orelse return error.KeyNotFound;
     const commit_id_to_path_to_live_parent_to_children = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(commit_id_to_path_to_live_parent_to_children_cursor);
 
-    const base_path_to_live_parent_to_children_cursor = (try commit_id_to_path_to_live_parent_to_children.getCursor(try hash.hexToHash(repo_opts.hash, base_oid))) orelse return error.KeyNotFound;
+    const base_path_to_live_parent_to_children_cursor = (try commit_id_to_path_to_live_parent_to_children.getCursor(try hash.hexToInt(repo_opts.hash, base_oid))) orelse return error.KeyNotFound;
     const base_path_to_live_parent_to_children = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(base_path_to_live_parent_to_children_cursor);
     const base_live_parent_to_children_cursor = (try base_path_to_live_parent_to_children.getCursor(path_hash)) orelse return error.KeyNotFound;
     const base_live_parent_to_children = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(base_live_parent_to_children_cursor);
 
-    const target_path_to_live_parent_to_children_cursor = (try commit_id_to_path_to_live_parent_to_children.getCursor(try hash.hexToHash(repo_opts.hash, target_oid))) orelse return error.KeyNotFound;
+    const target_path_to_live_parent_to_children_cursor = (try commit_id_to_path_to_live_parent_to_children.getCursor(try hash.hexToInt(repo_opts.hash, target_oid))) orelse return error.KeyNotFound;
     const target_path_to_live_parent_to_children = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(target_path_to_live_parent_to_children_cursor);
     const target_live_parent_to_children_cursor = (try target_path_to_live_parent_to_children.getCursor(path_hash)) orelse return error.KeyNotFound;
     const target_live_parent_to_children = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(target_live_parent_to_children_cursor);
 
-    const source_path_to_live_parent_to_children_cursor = (try commit_id_to_path_to_live_parent_to_children.getCursor(try hash.hexToHash(repo_opts.hash, source_oid))) orelse return error.KeyNotFound;
+    const source_path_to_live_parent_to_children_cursor = (try commit_id_to_path_to_live_parent_to_children.getCursor(try hash.hexToInt(repo_opts.hash, source_oid))) orelse return error.KeyNotFound;
     const source_path_to_live_parent_to_children = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(source_path_to_live_parent_to_children_cursor);
     const source_live_parent_to_children_cursor = (try source_path_to_live_parent_to_children.getCursor(path_hash)) orelse return error.KeyNotFound;
     const source_live_parent_to_children = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(source_live_parent_to_children_cursor);

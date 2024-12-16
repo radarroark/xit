@@ -95,13 +95,13 @@ pub fn hashInt(comptime hash_kind: HashKind, buffer: []const u8) HashInt(hash_ki
     return std.mem.bytesToValue(HashInt(hash_kind), &hash_buffer);
 }
 
-pub fn hexToHash(comptime hash_kind: HashKind, hex_buffer: *const [hexLen(hash_kind)]u8) !HashInt(hash_kind) {
+pub fn hexToInt(comptime hash_kind: HashKind, hex_buffer: *const [hexLen(hash_kind)]u8) !HashInt(hash_kind) {
     var hash_buffer = [_]u8{0} ** byteLen(hash_kind);
     _ = try std.fmt.hexToBytes(&hash_buffer, hex_buffer);
     return std.mem.bytesToValue(HashInt(hash_kind), &hash_buffer);
 }
 
-pub fn bytesToHash(comptime hash_kind: HashKind, bytes_buffer: *const [byteLen(hash_kind)]u8) HashInt(hash_kind) {
+pub fn bytesToInt(comptime hash_kind: HashKind, bytes_buffer: *const [byteLen(hash_kind)]u8) HashInt(hash_kind) {
     var hash_buffer = [_]u8{0} ** byteLen(hash_kind);
     @memcpy(&hash_buffer, bytes_buffer);
     return std.mem.bytesToValue(HashInt(hash_kind), &hash_buffer);
