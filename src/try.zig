@@ -60,7 +60,7 @@ pub fn main() !void {
     const writers = rp.Writers{ .out = std.io.getStdOut().writer().any(), .err = std.io.getStdErr().writer().any() };
 
     {
-        var git_repo = try rp.Repo(.git, .{}).init(allocator, .{ .cwd = temp_dir });
+        var git_repo = try rp.Repo(.git, .{}).open(allocator, .{ .cwd = temp_dir });
         defer git_repo.deinit();
 
         // restore all files in working tree
@@ -98,7 +98,7 @@ pub fn main() !void {
             }
         }
 
-        var xit_repo = try rp.Repo(.xit, .{}).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "." } }, writers);
+        var xit_repo = try rp.Repo(.xit, .{}).init(allocator, .{ .cwd = temp_dir }, ".");
         defer xit_repo.deinit();
 
         for (0..commits.items.len) |i| {

@@ -131,7 +131,100 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             cwd: std.fs.Dir,
         };
 
-        pub fn init(allocator: std.mem.Allocator, opts: InitOpts) !Repo(repo_kind, repo_opts) {
+        pub fn init(allocator: std.mem.Allocator, opts: InitOpts, sub_path: []const u8) !Repo(repo_kind, repo_opts) {
+            // get the root dir. if no path was given to the init command, this
+            // should just be the current working directory (cwd). if a path was
+            // given, it should either append it to the cwd or, if it is absolute,
+            // it should just use that path alone. IT'S MAGIC!
+            var repo_dir = try opts.cwd.makeOpenPath(sub_path, .{});
+            errdefer repo_dir.close();
+
+            switch (repo_kind) {
+                .git => {
+                    // return if dir already exists
+                    {
+                        var git_dir_or_err = repo_dir.openDir(".git", .{});
+                        if (git_dir_or_err) |*git_dir| {
+                            git_dir.close();
+                            return error.RepoAlreadyExists;
+                        } else |_| {}
+                    }
+
+                    // make the .git dir
+                    var git_dir = try repo_dir.makeOpenPath(".git", .{});
+                    errdefer git_dir.close();
+
+                    // make a few dirs inside of .git
+                    try git_dir.makePath("objects");
+                    try git_dir.makePath("objects/pack");
+                    try git_dir.makePath("refs");
+                    try git_dir.makePath("refs/heads");
+
+                    var self = Repo(repo_kind, repo_opts){
+                        .core = .{
+                            .repo_dir = repo_dir,
+                            .git_dir = git_dir,
+                        },
+                        .init_opts = opts,
+                    };
+
+                    // update HEAD
+                    const state = State(.read_write){ .core = &self.core, .extra = .{} };
+                    try ref.writeHead(repo_kind, repo_opts, state, "master", null);
+
+                    return self;
+                },
+                .xit => {
+                    // return if dir already exists
+                    {
+                        var xit_dir_or_err = repo_dir.openDir(".xit", .{});
+                        if (xit_dir_or_err) |*xit_dir| {
+                            xit_dir.close();
+                            return error.RepoAlreadyExists;
+                        } else |_| {}
+                    }
+
+                    // make the .xit dir
+                    var xit_dir = try repo_dir.makeOpenPath(".xit", .{});
+                    errdefer xit_dir.close();
+
+                    // create the db file
+                    const db_file = try xit_dir.createFile("db", .{ .exclusive = true, .lock = .exclusive, .read = true });
+                    errdefer db_file.close();
+
+                    // make the db
+                    var self = Repo(repo_kind, repo_opts){
+                        .core = .{
+                            .repo_dir = repo_dir,
+                            .xit_dir = xit_dir,
+                            .db_file = db_file,
+                            .db = try DB.init(allocator, .{ .file = db_file, .hash_id = .{ .id = hash.hashId(repo_opts.hash) } }),
+                        },
+                        .init_opts = opts,
+                    };
+
+                    // update HEAD
+                    const Ctx = struct {
+                        core: *Repo(repo_kind, repo_opts).Core,
+
+                        pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
+                            var moment = try DB.HashMap(.read_write).init(cursor.*);
+                            const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
+                            try ref.writeHead(repo_kind, repo_opts, state, "master", null);
+                        }
+                    };
+                    const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
+                    try history.appendContext(
+                        .{ .slot = try history.getSlot(-1) },
+                        Ctx{ .core = &self.core },
+                    );
+
+                    return self;
+                },
+            }
+        }
+
+        pub fn open(allocator: std.mem.Allocator, opts: InitOpts) !Repo(repo_kind, repo_opts) {
             const cwd_path = try opts.cwd.realpathAlloc(allocator, ".");
             defer allocator.free(cwd_path);
 
@@ -205,120 +298,6 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
-        pub fn initWithCommand(allocator: std.mem.Allocator, opts: InitOpts, sub_command: cmd.SubCommand(repo_opts.hash), writers: Writers) !Repo(repo_kind, repo_opts) {
-            var repo = Repo(repo_kind, repo_opts).init(allocator, opts) catch |err| switch (err) {
-                error.RepoNotFound => {
-                    if (sub_command == .init) {
-                        var repo = switch (repo_kind) {
-                            .git => Repo(repo_kind, repo_opts){ .core = undefined, .init_opts = opts },
-                            .xit => Repo(repo_kind, repo_opts){ .core = undefined, .init_opts = opts },
-                        };
-                        try repo.runCommand(allocator, sub_command, writers);
-                        return repo;
-                    } else {
-                        return error.RepoNotFound;
-                    }
-                },
-                else => |e| return e,
-            };
-            errdefer repo.deinit();
-            try repo.runCommand(allocator, sub_command, writers);
-            return repo;
-        }
-
-        pub fn initNew(allocator: std.mem.Allocator, dir: std.fs.Dir, sub_path: []const u8) !Repo(repo_kind, repo_opts) {
-            // get the root dir. if no path was given to the init command, this
-            // should just be the current working directory (cwd). if a path was
-            // given, it should either append it to the cwd or, if it is absolute,
-            // it should just use that path alone. IT'S MAGIC!
-            var repo_dir = try dir.makeOpenPath(sub_path, .{});
-            errdefer repo_dir.close();
-
-            switch (repo_kind) {
-                .git => {
-                    // return if dir already exists
-                    {
-                        var git_dir_or_err = repo_dir.openDir(".git", .{});
-                        if (git_dir_or_err) |*git_dir| {
-                            git_dir.close();
-                            return error.RepoAlreadyExists;
-                        } else |_| {}
-                    }
-
-                    // make the .git dir
-                    var git_dir = try repo_dir.makeOpenPath(".git", .{});
-                    errdefer git_dir.close();
-
-                    // make a few dirs inside of .git
-                    try git_dir.makePath("objects");
-                    try git_dir.makePath("objects/pack");
-                    try git_dir.makePath("refs");
-                    try git_dir.makePath("refs/heads");
-
-                    var self = Repo(repo_kind, repo_opts){
-                        .core = .{
-                            .repo_dir = repo_dir,
-                            .git_dir = git_dir,
-                        },
-                        .init_opts = .{ .cwd = dir },
-                    };
-
-                    // update HEAD
-                    const state = State(.read_write){ .core = &self.core, .extra = .{} };
-                    try ref.writeHead(repo_kind, repo_opts, state, "master", null);
-
-                    return self;
-                },
-                .xit => {
-                    // return if dir already exists
-                    {
-                        var xit_dir_or_err = repo_dir.openDir(".xit", .{});
-                        if (xit_dir_or_err) |*xit_dir| {
-                            xit_dir.close();
-                            return error.RepoAlreadyExists;
-                        } else |_| {}
-                    }
-
-                    // make the .xit dir
-                    var xit_dir = try repo_dir.makeOpenPath(".xit", .{});
-                    errdefer xit_dir.close();
-
-                    // create the db file
-                    const db_file = try xit_dir.createFile("db", .{ .exclusive = true, .lock = .exclusive, .read = true });
-                    errdefer db_file.close();
-
-                    // make the db
-                    var self = Repo(repo_kind, repo_opts){
-                        .core = .{
-                            .repo_dir = repo_dir,
-                            .xit_dir = xit_dir,
-                            .db_file = db_file,
-                            .db = try DB.init(allocator, .{ .file = db_file, .hash_id = .{ .id = hash.hashId(repo_opts.hash) } }),
-                        },
-                        .init_opts = .{ .cwd = dir },
-                    };
-
-                    // update HEAD
-                    const Ctx = struct {
-                        core: *Repo(repo_kind, repo_opts).Core,
-
-                        pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
-                            var moment = try DB.HashMap(.read_write).init(cursor.*);
-                            const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            try ref.writeHead(repo_kind, repo_opts, state, "master", null);
-                        }
-                    };
-                    const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
-                    try history.appendContext(
-                        .{ .slot = try history.getSlot(-1) },
-                        Ctx{ .core = &self.core },
-                    );
-
-                    return self;
-                },
-            }
-        }
-
         pub fn deinit(self: *Repo(repo_kind, repo_opts)) void {
             switch (repo_kind) {
                 .git => {
@@ -333,10 +312,10 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
-        fn runCommand(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, sub_command: cmd.SubCommand(repo_opts.hash), writers: Writers) !void {
+        pub fn command(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, sub_command: cmd.SubCommand(repo_opts.hash), writers: Writers) !void {
             switch (sub_command) {
                 .init => |init_cmd| {
-                    self.* = Repo(repo_kind, repo_opts).initNew(allocator, self.init_opts.cwd, init_cmd.dir) catch |err| switch (err) {
+                    self.* = Repo(repo_kind, repo_opts).init(allocator, self.init_opts, init_cmd.dir) catch |err| switch (err) {
                         error.RepoAlreadyExists => {
                             try writers.err.print("{s} is already a repository\n", .{init_cmd.dir});
                             return err;

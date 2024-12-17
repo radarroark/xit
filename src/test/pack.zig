@@ -198,7 +198,7 @@ test "pack" {
         var commit_oid_hex = [_]u8{0} ** hash.hexLen(repo_opts.hash);
         try std.testing.expectEqual(0, c.git_oid_fmt(@ptrCast(&commit_oid_hex), commit_oid));
 
-        var r = try rp.Repo(.git, repo_opts).init(allocator, .{ .cwd = repo_dir });
+        var r = try rp.Repo(.git, repo_opts).open(allocator, .{ .cwd = repo_dir });
         defer r.deinit();
 
         var object = try obj.Object(.git, repo_opts, .full).init(allocator, .{ .core = &r.core, .extra = .{} }, &commit_oid_hex);
@@ -208,7 +208,7 @@ test "pack" {
 
     // write and read a pack object
     {
-        var r = try rp.Repo(.git, repo_opts).init(allocator, .{ .cwd = repo_dir });
+        var r = try rp.Repo(.git, repo_opts).open(allocator, .{ .cwd = repo_dir });
         defer r.deinit();
 
         const head_oid = try ref.readHead(.git, repo_opts, .{ .core = &r.core, .extra = .{} });
