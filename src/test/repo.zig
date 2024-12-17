@@ -40,14 +40,14 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
     defer temp_dir.close();
 
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, .{});
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "repo");
         defer repo.deinit();
     }
 
     var repo_dir = try temp_dir.openDir("repo", .{});
     defer repo_dir.close();
 
-    var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
     defer repo.deinit();
 
     try addFile(repo_kind, repo_opts, &repo, allocator, "README.md", "Hello, world!");
@@ -101,14 +101,14 @@ fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
     defer temp_dir.close();
 
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, .{});
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "repo");
         defer repo.deinit();
     }
 
     var repo_dir = try temp_dir.openDir("repo", .{});
     defer repo_dir.close();
 
-    var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
     defer repo.deinit();
 
     // A --- B --- C --------- J --- K [master]
@@ -256,14 +256,14 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
     // same file conflict
     {
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "same-file-conflict" } }, .{});
+            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "same-file-conflict");
             defer repo.deinit();
         }
 
         var repo_dir = try temp_dir.openDir("same-file-conflict", .{});
         defer repo_dir.close();
 
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
 
         // A --- B --- D [master]
@@ -365,14 +365,14 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
     // same file conflict (autoresolved)
     {
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "same-file-conflict-autoresolved" } }, .{});
+            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "same-file-conflict-autoresolved");
             defer repo.deinit();
         }
 
         var repo_dir = try temp_dir.openDir("same-file-conflict-autoresolved", .{});
         defer repo_dir.close();
 
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
 
         // A --- B --- D [master]
@@ -452,14 +452,14 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
     // modify/delete conflict (target modifies, source deletes)
     {
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "modify-delete-conflict" } }, .{});
+            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "modify-delete-conflict");
             defer repo.deinit();
         }
 
         var repo_dir = try temp_dir.openDir("modify-delete-conflict", .{});
         defer repo_dir.close();
 
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
 
         // A --- B --- D [master]
@@ -527,14 +527,14 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
     // delete/modify conflict (target deletes, source modifies)
     {
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "delete-modify-conflict" } }, .{});
+            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "delete-modify-conflict");
             defer repo.deinit();
         }
 
         var repo_dir = try temp_dir.openDir("delete-modify-conflict", .{});
         defer repo_dir.close();
 
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
 
         // A --- B --- D [master]
@@ -600,14 +600,14 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
     // file/dir conflict (target has file, source has dir)
     {
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "file-dir-conflict" } }, .{});
+            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "file-dir-conflict");
             defer repo.deinit();
         }
 
         var repo_dir = try temp_dir.openDir("file-dir-conflict", .{});
         defer repo_dir.close();
 
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
 
         // A --- B --- D [master]
@@ -679,14 +679,14 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
     // dir/file conflict (target has dir, source has file)
     {
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "dir-file-conflict" } }, .{});
+            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "dir-file-conflict");
             defer repo.deinit();
         }
 
         var repo_dir = try temp_dir.openDir("dir-file-conflict", .{});
         defer repo_dir.close();
 
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
 
         // A --- B --- D [master]
@@ -778,14 +778,14 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind, comptime repo_op
     defer temp_dir.close();
 
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, .{});
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "repo");
         defer repo.deinit();
     }
 
     var repo_dir = try temp_dir.openDir("repo", .{});
     defer repo_dir.close();
 
-    var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
     defer repo.deinit();
 
     // A --- B --------- D [master]
@@ -913,14 +913,14 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
     // from https://pijul.org/manual/why_pijul.html
     {
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "simple" } }, .{});
+            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "simple");
             defer repo.deinit();
         }
 
         var repo_dir = try temp_dir.openDir("simple", .{});
         defer repo_dir.close();
 
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
 
         // A --- B --- C --- E [master]
@@ -1024,14 +1024,14 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
     // from https://tahoe-lafs.org/~zooko/badmerge/concrete-good-semantics.html
     {
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "concrete" } }, .{});
+            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "concrete");
             defer repo.deinit();
         }
 
         var repo_dir = try temp_dir.openDir("concrete", .{});
         defer repo_dir.close();
 
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
 
         // A --- B --- C --- E [master]
@@ -1220,14 +1220,14 @@ fn testCherryPick(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOp
     defer temp_dir.close();
 
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, .{});
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "repo");
         defer repo.deinit();
     }
 
     var repo_dir = try temp_dir.openDir("repo", .{});
     defer repo_dir.close();
 
-    var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
     defer repo.deinit();
 
     // A --- B ------------ D' [master]
@@ -1327,14 +1327,14 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
     }.run;
 
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, .{});
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "repo");
         defer repo.deinit();
     }
 
     var repo_dir = try temp_dir.openDir("repo", .{});
     defer repo_dir.close();
 
-    var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
     defer repo.deinit();
 
     // A --- B ------------ D' [master]
@@ -1435,14 +1435,14 @@ fn testLog(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo
     defer temp_dir.close();
 
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "repo" } }, .{});
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "repo");
         defer repo.deinit();
     }
 
     var repo_dir = try temp_dir.openDir("repo", .{});
     defer repo_dir.close();
 
-    var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
     defer repo.deinit();
 
     // A --- B --- C --------- G --- H [master]

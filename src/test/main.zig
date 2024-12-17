@@ -80,7 +80,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // make sure we can get status before first commit
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var status = try repo.status(allocator);
         defer status.deinit();
@@ -154,7 +154,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             .git => {
                 // check that the commit object was created
                 {
-                    var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+                    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
                     defer repo.deinit();
                     const head_file_buffer = try ref.readHead(repo_kind, repo_opts, .{ .core = &repo.core, .extra = .{} });
                     var objects_dir = try test_state.git_dir.openDir("objects", .{});
@@ -203,7 +203,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             },
             .xit => {
                 // check that the commit object was created
-                var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+                var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
                 var moment = try repo.core.latestMoment();
                 const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
@@ -219,7 +219,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // get HEAD contents
     const commit1 = blk: {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
@@ -290,7 +290,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
         // workspace diff
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
             var status = try repo.status(allocator);
             defer status.deinit();
@@ -380,7 +380,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
         // index diff
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
             var status = try repo.status(allocator);
             defer status.deinit();
@@ -430,7 +430,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             .git => {
                 // check that the commit object was created
                 {
-                    var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+                    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
                     defer repo.deinit();
                     const head_file_buffer = try ref.readHead(repo_kind, repo_opts, .{ .core = &repo.core, .extra = .{} });
                     var objects_dir = try test_state.git_dir.openDir("objects", .{});
@@ -459,7 +459,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             },
             .xit => {
                 // check that the commit object was created
-                var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+                var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
                 var moment = try repo.core.latestMoment();
                 const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
@@ -475,7 +475,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // get HEAD contents
     const commit2 = blk: {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
@@ -484,7 +484,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // tree diff
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var tree_diff = try repo.treeDiff(allocator, commit1, commit2);
         defer tree_diff.deinit();
@@ -546,7 +546,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
             // check out commit1 and make sure the conflict is found
             {
-                var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+                var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
                 var result = try repo.switchHead(allocator, &commit1, .{ .force = false });
                 defer result.deinit();
@@ -571,7 +571,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
             // check out commit1 and make sure the conflict is found
             {
-                var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+                var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
                 var result = try repo.switchHead(allocator, &commit1, .{ .force = false });
                 defer result.deinit();
@@ -594,7 +594,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
             // check out commit1 and make sure the conflict is found
             {
-                var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+                var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
                 var result = try repo.switchHead(allocator, &commit1, .{ .force = false });
                 defer result.deinit();
@@ -623,7 +623,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
             // check out commit1 and make sure the conflict is found
             {
-                var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+                var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
                 var result = try repo.switchHead(allocator, &commit1, .{ .force = false });
                 defer result.deinit();
@@ -696,7 +696,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
         // read index
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
             var moment = try repo.core.latestMoment();
             const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
@@ -725,7 +725,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             },
             .xit => {
                 // read the index in xitdb
-                var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+                var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
                 var count: u32 = 0;
                 var moment = try repo.core.latestMoment();
@@ -756,7 +756,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
         // read index
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
             var moment = try repo.core.latestMoment();
             const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
@@ -784,7 +784,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             },
             .xit => {
                 // read the index in xitdb
-                var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+                var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
                 var count: u32 = 0;
                 var moment = try repo.core.latestMoment();
@@ -848,7 +848,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             try main.run(repo_kind, repo_opts, allocator, &.{ "reset", "new-file.txt" }, repo_dir, .{});
             try main.run(repo_kind, repo_opts, allocator, &.{ "reset", "one/two/three.txt" }, repo_dir, .{});
 
-            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
             var moment = try repo.core.latestMoment();
             const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
@@ -931,7 +931,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         // workspace changes
         {
             // get status
-            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
             var status = try repo.status(allocator);
             defer status.deinit();
@@ -977,7 +977,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             try main.run(repo_kind, repo_opts, allocator, &.{ "add", "src/zig/main.zig" }, repo_dir, .{});
 
             // get status
-            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
             var status = try repo.status(allocator);
             defer status.deinit();
@@ -1001,7 +1001,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     {
         // there are two modified and two deleted files remaining
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
             var status = try repo.status(allocator);
             defer status.deinit();
@@ -1025,7 +1025,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
         // there are no modified or deleted files remaining
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
             var status = try repo.status(allocator);
             defer status.deinit();
@@ -1037,7 +1037,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // parse objects
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
@@ -1061,7 +1061,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // check the refs
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
@@ -1071,7 +1071,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // list all branches
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var ref_list = try repo.listBranches(allocator);
         defer ref_list.deinit();
@@ -1080,7 +1080,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // get the current branch
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         const current_branch = try repo.currentBranch(allocator);
         defer allocator.free(current_branch);
@@ -1101,7 +1101,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // can't delete current branch
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         try std.testing.expectEqual(error.CannotDeleteCurrentBranch, repo.removeBranch(.{ .name = "stuff" }));
     }
@@ -1134,7 +1134,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // get HEAD contents
     const commit4_stuff = blk: {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
@@ -1152,7 +1152,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // list all branches
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var ref_list = try repo.listBranches(allocator);
         defer ref_list.deinit();
@@ -1190,7 +1190,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // get HEAD contents
     const commit3 = blk: {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
@@ -1199,7 +1199,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // make sure the most recent branch name points to the most recent commit
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
@@ -1208,7 +1208,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // log
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var iter = try repo.log(allocator, &.{commit3});
         defer iter.deinit();
@@ -1230,7 +1230,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // common ancestor
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
@@ -1263,7 +1263,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // get HEAD contents
     const commit4 = blk: {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
@@ -1276,7 +1276,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         try main.run(repo_kind, repo_opts, allocator, &.{ "config", "add", "branch.master.remote", "origin" }, repo_dir, .{});
 
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
 
             var config = try repo.config(allocator);
@@ -1292,7 +1292,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         try main.run(repo_kind, repo_opts, allocator, &.{ "config", "rm", "branch.master.remote" }, repo_dir, .{});
 
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
 
             var config = try repo.config(allocator);
@@ -1308,7 +1308,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         try main.run(repo_kind, repo_opts, allocator, &.{ "config", "add", "user.name", "radar roark" }, repo_dir, .{});
 
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
 
             var config = try repo.config(allocator);
@@ -1327,7 +1327,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         try main.run(repo_kind, repo_opts, allocator, &.{ "remote", "add", "origin", "http://localhost:3000" }, repo_dir, .{});
 
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
 
             var remote = try repo.remote(allocator);
@@ -1340,7 +1340,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         try main.run(repo_kind, repo_opts, allocator, &.{ "remote", "rm", "origin" }, repo_dir, .{});
 
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
 
             var remote = try repo.remote(allocator);

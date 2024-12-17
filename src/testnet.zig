@@ -34,7 +34,7 @@ fn testPull(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     std.time.sleep(std.time.ns_per_s * 0.5);
 
     // init server repo
-    var server_repo = try rp.Repo(.git, .{}).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "server" } }, .{});
+    var server_repo = try rp.Repo(.git, .{}).init(allocator, .{ .cwd = temp_dir }, "server");
     defer server_repo.deinit();
 
     // make a commit
@@ -49,7 +49,7 @@ fn testPull(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     defer client_dir.close();
 
     // init client repo
-    var client_repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "client" } }, .{});
+    var client_repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "client");
     defer client_repo.deinit();
     try client_repo.addRemote(allocator, .{ .name = "origin", .value = "git://localhost:3000/server" });
 
@@ -105,7 +105,7 @@ fn testPush(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     defer _ = c.git_libgit2_shutdown();
 
     // init server repo
-    var server_repo = try rp.Repo(.git, .{}).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "server" } }, .{});
+    var server_repo = try rp.Repo(.git, .{}).init(allocator, .{ .cwd = temp_dir }, "server");
     defer server_repo.deinit();
     try server_repo.addConfig(allocator, .{ .name = "core.bare", .value = "false" });
     try server_repo.addConfig(allocator, .{ .name = "receive.denycurrentbranch", .value = "updateinstead" });
@@ -115,7 +115,7 @@ fn testPush(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     defer client_dir.close();
 
     // init client repo
-    var client_repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = temp_dir }, .{ .init = .{ .dir = "client" } }, .{});
+    var client_repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "client");
     defer client_repo.deinit();
     try client_repo.addRemote(allocator, .{ .name = "origin", .value = "git://localhost:3001/server" });
 
