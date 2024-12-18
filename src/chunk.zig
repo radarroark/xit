@@ -3,6 +3,227 @@ const hash = @import("./hash.zig");
 const rp = @import("./repo.zig");
 const io = @import("./io.zig");
 
+const FastCdcOpts = struct {
+    min_size: usize = 1024,
+    avg_size: usize = 2048,
+    max_size: usize = 4096,
+    normalization: Normalization = .level1,
+
+    const Normalization = enum {
+        level0,
+        level1,
+        level2,
+        level3,
+    };
+};
+
+const FastCdcChunk = struct {
+    hash: u64,
+    length: usize,
+};
+
+fn FastCdc(comptime opts: FastCdcOpts) type {
+    std.debug.assert(opts.min_size <= opts.avg_size);
+    std.debug.assert(opts.avg_size <= opts.max_size);
+    return struct {
+        offset: usize,
+        remaining: usize,
+
+        const gear_hash = computeGearHash();
+        const bits = std.math.log2(opts.avg_size);
+        const normalization = @intFromEnum(opts.normalization);
+        // thanks to https://github.com/nlfiedler/fastcdc-rs
+        const masks: [26]u64 = .{
+            0, // padding
+            0, // padding
+            0, // padding
+            0, // padding
+            0, // padding
+            0x0000000001804110, // unused except for NC 3
+            0x0000000001803110, // 64B
+            0x0000000018035100, // 128B
+            0x0000001800035300, // 256B
+            0x0000019000353000, // 512B
+            0x0000590003530000, // 1KB
+            0x0000d90003530000, // 2KB
+            0x0000d90103530000, // 4KB
+            0x0000d90303530000, // 8KB
+            0x0000d90313530000, // 16KB
+            0x0000d90f03530000, // 32KB
+            0x0000d90303537000, // 64KB
+            0x0000d90703537000, // 128KB
+            0x0000d90707537000, // 256KB
+            0x0000d91707537000, // 512KB
+            0x0000d91747537000, // 1MB
+            0x0000d91767537000, // 2MB
+            0x0000d93767537000, // 4MB
+            0x0000d93777537000, // 8MB
+            0x0000d93777577000, // 16MB
+            0x0000db3777577000, // unused except for NC 3
+        };
+        const mask_s = masks[bits + normalization];
+        const mask_l = masks[bits - normalization];
+
+        pub fn init(total_size: usize) FastCdc(opts) {
+            return .{
+                .offset = 0,
+                .remaining = total_size,
+            };
+        }
+
+        pub fn next(self: *FastCdc(opts), stream: anytype) !?FastCdcChunk {
+            if (self.remaining == 0) {
+                return null;
+            } else {
+                try stream.seekTo(self.offset);
+                const chunk = try self.cut(stream);
+                self.offset += chunk.length;
+                self.remaining -= chunk.length;
+                return chunk;
+            }
+        }
+
+        fn cut(self: FastCdc(opts), stream: anytype) !FastCdcChunk {
+            var remaining = self.remaining;
+            if (remaining <= opts.min_size) {
+                return .{
+                    .hash = 0,
+                    .length = remaining,
+                };
+            }
+
+            var center = opts.avg_size;
+            if (remaining > opts.max_size) {
+                remaining = opts.max_size;
+            } else if (remaining < center) {
+                center = remaining;
+            }
+
+            var index = opts.min_size;
+            try stream.seekBy(@intCast(index));
+            const reader = stream.reader();
+
+            var h: u64 = 0;
+            while (index < center) {
+                h = (h << 1) +% gear_hash[try reader.readByte()];
+                if (h & mask_s == 0) {
+                    return .{
+                        .hash = h,
+                        .length = index,
+                    };
+                }
+                index += 1;
+            }
+
+            const last_pos = remaining;
+            while (index < last_pos) {
+                h = (h << 1) +% gear_hash[try reader.readByte()];
+                if (h & mask_l == 0) {
+                    return .{
+                        .hash = h,
+                        .length = index,
+                    };
+                }
+                index += 1;
+            }
+
+            return .{
+                .hash = h,
+                .length = index,
+            };
+        }
+
+        fn computeGearHash() [256]u64 {
+            @setEvalBranchQuota(1_000_000);
+            var nums: [256]u64 = undefined;
+            for (&nums, 0..) |*num, i| {
+                var seed = [_]u8{0} ** 64;
+                @memset(&seed, i);
+
+                var buffer = [_]u8{0} ** std.crypto.hash.Md5.digest_length;
+                std.crypto.hash.Md5.hash(&seed, &buffer, .{});
+
+                var stream = std.io.fixedBufferStream(&buffer);
+                const reader = stream.reader();
+                num.* = reader.readInt(u64, .big) catch unreachable;
+            }
+            return nums;
+        }
+    };
+}
+
+test "fastcdc all zeros" {
+    const opts = FastCdcOpts{};
+    const buffer = [_]u8{0} ** (opts.max_size * 3);
+    var stream = std.io.fixedBufferStream(&buffer);
+    var iter = FastCdc(opts).init(buffer.len);
+    while (try iter.next(&stream)) |chunk| {
+        try std.testing.expectEqual(opts.max_size, chunk.length);
+    }
+}
+
+test "fastcdc sekien 16k chunks" {
+    const opts = FastCdcOpts{
+        .min_size = 4096,
+        .avg_size = 16384,
+        .max_size = 65535,
+    };
+    const buffer = @embedFile("test/embed/SekienAkashita.jpg");
+    var stream = std.io.fixedBufferStream(buffer);
+    var iter = FastCdc(opts).init(buffer.len);
+    const expected_chunks = [_]FastCdcChunk{
+        .{ .hash = 17968276318003433923, .length = 21325 },
+        .{ .hash = 4098594969649699419, .length = 17140 },
+        .{ .hash = 15733367461443853673, .length = 28084 },
+        .{ .hash = 4509236223063678303, .length = 18217 },
+        .{ .hash = 2504464741100432583, .length = 24700 },
+    };
+    for (expected_chunks) |expected_chunk| {
+        const actual_chunk = (try iter.next(&stream)).?;
+        try std.testing.expectEqual(expected_chunk, actual_chunk);
+    }
+    try std.testing.expectEqual(0, iter.remaining);
+}
+
+test "fastcdc sekien 32k chunks" {
+    const opts = FastCdcOpts{
+        .min_size = 8192,
+        .avg_size = 32768,
+        .max_size = 131072,
+    };
+    const buffer = @embedFile("test/embed/SekienAkashita.jpg");
+    var stream = std.io.fixedBufferStream(buffer);
+    var iter = FastCdc(opts).init(buffer.len);
+    const expected_chunks = [_]FastCdcChunk{
+        .{ .hash = 15733367461443853673, .length = 66549 },
+        .{ .hash = 2504464741100432583, .length = 42917 },
+    };
+    for (expected_chunks) |expected_chunk| {
+        const actual_chunk = (try iter.next(&stream)).?;
+        try std.testing.expectEqual(expected_chunk, actual_chunk);
+    }
+    try std.testing.expectEqual(0, iter.remaining);
+}
+
+test "fastcdc sekien 64k chunks" {
+    const opts = FastCdcOpts{
+        .min_size = 16384,
+        .avg_size = 65536,
+        .max_size = 262144,
+    };
+    const buffer = @embedFile("test/embed/SekienAkashita.jpg");
+    var stream = std.io.fixedBufferStream(buffer);
+    var iter = FastCdc(opts).init(buffer.len);
+    const expected_chunks = [_]FastCdcChunk{
+        .{ .hash = 2504464741100432583, .length = 109466 },
+    };
+    for (expected_chunks) |expected_chunk| {
+        const actual_chunk = (try iter.next(&stream)).?;
+        try std.testing.expectEqual(expected_chunk, actual_chunk);
+    }
+    try std.testing.expectEqual(0, iter.remaining);
+}
+
 pub fn writeChunks(
     comptime repo_opts: rp.RepoOpts(.xit),
     state: rp.Repo(.xit, repo_opts).State(.read_write),
