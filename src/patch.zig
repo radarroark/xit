@@ -34,7 +34,7 @@ fn createPatchEntries(
     path_hash: hash.HashInt(repo_opts.hash),
     patch_hash: hash.HashInt(repo_opts.hash),
     patch_entries: *std.ArrayList([]const u8),
-    patch_content_entries: *std.ArrayList([]const u8),
+    patch_offsets: *std.ArrayList(u64),
 ) !void {
     var myers_diff_iter = try df.MyersDiffIterator(.xit, repo_opts).init(allocator, &line_iter_pair.a, &line_iter_pair.b);
     defer myers_diff_iter.deinit();
@@ -95,8 +95,7 @@ fn createPatchEntries(
                 try buffer.writer().writeInt(NodeId(repo_opts.hash).Int, @bitCast(last_node.id), .big);
                 try patch_entries.append(buffer.items);
 
-                const content = try arena.allocator().dupe(u8, ins.new_line.text);
-                try patch_content_entries.append(content);
+                try patch_offsets.append(ins.new_line.offset);
 
                 new_node_count += 1;
 
@@ -138,13 +137,13 @@ fn patchHash(
     var patch_entries = std.ArrayList([]const u8).init(allocator);
     defer patch_entries.deinit();
 
-    var patch_content_entries = std.ArrayList([]const u8).init(allocator);
-    defer patch_content_entries.deinit();
+    var patch_offsets = std.ArrayList(u64).init(allocator);
+    defer patch_offsets.deinit();
 
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    try createPatchEntries(repo_opts, moment, branch, allocator, &arena, line_iter_pair, path_hash, 0, &patch_entries, &patch_content_entries);
+    try createPatchEntries(repo_opts, moment, branch, allocator, &arena, line_iter_pair, path_hash, 0, &patch_entries, &patch_offsets);
 
     var hasher = hash.Hasher(repo_opts.hash).init();
 
@@ -152,8 +151,11 @@ fn patchHash(
         hasher.update(patch_entry);
     }
 
-    for (patch_content_entries.items) |patch_content_entry| {
-        hasher.update(patch_content_entry);
+    hasher.update(&line_iter_pair.b.oid);
+    for (patch_offsets.items) |patch_offset| {
+        var buffer = [_]u8{0} ** (@bitSizeOf(u64) / 8);
+        std.mem.writeInt(u64, &buffer, patch_offset, .big);
+        hasher.update(&buffer);
     }
 
     var patch_hash = [_]u8{0} ** hash.byteLen(repo_opts.hash);
@@ -186,30 +188,32 @@ fn writePatch(
     const change_list_cursor = try patch_id_to_change_list.putCursor(patch_hash);
     const change_list = try rp.Repo(.xit, repo_opts).DB.ArrayList(.read_write).init(change_list_cursor);
 
-    // init change content list
-    const patch_id_to_change_content_list_cursor = try moment.putCursor(hash.hashInt(repo_opts.hash, "patch-id->change-content-list"));
-    const patch_id_to_change_content_list = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(patch_id_to_change_content_list_cursor);
-    const change_content_list_cursor = try patch_id_to_change_content_list.putCursor(patch_hash);
-    const change_content_list = try rp.Repo(.xit, repo_opts).DB.ArrayList(.read_write).init(change_content_list_cursor);
+    // init offset list
+    const patch_id_to_offset_list_cursor = try moment.putCursor(hash.hashInt(repo_opts.hash, "patch-id->offset-list"));
+    const patch_id_to_offset_list = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(patch_id_to_offset_list_cursor);
+    var offset_list_cursor = try patch_id_to_offset_list.putCursor(patch_hash);
 
     var patch_entries = std.ArrayList([]const u8).init(allocator);
     defer patch_entries.deinit();
 
-    var patch_content_entries = std.ArrayList([]const u8).init(allocator);
-    defer patch_content_entries.deinit();
+    var patch_offsets = std.ArrayList(u64).init(allocator);
+    defer patch_offsets.deinit();
 
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    try createPatchEntries(repo_opts, moment, branch, allocator, &arena, line_iter_pair, path_hash, patch_hash, &patch_entries, &patch_content_entries);
+    try createPatchEntries(repo_opts, moment, branch, allocator, &arena, line_iter_pair, path_hash, patch_hash, &patch_entries, &patch_offsets);
 
     for (patch_entries.items) |patch_entry| {
         try change_list.append(.{ .bytes = patch_entry });
     }
 
-    for (patch_content_entries.items) |patch_content_entry| {
-        try change_content_list.append(.{ .bytes = patch_content_entry });
+    var offset_list_writer = try offset_list_cursor.writer();
+    try offset_list_writer.writeAll(&line_iter_pair.b.oid);
+    for (patch_offsets.items) |patch_offset| {
+        try offset_list_writer.writeInt(u64, patch_offset, .big);
     }
+    try offset_list_writer.finish();
 
     return patch_hash_bytes;
 }
