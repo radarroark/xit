@@ -342,7 +342,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                             var actual_hunk = actual_hunk_ptr.*;
                             defer actual_hunk.deinit();
                             for (expected_hunk, actual_hunk.edits.items) |expected_edit, actual_edit| {
-                                try std.testing.expectEqualDeep(expected_edit, actual_edit);
+                                try std.testing.expectEqualDeep(expected_edit, actual_edit.withoutOffset());
                             }
                         } else {
                             return error.NullHunk;

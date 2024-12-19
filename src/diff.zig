@@ -321,6 +321,7 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp
         pub const Line = struct {
             num: usize,
             text: []const u8,
+            offset: u64 = 0,
         };
 
         pub const Edit = union(enum) {
@@ -334,6 +335,19 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp
             del: struct {
                 old_line: Line,
             },
+
+            pub fn withoutOffset(self: Edit) Edit {
+                var new_self = self;
+                switch (new_self) {
+                    .eql => |*eql| {
+                        eql.old_line.offset = 0;
+                        eql.new_line.offset = 0;
+                    },
+                    .ins => |*ins| ins.new_line.offset = 0,
+                    .del => |*del| del.old_line.offset = 0,
+                }
+                return new_self;
+            }
 
             pub fn deinit(self: Edit, allocator: std.mem.Allocator) void {
                 switch (self) {
@@ -628,33 +642,37 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp
 
             if (p1.x == p2.x) {
                 const new_idx = p1.y;
+                const new_offset = self.line_iter_b.line_offsets[new_idx];
                 const line_b = try self.line_iter_b.get(new_idx);
                 errdefer self.allocator.free(line_b);
                 return .{
                     .ins = .{
-                        .new_line = .{ .num = new_idx + 1, .text = line_b },
+                        .new_line = .{ .num = new_idx + 1, .text = line_b, .offset = new_offset },
                     },
                 };
             } else if (p1.y == p2.y) {
                 const old_idx = p1.x;
+                const old_offset = self.line_iter_a.line_offsets[old_idx];
                 const line_a = try self.line_iter_a.get(old_idx);
                 errdefer self.allocator.free(line_a);
                 return .{
                     .del = .{
-                        .old_line = .{ .num = old_idx + 1, .text = line_a },
+                        .old_line = .{ .num = old_idx + 1, .text = line_a, .offset = old_offset },
                     },
                 };
             } else {
                 const old_idx = p1.x;
                 const new_idx = p1.y;
+                const old_offset = self.line_iter_a.line_offsets[old_idx];
+                const new_offset = self.line_iter_b.line_offsets[new_idx];
                 const line_a = try self.line_iter_a.get(old_idx);
                 errdefer self.allocator.free(line_a);
                 const line_b = try self.line_iter_b.get(new_idx);
                 errdefer self.allocator.free(line_b);
                 return .{
                     .eql = .{
-                        .old_line = .{ .num = old_idx + 1, .text = line_a },
-                        .new_line = .{ .num = new_idx + 1, .text = line_b },
+                        .old_line = .{ .num = old_idx + 1, .text = line_a, .offset = old_offset },
+                        .new_line = .{ .num = new_idx + 1, .text = line_b, .offset = new_offset },
                     },
                 };
             }
@@ -734,7 +752,7 @@ test "myers diff" {
         }
         try std.testing.expectEqual(expected_diff.len, actual_diff.items.len);
         for (expected_diff, actual_diff.items) |expected, actual| {
-            try std.testing.expectEqualDeep(expected, actual);
+            try std.testing.expectEqualDeep(expected, actual.withoutOffset());
         }
     }
     {
@@ -762,7 +780,7 @@ test "myers diff" {
         }
         try std.testing.expectEqual(expected_diff.len, actual_diff.items.len);
         for (expected_diff, actual_diff.items) |expected, actual| {
-            try std.testing.expectEqualDeep(expected, actual);
+            try std.testing.expectEqualDeep(expected, actual.withoutOffset());
         }
     }
 }

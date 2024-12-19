@@ -252,23 +252,23 @@ fn writeBlobWithDiff3(
         allocator: std.mem.Allocator,
         lines: std.ArrayList([]const u8),
 
-        fn init(alctr: std.mem.Allocator, iter: *df.LineIterator(repo_kind, repo_opts), range_maybe: ?df.Diff3Iterator(repo_kind, repo_opts).Range) !@This() {
-            var lines = std.ArrayList([]const u8).init(alctr);
+        fn init(inner_allocator: std.mem.Allocator, iter: *df.LineIterator(repo_kind, repo_opts), range_maybe: ?df.Diff3Iterator(repo_kind, repo_opts).Range) !@This() {
+            var lines = std.ArrayList([]const u8).init(inner_allocator);
             errdefer {
                 for (lines.items) |line| {
-                    alctr.free(line);
+                    inner_allocator.free(line);
                 }
                 lines.deinit();
             }
             if (range_maybe) |range| {
                 for (range.begin..range.end) |line_num| {
                     const line = try iter.get(line_num);
-                    errdefer alctr.free(line);
+                    errdefer inner_allocator.free(line);
                     try lines.append(line);
                 }
             }
             return .{
-                .allocator = alctr,
+                .allocator = inner_allocator,
                 .lines = lines,
             };
         }
@@ -618,8 +618,8 @@ fn writeBlobWithPatches(
     const source_live_parent_to_children_cursor = (try source_path_to_live_parent_to_children.getCursor(path_hash)) orelse return error.KeyNotFound;
     const source_live_parent_to_children = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(source_live_parent_to_children_cursor);
 
-    const patch_id_to_change_content_list_cursor = (try state.extra.moment.getCursor(hash.hashInt(repo_opts.hash, "patch-id->change-content-list"))) orelse return error.KeyNotFound;
-    const patch_id_to_change_content_list = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(patch_id_to_change_content_list_cursor);
+    const patch_id_to_offset_list_cursor = (try state.extra.moment.getCursor(hash.hashInt(repo_opts.hash, "patch-id->offset-list"))) orelse return error.KeyNotFound;
+    const patch_id_to_offset_list = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(patch_id_to_offset_list_cursor);
 
     var line_buffer = std.ArrayList([]const u8).init(allocator);
     defer {
@@ -629,30 +629,62 @@ fn writeBlobWithPatches(
         line_buffer.deinit();
     }
 
+    const readLine = struct {
+        fn readLine(
+            inner_state: rp.Repo(.xit, repo_opts).State(.read_only),
+            inner_allocator: std.mem.Allocator,
+            offset_list_cursor: *rp.Repo(.xit, repo_opts).DB.Cursor(.read_only),
+            node_id: patch.NodeId(repo_opts.hash),
+        ) ![]const u8 {
+            var offset_list_reader = try offset_list_cursor.reader();
+
+            const hash_size = comptime hash.byteLen(repo_opts.hash);
+            const offset_size = @bitSizeOf(u64) / 8;
+
+            var oid = [_]u8{0} ** hash_size;
+            try offset_list_reader.readNoEof(&oid);
+            const oid_hex = std.fmt.bytesToHex(&oid, .lower);
+            try offset_list_reader.seekTo(hash_size + node_id.node * offset_size);
+            const change_offset = try offset_list_reader.readInt(u64, .big);
+
+            var obj_rdr = try obj.ObjectReader(.xit, repo_opts).init(inner_allocator, inner_state, &oid_hex);
+            defer obj_rdr.deinit();
+            try obj_rdr.seekTo(change_offset);
+
+            if (try obj_rdr.reader.reader().readUntilDelimiterOrEofAlloc(inner_allocator, '\n', repo_opts.max_line_size)) |line| {
+                return line;
+            } else {
+                // this should never happen because we only call the read function once
+                return error.LineNotFound;
+            }
+        }
+    }.readLine;
+
     const LineRange = struct {
         allocator: std.mem.Allocator,
         lines: std.ArrayList([]const u8),
 
-        fn init(alctr: std.mem.Allocator, patch_id_to_change_content_list_ptr: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_only), node_ids: []patch.NodeId(repo_opts.hash)) !@This() {
-            var lines = std.ArrayList([]const u8).init(alctr);
+        fn init(
+            inner_state: rp.Repo(.xit, repo_opts).State(.read_only),
+            inner_allocator: std.mem.Allocator,
+            patch_id_to_offset_list_ptr: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_only),
+            node_ids: []patch.NodeId(repo_opts.hash),
+        ) !@This() {
+            var lines = std.ArrayList([]const u8).init(inner_allocator);
             errdefer {
                 for (lines.items) |line| {
-                    alctr.free(line);
+                    inner_allocator.free(line);
                 }
                 lines.deinit();
             }
             for (node_ids) |node_id| {
-                const change_content_list_cursor = (try patch_id_to_change_content_list_ptr.getCursor(node_id.patch_id)) orelse return error.KeyNotFound;
-                const change_content_list = try rp.Repo(.xit, repo_opts).DB.ArrayList(.read_only).init(change_content_list_cursor);
-                const change_content_cursor = (try change_content_list.getCursor(node_id.node)) orelse return error.KeyNotFound;
-                const change_content = try change_content_cursor.readBytesAlloc(alctr, repo_opts.max_line_size);
-                {
-                    errdefer alctr.free(change_content);
-                    try lines.append(change_content);
-                }
+                var offset_list_cursor = (try patch_id_to_offset_list_ptr.getCursor(node_id.patch_id)) orelse return error.KeyNotFound;
+                const line = try readLine(inner_state, inner_allocator, &offset_list_cursor, node_id);
+                errdefer inner_allocator.free(line);
+                try lines.append(line);
             }
             return .{
-                .allocator = alctr,
+                .allocator = inner_allocator,
                 .lines = lines,
             };
         }
@@ -678,6 +710,7 @@ fn writeBlobWithPatches(
     };
 
     const Stream = struct {
+        state: rp.Repo(.xit, repo_opts).State(.read_only),
         allocator: std.mem.Allocator,
         target_marker: []u8,
         base_marker: []u8,
@@ -687,7 +720,7 @@ fn writeBlobWithPatches(
         base_live_parent_to_children: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_only),
         target_live_parent_to_children: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_only),
         source_live_parent_to_children: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_only),
-        patch_id_to_change_content_list: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_only),
+        patch_id_to_offset_list: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_only),
         line_buffer: *std.ArrayList([]const u8),
         current_line: ?[]const u8,
         current_node_id_hash: ?hash.HashInt(repo_opts.hash),
@@ -913,11 +946,11 @@ fn writeBlobWithPatches(
                             self.parent.current_node_id_hash = null;
                         }
 
-                        var base_lines = try LineRange.init(self.parent.allocator, self.parent.patch_id_to_change_content_list, base_node_ids.items);
+                        var base_lines = try LineRange.init(self.parent.state, self.parent.allocator, self.parent.patch_id_to_offset_list, base_node_ids.items);
                         defer base_lines.deinit();
-                        var target_lines = try LineRange.init(self.parent.allocator, self.parent.patch_id_to_change_content_list, target_node_ids.items);
+                        var target_lines = try LineRange.init(self.parent.state, self.parent.allocator, self.parent.patch_id_to_offset_list, target_node_ids.items);
                         defer target_lines.deinit();
-                        var source_lines = try LineRange.init(self.parent.allocator, self.parent.patch_id_to_change_content_list, source_node_ids.items);
+                        var source_lines = try LineRange.init(self.parent.state, self.parent.allocator, self.parent.patch_id_to_offset_list, source_node_ids.items);
                         defer source_lines.deinit();
 
                         // if base == target or target == source, return source to autoresolve conflict
@@ -974,15 +1007,10 @@ fn writeBlobWithPatches(
                         self.parent.current_line = self.parent.line_buffer.items[0];
                         self.parent.has_conflict = true;
                     } else {
-                        const change_content_list_cursor = (try self.parent.patch_id_to_change_content_list.getCursor(first_node_id.patch_id)) orelse return error.KeyNotFound;
-                        const change_content_list = try rp.Repo(.xit, repo_opts).DB.ArrayList(.read_only).init(change_content_list_cursor);
-
-                        const change_content_cursor = (try change_content_list.getCursor(first_node_id.node)) orelse return error.KeyNotFound;
-                        const change_content = try change_content_cursor.readBytesAlloc(self.parent.allocator, repo_opts.max_line_size);
-                        {
-                            errdefer self.parent.allocator.free(change_content);
-                            try self.parent.line_buffer.append(change_content);
-                        }
+                        var offset_list_cursor = (try self.parent.patch_id_to_offset_list.getCursor(first_node_id.patch_id)) orelse return error.KeyNotFound;
+                        const line = try readLine(self.parent.state, self.parent.allocator, &offset_list_cursor, first_node_id);
+                        errdefer self.parent.allocator.free(line);
+                        try self.parent.line_buffer.append(line);
                         self.parent.current_line = self.parent.line_buffer.items[0];
 
                         const next_children_cursor = (try self.parent.merge_live_parent_to_children.getCursor(first_node_id_hash)) orelse return error.KeyNotFound;
@@ -1046,6 +1074,7 @@ fn writeBlobWithPatches(
     const source_marker = try std.fmt.allocPrint(allocator, ">>>>>>> {s}", .{source_name});
     defer allocator.free(source_marker);
     var stream = Stream{
+        .state = state.readOnly(),
         .allocator = allocator,
         .target_marker = target_marker,
         .base_marker = base_marker,
@@ -1055,7 +1084,7 @@ fn writeBlobWithPatches(
         .base_live_parent_to_children = &base_live_parent_to_children,
         .target_live_parent_to_children = &target_live_parent_to_children,
         .source_live_parent_to_children = &source_live_parent_to_children,
-        .patch_id_to_change_content_list = &patch_id_to_change_content_list,
+        .patch_id_to_offset_list = &patch_id_to_offset_list,
         .line_buffer = &line_buffer,
         .current_line = null,
         .current_node_id_hash = hash.hashInt(repo_opts.hash, &patch.NodeId(repo_opts.hash).first_bytes),
