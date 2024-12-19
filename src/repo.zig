@@ -24,6 +24,8 @@ pub fn RepoOpts(comptime repo_kind: RepoKind) type {
         hash: hash.HashKind = .sha1,
         read_size: usize = 1024,
         max_read_size: usize = 2048,
+        max_line_size: usize = 10_000,
+        max_line_count: usize = 10_000_000,
         extra: Extra = .{},
 
         pub const Extra = switch (repo_kind) {

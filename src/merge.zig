@@ -645,7 +645,7 @@ fn writeBlobWithPatches(
                 const change_content_list_cursor = (try patch_id_to_change_content_list_ptr.getCursor(node_id.patch_id)) orelse return error.KeyNotFound;
                 const change_content_list = try rp.Repo(.xit, repo_opts).DB.ArrayList(.read_only).init(change_content_list_cursor);
                 const change_content_cursor = (try change_content_list.getCursor(node_id.node)) orelse return error.KeyNotFound;
-                const change_content = try change_content_cursor.readBytesAlloc(alctr, repo_opts.max_read_size);
+                const change_content = try change_content_cursor.readBytesAlloc(alctr, repo_opts.max_line_size);
                 {
                     errdefer alctr.free(change_content);
                     try lines.append(change_content);
@@ -978,7 +978,7 @@ fn writeBlobWithPatches(
                         const change_content_list = try rp.Repo(.xit, repo_opts).DB.ArrayList(.read_only).init(change_content_list_cursor);
 
                         const change_content_cursor = (try change_content_list.getCursor(first_node_id.node)) orelse return error.KeyNotFound;
-                        const change_content = try change_content_cursor.readBytesAlloc(self.parent.allocator, repo_opts.max_read_size);
+                        const change_content = try change_content_cursor.readBytesAlloc(self.parent.allocator, repo_opts.max_line_size);
                         {
                             errdefer self.parent.allocator.free(change_content);
                             try self.parent.line_buffer.append(change_content);
