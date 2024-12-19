@@ -825,6 +825,13 @@ pub const PackObjectReader = struct {
         return try reader.readAllAlloc(allocator, max_size);
     }
 
+    pub fn readByte(self: *PackObjectReader) !u8 {
+        var reader = std.io.GenericReader(*PackObjectReader, Error, PackObjectReader.read){
+            .context = self,
+        };
+        return try reader.readByte();
+    }
+
     pub fn skipBytes(self: *PackObjectReader, num_bytes: u64) !void {
         var reader = std.io.GenericReader(*PackObjectReader, Error, PackObjectReader.read){
             .context = self,
@@ -928,6 +935,13 @@ pub const LooseOrPackObjectReader = union(enum) {
         switch (self.*) {
             .loose => return try self.loose.stream.reader().readAllAlloc(allocator, max_size),
             .pack => return try self.pack.readAllAlloc(allocator, max_size),
+        }
+    }
+
+    pub fn readByte(self: *LooseOrPackObjectReader) !u8 {
+        switch (self.*) {
+            .loose => return try self.loose.stream.reader().readByte(),
+            .pack => return try self.pack.readByte(),
         }
     }
 

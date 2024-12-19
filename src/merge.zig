@@ -324,6 +324,23 @@ fn writeBlobWithDiff3(
                 return size;
             }
 
+            pub fn readByte(self: @This()) !u8 {
+                var buffer = [_]u8{0} ** 1;
+                const size = try self.read(&buffer);
+                if (size == 0) {
+                    return error.EndOfStream;
+                } else {
+                    return buffer[0];
+                }
+            }
+
+            pub fn readNoEof(self: @This(), dest: []u8) !void {
+                const size = try self.read(dest);
+                if (size != dest.len) {
+                    return error.EndOfStream;
+                }
+            }
+
             fn readStep(self: @This(), buf: []u8) !usize {
                 if (self.parent.current_line) |current_line| {
                     const size = @min(buf.len, current_line.len);
@@ -440,13 +457,19 @@ fn writeBlobWithDiff3(
         };
 
         pub fn seekTo(self: *@This(), offset: usize) !void {
-            if (offset == 0) {
-                try self.base_iter.reset();
-                try self.target_iter.reset();
-                try self.source_iter.reset();
-                try self.diff3_iter.reset();
-            } else {
-                return error.InvalidOffset;
+            try self.base_iter.reset();
+            try self.target_iter.reset();
+            try self.source_iter.reset();
+            try self.diff3_iter.reset();
+            for (self.line_buffer.items) |buffer| {
+                self.allocator.free(buffer);
+            }
+            self.line_buffer.clearAndFree();
+            self.current_line = null;
+            self.has_conflict = false;
+
+            for (0..offset) |_| {
+                _ = try self.reader().readByte();
             }
         }
 
@@ -685,6 +708,23 @@ fn writeBlobWithPatches(
                     size += read_size;
                 }
                 return size;
+            }
+
+            pub fn readByte(self: @This()) !u8 {
+                var buffer = [_]u8{0} ** 1;
+                const size = try self.read(&buffer);
+                if (size == 0) {
+                    return error.EndOfStream;
+                } else {
+                    return buffer[0];
+                }
+            }
+
+            pub fn readNoEof(self: @This(), dest: []u8) !void {
+                const size = try self.read(dest);
+                if (size != dest.len) {
+                    return error.EndOfStream;
+                }
             }
 
             fn readStep(self: @This(), buf: []u8) !usize {
@@ -962,10 +1002,16 @@ fn writeBlobWithPatches(
         };
 
         pub fn seekTo(self: *@This(), offset: usize) !void {
-            if (offset == 0) {
-                self.current_node_id_hash = hash.hashInt(repo_opts.hash, &patch.NodeId(repo_opts.hash).first_bytes);
-            } else {
-                return error.InvalidOffset;
+            for (self.line_buffer.items) |buffer| {
+                self.allocator.free(buffer);
+            }
+            self.line_buffer.clearAndFree();
+            self.current_line = null;
+            self.current_node_id_hash = hash.hashInt(repo_opts.hash, &patch.NodeId(repo_opts.hash).first_bytes);
+            self.has_conflict = false;
+
+            for (0..offset) |_| {
+                _ = try self.reader().readByte();
             }
         }
 

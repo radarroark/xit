@@ -12,6 +12,7 @@ const df = @import("./diff.zig");
 const mrg = @import("./merge.zig");
 const cfg = @import("./config.zig");
 const net = @import("./net.zig");
+const chunk = @import("./chunk.zig");
 
 pub const RepoKind = enum {
     git,
@@ -28,7 +29,12 @@ pub fn RepoOpts(comptime repo_kind: RepoKind) type {
         pub const Extra = switch (repo_kind) {
             .git => struct {},
             .xit => struct {
-                chunk_size: usize = 2048,
+                chunk_opts: chunk.FastCdcOpts = .{
+                    .min_size = 1024,
+                    .avg_size = 2048,
+                    .max_size = 4096,
+                    .normalization = .level1,
+                },
             },
         };
 
