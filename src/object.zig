@@ -508,7 +508,7 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
     return struct {
         allocator: std.mem.Allocator,
         header: ObjectHeader,
-        reader: std.io.BufferedReader(repo_opts.max_read_size, Reader),
+        reader: std.io.BufferedReader(repo_opts.read_size, Reader),
         internal: switch (repo_kind) {
             .git => void,
             .xit => struct {
@@ -528,7 +528,7 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                     return .{
                         .allocator = allocator,
                         .header = reader.header(),
-                        .reader = std.io.bufferedReaderSize(repo_opts.max_read_size, reader),
+                        .reader = std.io.bufferedReaderSize(repo_opts.read_size, reader),
                         .internal = {},
                     };
                 },
@@ -556,7 +556,7 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                     return .{
                         .allocator = allocator,
                         .header = header,
-                        .reader = std.io.bufferedReaderSize(repo_opts.max_read_size, Reader{
+                        .reader = std.io.bufferedReaderSize(repo_opts.read_size, Reader{
                             .xit_dir = state.core.xit_dir,
                             .chunk_info_reader = try chunk_info_ptr.reader(),
                             .position = 0,
@@ -578,7 +578,7 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
 
         pub fn reset(self: *ObjectReader(repo_kind, repo_opts)) !void {
             try self.reader.unbuffered_reader.reset();
-            self.reader = std.io.bufferedReaderSize(repo_opts.max_read_size, self.reader.unbuffered_reader);
+            self.reader = std.io.bufferedReaderSize(repo_opts.read_size, self.reader.unbuffered_reader);
         }
 
         pub fn seekTo(self: *ObjectReader(repo_kind, repo_opts), position: u64) !void {
