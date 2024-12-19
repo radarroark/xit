@@ -559,9 +559,9 @@ fn writeBlobWithPatches(
             if (try commit_id_to_path_to_patch_id.getCursor(try hash.hexToInt(repo_opts.hash, &object.oid))) |path_to_patch_id_cursor| {
                 const path_to_patch_id = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(path_to_patch_id_cursor);
                 if (try path_to_patch_id.getCursor(path_hash)) |patch_id_cursor| {
-                    const patch_id_bytes = try patch_id_cursor.readBytesAlloc(allocator, repo_opts.max_read_size);
-                    defer allocator.free(patch_id_bytes);
-                    const patch_id = hash.bytesToInt(repo_opts.hash, patch_id_bytes[0..comptime hash.byteLen(repo_opts.hash)]);
+                    var patch_id_buffer = [_]u8{0} ** hash.byteLen(repo_opts.hash);
+                    _ = try patch_id_cursor.readBytes(&patch_id_buffer);
+                    const patch_id = hash.bytesToInt(repo_opts.hash, &patch_id_buffer);
                     try patch_ids.append(patch_id);
                 }
             }
