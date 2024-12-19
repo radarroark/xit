@@ -65,9 +65,15 @@ pub fn Hasher(comptime hash_kind: HashKind) type {
     };
 }
 
-pub fn hashReader(comptime hash_kind: HashKind, reader: anytype, header_maybe: ?[]const u8, out: *[byteLen(hash_kind)]u8) !void {
+pub fn hashReader(
+    comptime hash_kind: HashKind,
+    comptime read_size: usize,
+    reader: anytype,
+    header_maybe: ?[]const u8,
+    out: *[byteLen(hash_kind)]u8,
+) !void {
     var hasher = Hasher(hash_kind).init();
-    var buffer = [_]u8{0} ** 1024;
+    var buffer = [_]u8{0} ** read_size;
     if (header_maybe) |header| {
         hasher.update(header);
     }

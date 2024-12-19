@@ -626,7 +626,7 @@ pub fn indexDiffersFromWorkspace(
             const header = try std.fmt.bufPrint(&header_buffer, "blob {}\x00", .{file_size});
 
             var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-            try hash.hashReader(repo_opts.hash, file.reader(), header, &oid);
+            try hash.hashReader(repo_opts.hash, repo_opts.read_size, file.reader(), header, &oid);
             if (!std.mem.eql(u8, &entry.oid, &oid)) {
                 return true;
             }

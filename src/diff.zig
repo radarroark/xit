@@ -63,7 +63,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
             const header = try std.fmt.allocPrint(allocator, "blob {}\x00", .{file_size});
             defer allocator.free(header);
             var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-            try hash.hashReader(repo_opts.hash, file.reader(), header, &oid);
+            try hash.hashReader(repo_opts.hash, repo_opts.read_size, file.reader(), header, &oid);
             try file.seekTo(0);
 
             var iter = LineIterator(repo_kind, repo_opts){
