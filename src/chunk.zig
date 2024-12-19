@@ -3,11 +3,11 @@ const hash = @import("./hash.zig");
 const rp = @import("./repo.zig");
 const io = @import("./io.zig");
 
-const FastCdcOpts = struct {
-    min_size: usize = 1024,
-    avg_size: usize = 2048,
-    max_size: usize = 4096,
-    normalization: Normalization = .level1,
+pub const FastCdcOpts = struct {
+    min_size: usize,
+    avg_size: usize,
+    max_size: usize,
+    normalization: Normalization,
 
     const Normalization = enum {
         level0,
@@ -30,7 +30,9 @@ fn FastCdc(comptime opts: FastCdcOpts) type {
         remaining: usize,
 
         const gear_hash = computeGearHash();
-        const bits = std.math.log2(opts.avg_size);
+        // in some tests, avg_size will be very low, so we use @max
+        // here so that a valid mask is still used
+        const bits = std.math.log2(@max(opts.avg_size, 256));
         const normalization = @intFromEnum(opts.normalization);
         // thanks to https://github.com/nlfiedler/fastcdc-rs
         const masks: [26]u64 = .{
@@ -100,7 +102,7 @@ fn FastCdc(comptime opts: FastCdcOpts) type {
             }
 
             var index = opts.min_size;
-            try stream.seekBy(@intCast(index));
+            try stream.seekTo(self.offset + index);
             const reader = stream.reader();
 
             var h: u64 = 0;
@@ -153,7 +155,12 @@ fn FastCdc(comptime opts: FastCdcOpts) type {
 }
 
 test "fastcdc all zeros" {
-    const opts = FastCdcOpts{};
+    const opts = FastCdcOpts{
+        .min_size = 1024,
+        .avg_size = 2048,
+        .max_size = 4096,
+        .normalization = .level1,
+    };
     const buffer = [_]u8{0} ** (opts.max_size * 3);
     var stream = std.io.fixedBufferStream(&buffer);
     var iter = FastCdc(opts).init(buffer.len);
@@ -167,6 +174,7 @@ test "fastcdc sekien 16k chunks" {
         .min_size = 4096,
         .avg_size = 16384,
         .max_size = 65535,
+        .normalization = .level1,
     };
     const buffer = @embedFile("test/embed/SekienAkashita.jpg");
     var stream = std.io.fixedBufferStream(buffer);
@@ -190,6 +198,7 @@ test "fastcdc sekien 32k chunks" {
         .min_size = 8192,
         .avg_size = 32768,
         .max_size = 131072,
+        .normalization = .level1,
     };
     const buffer = @embedFile("test/embed/SekienAkashita.jpg");
     var stream = std.io.fixedBufferStream(buffer);
@@ -210,6 +219,7 @@ test "fastcdc sekien 64k chunks" {
         .min_size = 16384,
         .avg_size = 65536,
         .max_size = 262144,
+        .normalization = .level1,
     };
     const buffer = @embedFile("test/embed/SekienAkashita.jpg");
     var stream = std.io.fixedBufferStream(buffer);
@@ -229,6 +239,7 @@ pub fn writeChunks(
     state: rp.Repo(.xit, repo_opts).State(.read_write),
     file: anytype,
     object_hash: hash.HashInt(repo_opts.hash),
+    object_len: usize,
     object_header: []const u8,
 ) !void {
     // exit early if the chunks for this object already exist
@@ -244,21 +255,20 @@ pub fn writeChunks(
     var chunks_dir = try state.core.xit_dir.makeOpenPath("chunks", .{});
     defer chunks_dir.close();
 
-    var chunk_buffer = [_]u8{0} ** repo_opts.extra.chunk_size;
+    var chunk_buffer = [_]u8{0} ** repo_opts.extra.chunk_opts.max_size;
     const reader = file.reader();
 
+    var iter = FastCdc(repo_opts.extra.chunk_opts).init(object_len);
     var offset: u64 = 0;
-    while (true) {
+    while (try iter.next(file)) |chunk| {
         // read chunk
-        const size = try reader.read(&chunk_buffer);
-        if (size == 0) {
-            break;
-        }
-        const chunk = chunk_buffer[0..size];
+        try file.seekTo(offset);
+        try reader.readNoEof(chunk_buffer[0..chunk.length]);
+        const chunk_bytes = chunk_buffer[0..chunk.length];
 
         // hash the chunk
         var chunk_hash_bytes = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-        try hash.hashBuffer(repo_opts.hash, chunk, &chunk_hash_bytes);
+        try hash.hashBuffer(repo_opts.hash, chunk_bytes, &chunk_hash_bytes);
 
         // write chunk unless it already exists
         const chunk_hash_hex = std.fmt.bytesToHex(chunk_hash_bytes, .lower);
@@ -268,7 +278,7 @@ pub fn writeChunks(
             error.FileNotFound => {
                 var lock = try io.LockFile.init(chunks_dir, &chunk_hash_hex);
                 defer lock.deinit();
-                try lock.lock_file.writeAll(chunk);
+                try lock.lock_file.writeAll(chunk_bytes);
                 lock.success = true;
             },
             else => |e| return e,
@@ -278,7 +288,7 @@ pub fn writeChunks(
         // note: we are storing the offset at the *end* of this chunk.
         // this is useful so we can find the total size of the file
         // by looking at the last offset.
-        offset += size;
+        offset += chunk.length;
         try writer.writeAll(&chunk_hash_bytes);
         try writer.writeInt(u64, offset, .big);
     }
