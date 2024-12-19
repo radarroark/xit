@@ -26,7 +26,7 @@ pub fn writeChunks(
     var chunk_buffer = [_]u8{0} ** repo_opts.extra.chunk_size;
     const reader = file.reader();
 
-    var total_size: u64 = 0;
+    var offset: u64 = 0;
     while (true) {
         // read chunk
         const size = try reader.read(&chunk_buffer);
@@ -53,13 +53,13 @@ pub fn writeChunks(
             else => |e| return e,
         }
 
-        // write offset and hash to db
+        // write hash and offset to db
         // note: we are storing the offset at the *end* of this chunk.
         // this is useful so we can find the total size of the file
-        // by looking at the offset of the last chunk.
-        total_size += size;
-        try writer.writeInt(u64, total_size, .big);
+        // by looking at the last offset.
+        offset += size;
         try writer.writeAll(&chunk_hash_bytes);
+        try writer.writeInt(u64, offset, .big);
     }
 
     // finish writing to db
@@ -76,7 +76,9 @@ fn findChunkIndex(
     chunk_info_reader: *rp.Repo(.xit, repo_opts).DB.Cursor(.read_only).Reader,
     position: u64,
 ) !?usize {
-    const chunk_info_size = ((@bitSizeOf(u64) / 8) + hash.byteLen(repo_opts.hash));
+    const chunk_hash_size = comptime hash.byteLen(repo_opts.hash);
+    const chunk_offset_size = @bitSizeOf(u64) / 8;
+    const chunk_info_size = chunk_hash_size + chunk_offset_size;
     const chunk_count = chunk_info_reader.size / chunk_info_size;
     if (chunk_count == 0) {
         return null;
@@ -90,14 +92,14 @@ fn findChunkIndex(
         const mid = left + ((right - left) / 2);
 
         // note: we are storing the *end* offsets of each chunk
-        try chunk_info_reader.seekTo(mid * chunk_info_size);
+        try chunk_info_reader.seekTo(mid * chunk_info_size + chunk_hash_size);
         const end_offset = try chunk_info_reader.readInt(u64, .big);
 
         if (position < end_offset) {
             if (mid > 0) {
                 // since we store end offsets, the offset of the previous
                 // chunk is the actual offset of `mid`
-                try chunk_info_reader.seekTo((mid - 1) * chunk_info_size);
+                try chunk_info_reader.seekTo((mid - 1) * chunk_info_size + chunk_hash_size);
                 const mid_offset = try chunk_info_reader.readInt(u64, .big);
 
                 if (position >= mid_offset) {
@@ -113,7 +115,7 @@ fn findChunkIndex(
         }
     }
 
-    try chunk_info_reader.seekTo(right * chunk_info_size);
+    try chunk_info_reader.seekTo(right * chunk_info_size + chunk_hash_size);
     const right_offset = try chunk_info_reader.readInt(u64, .big);
     if (position < right_offset) {
         return right;
@@ -130,12 +132,19 @@ pub fn readChunk(
     buf: []u8,
 ) !usize {
     const chunk_index = (try findChunkIndex(repo_opts, chunk_info_reader, position)) orelse return 0;
-    const chunk_info_size = ((@bitSizeOf(u64) / 8) + hash.byteLen(repo_opts.hash));
+    const chunk_hash_size = comptime hash.byteLen(repo_opts.hash);
+    const chunk_offset_size = @bitSizeOf(u64) / 8;
+    const chunk_info_size = chunk_hash_size + chunk_offset_size;
     const chunk_info_position = chunk_index * chunk_info_size;
-    const chunk_hash_position = chunk_info_position + (@bitSizeOf(u64) / 8);
 
-    try chunk_info_reader.seekTo(chunk_hash_position);
-    var chunk_hash_bytes = [_]u8{0} ** hash.byteLen(repo_opts.hash);
+    const offset = if (chunk_index == 0) blk: {
+        try chunk_info_reader.seekTo(chunk_info_position);
+        break :blk 0;
+    } else blk: {
+        try chunk_info_reader.seekTo(chunk_info_position - chunk_offset_size);
+        break :blk try chunk_info_reader.readInt(u64, .big);
+    };
+    var chunk_hash_bytes = [_]u8{0} ** chunk_hash_size;
     try chunk_info_reader.readNoEof(&chunk_hash_bytes);
     const chunk_hash_hex = std.fmt.bytesToHex(chunk_hash_bytes, .lower);
 
@@ -144,7 +153,7 @@ pub fn readChunk(
 
     const chunk_file = try chunks_dir.openFile(&chunk_hash_hex, .{});
     defer chunk_file.close();
-    try chunk_file.seekTo(position % repo_opts.extra.chunk_size);
+    try chunk_file.seekTo(position - offset);
     return try chunk_file.read(buf);
 }
 
