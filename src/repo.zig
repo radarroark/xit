@@ -298,6 +298,28 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
+        pub fn initWithCommand(
+            allocator: std.mem.Allocator,
+            opts: InitOpts,
+            sub_command: cmd.SubCommand(repo_opts.hash),
+            writers: Writers,
+        ) !Repo(repo_kind, repo_opts) {
+            switch (sub_command) {
+                .init => |init_cmd| {
+                    return Repo(repo_kind, repo_opts).init(allocator, opts, init_cmd.dir) catch |err| switch (err) {
+                        error.RepoAlreadyExists => {
+                            try writers.err.print("{s} is already a repository\n", .{init_cmd.dir});
+                            return err;
+                        },
+                        else => |e| return e,
+                    };
+                },
+                else => {
+                    return try Repo(repo_kind, repo_opts).open(allocator, opts);
+                },
+            }
+        }
+
         pub fn deinit(self: *Repo(repo_kind, repo_opts)) void {
             switch (repo_kind) {
                 .git => {
@@ -312,17 +334,14 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
-        pub fn command(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, sub_command: cmd.SubCommand(repo_opts.hash), writers: Writers) !void {
+        pub fn runCommand(
+            self: *Repo(repo_kind, repo_opts),
+            allocator: std.mem.Allocator,
+            sub_command: cmd.SubCommand(repo_opts.hash),
+            writers: Writers,
+        ) !void {
             switch (sub_command) {
-                .init => |init_cmd| {
-                    self.* = Repo(repo_kind, repo_opts).init(allocator, self.init_opts, init_cmd.dir) catch |err| switch (err) {
-                        error.RepoAlreadyExists => {
-                            try writers.err.print("{s} is already a repository\n", .{init_cmd.dir});
-                            return err;
-                        },
-                        else => |e| return e,
-                    };
-                },
+                .init => {},
                 .add => |add_cmd| {
                     try self.add(allocator, add_cmd.paths);
                 },

@@ -173,18 +173,9 @@ pub fn run(
             },
             .cli => |sub_cmd_maybe| {
                 if (sub_cmd_maybe) |sub_cmd| {
-                    switch (sub_cmd) {
-                        .init => {
-                            var repo = rp.Repo(repo_kind, repo_opts){ .core = undefined, .init_opts = .{ .cwd = cwd } };
-                            try repo.command(allocator, sub_cmd, writers);
-                            defer repo.deinit(); // deinit must be after command because repo isn't fully init'ed yet
-                        },
-                        else => {
-                            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = cwd });
-                            defer repo.deinit();
-                            try repo.command(allocator, sub_cmd, writers);
-                        },
-                    }
+                    var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = cwd }, sub_cmd, writers);
+                    defer repo.deinit();
+                    try repo.runCommand(allocator, sub_cmd, writers);
                 } else {
                     try writers.out.print(USAGE, .{});
                 }
