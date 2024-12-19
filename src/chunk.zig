@@ -73,19 +73,19 @@ fn FastCdc(comptime opts: FastCdcOpts) type {
             };
         }
 
-        pub fn next(self: *FastCdc(opts), stream: anytype) !?FastCdcChunk {
+        pub fn next(self: *FastCdc(opts), stream: anytype, reader: anytype) !?FastCdcChunk {
             if (self.remaining == 0) {
                 return null;
             } else {
                 try stream.seekTo(self.offset);
-                const chunk = try self.cut(stream);
+                const chunk = try self.cut(stream, reader);
                 self.offset += chunk.length;
                 self.remaining -= chunk.length;
                 return chunk;
             }
         }
 
-        fn cut(self: FastCdc(opts), stream: anytype) !FastCdcChunk {
+        fn cut(self: FastCdc(opts), stream: anytype, reader: anytype) !FastCdcChunk {
             var remaining = self.remaining;
             if (remaining <= opts.min_size) {
                 return .{
@@ -103,7 +103,6 @@ fn FastCdc(comptime opts: FastCdcOpts) type {
 
             var index = opts.min_size;
             try stream.seekTo(self.offset + index);
-            const reader = stream.reader();
 
             var h: u64 = 0;
             while (index < center) {
@@ -164,7 +163,7 @@ test "fastcdc all zeros" {
     const buffer = [_]u8{0} ** (opts.max_size * 3);
     var stream = std.io.fixedBufferStream(&buffer);
     var iter = FastCdc(opts).init(buffer.len);
-    while (try iter.next(&stream)) |chunk| {
+    while (try iter.next(&stream, stream.reader())) |chunk| {
         try std.testing.expectEqual(opts.max_size, chunk.length);
     }
 }
@@ -187,7 +186,7 @@ test "fastcdc sekien 16k chunks" {
         .{ .hash = 2504464741100432583, .length = 24700 },
     };
     for (expected_chunks) |expected_chunk| {
-        const actual_chunk = (try iter.next(&stream)).?;
+        const actual_chunk = (try iter.next(&stream, stream.reader())).?;
         try std.testing.expectEqual(expected_chunk, actual_chunk);
     }
     try std.testing.expectEqual(0, iter.remaining);
@@ -208,7 +207,7 @@ test "fastcdc sekien 32k chunks" {
         .{ .hash = 2504464741100432583, .length = 42917 },
     };
     for (expected_chunks) |expected_chunk| {
-        const actual_chunk = (try iter.next(&stream)).?;
+        const actual_chunk = (try iter.next(&stream, stream.reader())).?;
         try std.testing.expectEqual(expected_chunk, actual_chunk);
     }
     try std.testing.expectEqual(0, iter.remaining);
@@ -228,7 +227,7 @@ test "fastcdc sekien 64k chunks" {
         .{ .hash = 2504464741100432583, .length = 109466 },
     };
     for (expected_chunks) |expected_chunk| {
-        const actual_chunk = (try iter.next(&stream)).?;
+        const actual_chunk = (try iter.next(&stream, stream.reader())).?;
         try std.testing.expectEqual(expected_chunk, actual_chunk);
     }
     try std.testing.expectEqual(0, iter.remaining);
@@ -237,7 +236,8 @@ test "fastcdc sekien 64k chunks" {
 pub fn writeChunks(
     comptime repo_opts: rp.RepoOpts(.xit),
     state: rp.Repo(.xit, repo_opts).State(.read_write),
-    file: anytype,
+    stream: anytype,
+    reader: anytype,
     object_hash: hash.HashInt(repo_opts.hash),
     object_len: usize,
     object_header: []const u8,
@@ -255,15 +255,13 @@ pub fn writeChunks(
     var chunks_dir = try state.core.xit_dir.makeOpenPath("chunks", .{});
     defer chunks_dir.close();
 
-    var chunk_buffer = [_]u8{0} ** repo_opts.extra.chunk_opts.max_size;
-    const reader = file.reader();
-
     var iter = FastCdc(repo_opts.extra.chunk_opts).init(object_len);
     var offset: u64 = 0;
-    while (try iter.next(file)) |chunk| {
+    while (try iter.next(stream, reader)) |chunk| {
         // read chunk
-        try file.seekTo(offset);
-        try reader.readNoEof(chunk_buffer[0..chunk.length]);
+        var chunk_buffer = [_]u8{0} ** repo_opts.extra.chunk_opts.max_size;
+        try stream.seekTo(offset);
+        try stream.reader().readNoEof(chunk_buffer[0..chunk.length]);
         const chunk_bytes = chunk_buffer[0..chunk.length];
 
         // hash the chunk
@@ -286,7 +284,7 @@ pub fn writeChunks(
 
         // write hash and offset to db
         // note: we are storing the offset at the *end* of this chunk.
-        // this is useful so we can find the total size of the file
+        // this is useful so we can find the total size of the object
         // by looking at the last offset.
         offset += chunk.length;
         try writer.writeAll(&chunk_hash_bytes);

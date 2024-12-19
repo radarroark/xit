@@ -47,7 +47,8 @@ pub fn writeObject(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
-    file: anytype,
+    stream: anytype,
+    reader: anytype,
     header: ObjectHeader,
     hash_bytes_buffer: *[hash.byteLen(repo_opts.hash)]u8,
 ) !void {
@@ -56,12 +57,11 @@ pub fn writeObject(
     const header_str = try writeObjectHeader(header, &header_bytes);
 
     // calc the hash of its contents
-    const reader = file.reader();
-    try hash.hashReader(repo_opts.hash, reader, header_str, hash_bytes_buffer);
+    try hash.hashReader(repo_opts.hash, stream.reader(), header_str, hash_bytes_buffer);
     const hash_hex = std.fmt.bytesToHex(hash_bytes_buffer, .lower);
 
     // reset seek pos so we can reuse the reader for copying
-    try file.seekTo(0);
+    try stream.seekTo(0);
 
     switch (repo_kind) {
         .git => {
@@ -105,8 +105,8 @@ pub fn writeObject(
             compressed_lock.success = true;
         },
         .xit => {
-            const file_hash = hash.bytesToInt(repo_opts.hash, hash_bytes_buffer);
-            try chunk.writeChunks(repo_opts, state, file, file_hash, header.size, header_str);
+            const object_hash = hash.bytesToInt(repo_opts.hash, hash_bytes_buffer);
+            try chunk.writeChunks(repo_opts, state, stream, reader, object_hash, header.size, header_str);
         },
     }
 }
@@ -184,7 +184,7 @@ fn writeTree(
         .xit => {
             const object_hash = hash.bytesToInt(repo_opts.hash, hash_bytes_buffer);
             var stream = std.io.fixedBufferStream(tree_contents);
-            try chunk.writeChunks(repo_opts, state, &stream, object_hash, tree_contents.len, header);
+            try chunk.writeChunks(repo_opts, state, &stream, stream.reader(), object_hash, tree_contents.len, header);
         },
     }
 }
@@ -367,7 +367,7 @@ pub fn writeCommit(
         },
         .xit => {
             var stream = std.io.fixedBufferStream(commit_contents);
-            try chunk.writeChunks(repo_opts, state, &stream, commit_hash, commit_contents.len, header);
+            try chunk.writeChunks(repo_opts, state, &stream, stream.reader(), commit_hash, commit_contents.len, header);
 
             // write commit id to HEAD
             try ref.writeRecur(repo_kind, repo_opts, state, "HEAD", &commit_hash_hex);
@@ -505,11 +505,10 @@ pub fn TreeEntry(comptime hash_kind: hash.HashKind) type {
 }
 
 pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
-    const BUFFER_SIZE = 2048;
     return struct {
         allocator: std.mem.Allocator,
         header: ObjectHeader,
-        reader: std.io.BufferedReader(BUFFER_SIZE, Reader),
+        reader: std.io.BufferedReader(repo_opts.max_read_size, Reader),
         internal: switch (repo_kind) {
             .git => void,
             .xit => struct {
@@ -529,7 +528,7 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                     return .{
                         .allocator = allocator,
                         .header = reader.header(),
-                        .reader = std.io.bufferedReaderSize(BUFFER_SIZE, reader),
+                        .reader = std.io.bufferedReaderSize(repo_opts.max_read_size, reader),
                         .internal = {},
                     };
                 },
@@ -557,7 +556,7 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                     return .{
                         .allocator = allocator,
                         .header = header,
-                        .reader = std.io.bufferedReaderSize(BUFFER_SIZE, Reader{
+                        .reader = std.io.bufferedReaderSize(repo_opts.max_read_size, Reader{
                             .xit_dir = state.core.xit_dir,
                             .chunk_info_reader = try chunk_info_ptr.reader(),
                             .position = 0,
@@ -579,7 +578,7 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
 
         pub fn reset(self: *ObjectReader(repo_kind, repo_opts)) !void {
             try self.reader.unbuffered_reader.reset();
-            self.reader = std.io.bufferedReaderSize(BUFFER_SIZE, self.reader.unbuffered_reader);
+            self.reader = std.io.bufferedReaderSize(repo_opts.max_read_size, self.reader.unbuffered_reader);
         }
 
         pub fn seekTo(self: *ObjectReader(repo_kind, repo_opts), position: u64) !void {
