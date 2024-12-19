@@ -219,13 +219,19 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
             const meta = try io.getMetadata(state.core.repo_dir, path);
             switch (meta.kind()) {
                 .file => {
+                    // open file
                     const file = try state.core.repo_dir.openFile(path, .{ .mode = .read_only });
                     defer file.close();
 
-                    // write the object
+                    // make reader
+                    var buffered_reader = std.io.bufferedReaderSize(repo_opts.max_read_size, file.reader());
+                    const reader = buffered_reader.reader();
+
+                    // write object
                     var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-                    try obj.writeObject(repo_kind, repo_opts, state, file, .{ .kind = .blob, .size = meta.size() }, &oid);
-                    // add the entry
+                    try obj.writeObject(repo_kind, repo_opts, state, file, reader, .{ .kind = .blob, .size = meta.size() }, &oid);
+
+                    // add entry
                     const times = io.getTimes(meta);
                     const stat = try io.getStat(file);
                     const entry = Entry{
