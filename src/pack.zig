@@ -301,7 +301,7 @@ pub const PackObjectReader = struct {
                 const header_str = try obj.writeObjectHeader(pack_reader.header(), &header_bytes);
 
                 var oid = [_]u8{0} ** hash.byteLen(.sha1);
-                try hash.hashReader(.sha1, pack_reader, header_str, &oid);
+                try hash.hashReader(.sha1, (rp.RepoOpts(.git){}).read_size, pack_reader, header_str, &oid);
 
                 if (std.mem.eql(u8, oid_hex, &std.fmt.bytesToHex(oid, .lower))) {
                     try pack_reader.reset();

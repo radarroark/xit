@@ -190,7 +190,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                     defer allocator.free(header);
 
                     var sha1_bytes_buffer = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-                    try hash.hashReader(repo_opts.hash, readme.reader(), header, &sha1_bytes_buffer);
+                    try hash.hashReader(repo_opts.hash, repo_opts.read_size, readme.reader(), header, &sha1_bytes_buffer);
                     const sha1_hex = std.fmt.bytesToHex(&sha1_bytes_buffer, .lower);
 
                     var oid: c.git_oid = undefined;
