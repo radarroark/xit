@@ -868,7 +868,7 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind, comptime repo_op
     {
         const file = try repo.core.repo_dir.createFile("bin", .{ .truncate = true });
         defer file.close();
-        while (try file.getPos() < df.MAX_LINE_BYTES) {
+        while (try file.getPos() < repo_opts.max_line_size) {
             try file.writeAll(&[_]u8{' '} ** 256);
         }
 

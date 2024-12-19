@@ -6,9 +6,6 @@ const io = @import("./io.zig");
 const idx = @import("./index.zig");
 const obj = @import("./object.zig");
 
-pub const MAX_LINE_BYTES = 10_000;
-pub const MAX_LINE_COUNT = 10_000_000;
-
 pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return struct {
         allocator: std.mem.Allocator,
@@ -177,7 +174,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                         } else if (buffer[0] == '\n') {
                             break;
                         } else {
-                            if (line_arr.items.len == MAX_LINE_BYTES) {
+                            if (line_arr.items.len == repo_opts.max_line_size) {
                                 return error.StreamTooLong;
                             }
                             try line_arr.append(buffer[0]);
@@ -191,7 +188,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                     }
                     var line_arr = std.ArrayList(u8).init(self.allocator);
                     errdefer line_arr.deinit();
-                    workspace.file.reader().streamUntilDelimiter(line_arr.writer(), '\n', MAX_LINE_BYTES) catch |err| switch (err) {
+                    workspace.file.reader().streamUntilDelimiter(line_arr.writer(), '\n', repo_opts.max_line_size) catch |err| switch (err) {
                         error.EndOfStream => workspace.eof = true,
                         else => |e| return e,
                     };
@@ -287,7 +284,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
 
                 // if line doesn't contain valid unicode or the line count has been exceeded,
                 // consider this file binary
-                if (!std.unicode.utf8ValidateSlice(line) or offsets.items.len == MAX_LINE_COUNT) {
+                if (!std.unicode.utf8ValidateSlice(line) or offsets.items.len == repo_opts.max_line_count) {
                     is_binary = true;
                     break;
                 }
