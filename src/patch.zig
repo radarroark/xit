@@ -185,8 +185,7 @@ fn writePatch(
     // init change list
     const patch_id_to_change_list_cursor = try moment.putCursor(hash.hashInt(repo_opts.hash, "patch-id->change-list"));
     const patch_id_to_change_list = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(patch_id_to_change_list_cursor);
-    const change_list_cursor = try patch_id_to_change_list.putCursor(patch_hash);
-    const change_list = try rp.Repo(.xit, repo_opts).DB.ArrayList(.read_write).init(change_list_cursor);
+    var change_list_cursor = try patch_id_to_change_list.putCursor(patch_hash);
 
     // init offset list
     const patch_id_to_offset_list_cursor = try moment.putCursor(hash.hashInt(repo_opts.hash, "patch-id->offset-list"));
@@ -204,9 +203,11 @@ fn writePatch(
 
     try createPatchEntries(repo_opts, moment, branch, allocator, &arena, line_iter_pair, path_hash, patch_hash, &patch_entries, &patch_offsets);
 
+    var change_list_writer = try change_list_cursor.writer();
     for (patch_entries.items) |patch_entry| {
-        try change_list.append(.{ .bytes = patch_entry });
+        try change_list_writer.writeAll(patch_entry);
     }
+    try change_list_writer.finish();
 
     var offset_list_writer = try offset_list_cursor.writer();
     try offset_list_writer.writeAll(&line_iter_pair.b.oid);
@@ -267,19 +268,18 @@ pub fn applyPatch(
     var parent_to_added_child = std.AutoArrayHashMap(hash.HashInt(repo_opts.hash), [NodeId(repo_opts.hash).byte_size]u8).init(allocator);
     defer parent_to_added_child.deinit();
 
-    var iter = try change_list_cursor.iterator();
-    defer iter.deinit();
-    while (try iter.next()) |*next_cursor| {
-        const change_buffer = try next_cursor.readBytesAlloc(allocator, repo_opts.max_read_size);
-        defer allocator.free(change_buffer);
+    var buffered_reader = std.io.bufferedReaderSize(repo_opts.read_size, try change_list_cursor.reader());
+    const change_list_reader = buffered_reader.reader();
+    while (true) {
+        const change_kind = change_list_reader.readInt(u8, .big) catch |err| switch (err) {
+            error.EndOfStream => break,
+            else => |e| return e,
+        };
 
-        var stream = std.io.fixedBufferStream(change_buffer);
-        var reader = stream.reader();
-        const change_kind = try reader.readInt(u8, .big);
         switch (try std.meta.intToEnum(ChangeKind, change_kind)) {
             .new_edge => {
-                const node_id_int = try reader.readInt(NodeId(repo_opts.hash).Int, .big);
-                const parent_node_id_int = try reader.readInt(NodeId(repo_opts.hash).Int, .big);
+                const node_id_int = try change_list_reader.readInt(NodeId(repo_opts.hash).Int, .big);
+                const parent_node_id_int = try change_list_reader.readInt(NodeId(repo_opts.hash).Int, .big);
 
                 const node_id_bytes = try hash.numToBytes(NodeId(repo_opts.hash).Int, node_id_int);
                 const node_id_hash = hash.hashInt(repo_opts.hash, &node_id_bytes);
@@ -326,7 +326,7 @@ pub fn applyPatch(
                 }
             },
             .delete_node => {
-                const node_id_int = try reader.readInt(NodeId(repo_opts.hash).Int, .big);
+                const node_id_int = try change_list_reader.readInt(NodeId(repo_opts.hash).Int, .big);
                 const node_id_bytes = try hash.numToBytes(NodeId(repo_opts.hash).Int, node_id_int);
                 const node_id_hash = hash.hashInt(repo_opts.hash, &node_id_bytes);
 
