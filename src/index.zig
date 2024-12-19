@@ -224,7 +224,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     defer file.close();
 
                     // make reader
-                    var buffered_reader = std.io.bufferedReaderSize(repo_opts.max_read_size, file.reader());
+                    var buffered_reader = std.io.bufferedReaderSize(repo_opts.read_size, file.reader());
                     const reader = buffered_reader.reader();
 
                     // write object
