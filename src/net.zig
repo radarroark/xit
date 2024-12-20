@@ -225,15 +225,15 @@ pub fn fetch(
     defer dir.deleteFile("temp.pack") catch {};
     const pack_file_path = try dir.realpathAlloc(allocator, "temp.pack");
     defer allocator.free(pack_file_path);
-    var iter = try pack.PackObjectIterator.init(allocator, pack_file_path);
+    var iter = try pack.PackObjectIterator(repo_kind, repo_opts).init(allocator, pack_file_path);
     defer iter.deinit();
     while (try iter.next()) |pack_reader| {
         defer pack_reader.deinit();
 
         const Stream = struct {
-            pack_reader: *pack.PackObjectReader,
+            pack_reader: *pack.PackObjectReader(repo_kind, repo_opts),
 
-            pub fn reader(self: @This()) *pack.PackObjectReader {
+            pub fn reader(self: @This()) *pack.PackObjectReader(repo_kind, repo_opts) {
                 return self.pack_reader;
             }
 

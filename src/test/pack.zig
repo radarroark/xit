@@ -216,7 +216,7 @@ test "pack" {
         var obj_iter = try obj.ObjectIterator(.git, repo_opts, .raw).init(allocator, .{ .core = &r.core, .extra = .{} }, &.{head_oid}, .{ .recursive = true });
         defer obj_iter.deinit();
 
-        var pack_writer = try pack.PackObjectWriter.init(allocator, &obj_iter);
+        var pack_writer = try pack.PackObjectWriter(.git, repo_opts).init(allocator, &obj_iter);
         defer pack_writer.deinit();
 
         var pack_file = try temp_dir.createFile("test.pack", .{});
@@ -238,7 +238,7 @@ test "pack" {
             var commit_oid_hex = [_]u8{0} ** hash.hexLen(repo_opts.hash);
             try std.testing.expectEqual(0, c.git_oid_fmt(@ptrCast(&commit_oid_hex), commit_oid));
 
-            var pack_reader = try pack.PackObjectReader.initWithPath(allocator, pack_file_path, &commit_oid_hex);
+            var pack_reader = try pack.PackObjectReader(.git, repo_opts).initWithPath(allocator, pack_file_path, &commit_oid_hex);
             defer pack_reader.deinit();
 
             // make sure the reader's position is at the beginning
