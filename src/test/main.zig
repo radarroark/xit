@@ -3,7 +3,6 @@
 //! validate git mode.
 
 const std = @import("std");
-const xitdb = @import("xitdb");
 const builtin = @import("builtin");
 const main = @import("../main.zig");
 const hash = @import("../hash.zig");
