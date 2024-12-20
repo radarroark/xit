@@ -3,6 +3,12 @@ const hash = @import("./hash.zig");
 const rp = @import("./repo.zig");
 const io = @import("./io.zig");
 
+// reordering is a breaking change
+const CompressKind = enum(u8) {
+    none,
+    zlib,
+};
+
 pub const FastCdcOpts = struct {
     min_size: usize,
     avg_size: usize,
@@ -276,8 +282,30 @@ pub fn writeChunks(
             error.FileNotFound => {
                 var lock = try io.LockFile.init(chunks_dir, &chunk_hash_hex);
                 defer lock.deinit();
-                try lock.lock_file.writeAll(chunk_bytes);
-                lock.success = true;
+
+                // if it's text, try compressing it
+                if (std.unicode.utf8ValidateSlice(chunk_bytes)) {
+                    try lock.lock_file.writer().writeByte(@intFromEnum(CompressKind.zlib));
+                    var zlib_stream = try std.compress.zlib.compressor(lock.lock_file.writer(), .{ .level = .default });
+                    try zlib_stream.writer().writeAll(chunk_bytes);
+                    try zlib_stream.finish();
+
+                    // if the compression made it larger, don't compress
+                    const compress_kind_size = @bitSizeOf(CompressKind) / 8;
+                    if (try lock.lock_file.getPos() > compress_kind_size + chunk_bytes.len) {
+                        try lock.lock_file.seekTo(0);
+                        try lock.lock_file.setEndPos(0);
+                    } else {
+                        lock.success = true;
+                    }
+                }
+
+                // write the chunk uncompressed
+                if (!lock.success) {
+                    try lock.lock_file.writer().writeByte(@intFromEnum(CompressKind.none));
+                    try lock.lock_file.writeAll(chunk_bytes);
+                    lock.success = true;
+                }
             },
             else => |e| return e,
         }
@@ -357,34 +385,57 @@ pub fn readChunk(
     comptime repo_opts: rp.RepoOpts(.xit),
     xit_dir: std.fs.Dir,
     chunk_info_reader: *rp.Repo(.xit, repo_opts).DB.Cursor(.read_only).Reader,
-    position: u64,
+    object_position: u64,
     buf: []u8,
 ) !usize {
-    const chunk_index = (try findChunkIndex(repo_opts, chunk_info_reader, position)) orelse return 0;
+    // find the chunk info position
+    const chunk_index = (try findChunkIndex(repo_opts, chunk_info_reader, object_position)) orelse return 0;
     const chunk_hash_size = comptime hash.byteLen(repo_opts.hash);
     const chunk_offset_size = @bitSizeOf(u64) / 8;
     const chunk_info_size = chunk_hash_size + chunk_offset_size;
     const chunk_info_position = chunk_index * chunk_info_size;
 
-    const offset = if (chunk_index == 0) blk: {
+    // find the chunk info
+    // the offset is where the chunk is located in the object.
+    // the hash is the hash of the uncompressed chunk data.
+    const object_offset = if (chunk_index == 0) blk: {
         try chunk_info_reader.seekTo(chunk_info_position);
         break :blk 0;
     } else blk: {
         try chunk_info_reader.seekTo(chunk_info_position - chunk_offset_size);
         break :blk try chunk_info_reader.readInt(u64, .big);
     };
+    const chunk_offset = object_position - object_offset;
     var chunk_hash_bytes = [_]u8{0} ** chunk_hash_size;
     try chunk_info_reader.readNoEof(&chunk_hash_bytes);
     const chunk_hash_hex = std.fmt.bytesToHex(chunk_hash_bytes, .lower);
 
+    // open the chunk file
     var chunks_dir = try xit_dir.openDir("chunks", .{});
     defer chunks_dir.close();
-
     const chunk_file = try chunks_dir.openFile(&chunk_hash_hex, .{});
     defer chunk_file.close();
-    try chunk_file.seekTo(position - offset);
-    return try chunk_file.read(buf);
+
+    // make reader
+    var buffered_reader = std.io.bufferedReaderSize(repo_opts.read_size, chunk_file.reader());
+    const chunk_reader = buffered_reader.reader();
+
+    // read chunk, decompressing if necessary
+    const compress_kind = try std.meta.intToEnum(CompressKind, try chunk_reader.readByte());
+    switch (compress_kind) {
+        .none => {
+            try chunk_reader.skipBytes(chunk_offset, .{});
+            return try chunk_reader.read(buf);
+        },
+        .zlib => {
+            var zlib_stream = std.compress.zlib.decompressor(chunk_reader);
+            try zlib_stream.reader().skipBytes(chunk_offset, .{});
+            return try zlib_stream.reader().read(buf);
+        },
+    }
 }
+
+const ZlibStream = std.compress.flate.inflate.Decompressor(.zlib, std.fs.File.Reader);
 
 pub fn ChunkObjectReader(comptime repo_opts: rp.RepoOpts(.xit)) type {
     return struct {
@@ -392,7 +443,7 @@ pub fn ChunkObjectReader(comptime repo_opts: rp.RepoOpts(.xit)) type {
         chunk_info_reader: rp.Repo(.xit, repo_opts).DB.Cursor(.read_only).Reader,
         position: u64,
 
-        pub const Error = std.fs.File.OpenError || rp.Repo(.xit, repo_opts).DB.Cursor(.read_only).Reader.Error || error{InvalidOffset};
+        pub const Error = ZlibStream.Reader.Error || std.fs.File.OpenError || rp.Repo(.xit, repo_opts).DB.Cursor(.read_only).Reader.Error || error{ InvalidOffset, InvalidEnumTag };
 
         pub fn read(self: *@This(), buf: []u8) !usize {
             var size: usize = 0;
