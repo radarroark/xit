@@ -1,7 +1,6 @@
 const std = @import("std");
 const hash = @import("./hash.zig");
 const rp = @import("./repo.zig");
-const compress = @import("./compress.zig");
 const obj = @import("./object.zig");
 
 fn findOid(idx_file: std.fs.File, oid_list_pos: u64, index: usize) ![hash.byteLen(.sha1)]u8 {
@@ -208,9 +207,11 @@ const PackObjectHeader = packed struct {
     extra: bool,
 };
 
+const ZlibStream = std.compress.flate.inflate.Decompressor(.zlib, std.fs.File.Reader);
+
 pub const PackObjectReader = struct {
     pack_file: std.fs.File,
-    stream: compress.ZlibStream,
+    stream: ZlibStream,
     start_position: u64,
     relative_position: u64,
     size: u64,
@@ -254,7 +255,7 @@ pub const PackObjectReader = struct {
         },
     };
 
-    pub const Error = compress.ZlibStream.Reader.Error || error{ Unseekable, UnexpectedEndOfStream, InvalidDeltaCache };
+    pub const Error = ZlibStream.Reader.Error || error{ Unseekable, UnexpectedEndOfStream, InvalidDeltaCache };
 
     pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(.git, .{}).Core, oid_hex: *const [hash.hexLen(.sha1)]u8) !PackObjectReader {
         var pack_reader = try PackObjectReader.initWithIndex(allocator, core, oid_hex);
@@ -843,7 +844,7 @@ pub const PackObjectReader = struct {
 pub const LooseOrPackObjectReader = union(enum) {
     loose: struct {
         file: std.fs.File,
-        stream: compress.ZlibStream,
+        stream: ZlibStream,
         header: obj.ObjectHeader,
     },
     pack: PackObjectReader,

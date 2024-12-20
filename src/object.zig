@@ -4,7 +4,6 @@
 
 const std = @import("std");
 const hash = @import("./hash.zig");
-const compress = @import("./compress.zig");
 const idx = @import("./index.zig");
 const ref = @import("./ref.zig");
 const io = @import("./io.zig");
@@ -42,6 +41,24 @@ pub const Tree = struct {
         try self.entries.put(name, entry);
     }
 };
+
+fn compressZlib(comptime read_size: usize, in: std.fs.File, out: std.fs.File) !void {
+    // init stream from input file
+    var zlib_stream = try std.compress.zlib.compressor(out.writer(), .{ .level = .default });
+
+    // write the compressed data to the output file
+    try in.seekTo(0);
+    const reader = in.reader();
+    var buf = [_]u8{0} ** read_size;
+    while (true) {
+        // read from file
+        const size = try reader.read(&buf);
+        if (size == 0) break;
+        // compress
+        try zlib_stream.writer().writeAll(buf[0..size]);
+    }
+    try zlib_stream.finish();
+}
 
 pub fn writeObject(
     comptime repo_kind: rp.RepoKind,
@@ -101,7 +118,7 @@ pub fn writeObject(
             // create compressed lock file
             var compressed_lock = try io.LockFile.init(hash_prefix_dir, hash_suffix);
             defer compressed_lock.deinit();
-            try compress.compress(repo_opts.read_size, lock.lock_file, compressed_lock.lock_file);
+            try compressZlib(repo_opts.read_size, lock.lock_file, compressed_lock.lock_file);
             compressed_lock.success = true;
         },
         .xit => {
@@ -178,7 +195,7 @@ fn writeTree(
             // create compressed lock file
             var compressed_lock = try io.LockFile.init(tree_hash_prefix_dir, tree_hash_suffix);
             defer compressed_lock.deinit();
-            try compress.compress(repo_opts.read_size, lock.lock_file, compressed_lock.lock_file);
+            try compressZlib(repo_opts.read_size, lock.lock_file, compressed_lock.lock_file);
             compressed_lock.success = true;
         },
         .xit => {
@@ -359,7 +376,7 @@ pub fn writeCommit(
             // create compressed lock file
             var compressed_lock = try io.LockFile.init(commit_hash_prefix_dir, commit_hash_suffix);
             defer compressed_lock.deinit();
-            try compress.compress(repo_opts.read_size, lock.lock_file, compressed_lock.lock_file);
+            try compressZlib(repo_opts.read_size, lock.lock_file, compressed_lock.lock_file);
             compressed_lock.success = true;
 
             // write commit id to HEAD
