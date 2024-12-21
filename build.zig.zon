@@ -3,8 +3,8 @@
     .version = "0.0.0",
     .dependencies = .{
         .xitdb = .{
-            .url = "git+https://github.com/radarroark/xitdb#afc4732ece42249400bd8f98870f3d2b7ebce526",
-            .hash = "12205cd70e7c52e0efe4ccf6af34ce3471ba0e8420a65bf38abc452c213b661c3806",
+            .url = "git+https://github.com/radarroark/xitdb#7d38f9345578379c8467c15678b1048872dfc53b",
+            .hash = "12206b206d5bd3edd19f8776bb24368f791edd3806b5fdbcc8efde13754910aa30ec",
         },
         .xitui = .{
             .url = "git+https://github.com/radarroark/xitui#41ad3e53ec75bdc3d46908645f47e2284b890859",
