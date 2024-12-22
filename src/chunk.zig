@@ -359,9 +359,9 @@ pub fn writeChunks(
                     try zlib_stream.writer().writeAll(chunk_bytes);
                     try zlib_stream.finish();
 
-                    // if the compression made it larger, don't compress
+                    // abort compression if it didn't make it smaller
                     const compress_kind_size = @bitSizeOf(CompressKind) / 8;
-                    if (try lock.lock_file.getPos() > compress_kind_size + chunk_bytes.len) {
+                    if (try lock.lock_file.getPos() >= compress_kind_size + chunk_bytes.len) {
                         try lock.lock_file.seekTo(0);
                         try lock.lock_file.setEndPos(0);
                     } else {
