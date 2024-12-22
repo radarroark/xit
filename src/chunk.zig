@@ -23,16 +23,11 @@ pub const FastCdcOpts = struct {
     };
 };
 
-const FastCdcChunk = struct {
-    hash: u64,
-    length: usize,
-};
-
 fn FastCdc(comptime opts: FastCdcOpts) type {
+    std.debug.assert(opts.min_size > 0);
     std.debug.assert(opts.min_size <= opts.avg_size);
     std.debug.assert(opts.avg_size <= opts.max_size);
     return struct {
-        offset: usize,
         remaining: usize,
 
         const gear_hash = computeGearHash();
@@ -74,30 +69,25 @@ fn FastCdc(comptime opts: FastCdcOpts) type {
 
         pub fn init(total_size: usize) FastCdc(opts) {
             return .{
-                .offset = 0,
                 .remaining = total_size,
             };
         }
 
-        pub fn next(self: *FastCdc(opts), stream: anytype, reader: anytype) !?FastCdcChunk {
+        pub fn next(self: *FastCdc(opts), reader: anytype, buffer: *[opts.max_size]u8) !?[]const u8 {
             if (self.remaining == 0) {
                 return null;
             } else {
-                try stream.seekTo(self.offset);
-                const chunk = try self.cut(stream, reader);
-                self.offset += chunk.length;
-                self.remaining -= chunk.length;
+                const chunk = try self.read(reader, buffer);
+                self.remaining -= chunk.len;
                 return chunk;
             }
         }
 
-        fn cut(self: FastCdc(opts), stream: anytype, reader: anytype) !FastCdcChunk {
+        fn read(self: FastCdc(opts), reader: anytype, buffer: *[opts.max_size]u8) ![]const u8 {
             var remaining = self.remaining;
             if (remaining <= opts.min_size) {
-                return .{
-                    .hash = 0,
-                    .length = remaining,
-                };
+                try reader.readNoEof(buffer[0..remaining]);
+                return buffer[0..remaining];
             }
 
             var center = opts.avg_size;
@@ -107,37 +97,32 @@ fn FastCdc(comptime opts: FastCdcOpts) type {
                 center = remaining;
             }
 
-            var index = opts.min_size;
-            try stream.seekTo(self.offset + index);
+            var index = opts.min_size - 1;
+            try reader.readNoEof(buffer[0..index]);
 
             var h: u64 = 0;
             while (index < center) {
-                h = (h << 1) +% gear_hash[try reader.readByte()];
-                if (h & mask_s == 0) {
-                    return .{
-                        .hash = h,
-                        .length = index,
-                    };
-                }
+                const byte = try reader.readByte();
+                buffer[index] = byte;
+                h = (h << 1) +% gear_hash[byte];
                 index += 1;
+                if (h & mask_s == 0) {
+                    return buffer[0..index];
+                }
             }
 
             const last_pos = remaining;
             while (index < last_pos) {
-                h = (h << 1) +% gear_hash[try reader.readByte()];
-                if (h & mask_l == 0) {
-                    return .{
-                        .hash = h,
-                        .length = index,
-                    };
-                }
+                const byte = try reader.readByte();
+                buffer[index] = byte;
+                h = (h << 1) +% gear_hash[byte];
                 index += 1;
+                if (h & mask_l == 0) {
+                    return buffer[0..index];
+                }
             }
 
-            return .{
-                .hash = h,
-                .length = index,
-            };
+            return buffer[0..index];
         }
 
         fn computeGearHash() [256]u64 {
@@ -166,11 +151,12 @@ test "fastcdc all zeros" {
         .max_size = 4096,
         .normalization = .level1,
     };
-    const buffer = [_]u8{0} ** (opts.max_size * 3);
-    var stream = std.io.fixedBufferStream(&buffer);
-    var iter = FastCdc(opts).init(buffer.len);
-    while (try iter.next(&stream, stream.reader())) |chunk| {
-        try std.testing.expectEqual(opts.max_size, chunk.length);
+    const zero_buffer = [_]u8{0} ** (opts.max_size * 3);
+    var stream = std.io.fixedBufferStream(&zero_buffer);
+    var iter = FastCdc(opts).init(zero_buffer.len);
+    var chunk_buffer = [_]u8{0} ** opts.max_size;
+    while (try iter.next(stream.reader(), &chunk_buffer)) |chunk| {
+        try std.testing.expectEqual(opts.max_size, chunk.len);
     }
 }
 
@@ -184,16 +170,17 @@ test "fastcdc sekien 16k chunks" {
     const buffer = @embedFile("test/embed/SekienAkashita.jpg");
     var stream = std.io.fixedBufferStream(buffer);
     var iter = FastCdc(opts).init(buffer.len);
-    const expected_chunks = [_]FastCdcChunk{
-        .{ .hash = 17968276318003433923, .length = 21325 },
-        .{ .hash = 4098594969649699419, .length = 17140 },
-        .{ .hash = 15733367461443853673, .length = 28084 },
-        .{ .hash = 4509236223063678303, .length = 18217 },
-        .{ .hash = 2504464741100432583, .length = 24700 },
+    var chunk_buffer = [_]u8{0} ** opts.max_size;
+    const expected_lengths = [_]usize{
+        21326,
+        17140,
+        28084,
+        18217,
+        24699,
     };
-    for (expected_chunks) |expected_chunk| {
-        const actual_chunk = (try iter.next(&stream, stream.reader())).?;
-        try std.testing.expectEqual(expected_chunk, actual_chunk);
+    for (expected_lengths) |expected_length| {
+        const actual_chunk = (try iter.next(stream.reader(), &chunk_buffer)).?;
+        try std.testing.expectEqual(expected_length, actual_chunk.len);
     }
     try std.testing.expectEqual(0, iter.remaining);
 }
@@ -208,13 +195,14 @@ test "fastcdc sekien 32k chunks" {
     const buffer = @embedFile("test/embed/SekienAkashita.jpg");
     var stream = std.io.fixedBufferStream(buffer);
     var iter = FastCdc(opts).init(buffer.len);
-    const expected_chunks = [_]FastCdcChunk{
-        .{ .hash = 15733367461443853673, .length = 66549 },
-        .{ .hash = 2504464741100432583, .length = 42917 },
+    var chunk_buffer = [_]u8{0} ** opts.max_size;
+    const expected_lengths = [_]usize{
+        66550,
+        42916,
     };
-    for (expected_chunks) |expected_chunk| {
-        const actual_chunk = (try iter.next(&stream, stream.reader())).?;
-        try std.testing.expectEqual(expected_chunk, actual_chunk);
+    for (expected_lengths) |expected_length| {
+        const actual_chunk = (try iter.next(stream.reader(), &chunk_buffer)).?;
+        try std.testing.expectEqual(expected_length, actual_chunk.len);
     }
     try std.testing.expectEqual(0, iter.remaining);
 }
@@ -229,12 +217,13 @@ test "fastcdc sekien 64k chunks" {
     const buffer = @embedFile("test/embed/SekienAkashita.jpg");
     var stream = std.io.fixedBufferStream(buffer);
     var iter = FastCdc(opts).init(buffer.len);
-    const expected_chunks = [_]FastCdcChunk{
-        .{ .hash = 2504464741100432583, .length = 109466 },
+    var chunk_buffer = [_]u8{0} ** opts.max_size;
+    const expected_lengths = [_]usize{
+        109466,
     };
-    for (expected_chunks) |expected_chunk| {
-        const actual_chunk = (try iter.next(&stream, stream.reader())).?;
-        try std.testing.expectEqual(expected_chunk, actual_chunk);
+    for (expected_lengths) |expected_length| {
+        const actual_chunk = (try iter.next(stream.reader(), &chunk_buffer)).?;
+        try std.testing.expectEqual(expected_length, actual_chunk.len);
     }
     try std.testing.expectEqual(0, iter.remaining);
 }
@@ -308,7 +297,6 @@ test "trimTruncatedCodepoints" {
 pub fn writeChunks(
     comptime repo_opts: rp.RepoOpts(.xit),
     state: rp.Repo(.xit, repo_opts).State(.read_write),
-    stream: anytype,
     reader: anytype,
     object_hash: hash.HashInt(repo_opts.hash),
     object_len: usize,
@@ -327,18 +315,13 @@ pub fn writeChunks(
     var chunks_dir = try state.core.xit_dir.makeOpenPath("chunks", .{});
     defer chunks_dir.close();
 
+    var chunk_buffer = [_]u8{0} ** repo_opts.extra.chunk_opts.max_size;
     var iter = FastCdc(repo_opts.extra.chunk_opts).init(object_len);
     var offset: u64 = 0;
-    while (try iter.next(stream, reader)) |chunk| {
-        // read chunk
-        var chunk_buffer = [_]u8{0} ** repo_opts.extra.chunk_opts.max_size;
-        try stream.seekTo(offset);
-        try stream.reader().readNoEof(chunk_buffer[0..chunk.length]);
-        const chunk_bytes = chunk_buffer[0..chunk.length];
-
+    while (try iter.next(reader, &chunk_buffer)) |chunk| {
         // hash the chunk
         var chunk_hash_bytes = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-        try hash.hashBuffer(repo_opts.hash, chunk_bytes, &chunk_hash_bytes);
+        try hash.hashBuffer(repo_opts.hash, chunk, &chunk_hash_bytes);
 
         // write chunk unless it already exists
         const chunk_hash_hex = std.fmt.bytesToHex(chunk_hash_bytes, .lower);
@@ -353,15 +336,15 @@ pub fn writeChunks(
                 // since the beginning and end could have truncated unicode codepoints,
                 // we must first trim them. if we don't do this, non-English text will
                 // sometimes fail to validate as utf8 and thus won't get compressed.
-                if (std.unicode.utf8ValidateSlice(trimTruncatedCodepoints(chunk_bytes))) {
+                if (std.unicode.utf8ValidateSlice(trimTruncatedCodepoints(chunk))) {
                     try lock.lock_file.writer().writeByte(@intFromEnum(CompressKind.zlib));
                     var zlib_stream = try std.compress.zlib.compressor(lock.lock_file.writer(), .{ .level = .default });
-                    try zlib_stream.writer().writeAll(chunk_bytes);
+                    try zlib_stream.writer().writeAll(chunk);
                     try zlib_stream.finish();
 
                     // abort compression if it didn't make it smaller
                     const compress_kind_size = @bitSizeOf(CompressKind) / 8;
-                    if (try lock.lock_file.getPos() >= compress_kind_size + chunk_bytes.len) {
+                    if (try lock.lock_file.getPos() >= compress_kind_size + chunk.len) {
                         try lock.lock_file.seekTo(0);
                         try lock.lock_file.setEndPos(0);
                     } else {
@@ -372,7 +355,7 @@ pub fn writeChunks(
                 // write the chunk uncompressed
                 if (!lock.success) {
                     try lock.lock_file.writer().writeByte(@intFromEnum(CompressKind.none));
-                    try lock.lock_file.writeAll(chunk_bytes);
+                    try lock.lock_file.writeAll(chunk);
                     lock.success = true;
                 }
             },
@@ -383,7 +366,7 @@ pub fn writeChunks(
         // note: we are storing the offset at the *end* of this chunk.
         // this is useful so we can find the total size of the object
         // by looking at the last offset.
-        offset += chunk.length;
+        offset += chunk.len;
         try writer.writeAll(&chunk_hash_bytes);
         try writer.writeInt(u64, offset, .big);
     }

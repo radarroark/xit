@@ -123,7 +123,7 @@ pub fn writeObject(
         },
         .xit => {
             const object_hash = hash.bytesToInt(repo_opts.hash, hash_bytes_buffer);
-            try chunk.writeChunks(repo_opts, state, stream, reader, object_hash, header.size, header_str);
+            try chunk.writeChunks(repo_opts, state, reader, object_hash, header.size, header_str);
         },
     }
 }
@@ -201,7 +201,7 @@ fn writeTree(
         .xit => {
             const object_hash = hash.bytesToInt(repo_opts.hash, hash_bytes_buffer);
             var stream = std.io.fixedBufferStream(tree_contents);
-            try chunk.writeChunks(repo_opts, state, &stream, stream.reader(), object_hash, tree_contents.len, header);
+            try chunk.writeChunks(repo_opts, state, stream.reader(), object_hash, tree_contents.len, header);
         },
     }
 }
@@ -384,7 +384,7 @@ pub fn writeCommit(
         },
         .xit => {
             var stream = std.io.fixedBufferStream(commit_contents);
-            try chunk.writeChunks(repo_opts, state, &stream, stream.reader(), commit_hash, commit_contents.len, header);
+            try chunk.writeChunks(repo_opts, state, stream.reader(), commit_hash, commit_contents.len, header);
 
             // write commit id to HEAD
             try ref.writeRecur(repo_kind, repo_opts, state, "HEAD", &commit_hash_hex);
