@@ -6,16 +6,20 @@ A version control system written in Zig. Is it ready yet? Nope...it doesn't even
 * combine snapshot-based and patch-based version control
   * merging and cherry-picking uses patches like Darcs and Pijul
   * checking out commits and anything sent over the network uses snapshots like git
-  * *status: mostly implemented*
+  * [read more](docs/patch.md) about snapshots vs patches
+  * *status: fully implemented*
 * universal undo
   * any change to the repo can be cleanly undone
-  * *status: not implemented, but [xitdb](https://github.com/radarroark/xitdb) will make it trivial*
+  * [read more](docs/db.md) about the immutable database
+  * *status: partially implemented (not exposed to the user yet)*
 * built-in TUI
   * all functionality will be exposed via the TUI
+  * [read more](docs/tui.md) about the TUI
   * *status: partially implemented (only log and status for now)*
 * store large/binary files efficiently
   * use modern chunking algorithm (FastCDC) so files are deltified efficiently
   * only use compression on text data so the cost isn't paid on binary files where it has no benefit
+  * [read more](docs/chunk.md) about chunking
   * *status: fully implemented*
 
 To get started, run `zig build` and you'll find the binary in the `zig-out` dir. The CLI is similar to git:
