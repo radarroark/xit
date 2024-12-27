@@ -47,15 +47,32 @@ pub fn objectToFile(
             const out_file = try state.core.repo_dir.createFile(path, out_flags);
             defer out_file.close();
 
-            // write the decompressed data to the output file
+            // make a hasher that will verify the object's data matches its oid
+            var hasher = hash.Hasher(repo_opts.hash).init();
+            {
+                var header_bytes = [_]u8{0} ** 32;
+                const header_str = try obj.writeObjectHeader(obj_rdr.header, &header_bytes);
+                hasher.update(header_str);
+            }
+
+            // write the data to the output file
             const writer = out_file.writer();
             var buf = [_]u8{0} ** repo_opts.read_size;
             while (true) {
-                // read from file
                 const size = try obj_rdr.reader.read(&buf);
-                if (size == 0) break;
-                // decompress
+                if (size == 0) {
+                    break;
+                }
                 _ = try writer.write(buf[0..size]);
+                hasher.update(buf[0..size]);
+            }
+
+            // make sure the hash matches the oid
+            // if this fails, then the data was corrupted somehow
+            var hash_bytes = [_]u8{0} ** hash.byteLen(repo_opts.hash);
+            hasher.final(&hash_bytes);
+            if (!std.mem.eql(u8, &hash_bytes, &tree_entry.oid)) {
+                return error.ObjectHashDoesNotMatchOid;
             }
         },
         .tree => {
