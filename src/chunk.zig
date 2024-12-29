@@ -344,7 +344,8 @@ pub fn writeChunks(
 
                     // abort compression if it didn't make it smaller
                     const compress_kind_size = @bitSizeOf(CompressKind) / 8;
-                    if (try lock.lock_file.getPos() >= compress_kind_size + chunk.len) {
+                    const checksum_size = @bitSizeOf(u32) / 8;
+                    if (try lock.lock_file.getPos() >= compress_kind_size + checksum_size + chunk.len) {
                         try lock.lock_file.seekTo(0);
                         try lock.lock_file.setEndPos(0);
                     } else {
@@ -355,6 +356,7 @@ pub fn writeChunks(
                 // write the chunk uncompressed
                 if (!lock.success) {
                     try lock.lock_file.writer().writeByte(@intFromEnum(CompressKind.none));
+                    try lock.lock_file.writer().writeInt(u32, std.hash.Adler32.hash(chunk), .big);
                     try lock.lock_file.writeAll(chunk);
                     lock.success = true;
                 }
@@ -476,13 +478,28 @@ pub fn readChunk(
     const compress_kind = try std.meta.intToEnum(CompressKind, try chunk_reader.readByte());
     switch (compress_kind) {
         .none => {
-            try chunk_reader.skipBytes(chunk_offset, .{});
-            return try chunk_reader.read(buf);
+            const expected_checksum = try chunk_reader.readInt(u32, .big);
+
+            var chunk_buffer = [_]u8{0} ** repo_opts.extra.chunk_opts.max_size;
+            const chunk_size = try chunk_reader.readAll(&chunk_buffer);
+
+            const actual_checksum = std.hash.Adler32.hash(chunk_buffer[0..chunk_size]);
+            if (actual_checksum != expected_checksum) {
+                return error.WrongChunkChecksum;
+            }
+
+            const read_size = @min(buf.len, chunk_size - chunk_offset);
+            @memcpy(buf[0..read_size], chunk_buffer[chunk_offset .. chunk_offset + read_size]);
+
+            return read_size;
         },
         .zlib => {
             var zlib_stream = std.compress.zlib.decompressor(chunk_reader);
             try zlib_stream.reader().skipBytes(chunk_offset, .{});
-            return try zlib_stream.reader().read(buf);
+            return zlib_stream.reader().read(buf) catch |err| switch (err) {
+                error.WrongZlibChecksum => error.WrongChunkChecksum,
+                else => |e| e,
+            };
         },
     }
 }
@@ -495,7 +512,7 @@ pub fn ChunkObjectReader(comptime repo_opts: rp.RepoOpts(.xit)) type {
         chunk_info_reader: rp.Repo(.xit, repo_opts).DB.Cursor(.read_only).Reader,
         position: u64,
 
-        pub const Error = ZlibStream.Reader.Error || std.fs.File.OpenError || rp.Repo(.xit, repo_opts).DB.Cursor(.read_only).Reader.Error || error{ InvalidOffset, InvalidEnumTag };
+        pub const Error = ZlibStream.Reader.Error || std.fs.File.OpenError || rp.Repo(.xit, repo_opts).DB.Cursor(.read_only).Reader.Error || error{ InvalidOffset, InvalidEnumTag, WrongChunkChecksum };
 
         pub fn read(self: *@This(), buf: []u8) !usize {
             var size: usize = 0;
