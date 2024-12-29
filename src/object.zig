@@ -719,14 +719,6 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                         .full => {
                             var entries = std.StringArrayHashMap(TreeEntry(repo_opts.hash)).init(arena.allocator());
 
-                            // make a hasher that will verify the object's data matches its oid
-                            var hasher = hash.Hasher(repo_opts.hash).init();
-                            {
-                                var header_bytes = [_]u8{0} ** 32;
-                                const header_str = try writeObjectHeader(obj_rdr.header, &header_bytes);
-                                hasher.update(header_str);
-                            }
-
                             while (true) {
                                 const entry_mode_str = reader.readUntilDelimiterAlloc(arena.allocator(), ' ', repo_opts.max_read_size) catch |err| switch (err) {
                                     error.EndOfStream => break,
@@ -737,21 +729,6 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                                 var entry_oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
                                 try reader.readNoEof(&entry_oid);
                                 try entries.put(entry_name, .{ .oid = entry_oid, .mode = entry_mode });
-
-                                // update hash
-                                hasher.update(entry_mode_str);
-                                hasher.update(" ");
-                                hasher.update(entry_name);
-                                hasher.update("\x00");
-                                hasher.update(&entry_oid);
-                            }
-
-                            // make sure the hash matches the oid
-                            // if this fails, then the data was corrupted somehow
-                            var hash_bytes = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-                            hasher.final(&hash_bytes);
-                            if (!std.mem.eql(u8, &std.fmt.bytesToHex(hash_bytes, .lower), oid)) {
-                                return error.ObjectHashDoesNotMatchOid;
                             }
 
                             return .{
@@ -776,36 +753,24 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                             .object_reader = obj_rdr,
                         },
                         .full => {
-                            // make a hasher that will verify the object's data matches its oid
-                            var hasher = hash.Hasher(repo_opts.hash).init();
-                            {
-                                var header_bytes = [_]u8{0} ** 32;
-                                const header_str = try writeObjectHeader(obj_rdr.header, &header_bytes);
-                                hasher.update(header_str);
-                            }
-
                             // read the content kind
                             const content_kind = try reader.readUntilDelimiterAlloc(allocator, ' ', repo_opts.max_read_size);
                             defer allocator.free(content_kind);
                             if (!std.mem.eql(u8, "tree", content_kind)) {
                                 return error.InvalidCommitContentKind;
                             }
-                            hasher.update(content_kind);
-                            hasher.update(" ");
 
                             // read the tree hash
-                            var tree_hash_buffer = [_]u8{0} ** (hash.hexLen(repo_opts.hash) + 1);
-                            const tree_hash = try reader.readUntilDelimiter(&tree_hash_buffer, '\n');
-                            if (tree_hash.len != hash.hexLen(repo_opts.hash)) {
+                            var tree_hash = [_]u8{0} ** (hash.hexLen(repo_opts.hash) + 1);
+                            const tree_hash_slice = try reader.readUntilDelimiter(&tree_hash, '\n');
+                            if (tree_hash_slice.len != hash.hexLen(repo_opts.hash)) {
                                 return error.InvalidCommitTreeHash;
                             }
-                            hasher.update(tree_hash);
-                            hasher.update("\n");
 
                             // init the content
                             var content = ObjectContent(repo_opts.hash){
                                 .commit = .{
-                                    .tree = tree_hash[0..comptime hash.hexLen(repo_opts.hash)].*,
+                                    .tree = tree_hash_slice[0..comptime hash.hexLen(repo_opts.hash)].*,
                                     .parents = std.ArrayList([hash.hexLen(repo_opts.hash)]u8).init(arena.allocator()),
                                     .metadata = .{},
                                 },
@@ -814,8 +779,6 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                             // read the metadata
                             while (true) {
                                 const line = try reader.readUntilDelimiterAlloc(arena.allocator(), '\n', repo_opts.max_read_size);
-                                hasher.update(line);
-                                hasher.update("\n");
                                 if (line.len == 0) {
                                     break;
                                 }
@@ -841,15 +804,6 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
                             // read the message
                             content.commit.metadata.message = try reader.readAllAlloc(arena.allocator(), repo_opts.max_read_size);
-                            hasher.update(content.commit.metadata.message);
-
-                            // make sure the hash matches the oid
-                            // if this fails, then the data was corrupted somehow
-                            var hash_bytes = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-                            hasher.final(&hash_bytes);
-                            if (!std.mem.eql(u8, &std.fmt.bytesToHex(hash_bytes, .lower), oid)) {
-                                return error.ObjectHashDoesNotMatchOid;
-                            }
 
                             return .{
                                 .allocator = allocator,
