@@ -310,13 +310,13 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             defer allocator.free(f_txt_content);
             const expected_f_txt_content = try std.fmt.allocPrint(allocator,
                 \\a
-                \\<<<<<<< master
+                \\<<<<<<< target (master)
                 \\x
-                \\||||||| original ({s})
+                \\||||||| base ({s})
                 \\b
                 \\=======
                 \\y
-                \\>>>>>>> foo
+                \\>>>>>>> source (foo)
                 \\c
             , .{result.base_oid});
             defer allocator.free(expected_f_txt_content);
@@ -1131,7 +1131,7 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
                     try std.testing.expect(.conflict == result.data);
                     try std.testing.expectEqualStrings(
                         \\int square(int x) {
-                        \\<<<<<<< master
+                        \\<<<<<<< target (master)
                         \\  int y = x;
                         \\  /* Update y to equal the result. */
                         \\  /* Question: what is the order of magnitude of this algorithm with respect to x? */
@@ -1140,11 +1140,11 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
                         \\
                         \\int very_slow_square(int x) {
                         \\  int y = 0;
-                        \\||||||| original (218399a19e8507080980d6b43a64c069133fd26f)
+                        \\||||||| base (218399a19e8507080980d6b43a64c069133fd26f)
                         \\  int y = x;
                         \\=======
                         \\  int y = 0;
-                        \\>>>>>>> foo
+                        \\>>>>>>> source (foo)
                         \\  /* Update y to equal the result. */
                         \\  /* Question: what is the order of magnitude of this algorithm with respect to x? */
                         \\  for (int i = 0; i < x; i++)
@@ -1374,13 +1374,13 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
         const readme_md_content = try readme_md.readToEndAlloc(allocator, 1024);
         defer allocator.free(readme_md_content);
         const expected_readme_md_content = try std.fmt.allocPrint(allocator,
-            \\<<<<<<< master
+            \\<<<<<<< target (master)
             \\b
-            \\||||||| original ({s})
+            \\||||||| base ({s})
             \\c
             \\=======
             \\d
-            \\>>>>>>> {s}
+            \\>>>>>>> source ({s})
         , .{ result.base_oid, commit_d });
         defer allocator.free(expected_readme_md_content);
         try std.testing.expectEqualStrings(expected_readme_md_content, readme_md_content);

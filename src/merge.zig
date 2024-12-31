@@ -495,13 +495,13 @@ fn writeBlobWithDiff3(
         }
     };
 
-    const target_marker = try std.fmt.allocPrint(allocator, "<<<<<<< {s}", .{target_name});
+    const target_marker = try std.fmt.allocPrint(allocator, "<<<<<<< target ({s})", .{target_name});
     defer allocator.free(target_marker);
-    const base_marker = try std.fmt.allocPrint(allocator, "||||||| original ({s})", .{base_oid});
+    const base_marker = try std.fmt.allocPrint(allocator, "||||||| base ({s})", .{base_oid});
     defer allocator.free(base_marker);
     const separate_marker = try std.fmt.allocPrint(allocator, "=======", .{});
     defer allocator.free(separate_marker);
-    const source_marker = try std.fmt.allocPrint(allocator, ">>>>>>> {s}", .{source_name});
+    const source_marker = try std.fmt.allocPrint(allocator, ">>>>>>> source ({s})", .{source_name});
     defer allocator.free(source_marker);
     var stream = Stream{
         .allocator = allocator,
@@ -1065,13 +1065,13 @@ fn writeBlobWithPatches(
         }
     };
 
-    const target_marker = try std.fmt.allocPrint(allocator, "<<<<<<< {s}", .{target_name});
+    const target_marker = try std.fmt.allocPrint(allocator, "<<<<<<< target ({s})", .{target_name});
     defer allocator.free(target_marker);
-    const base_marker = try std.fmt.allocPrint(allocator, "||||||| original ({s})", .{base_oid});
+    const base_marker = try std.fmt.allocPrint(allocator, "||||||| base ({s})", .{base_oid});
     defer allocator.free(base_marker);
     const separate_marker = try std.fmt.allocPrint(allocator, "=======", .{});
     defer allocator.free(separate_marker);
-    const source_marker = try std.fmt.allocPrint(allocator, ">>>>>>> {s}", .{source_name});
+    const source_marker = try std.fmt.allocPrint(allocator, ">>>>>>> source ({s})", .{source_name});
     defer allocator.free(source_marker);
     var stream = Stream{
         .state = state.readOnly(),
