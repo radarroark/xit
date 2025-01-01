@@ -300,14 +300,17 @@ pub fn writeChunks(
     reader: anytype,
     object_hash: hash.HashInt(repo_opts.hash),
     object_len: usize,
-    object_header: []const u8,
+    object_kind_name: []const u8,
 ) !void {
     // exit early if the chunks for this object already exist
     const blob_id_to_chunk_info_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "object-id->chunk-info"));
     const blob_id_to_chunk_info = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(blob_id_to_chunk_info_cursor);
     if (null != try blob_id_to_chunk_info.getCursor(object_hash)) return;
 
-    // get the writer
+    // write object kind in the key slot
+    try blob_id_to_chunk_info.putKey(object_hash, .{ .bytes = object_kind_name });
+
+    // get a writer to the value slot
     var chunk_info_cursor = try blob_id_to_chunk_info.putCursor(object_hash);
     var writer = try chunk_info_cursor.writer();
 
@@ -343,8 +346,8 @@ pub fn writeChunks(
                     try zlib_stream.finish();
 
                     // abort compression if it didn't make it smaller
-                    const compress_kind_size = @bitSizeOf(CompressKind) / 8;
-                    const checksum_size = @bitSizeOf(u32) / 8;
+                    const compress_kind_size = @sizeOf(CompressKind);
+                    const checksum_size = @sizeOf(u32);
                     if (try lock.lock_file.getPos() >= compress_kind_size + checksum_size + chunk.len) {
                         try lock.lock_file.seekTo(0);
                         try lock.lock_file.setEndPos(0);
@@ -375,11 +378,6 @@ pub fn writeChunks(
 
     // finish writing to db
     try writer.finish();
-
-    // write object header
-    const object_id_to_header_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "object-id->header"));
-    const object_id_to_header = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(object_id_to_header_cursor);
-    try object_id_to_header.put(object_hash, .{ .bytes = object_header });
 }
 
 fn findChunkIndex(
@@ -388,7 +386,7 @@ fn findChunkIndex(
     position: u64,
 ) !?usize {
     const chunk_hash_size = comptime hash.byteLen(repo_opts.hash);
-    const chunk_offset_size = @bitSizeOf(u64) / 8;
+    const chunk_offset_size = @sizeOf(u64);
     const chunk_info_size = chunk_hash_size + chunk_offset_size;
     const chunk_count = chunk_info_reader.size / chunk_info_size;
     if (chunk_count == 0) {
@@ -445,7 +443,7 @@ pub fn readChunk(
     // find the chunk info position
     const chunk_index = (try findChunkIndex(repo_opts, chunk_info_reader, object_position)) orelse return 0;
     const chunk_hash_size = comptime hash.byteLen(repo_opts.hash);
-    const chunk_offset_size = @bitSizeOf(u64) / 8;
+    const chunk_offset_size = @sizeOf(u64);
     const chunk_info_size = chunk_hash_size + chunk_offset_size;
     const chunk_info_position = chunk_index * chunk_info_size;
 

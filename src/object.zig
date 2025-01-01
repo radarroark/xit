@@ -123,7 +123,7 @@ pub fn writeObject(
         },
         .xit => {
             const object_hash = hash.bytesToInt(repo_opts.hash, hash_bytes_buffer);
-            try chunk.writeChunks(repo_opts, state, reader, object_hash, header.size, header_str);
+            try chunk.writeChunks(repo_opts, state, reader, object_hash, header.size, header.kind.name());
         },
     }
 }
@@ -201,7 +201,7 @@ fn writeTree(
         .xit => {
             const object_hash = hash.bytesToInt(repo_opts.hash, hash_bytes_buffer);
             var stream = std.io.fixedBufferStream(tree_contents);
-            try chunk.writeChunks(repo_opts, state, stream.reader(), object_hash, tree_contents.len, header);
+            try chunk.writeChunks(repo_opts, state, stream.reader(), object_hash, tree_contents.len, "tree");
         },
     }
 }
@@ -384,7 +384,7 @@ pub fn writeCommit(
         },
         .xit => {
             var stream = std.io.fixedBufferStream(commit_contents);
-            try chunk.writeChunks(repo_opts, state, stream.reader(), commit_hash, commit_contents.len, header);
+            try chunk.writeChunks(repo_opts, state, stream.reader(), commit_hash, commit_contents.len, "commit");
 
             // write commit id to HEAD
             try ref.writeRecur(repo_kind, repo_opts, state, "HEAD", &commit_hash_hex);
@@ -502,7 +502,22 @@ pub const ObjectKind = enum {
     commit,
 
     pub fn init(kind_str: []const u8) !ObjectKind {
-        return if (std.mem.eql(u8, "blob", kind_str)) .blob else if (std.mem.eql(u8, "tree", kind_str)) .tree else if (std.mem.eql(u8, "commit", kind_str)) .commit else error.InvalidObjectKind;
+        return if (std.mem.eql(u8, "blob", kind_str))
+            .blob
+        else if (std.mem.eql(u8, "tree", kind_str))
+            .tree
+        else if (std.mem.eql(u8, "commit", kind_str))
+            .commit
+        else
+            error.InvalidObjectKind;
+    }
+
+    pub fn name(self: ObjectKind) []const u8 {
+        return switch (self) {
+            .blob => "blob",
+            .tree => "tree",
+            .commit => "commit",
+        };
     }
 };
 
@@ -550,20 +565,32 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                     };
                 },
                 .xit => {
-                    const chunk_info_cursor = (try state.extra.moment.cursor.readPath(void, &.{
-                        .{ .hash_map_get = .{ .value = hash.hashInt(repo_opts.hash, "object-id->chunk-info") } },
-                        .{ .hash_map_get = .{ .value = try hash.hexToInt(repo_opts.hash, oid) } },
-                    })) orelse return error.ObjectNotFound;
+                    // chunk info map
+                    const object_id_to_chunk_info_cursor = (try state.extra.moment.getCursor(hash.hashInt(repo_opts.hash, "object-id->chunk-info"))) orelse return error.ObjectIdToChunkInfoNotFound;
+                    const object_id_to_chunk_info = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(object_id_to_chunk_info_cursor);
 
-                    const header_cursor = (try state.extra.moment.cursor.readPath(void, &.{
-                        .{ .hash_map_get = .{ .value = hash.hashInt(repo_opts.hash, "object-id->header") } },
-                        .{ .hash_map_get = .{ .value = try hash.hexToInt(repo_opts.hash, oid) } },
-                    })) orelse return error.ObjectNotFound;
+                    // cursors to the object
+                    const oid_int = try hash.hexToInt(repo_opts.hash, oid);
+                    var object_kind_cursor = (try object_id_to_chunk_info.getKeyCursor(oid_int)) orelse return error.ObjectNotFound;
+                    var chunk_info_cursor = (try object_id_to_chunk_info.getCursor(oid_int)) orelse return error.ObjectNotFound;
 
-                    var header_buffer = [_]u8{0} ** 32;
-                    const header_slice = try header_cursor.readBytes(&header_buffer);
-                    var stream = std.io.fixedBufferStream(header_slice);
-                    const header = try readObjectHeader(stream.reader());
+                    // object kind name
+                    var object_kind_name_buffer = [_]u8{0} ** 8;
+                    const object_kind_name = try object_kind_cursor.readBytes(&object_kind_name_buffer);
+
+                    // object size
+                    const object_size = blk: {
+                        var reader = try chunk_info_cursor.reader();
+                        if (reader.size == 0) {
+                            break :blk 0;
+                        } else {
+                            // the last 8 bytes in the chunk info contain the object size
+                            try reader.seekFromEnd(-@sizeOf(u64));
+                            const size = try reader.readInt(u64, .big);
+                            try reader.seekTo(0);
+                            break :blk size;
+                        }
+                    };
 
                     // put cursor on the heap so the pointer is stable (the reader uses it internally)
                     const chunk_info_ptr = try allocator.create(rp.Repo(repo_kind, repo_opts).DB.Cursor(.read_only));
@@ -572,7 +599,10 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
 
                     return .{
                         .allocator = allocator,
-                        .header = header,
+                        .header = ObjectHeader{
+                            .kind = try ObjectKind.init(object_kind_name),
+                            .size = object_size,
+                        },
                         .reader = std.io.bufferedReaderSize(repo_opts.read_size, Reader{
                             .xit_dir = state.core.xit_dir,
                             .chunk_info_reader = try chunk_info_ptr.reader(),
@@ -626,11 +656,7 @@ pub fn readObjectHeader(reader: anytype) !ObjectHeader {
 }
 
 pub fn writeObjectHeader(header: ObjectHeader, buffer: []u8) ![]const u8 {
-    const type_name = switch (header.kind) {
-        .blob => "blob",
-        .tree => "tree",
-        .commit => "commit",
-    };
+    const type_name = header.kind.name();
     const file_size = header.size;
     return try std.fmt.bufPrint(buffer, "{s} {}\x00", .{ type_name, file_size });
 }
