@@ -568,19 +568,15 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                     // chunk info map
                     const object_id_to_chunk_info_cursor = (try state.extra.moment.getCursor(hash.hashInt(repo_opts.hash, "object-id->chunk-info"))) orelse return error.ObjectIdToChunkInfoNotFound;
                     const object_id_to_chunk_info = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(object_id_to_chunk_info_cursor);
-
-                    // cursors to the object
-                    const oid_int = try hash.hexToInt(repo_opts.hash, oid);
-                    var object_kind_cursor = (try object_id_to_chunk_info.getKeyCursor(oid_int)) orelse return error.ObjectNotFound;
-                    var chunk_info_cursor = (try object_id_to_chunk_info.getCursor(oid_int)) orelse return error.ObjectNotFound;
+                    var chunk_info_kv_pair = (try object_id_to_chunk_info.getKeyValuePair(try hash.hexToInt(repo_opts.hash, oid))) orelse return error.ObjectNotFound;
 
                     // object kind name
                     var object_kind_name_buffer = [_]u8{0} ** 8;
-                    const object_kind_name = try object_kind_cursor.readBytes(&object_kind_name_buffer);
+                    const object_kind_name = try chunk_info_kv_pair.key_cursor.readBytes(&object_kind_name_buffer);
 
                     // object size
                     const object_size = blk: {
-                        var reader = try chunk_info_cursor.reader();
+                        var reader = try chunk_info_kv_pair.value_cursor.reader();
                         if (reader.size == 0) {
                             break :blk 0;
                         } else {
@@ -595,7 +591,7 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                     // put cursor on the heap so the pointer is stable (the reader uses it internally)
                     const chunk_info_ptr = try allocator.create(rp.Repo(repo_kind, repo_opts).DB.Cursor(.read_only));
                     errdefer allocator.destroy(chunk_info_ptr);
-                    chunk_info_ptr.* = chunk_info_cursor;
+                    chunk_info_ptr.* = chunk_info_kv_pair.value_cursor;
 
                     return .{
                         .allocator = allocator,
