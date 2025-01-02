@@ -401,7 +401,7 @@ pub fn applyPatch(
                 // cannot be "flattened" into a list
                 if (try children_iter.next() != null) {
                     _ = try path_to_node_id_list.remove(path_hash);
-                    break;
+                    return;
                 }
                 // append child to the node list
                 else {
