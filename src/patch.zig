@@ -62,26 +62,36 @@ fn createPatchEntries(
 
         switch (edit) {
             .eql => |eql| {
-                const node_id_list_cursor = node_id_list_cursor_maybe orelse return error.NodeListNotFound;
-                const node_id_list = try rp.Repo(.xit, repo_opts).DB.LinkedArrayList(.read_only).init(node_id_list_cursor);
-                const node_id_cursor = (try node_id_list.getCursor(eql.old_line.num - 1)) orelse return error.ExpectedNode;
+                var node_id_list_cursor = node_id_list_cursor_maybe orelse return error.NodeListNotFound;
+                var node_id_list_reader = try node_id_list_cursor.reader();
+                try node_id_list_reader.seekTo((eql.old_line.num - 1) * @sizeOf(u64));
 
+                const node_id_position = try node_id_list_reader.readInt(u64, .big);
+                var node_id_cursor = rp.Repo(.xit, repo_opts).DB.Cursor(.read_only){
+                    .slot_ptr = .{
+                        .position = null,
+                        .slot = .{ .tag = .bytes, .value = node_id_position },
+                    },
+                    .db = moment.cursor.db,
+                };
+
+                var node_id_reader = try node_id_cursor.reader();
                 var node_id_bytes = [_]u8{0} ** NodeId(repo_opts.hash).byte_size;
-                const node_id_slice = try node_id_cursor.readBytes(&node_id_bytes);
-
-                var stream = std.io.fixedBufferStream(node_id_slice);
-                var reader = stream.reader();
-                const node_id: NodeId(repo_opts.hash) = @bitCast(try reader.readInt(NodeId(repo_opts.hash).Int, .big));
+                try node_id_reader.readNoEof(&node_id_bytes);
 
                 if (last_node.origin == .new) {
                     var buffer = std.ArrayList(u8).init(arena.allocator());
                     try buffer.writer().writeInt(u8, @intFromEnum(ChangeKind.new_edge), .big);
-                    try buffer.writer().writeInt(NodeId(repo_opts.hash).Int, @bitCast(node_id), .big);
+                    try buffer.writer().writeAll(&node_id_bytes);
                     try buffer.writer().writeInt(NodeId(repo_opts.hash).Int, @bitCast(last_node.id), .big);
                     try patch_entries.append(buffer.items);
                 }
 
-                last_node = .{ .id = node_id, .origin = .old };
+                var stream = std.io.fixedBufferStream(&node_id_bytes);
+                var reader = stream.reader();
+                const node_id_int = try reader.readInt(NodeId(repo_opts.hash).Int, .big);
+
+                last_node = .{ .id = @bitCast(node_id_int), .origin = .old };
             },
             .ins => |ins| {
                 const node_id = NodeId(repo_opts.hash){
@@ -105,18 +115,24 @@ fn createPatchEntries(
                 var buffer = std.ArrayList(u8).init(arena.allocator());
                 try buffer.writer().writeInt(u8, @intFromEnum(ChangeKind.delete_node), .big);
 
-                const node_id_list_cursor = node_id_list_cursor_maybe orelse return error.NodeListNotFound;
-                const node_id_list = try rp.Repo(.xit, repo_opts).DB.LinkedArrayList(.read_only).init(node_id_list_cursor);
-                const node_id_cursor = (try node_id_list.getCursor(del.old_line.num - 1)) orelse return error.ExpectedNode;
+                var node_id_list_cursor = node_id_list_cursor_maybe orelse return error.NodeListNotFound;
+                var node_id_list_reader = try node_id_list_cursor.reader();
+                try node_id_list_reader.seekTo((del.old_line.num - 1) * @sizeOf(u64));
 
+                const node_id_position = try node_id_list_reader.readInt(u64, .big);
+                var node_id_cursor = rp.Repo(.xit, repo_opts).DB.Cursor(.read_only){
+                    .slot_ptr = .{
+                        .position = null,
+                        .slot = .{ .tag = .bytes, .value = node_id_position },
+                    },
+                    .db = moment.cursor.db,
+                };
+
+                var node_id_reader = try node_id_cursor.reader();
                 var node_id_bytes = [_]u8{0} ** NodeId(repo_opts.hash).byte_size;
-                const node_id_slice = try node_id_cursor.readBytes(&node_id_bytes);
+                try node_id_reader.readNoEof(&node_id_bytes);
 
-                var stream = std.io.fixedBufferStream(node_id_slice);
-                var reader = stream.reader();
-                const node_id: NodeId(repo_opts.hash) = @bitCast(try reader.readInt(NodeId(repo_opts.hash).Int, .big));
-
-                try buffer.writer().writeInt(NodeId(repo_opts.hash).Int, @bitCast(node_id), .big);
+                try buffer.writer().writeAll(&node_id_bytes);
 
                 try patch_entries.append(buffer.items);
 
@@ -366,11 +382,10 @@ pub fn applyPatch(
     const path_to_node_id_list_cursor = try branch.putCursor(hash.hashInt(repo_opts.hash, "path->node-id-list"));
     const path_to_node_id_list = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(path_to_node_id_list_cursor);
     try path_to_node_id_list.putKey(path_hash, .{ .slot = path_slot });
-    const node_id_list_cursor = try path_to_node_id_list.putCursor(path_hash);
-    const node_id_list = try rp.Repo(.xit, repo_opts).DB.LinkedArrayList(.read_write).init(node_id_list_cursor);
+    var node_id_list_cursor = try path_to_node_id_list.putCursor(path_hash);
+    var node_id_list_writer = try node_id_list_cursor.writer();
 
     var current_node_id_int = NodeId(repo_opts.hash).first_int;
-    var current_index_maybe: ?usize = 0;
 
     while (true) {
         const current_node_id_bytes = try hash.numToBytes(NodeId(repo_opts.hash).Int, current_node_id_int);
@@ -390,33 +405,15 @@ pub fn applyPatch(
                 }
                 // append child to the node list
                 else {
-                    const kv_pair = try child_cursor.readKeyValuePair();
+                    var kv_pair_cursor = try child_cursor.readKeyValuePair();
+                    var key_reader = try kv_pair_cursor.key_cursor.reader();
                     var child_bytes = [_]u8{0} ** NodeId(repo_opts.hash).byte_size;
-                    const child_slice = try kv_pair.key_cursor.readBytes(&child_bytes);
+                    try key_reader.readNoEof(&child_bytes);
 
-                    if (current_index_maybe) |*current_index| {
-                        if (try node_id_list.getCursor(current_index.*)) |existing_node_id_cursor| {
-                            var existing_node_id_bytes = [_]u8{0} ** NodeId(repo_opts.hash).byte_size;
-                            const existing_node_id_slice = try existing_node_id_cursor.readBytes(&existing_node_id_bytes);
-                            if (std.mem.eql(u8, existing_node_id_slice, child_slice)) {
-                                // node id hasn't changed, so just continue without changing the data
-                                current_index.* += 1;
-                            } else {
-                                // node id is different, so slice the list and begin appending the node ids from here
-                                try node_id_list.slice(0, current_index.*);
-                                current_index_maybe = null;
-                            }
-                        } else {
-                            // we've reached the end of the existing list so begin appending the node ids from here
-                            current_index_maybe = null;
-                        }
-                    }
+                    const node_id_position = kv_pair_cursor.key_cursor.slot().value;
+                    try node_id_list_writer.writeInt(u64, node_id_position, .big);
 
-                    if (current_index_maybe == null) {
-                        try node_id_list.append(.{ .bytes = child_slice });
-                    }
-
-                    var stream = std.io.fixedBufferStream(child_slice);
+                    var stream = std.io.fixedBufferStream(&child_bytes);
                     var reader = stream.reader();
                     current_node_id_int = try reader.readInt(NodeId(repo_opts.hash).Int, .big);
                 }
@@ -428,14 +425,7 @@ pub fn applyPatch(
         }
     }
 
-    // if the current index is less than the size of the node id list,
-    // that means the only change was that lines were deleted at the end
-    // of the file. we just need to slice the node id list in that case.
-    if (current_index_maybe) |current_index| {
-        if (current_index < try node_id_list.count()) {
-            try node_id_list.slice(0, current_index);
-        }
-    }
+    try node_id_list_writer.finish();
 }
 
 fn removePatch(comptime repo_opts: rp.RepoOpts(.xit), branch: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write), path: []const u8) !void {
