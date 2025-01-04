@@ -654,7 +654,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         const header = try xitdb.DatabaseHeader.read(self.core.db_file.reader());
                         try header.validate();
 
-                        return hash.hashKind(header.hash_id.id) orelse error.InvalidHashKind;
+                        return hash.hashKind(header.hash_id.id, header.hash_size) orelse error.InvalidHashKind;
                     },
                     else => return self.core.db.header.hash_id.id,
                 },

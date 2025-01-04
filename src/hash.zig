@@ -20,10 +20,13 @@ pub fn hashId(comptime hash_kind: HashKind) u32 {
     };
 }
 
-pub fn hashKind(hash_id: u32) ?HashKind {
+pub fn hashKind(hash_id: u32, hash_size: u16) ?HashKind {
     return switch (hash_id) {
         hashId(.none) => .none,
-        hashId(.sha1) => .sha1,
+        hashId(.sha1) => switch (hash_size) {
+            byteLen(.sha1) => .sha1,
+            else => null,
+        },
         else => null,
     };
 }
