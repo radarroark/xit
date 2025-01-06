@@ -17,6 +17,18 @@ const c = @cImport({
     @cInclude("git2.h");
 });
 
+test "main" {
+    // read and write objects in small increments to help uncover bugs
+    const last_hash_git = try testMain(.git, .{ .read_size = 1 });
+    const last_hash_xit = try testMain(.xit, .{ .read_size = 1, .extra = .{
+        .chunk_opts = .{ .min_size = 1, .avg_size = 2, .max_size = 4, .normalization = .level1 },
+    } });
+    try std.testing.expectEqualStrings(&last_hash_git, &last_hash_xit);
+
+    // make sure sha256 works on the xit side
+    _ = try testMain(.xit, .{ .hash = .sha256 });
+}
+
 fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) ![hash.hexLen(repo_opts.hash)]u8 {
     const allocator = std.testing.allocator;
     const temp_dir_name = "temp-test-main";
@@ -1352,13 +1364,4 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     }
 
     return commit4;
-}
-
-test "main" {
-    // read and write objects in small increments to help uncover bugs
-    const last_hash_git = try testMain(.git, .{ .read_size = 1 });
-    const last_hash_xit = try testMain(.xit, .{ .read_size = 1, .extra = .{
-        .chunk_opts = .{ .min_size = 1, .avg_size = 2, .max_size = 4, .normalization = .level1 },
-    } });
-    try std.testing.expectEqualStrings(&last_hash_git, &last_hash_xit);
 }

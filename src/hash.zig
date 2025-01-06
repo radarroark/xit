@@ -3,12 +3,14 @@ const std = @import("std");
 pub const HashKind = enum {
     none,
     sha1,
+    sha256,
 };
 
 pub fn HashInt(comptime hash_kind: HashKind) type {
     return switch (hash_kind) {
         .none => u0,
         .sha1 => u160,
+        .sha256 => u256,
     };
 }
 
@@ -17,6 +19,7 @@ pub fn hashId(comptime hash_kind: HashKind) u32 {
     return switch (hash_kind) {
         .none => 0,
         .sha1 => xitdb.HashId.fromBytes("sha1").id,
+        .sha256 => xitdb.HashId.fromBytes("sha2").id,
     };
 }
 
@@ -27,6 +30,10 @@ pub fn hashKind(hash_id: u32, hash_size: u16) ?HashKind {
             byteLen(.sha1) => .sha1,
             else => null,
         },
+        hashId(.sha256) => switch (hash_size) {
+            byteLen(.sha256) => .sha256,
+            else => null,
+        },
         else => null,
     };
 }
@@ -35,6 +42,7 @@ pub fn byteLen(comptime hash_kind: HashKind) usize {
     return switch (hash_kind) {
         .none => 0,
         .sha1 => std.crypto.hash.Sha1.digest_length,
+        .sha256 => std.crypto.hash.sha2.Sha256.digest_length,
     };
 }
 
@@ -47,6 +55,7 @@ pub fn Hasher(comptime hash_kind: HashKind) type {
         hasher: switch (hash_kind) {
             .none => void,
             .sha1 => std.crypto.hash.Sha1,
+            .sha256 => std.crypto.hash.sha2.Sha256,
         },
 
         pub fn init() Hasher(hash_kind) {
@@ -54,6 +63,7 @@ pub fn Hasher(comptime hash_kind: HashKind) type {
                 .hasher = switch (hash_kind) {
                     .none => @compileError("no hash algorithm"),
                     .sha1 => std.crypto.hash.Sha1.init(.{}),
+                    .sha256 => std.crypto.hash.sha2.Sha256.init(.{}),
                 },
             };
         }

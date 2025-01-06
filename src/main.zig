@@ -145,6 +145,7 @@ pub fn run(
         switch (hash_kind) {
             .none => return error.HashKindNotFound,
             .sha1 => try run(repo_kind, repo_opts.withHash(.sha1), allocator, args, cwd, writers),
+            .sha256 => try run(repo_kind, repo_opts.withHash(.sha256), allocator, args, cwd, writers),
         }
     } else {
         var sub_cmd_args = try cmd.SubCommandArgs.init(allocator, args);
