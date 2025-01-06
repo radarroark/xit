@@ -257,7 +257,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             // validate the config name
             for (input.name, 0..) |char, i| {
                 switch (char) {
-                    'a'...'z' => {},
+                    'a'...'z', 'A'...'Z', '0'...'9' => {},
                     '.' => {
                         // can't start with, end with, or contain repeat periods
                         if (i == 0 or i == input.name.len - 1 or input.name[i - 1] == char) {
