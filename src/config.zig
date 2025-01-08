@@ -95,7 +95,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                             .symbol,
                         };
 
-                        fn init(arena_ptr: *std.heap.ArenaAllocator, char_kinds: []CharKind, tokens: []const []const u8) !@This() {
+                        fn init(inner_allocator: std.mem.Allocator, arena_ptr: *std.heap.ArenaAllocator, char_kinds: []CharKind, tokens: []const []const u8) !@This() {
                             if (char_kinds.len == 0) {
                                 return .empty;
                             } else if (std.mem.eql(CharKind, &section_header_pattern, char_kinds)) {
@@ -105,7 +105,9 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                                 // [branch "master"]
                                 // ...and they must be represented in memory like this:
                                 // branch.master
-                                return .{ .section_header = try std.fmt.allocPrint(arena_ptr.allocator(), "{s}.{s}", .{ tokens[1], tokens[2][1 .. tokens[2].len - 1] }) };
+                                const subsection_name = try unescapeStr(inner_allocator, tokens[2][1 .. tokens[2].len - 1]);
+                                defer inner_allocator.free(subsection_name);
+                                return .{ .section_header = try std.fmt.allocPrint(arena_ptr.allocator(), "{s}.{s}", .{ tokens[1], subsection_name }) };
                             } else if (std.mem.startsWith(CharKind, char_kinds, &variable_pattern)) {
                                 // variables can have multiple symbols after the equals,
                                 // so we check with startsWith and join the tokens
@@ -148,7 +150,15 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                             next_cursor += rune.len;
 
                             if (current_token_maybe) |*current_token| {
-                                if (current_token.kind == .quote and char_kind == .quote) {
+                                if (current_token.kind == .quote and std.mem.eql(u8, "\\", rune)) {
+                                    // the next character is escaped, so skip it
+                                    if (iter.nextCodepointSlice()) |next_rune| {
+                                        next_cursor += next_rune.len;
+                                    } else {
+                                        return error.InvalidEscapeInString;
+                                    }
+                                    continue;
+                                } else if (current_token.kind == .quote and char_kind == .quote) {
                                     // the quote terminated, so save the current token
                                     try token_kinds.append(current_token.kind);
                                     try token_ranges.append(.{ .start = current_token.start, .end = next_cursor });
@@ -194,7 +204,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                         }
 
                         // parse the lines and update the sections/variables
-                        const parsed_line = try ParsedLine.init(arena, token_kinds.items, tokens.items);
+                        const parsed_line = try ParsedLine.init(allocator, arena, token_kinds.items, tokens.items);
                         switch (parsed_line) {
                             .empty => {},
                             .section_header => |section_header| {
@@ -254,109 +264,119 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
         }
 
         pub fn add(self: *Config(repo_kind, repo_opts), state: rp.Repo(repo_kind, repo_opts).State(.read_write), input: AddConfigInput) !void {
-            // validate the config name
-            for (input.name, 0..) |char, i| {
-                switch (char) {
-                    'a'...'z', 'A'...'Z', '0'...'9' => {},
-                    '.' => {
-                        // can't start with, end with, or contain repeat periods
-                        if (i == 0 or i == input.name.len - 1 or input.name[i - 1] == char) {
-                            return error.InvalidConfigName;
-                        }
-                    },
-                    else => return error.InvalidConfigName,
+            const last_dot_index = std.mem.lastIndexOfScalar(u8, input.name, '.') orelse return error.KeyDoesNotContainASection;
+
+            // extract the parts of the config name
+            var section_name_orig = input.name[0..last_dot_index];
+            var subsection_name_orig_maybe: ?[]const u8 = null;
+            if (std.mem.indexOfScalar(u8, section_name_orig, '.')) |dot_index| {
+                subsection_name_orig_maybe = section_name_orig[dot_index + 1 ..];
+                section_name_orig = section_name_orig[0..dot_index];
+            }
+            const var_name_orig = input.name[last_dot_index + 1 ..];
+
+            // validate the section and var names
+            for (&[_][]const u8{ section_name_orig, var_name_orig }) |name| {
+                if (name.len == 0) return error.InvalidConfigName;
+                for (name) |char| {
+                    switch (char) {
+                        'a'...'z', 'A'...'Z', '0'...'9', '-' => {},
+                        else => return error.InvalidConfigName,
+                    }
                 }
             }
 
-            if (std.mem.lastIndexOfScalar(u8, input.name, '.')) |index| {
-                const section_name = try self.arena.allocator().dupe(u8, input.name[0..index]);
-                const var_name = try self.arena.allocator().dupe(u8, input.name[index + 1 ..]);
-                const var_value = try self.arena.allocator().dupe(u8, input.value);
-                if (self.sections.getPtr(section_name)) |variables| {
-                    try variables.put(var_name, var_value);
-                } else {
-                    var variables = Variables.init(self.arena.allocator());
-                    try variables.put(var_name, var_value);
-                    try self.sections.put(section_name, variables);
-                }
+            const section_name_lower = try self.arena.allocator().alloc(u8, section_name_orig.len);
+            _ = std.ascii.lowerString(section_name_lower, section_name_orig);
+            const section_name = if (subsection_name_orig_maybe) |subsection_name|
+                try std.fmt.allocPrint(self.arena.allocator(), "{s}.{s}", .{ section_name_lower, subsection_name })
+            else
+                section_name_lower;
+            const var_name = try self.arena.allocator().alloc(u8, var_name_orig.len);
+            _ = std.ascii.lowerString(var_name, var_name_orig);
+            const var_value = try self.arena.allocator().dupe(u8, input.value);
 
-                switch (repo_kind) {
-                    .git => try self.write(state),
-                    .xit => {
-                        const config_name_set_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "config-name-set"));
-                        const config_name_set = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(config_name_set_cursor);
-
-                        // store section name
-                        const section_name_hash = hash.hashInt(repo_opts.hash, section_name);
-                        var section_name_cursor = try config_name_set.putKeyCursor(section_name_hash);
-                        try section_name_cursor.writeIfEmpty(.{ .bytes = section_name });
-
-                        // add section name to config
-                        const config_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "config"));
-                        const config = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(config_cursor);
-                        try config.putKey(section_name_hash, .{ .slot = section_name_cursor.slot() });
-
-                        // store variable name
-                        const var_name_hash = hash.hashInt(repo_opts.hash, var_name);
-                        var var_name_cursor = try config_name_set.putKeyCursor(var_name_hash);
-                        try var_name_cursor.writeIfEmpty(.{ .bytes = var_name });
-
-                        // add var name to config
-                        const section_cursor = try config.putCursor(section_name_hash);
-                        const section = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(section_cursor);
-                        try section.putKey(var_name_hash, .{ .slot = var_name_cursor.slot() });
-
-                        // save the variable
-                        try section.put(var_name_hash, .{ .bytes = var_value });
-                    },
-                }
+            if (self.sections.getPtr(section_name)) |variables| {
+                try variables.put(var_name, var_value);
             } else {
-                return error.KeyDoesNotContainASection;
+                var variables = Variables.init(self.arena.allocator());
+                try variables.put(var_name, var_value);
+                try self.sections.put(section_name, variables);
+            }
+
+            switch (repo_kind) {
+                .git => try self.write(state),
+                .xit => {
+                    const config_name_set_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "config-name-set"));
+                    const config_name_set = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(config_name_set_cursor);
+
+                    // store section name
+                    const section_name_hash = hash.hashInt(repo_opts.hash, section_name);
+                    var section_name_cursor = try config_name_set.putKeyCursor(section_name_hash);
+                    try section_name_cursor.writeIfEmpty(.{ .bytes = section_name });
+
+                    // add section name to config
+                    const config_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "config"));
+                    const config = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(config_cursor);
+                    try config.putKey(section_name_hash, .{ .slot = section_name_cursor.slot() });
+
+                    // store variable name
+                    const var_name_hash = hash.hashInt(repo_opts.hash, var_name);
+                    var var_name_cursor = try config_name_set.putKeyCursor(var_name_hash);
+                    try var_name_cursor.writeIfEmpty(.{ .bytes = var_name });
+
+                    // add var name to config
+                    const section_cursor = try config.putCursor(section_name_hash);
+                    const section = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(section_cursor);
+                    try section.putKey(var_name_hash, .{ .slot = var_name_cursor.slot() });
+
+                    // save the variable
+                    try section.put(var_name_hash, .{ .bytes = var_value });
+                },
             }
         }
 
         pub fn remove(self: *Config(repo_kind, repo_opts), state: rp.Repo(repo_kind, repo_opts).State(.read_write), input: RemoveConfigInput) !void {
-            if (std.mem.lastIndexOfScalar(u8, input.name, '.')) |index| {
-                const section_name = try self.arena.allocator().dupe(u8, input.name[0..index]);
-                const var_name = try self.arena.allocator().dupe(u8, input.name[index + 1 ..]);
-                if (self.sections.getPtr(section_name)) |variables| {
-                    _ = variables.orderedRemove(var_name);
-                    if (variables.count() == 0) {
-                        _ = self.sections.orderedRemove(section_name);
-                    }
-                } else {
-                    return error.SectionDoesNotExist;
-                }
+            const last_dot_index = std.mem.lastIndexOfScalar(u8, input.name, '.') orelse return error.KeyDoesNotContainASection;
 
-                switch (repo_kind) {
-                    .git => try self.write(state),
-                    .xit => {
-                        const config_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "config"));
-                        const config = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(config_cursor);
-                        if (!self.sections.contains(section_name)) {
-                            _ = try config.remove(hash.hashInt(repo_opts.hash, section_name));
-                        } else {
-                            const section_cursor = try config.putCursor(hash.hashInt(repo_opts.hash, section_name));
-                            const section = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(section_cursor);
-                            _ = try section.remove(hash.hashInt(repo_opts.hash, var_name));
-                        }
-                    },
+            const section_name = try self.arena.allocator().dupe(u8, input.name[0..last_dot_index]);
+            const var_name = try self.arena.allocator().dupe(u8, input.name[last_dot_index + 1 ..]);
+            if (self.sections.getPtr(section_name)) |variables| {
+                _ = variables.orderedRemove(var_name);
+                if (variables.count() == 0) {
+                    _ = self.sections.orderedRemove(section_name);
                 }
             } else {
-                return error.KeyDoesNotContainASection;
+                return error.SectionDoesNotExist;
+            }
+
+            switch (repo_kind) {
+                .git => try self.write(state),
+                .xit => {
+                    const config_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "config"));
+                    const config = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(config_cursor);
+                    if (!self.sections.contains(section_name)) {
+                        _ = try config.remove(hash.hashInt(repo_opts.hash, section_name));
+                    } else {
+                        const section_cursor = try config.putCursor(hash.hashInt(repo_opts.hash, section_name));
+                        const section = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(section_cursor);
+                        _ = try section.remove(hash.hashInt(repo_opts.hash, var_name));
+                    }
+                },
             }
         }
 
-        fn write(self: *Config(repo_kind, repo_opts), state: rp.Repo(.git, repo_opts).State(.read_write)) !void {
+        fn write(self: *Config(.git, repo_opts), state: rp.Repo(.git, repo_opts).State(.read_write)) !void {
             const lock_file = state.extra.lock_file_maybe orelse return error.NoLockFile;
             try lock_file.setEndPos(0); // truncate file in case this method is called multiple times
 
             for (self.sections.keys(), self.sections.values()) |section_name, variables| {
                 // if the section name has periods, put everything after the first period in quotes
-                const section_line = if (std.mem.indexOfScalar(u8, section_name, '.')) |index|
-                    try std.fmt.allocPrint(self.allocator, "[{s} \"{s}\"]\n", .{ section_name[0..index], section_name[index + 1 ..] })
-                else
-                    try std.fmt.allocPrint(self.allocator, "[{s}]\n", .{section_name});
+                const section_line = if (std.mem.indexOfScalar(u8, section_name, '.')) |index| blk: {
+                    const subsection_name = try escapeStr(self.allocator, section_name[index + 1 ..]);
+                    defer self.allocator.free(subsection_name);
+                    break :blk try std.fmt.allocPrint(self.allocator, "[{s} \"{s}\"]\n", .{ section_name[0..index], subsection_name });
+                } else try std.fmt.allocPrint(self.allocator, "[{s}]\n", .{section_name});
                 defer self.allocator.free(section_line);
                 try lock_file.writeAll(section_line);
 
@@ -366,6 +386,58 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     try lock_file.writeAll(var_line);
                 }
             }
+        }
+
+        fn escapeChar(char: u8) ?u8 {
+            return switch (char) {
+                '"', '\'' => char,
+                '\n' => 'n',
+                '\r' => 'r',
+                '\t' => 't',
+                else => null,
+            };
+        }
+
+        fn unescapeChar(char: u8) ?u8 {
+            return switch (char) {
+                '"', '\'' => char,
+                'n' => '\n',
+                'r' => '\r',
+                't' => '\t',
+                else => null,
+            };
+        }
+
+        fn escapeStr(allocator: std.mem.Allocator, str: []const u8) ![]u8 {
+            var arr = std.ArrayList(u8).init(allocator);
+            errdefer arr.deinit();
+            for (str) |ch| {
+                if (escapeChar(ch)) |esc_ch| {
+                    try arr.append('\\');
+                    try arr.append(esc_ch);
+                } else {
+                    try arr.append(ch);
+                }
+            }
+            return try arr.toOwnedSlice();
+        }
+
+        fn unescapeStr(allocator: std.mem.Allocator, str: []const u8) ![]u8 {
+            var arr = std.ArrayList(u8).init(allocator);
+            errdefer arr.deinit();
+            var i: usize = 0;
+            while (i < str.len) {
+                const char = str[i];
+                if (char == '\\') {
+                    const next_char = if (i + 1 < str.len) str[i + 1] else return error.InvalidEscapeInString;
+                    try arr.append(unescapeChar(next_char) orelse return error.InvalidEscapeInString);
+                    i += 1;
+                } else {
+                    try arr.append(char);
+                }
+                i += 1;
+            }
+            return try arr.toOwnedSlice();
         }
     };
 }

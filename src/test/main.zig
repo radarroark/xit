@@ -1285,7 +1285,6 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     {
         try main.run(repo_kind, repo_opts, allocator, &.{ "config", "add", "core.editor", "vim" }, repo_dir, .{});
         try main.run(repo_kind, repo_opts, allocator, &.{ "config", "add", "branch.master.remote", "origin" }, repo_dir, .{});
-
         {
             var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
@@ -1298,10 +1297,10 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
             const branch_master_section = config.sections.get("branch.master").?;
             try std.testing.expectEqual(1, branch_master_section.count());
+            try std.testing.expectEqualStrings("origin", branch_master_section.get("remote").?);
         }
 
         try main.run(repo_kind, repo_opts, allocator, &.{ "config", "rm", "branch.master.remote" }, repo_dir, .{});
-
         {
             var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
@@ -1313,11 +1312,10 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         }
 
         // don't allow invalid names
-        try std.testing.expectEqual(error.InvalidConfigName, main.run(repo_kind, repo_opts, allocator, &.{ "config", "add", "core#editor", "vim" }, repo_dir, .{}));
+        try std.testing.expectEqual(error.InvalidConfigName, main.run(repo_kind, repo_opts, allocator, &.{ "config", "add", "core.editor#hi", "vim" }, repo_dir, .{}));
 
         // do allow values with spaces
         try main.run(repo_kind, repo_opts, allocator, &.{ "config", "add", "user.name", "radar roark" }, repo_dir, .{});
-
         {
             var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
@@ -1330,13 +1328,39 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             try std.testing.expectEqualStrings("radar roark", user_section.get("name").?);
         }
 
+        // do allow additional characters in subsection names
+        try main.run(repo_kind, repo_opts, allocator, &.{ "config", "add", "branch.\"hello.world\".remote", "radar roark" }, repo_dir, .{});
+        {
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
+            defer repo.deinit();
+
+            var config = try repo.config(allocator);
+            defer config.deinit();
+
+            const branch_hi_section = config.sections.get("branch.\"hello.world\"").?;
+            try std.testing.expectEqual(1, branch_hi_section.count());
+        }
+
+        // section and var names are forcibly lower-cased, but not the subsection name
+        try main.run(repo_kind, repo_opts, allocator, &.{ "config", "add", "BRANCH.MASTER.REMOTE", "origin" }, repo_dir, .{});
+        {
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
+            defer repo.deinit();
+
+            var config = try repo.config(allocator);
+            defer config.deinit();
+
+            const branch_master_section = config.sections.get("branch.MASTER").?;
+            try std.testing.expectEqual(1, branch_master_section.count());
+            try std.testing.expectEqualStrings("origin", branch_master_section.get("remote").?);
+        }
+
         try main.run(repo_kind, repo_opts, allocator, &.{ "config", "list" }, repo_dir, .{});
     }
 
     // remote
     {
         try main.run(repo_kind, repo_opts, allocator, &.{ "remote", "add", "origin", "http://localhost:3000" }, repo_dir, .{});
-
         {
             var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
@@ -1349,7 +1373,6 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         }
 
         try main.run(repo_kind, repo_opts, allocator, &.{ "remote", "rm", "origin" }, repo_dir, .{});
-
         {
             var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
