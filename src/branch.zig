@@ -18,6 +18,10 @@ pub const RemoveBranchInput = struct {
     name: []const u8,
 };
 
+pub fn validateName(name: []const u8) bool {
+    return ref.validateName(name) and !std.mem.eql(u8, "HEAD", name);
+}
+
 pub fn add(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
@@ -25,15 +29,7 @@ pub fn add(
     input: AddBranchInput,
 ) !void {
     const name = input.name;
-    if (name.len == 0 or
-        name[0] == '.' or
-        name[0] == '/' or
-        std.mem.endsWith(u8, name, "/") or
-        std.mem.endsWith(u8, name, ".lock") or
-        std.mem.indexOf(u8, name, "..") != null or
-        std.mem.indexOf(u8, name, "@") != null or
-        std.mem.indexOf(u8, name, "//") != null)
-    {
+    if (!validateName(name)) {
         return error.InvalidBranchName;
     }
 

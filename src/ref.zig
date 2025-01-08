@@ -6,6 +6,41 @@ const rp = @import("./repo.zig");
 pub const MAX_REF_CONTENT_SIZE = 512;
 const REF_START_STR = "ref: ";
 
+/// validates ref name with mostly the same rules as in:
+/// git check-ref-format --help
+pub fn validateName(name: []const u8) bool {
+    if (name.len == 0 or
+        name.len > 255 or // apparently git's max ref name size
+        name[0] == '-' or
+        name[name.len - 1] == '.' or
+        std.mem.indexOf(u8, name, "..") != null or
+        std.mem.indexOf(u8, name, "@{") != null)
+    {
+        return false;
+    }
+
+    // can't contain ASCII control chars or certain special chars
+    for (name) |char| {
+        switch (char) {
+            0...0o37, 0o177, ' ', '~', '^', ':', '?', '*', '[', '\\' => return false,
+            else => {},
+        }
+    }
+
+    // restrictions on each path part
+    var split_iter = std.mem.splitScalar(u8, name, '/');
+    while (split_iter.next()) |path_part| {
+        if (path_part.len == 0 or
+            path_part[0] == '.' or
+            std.mem.endsWith(u8, name, ".lock"))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 pub const Ref = struct {
     kind: union(enum) {
         local,
