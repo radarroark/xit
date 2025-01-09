@@ -1304,7 +1304,7 @@ pub fn MergeAction(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.Has
 
 pub fn MergeInput(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
     return struct {
-        kind: MergeKind = .merge,
+        kind: MergeKind,
         action: MergeAction(repo_kind, hash_kind),
     };
 }
@@ -1353,9 +1353,10 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
             var auto_resolved_conflicts = std.StringArrayHashMap(void).init(arena.allocator());
             var conflicts = std.StringArrayHashMap(MergeConflict(repo_opts.hash)).init(arena.allocator());
 
+            const merge_head_names = &[_][]const u8{ "MERGE_HEAD", "CHERRY_PICK_HEAD" };
             const merge_head_name = switch (merge_input.kind) {
-                .merge => "MERGE_HEAD",
-                .cherry_pick => "CHERRY_PICK_HEAD",
+                .merge => merge_head_names[0],
+                .cherry_pick => merge_head_names[1],
             };
             const merge_msg_name = "MERGE_MSG";
 
@@ -1366,20 +1367,22 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                         return error.OidRequired;
                     }
 
-                    // make sure there is no stored merge state
+                    // make sure there is no unfinished merge in progress
                     switch (repo_kind) {
                         .git => {
-                            if (state.core.git_dir.openFile(merge_head_name, .{ .mode = .read_only })) |merge_head| {
-                                defer merge_head.close();
-                                return error.UnfinishedMergeAlreadyInProgress;
-                            } else |err| switch (err) {
-                                error.FileNotFound => {},
-                                else => |e| return e,
+                            for (merge_head_names) |head_name| {
+                                if (state.core.git_dir.openFile(head_name, .{ .mode = .read_only })) |merge_head| {
+                                    defer merge_head.close();
+                                    return error.UnfinishedMergeInProgress;
+                                } else |err| switch (err) {
+                                    error.FileNotFound => {},
+                                    else => |e| return e,
+                                }
                             }
                         },
                         .xit => {
                             if (try state.extra.moment.getCursor(hash.hashInt(repo_opts.hash, "merge-in-progress"))) |_| {
-                                return error.UnfinishedMergeAlreadyInProgress;
+                                return error.UnfinishedMergeInProgress;
                             }
                         },
                     }
@@ -1391,7 +1394,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                         .oid => |oid| oid,
                     });
 
-                    // get the oids for the three-way merge
+                    // get the source and target oid
                     const source_oid = try ref.readRecur(repo_kind, repo_opts, state.readOnly(), action.source) orelse return error.InvalidTarget;
                     const target_oid = target_oid_maybe orelse {
                         // the target branch is completely empty, so just set it to the source oid
@@ -1418,6 +1421,8 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                             .data = .fast_forward,
                         };
                     };
+
+                    // get the base oid
                     var base_oid: [hash.hexLen(repo_opts.hash)]u8 = undefined;
                     switch (merge_input.kind) {
                         .merge => base_oid = try commonAncestor(repo_kind, repo_opts, allocator, state.readOnly(), &target_oid, &source_oid),
@@ -1645,9 +1650,23 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     var source_oid: [hash.hexLen(repo_opts.hash)]u8 = undefined;
                     var commit_metadata = obj.CommitMetadata(repo_opts.hash){};
 
-                    // read the stored merge state
+                    // read the existing merge state
                     switch (repo_kind) {
                         .git => {
+                            // make sure there isn't another kind of merge in progress
+                            for (merge_head_names) |head_name| {
+                                if (std.mem.eql(u8, merge_head_name, head_name)) {
+                                    continue;
+                                }
+                                if (state.core.git_dir.openFile(head_name, .{ .mode = .read_only })) |merge_head| {
+                                    defer merge_head.close();
+                                    return error.OtherMergeInProgress;
+                                } else |err| switch (err) {
+                                    error.FileNotFound => {},
+                                    else => |e| return e,
+                                }
+                            }
+
                             const merge_head = state.core.git_dir.openFile(merge_head_name, .{ .mode = .read_only }) catch |err| switch (err) {
                                 error.FileNotFound => return error.MergeHeadNotFound,
                                 else => |e| return e,
@@ -1668,6 +1687,16 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                         .xit => {
                             const merge_in_progress_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "merge-in-progress"));
                             const merge_in_progress = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(merge_in_progress_cursor);
+
+                            // make sure there isn't another kind of merge in progress
+                            for (merge_head_names) |head_name| {
+                                if (std.mem.eql(u8, merge_head_name, head_name)) {
+                                    continue;
+                                }
+                                if (null != try merge_in_progress.getCursor(hash.hashInt(repo_opts.hash, head_name))) {
+                                    return error.OtherMergeInProgress;
+                                }
+                            }
 
                             const source_oid_cursor = (try merge_in_progress.getCursor(hash.hashInt(repo_opts.hash, merge_head_name))) orelse return error.MergeHeadNotFound;
                             const source_oid_slice = try source_oid_cursor.readBytes(&source_oid);
