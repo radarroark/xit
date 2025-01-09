@@ -1,6 +1,7 @@
 //! the command parsed from CLI args.
 
 const std = @import("std");
+const rp = @import("./repo.zig");
 const df = @import("./diff.zig");
 const mrg = @import("./merge.zig");
 const idx = @import("./index.zig");
@@ -24,7 +25,6 @@ pub const SubCommandKind = enum {
     restore,
     log,
     merge,
-    cherry_pick,
     config,
     remote,
     fetch,
@@ -104,7 +104,7 @@ pub const SubCommandArgs = struct {
             else if (std.mem.eql(u8, sub_command, "merge"))
                 .merge
             else if (std.mem.eql(u8, sub_command, "cherry-pick"))
-                .cherry_pick
+                .merge
             else if (std.mem.eql(u8, sub_command, "config"))
                 .config
             else if (std.mem.eql(u8, sub_command, "remote"))
@@ -130,7 +130,7 @@ pub const SubCommandArgs = struct {
     }
 };
 
-pub fn SubCommand(comptime hash_kind: hash.HashKind) type {
+pub fn SubCommand(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
     return union(SubCommandKind) {
         init: struct {
             dir: []const u8,
@@ -162,8 +162,7 @@ pub fn SubCommand(comptime hash_kind: hash.HashKind) type {
             path: []const u8,
         },
         log,
-        merge: mrg.MergeInput(hash_kind),
-        cherry_pick: mrg.MergeInput(hash_kind),
+        merge: mrg.MergeInput(repo_kind, hash_kind),
         config: cfg.ConfigCommand,
         remote: cfg.ConfigCommand,
         fetch: struct {
@@ -176,16 +175,16 @@ pub fn SubCommand(comptime hash_kind: hash.HashKind) type {
     };
 }
 
-pub fn Command(comptime hash_kind: hash.HashKind) type {
+pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
     return union(enum) {
         invalid: struct {
             name: []const u8,
         },
         help: ?SubCommandKind,
         tui: ?SubCommandKind,
-        cli: ?SubCommand(hash_kind),
+        cli: ?SubCommand(repo_kind, hash_kind),
 
-        pub fn init(sub_cmd_args: *const SubCommandArgs) !Command(hash_kind) {
+        pub fn init(sub_cmd_args: *const SubCommandArgs) !Command(repo_kind, hash_kind) {
             if (sub_cmd_args.sub_command_kind) |sub_command_kind| {
                 const extra_args = sub_cmd_args.positional_args.items[1..];
                 const show_help = sub_cmd_args.map_args.contains("--help");
@@ -326,44 +325,37 @@ pub fn Command(comptime hash_kind: hash.HashKind) type {
                         if (show_help) {
                             return .{ .help = .merge };
                         } else {
-                            var merge_input_maybe: ?mrg.MergeInput(hash_kind) = switch (extra_args.len) {
+                            const sub_command = sub_cmd_args.positional_args.items[0];
+                            const merge_kind: mrg.MergeKind = if (std.mem.eql(u8, "merge", sub_command))
+                                .merge
+                            else if (std.mem.eql(u8, "cherry-pick", sub_command))
+                                .cherry_pick
+                            else
+                                return error.InvalidMergeKind;
+
+                            var merge_action_maybe: ?mrg.MergeAction(hash_kind) = switch (extra_args.len) {
                                 0 => null,
                                 1 => .{ .new = ref.RefOrOid(hash_kind).initFromUser(extra_args[0]) },
                                 2 => .{ .new = .{ .ref = .{ .kind = .{ .remote = extra_args[0] }, .name = extra_args[1] } } },
                                 else => return error.TooManyArgs,
                             };
                             if (sub_cmd_args.map_args.contains("--continue")) {
-                                if (merge_input_maybe != null) {
+                                if (merge_action_maybe != null) {
                                     return error.ConflictingMergeArgs;
                                 }
-                                merge_input_maybe = .cont;
+                                merge_action_maybe = .cont;
                             }
-                            if (merge_input_maybe) |merge_input| {
-                                return .{ .cli = .{ .merge = merge_input } };
+                            if (merge_action_maybe) |merge_action| {
+                                return .{
+                                    .cli = .{
+                                        .merge = .{
+                                            .kind = merge_kind,
+                                            .action = merge_action,
+                                        },
+                                    },
+                                };
                             } else {
                                 return error.InsufficientMergeArgs;
-                            }
-                        }
-                    },
-                    .cherry_pick => {
-                        if (show_help) {
-                            return .{ .help = .cherry_pick };
-                        } else {
-                            var merge_input_maybe: ?mrg.MergeInput(hash_kind) = switch (extra_args.len) {
-                                0 => null,
-                                1 => .{ .new = ref.RefOrOid(hash_kind).initFromUser(extra_args[0]) },
-                                else => return error.TooManyArgs,
-                            };
-                            if (sub_cmd_args.map_args.contains("--continue")) {
-                                if (merge_input_maybe != null) {
-                                    return error.ConflictingCherryPickArgs;
-                                }
-                                merge_input_maybe = .cont;
-                            }
-                            if (merge_input_maybe) |merge_input| {
-                                return .{ .cli = .{ .cherry_pick = merge_input } };
-                            } else {
-                                return error.InsufficientCherryPickArgs;
                             }
                         }
                     },
@@ -463,6 +455,7 @@ pub fn Command(comptime hash_kind: hash.HashKind) type {
 }
 
 test "command" {
+    const repo_kind = rp.RepoKind.git;
     const hash_kind = hash.HashKind.sha1;
     const allocator = std.testing.allocator;
 
@@ -472,21 +465,21 @@ test "command" {
     {
         var sub_cmd_args = try SubCommandArgs.init(allocator, &.{ "add", "--cli" });
         defer sub_cmd_args.deinit();
-        const command = try Command(hash_kind).init(&sub_cmd_args);
+        const command = try Command(repo_kind, hash_kind).init(&sub_cmd_args);
         try std.testing.expect(command == .help);
     }
 
     {
         var sub_cmd_args = try SubCommandArgs.init(allocator, &.{ "add", "file.txt" });
         defer sub_cmd_args.deinit();
-        const command = try Command(hash_kind).init(&sub_cmd_args);
+        const command = try Command(repo_kind, hash_kind).init(&sub_cmd_args);
         try std.testing.expect(command == .cli and command.cli.? == .add);
     }
 
     {
         var sub_cmd_args = try SubCommandArgs.init(allocator, &.{ "commit", "-m" });
         defer sub_cmd_args.deinit();
-        const command_or_err = Command(hash_kind).init(&sub_cmd_args);
+        const command_or_err = Command(repo_kind, hash_kind).init(&sub_cmd_args);
         if (command_or_err) |_| {
             return error.ExpectedError;
         } else |err| {
@@ -497,7 +490,7 @@ test "command" {
     {
         var sub_cmd_args = try SubCommandArgs.init(allocator, &.{ "commit", "-m", "let there be light" });
         defer sub_cmd_args.deinit();
-        const command = try Command(hash_kind).init(&sub_cmd_args);
+        const command = try Command(repo_kind, hash_kind).init(&sub_cmd_args);
         try std.testing.expect(command == .cli and command.cli.? == .commit);
         try std.testing.expect(std.mem.eql(u8, "let there be light", command.cli.?.commit.message));
     }

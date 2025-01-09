@@ -309,7 +309,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
         pub fn initWithCommand(
             allocator: std.mem.Allocator,
             opts: InitOpts,
-            sub_command: cmd.SubCommand(repo_opts.hash),
+            sub_command: cmd.SubCommand(repo_kind, repo_opts.hash),
             writers: Writers,
         ) !Repo(repo_kind, repo_opts) {
             switch (sub_command) {
@@ -345,7 +345,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
         pub fn runCommand(
             self: *Repo(repo_kind, repo_opts),
             allocator: std.mem.Allocator,
-            sub_command: cmd.SubCommand(repo_opts.hash),
+            sub_command: cmd.SubCommand(repo_kind, repo_opts.hash),
             writers: Writers,
         ) !void {
             switch (sub_command) {
@@ -538,12 +538,8 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         try writers.out.print("\n", .{});
                     }
                 },
-                .merge, .cherry_pick => {
-                    var result = switch (sub_command) {
-                        .merge => |merge_cmd| try self.merge(allocator, merge_cmd),
-                        .cherry_pick => |cherry_pick_cmd| try self.cherryPick(allocator, cherry_pick_cmd),
-                        else => unreachable,
-                    };
+                .merge => |merge_cmd| {
+                    var result = try self.merge(allocator, merge_cmd);
                     defer result.deinit();
                     try printMergeResult(&result, writers);
                 },
@@ -1074,59 +1070,22 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
-        pub fn merge(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: mrg.MergeInput(repo_opts.hash)) !mrg.Merge(repo_kind, repo_opts) {
+        pub fn merge(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: mrg.MergeInput(repo_kind, repo_opts.hash)) !mrg.Merge(repo_kind, repo_opts) {
             switch (repo_kind) {
-                .git => return try mrg.Merge(repo_kind, repo_opts).init(.{ .core = &self.core, .extra = .{} }, allocator, input, .merge, .diff3),
+                .git => return try mrg.Merge(repo_kind, repo_opts).init(.{ .core = &self.core, .extra = .{} }, allocator, input),
                 .xit => {
                     var result: mrg.Merge(repo_kind, repo_opts) = undefined;
 
                     const Ctx = struct {
                         core: *Repo(repo_kind, repo_opts).Core,
                         allocator: std.mem.Allocator,
-                        input: mrg.MergeInput(repo_opts.hash),
+                        input: mrg.MergeInput(repo_kind, repo_opts.hash),
                         result: *mrg.Merge(repo_kind, repo_opts),
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            ctx.result.* = try mrg.Merge(repo_kind, repo_opts).init(state, ctx.allocator, ctx.input, .merge, .patch);
-                            // no need to make a new transaction if nothing was done
-                            if (.nothing == ctx.result.data) {
-                                return error.CancelTransaction;
-                            }
-                        }
-                    };
-
-                    const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
-                    history.appendContext(
-                        .{ .slot = try history.getSlot(-1) },
-                        Ctx{ .core = &self.core, .allocator = allocator, .input = input, .result = &result },
-                    ) catch |err| switch (err) {
-                        error.CancelTransaction => {},
-                        else => |e| return e,
-                    };
-
-                    return result;
-                },
-            }
-        }
-
-        pub fn cherryPick(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: mrg.MergeInput(repo_opts.hash)) !mrg.Merge(repo_kind, repo_opts) {
-            switch (repo_kind) {
-                .git => return try mrg.Merge(repo_kind, repo_opts).init(.{ .core = &self.core, .extra = .{} }, allocator, input, .cherry_pick, .diff3),
-                .xit => {
-                    var result: mrg.Merge(repo_kind, repo_opts) = undefined;
-
-                    const Ctx = struct {
-                        core: *Repo(repo_kind, repo_opts).Core,
-                        allocator: std.mem.Allocator,
-                        input: mrg.MergeInput(repo_opts.hash),
-                        result: *mrg.Merge(repo_kind, repo_opts),
-
-                        pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
-                            var moment = try DB.HashMap(.read_write).init(cursor.*);
-                            const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            ctx.result.* = try mrg.Merge(repo_kind, repo_opts).init(state, ctx.allocator, ctx.input, .cherry_pick, .patch);
+                            ctx.result.* = try mrg.Merge(repo_kind, repo_opts).init(state, ctx.allocator, ctx.input);
                             // no need to make a new transaction if nothing was done
                             if (.nothing == ctx.result.data) {
                                 return error.CancelTransaction;
@@ -1369,7 +1328,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                 .git => {
                     const fetch_result = try net.fetch(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, allocator, remote_name, parsed_uri);
                     const remote_ref = ref.Ref{ .kind = .{ .remote = remote_name }, .name = remote_ref_name };
-                    var merge_result = try mrg.Merge(repo_kind, repo_opts).init(.{ .core = &self.core, .extra = .{} }, allocator, .{ .new = .{ .ref = remote_ref } }, .merge, .diff3);
+                    var merge_result = try mrg.Merge(repo_kind, repo_opts).init(.{ .core = &self.core, .extra = .{} }, allocator, .{ .action = .{ .new = .{ .ref = remote_ref } } });
                     errdefer merge_result.deinit();
 
                     return .{
@@ -1393,7 +1352,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
                             const fetch_result = try net.fetch(repo_kind, repo_opts, state, ctx.allocator, ctx.remote_name, ctx.parsed_uri);
                             const remote_ref = ref.Ref{ .kind = .{ .remote = ctx.remote_name }, .name = ctx.remote_ref_name };
-                            var merge_result = try mrg.Merge(repo_kind, repo_opts).init(state, ctx.allocator, .{ .new = .{ .ref = remote_ref } }, .merge, .patch);
+                            var merge_result = try mrg.Merge(repo_kind, repo_opts).init(state, ctx.allocator, .{ .action = .{ .new = .{ .ref = remote_ref } } });
                             errdefer merge_result.deinit();
 
                             ctx.pull_result.* = .{

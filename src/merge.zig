@@ -525,8 +525,9 @@ fn writeBlobWithDiff3(
 }
 
 fn writeBlobWithPatches(
-    comptime repo_opts: rp.RepoOpts(.xit),
-    state: rp.Repo(.xit, repo_opts).State(.read_write),
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    state: rp.Repo(repo_kind, repo_opts).State(.read_write),
     allocator: std.mem.Allocator,
     source_file_oid: *const [hash.byteLen(repo_opts.hash)]u8,
     base_oid: *const [hash.hexLen(repo_opts.hash)]u8,
@@ -537,6 +538,8 @@ fn writeBlobWithPatches(
     has_conflict: *bool,
     path: []const u8,
 ) ![hash.byteLen(repo_opts.hash)]u8 {
+    if (repo_kind != .xit) return error.PatchBasedMergeRequiresXitBackend;
+
     const commit_id_to_path_to_patch_id_cursor_maybe = try state.extra.moment.getCursor(hash.hashInt(repo_opts.hash, "commit-id->path->patch-id"));
 
     var patch_ids = std.ArrayList(hash.HashInt(repo_opts.hash)).init(allocator);
@@ -1117,7 +1120,7 @@ fn samePathConflict(
     target_change_maybe: ?obj.Change(repo_opts.hash),
     source_change: obj.Change(repo_opts.hash),
     path: []const u8,
-    comptime merge_algo: MergeAlgorithm,
+    merge_algo: MergeAlgorithm,
 ) !SamePathConflictResult(repo_opts.hash) {
     if (target_change_maybe) |target_change| {
         const base_entry_maybe = source_change.old;
@@ -1163,7 +1166,7 @@ fn samePathConflict(
                 const base_file_oid_maybe = if (base_entry_maybe) |base_entry| &base_entry.oid else null;
                 const oid = oid_maybe orelse switch (merge_algo) {
                     .diff3 => try writeBlobWithDiff3(repo_kind, repo_opts, state, allocator, base_file_oid_maybe, &target_entry.oid, &source_entry.oid, base_oid, target_name, source_name, &has_conflict),
-                    .patch => try writeBlobWithPatches(repo_opts, state, allocator, &source_entry.oid, base_oid, target_oid, source_oid, target_name, source_name, &has_conflict, path),
+                    .patch => try writeBlobWithPatches(repo_kind, repo_opts, state, allocator, &source_entry.oid, base_oid, target_oid, source_oid, target_name, source_name, &has_conflict, path),
                 };
                 const mode = mode_maybe orelse target_entry.mode;
 
@@ -1281,17 +1284,28 @@ pub const MergeKind = enum {
     cherry_pick,
 };
 
-pub fn MergeInput(comptime hash_kind: hash.HashKind) type {
+pub const MergeAlgorithm = enum {
+    diff3, // three-way merge
+    patch, // patch-based (xit only)
+};
+
+pub fn MergeAction(comptime hash_kind: hash.HashKind) type {
     return union(enum) {
         new: ref.RefOrOid(hash_kind),
         cont,
     };
 }
 
-pub const MergeAlgorithm = enum {
-    diff3, // three-way merge
-    patch, // patch-based (xit only)
-};
+pub fn MergeInput(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
+    return struct {
+        kind: MergeKind = .merge,
+        algo: MergeAlgorithm = switch (repo_kind) {
+            .git => .diff3,
+            .xit => .patch,
+        },
+        action: MergeAction(hash_kind),
+    };
+}
 
 pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return struct {
@@ -1316,9 +1330,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
         pub fn init(
             state: rp.Repo(repo_kind, repo_opts).State(.read_write),
             allocator: std.mem.Allocator,
-            merge_input: MergeInput(repo_opts.hash),
-            comptime merge_kind: MergeKind,
-            comptime merge_algo: MergeAlgorithm,
+            merge_input: MergeInput(repo_kind, repo_opts.hash),
         ) !Merge(repo_kind, repo_opts) {
             // TODO: exit early if working tree is dirty
 
@@ -1339,16 +1351,16 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
             var auto_resolved_conflicts = std.StringArrayHashMap(void).init(arena.allocator());
             var conflicts = std.StringArrayHashMap(MergeConflict(repo_opts.hash)).init(arena.allocator());
 
-            const merge_head_name = switch (merge_kind) {
+            const merge_head_name = switch (merge_input.kind) {
                 .merge => "MERGE_HEAD",
                 .cherry_pick => "CHERRY_PICK_HEAD",
             };
             const merge_msg_name = "MERGE_MSG";
 
-            switch (merge_input) {
+            switch (merge_input.action) {
                 .new => |ref_or_oid| {
                     // cherry-picking requires an oid
-                    if (merge_kind == .cherry_pick and ref_or_oid != .oid) {
+                    if (merge_input.kind == .cherry_pick and ref_or_oid != .oid) {
                         return error.OidRequired;
                     }
 
@@ -1405,7 +1417,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                         };
                     };
                     var base_oid: [hash.hexLen(repo_opts.hash)]u8 = undefined;
-                    switch (merge_kind) {
+                    switch (merge_input.kind) {
                         .merge => base_oid = try commonAncestor(repo_kind, repo_opts, allocator, state.readOnly(), &target_oid, &source_oid),
                         .cherry_pick => {
                             var object = try obj.Object(repo_kind, repo_opts, .full).init(allocator, state.readOnly(), &source_oid);
@@ -1442,7 +1454,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 
                     // look for same path conflicts while populating the clean diff
                     for (source_diff.changes.keys(), source_diff.changes.values()) |path, source_change| {
-                        const same_path_result = try samePathConflict(repo_kind, repo_opts, state, allocator, &base_oid, &target_oid, &source_oid, target_name, source_name, target_diff.changes.get(path), source_change, path, merge_algo);
+                        const same_path_result = try samePathConflict(repo_kind, repo_opts, state, allocator, &base_oid, &target_oid, &source_oid, target_name, source_name, target_diff.changes.get(path), source_change, path, merge_input.algo);
                         if (same_path_result.change) |change| {
                             try clean_diff.changes.put(path, change);
                         }
@@ -1466,7 +1478,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     }
 
                     // create commit message
-                    var commit_metadata: obj.CommitMetadata(repo_opts.hash) = switch (merge_kind) {
+                    var commit_metadata: obj.CommitMetadata(repo_opts.hash) = switch (merge_input.kind) {
                         .merge => .{
                             .message = try std.fmt.allocPrint(arena.allocator(), "merge from {s}", .{source_name}),
                         },
@@ -1598,7 +1610,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     }
 
                     // commit the change
-                    commit_metadata.parent_oids = switch (merge_kind) {
+                    commit_metadata.parent_oids = switch (merge_input.kind) {
                         .merge => &.{ target_oid, source_oid },
                         .cherry_pick => &.{base_oid},
                     };
@@ -1673,7 +1685,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     // get the base oid
                     var base_oid: [hash.hexLen(repo_opts.hash)]u8 = undefined;
                     const target_oid = target_oid_maybe orelse return error.TargetOidNotFound;
-                    switch (merge_kind) {
+                    switch (merge_input.kind) {
                         .merge => base_oid = try commonAncestor(repo_kind, repo_opts, allocator, state.readOnly(), &target_oid, &source_oid),
                         .cherry_pick => {
                             var object = try obj.Object(repo_kind, repo_opts, .full).init(allocator, state.readOnly(), &source_oid);
@@ -1687,7 +1699,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     }
 
                     // commit the change
-                    commit_metadata.parent_oids = switch (merge_kind) {
+                    commit_metadata.parent_oids = switch (merge_input.kind) {
                         .merge => &.{ target_oid, source_oid },
                         .cherry_pick => &.{target_oid},
                     };
