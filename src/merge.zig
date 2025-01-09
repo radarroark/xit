@@ -1689,7 +1689,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     // commit the change
                     commit_metadata.parent_oids = switch (merge_kind) {
                         .merge => &.{ target_oid, source_oid },
-                        .cherry_pick => &.{base_oid},
+                        .cherry_pick => &.{target_oid},
                     };
                     const commit_oid = try obj.writeCommit(repo_kind, repo_opts, state, allocator, commit_metadata);
 
