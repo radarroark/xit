@@ -327,9 +327,9 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                         } else {
                             const sub_command = sub_cmd_args.positional_args.items[0];
                             const merge_kind: mrg.MergeKind = if (std.mem.eql(u8, "merge", sub_command))
-                                .merge
+                                .full
                             else if (std.mem.eql(u8, "cherry-pick", sub_command))
-                                .cherry_pick
+                                .pick
                             else
                                 return error.InvalidMergeKind;
 

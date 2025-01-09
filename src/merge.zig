@@ -1280,8 +1280,8 @@ fn fileDirConflict(
 }
 
 pub const MergeKind = enum {
-    merge,
-    cherry_pick,
+    full, // merge
+    pick, // cherry-pick
 };
 
 pub const MergeAlgorithm = enum {
@@ -1355,15 +1355,15 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 
             const merge_head_names = &[_][]const u8{ "MERGE_HEAD", "CHERRY_PICK_HEAD" };
             const merge_head_name = switch (merge_input.kind) {
-                .merge => merge_head_names[0],
-                .cherry_pick => merge_head_names[1],
+                .full => merge_head_names[0],
+                .pick => merge_head_names[1],
             };
             const merge_msg_name = "MERGE_MSG";
 
             switch (merge_input.action) {
                 .new => |action| {
                     // cherry-picking requires an oid
-                    if (merge_input.kind == .cherry_pick and action.source != .oid) {
+                    if (merge_input.kind == .pick and action.source != .oid) {
                         return error.OidRequired;
                     }
 
@@ -1425,8 +1425,8 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     // get the base oid
                     var base_oid: [hash.hexLen(repo_opts.hash)]u8 = undefined;
                     switch (merge_input.kind) {
-                        .merge => base_oid = try commonAncestor(repo_kind, repo_opts, allocator, state.readOnly(), &target_oid, &source_oid),
-                        .cherry_pick => {
+                        .full => base_oid = try commonAncestor(repo_kind, repo_opts, allocator, state.readOnly(), &target_oid, &source_oid),
+                        .pick => {
                             var object = try obj.Object(repo_kind, repo_opts, .full).init(allocator, state.readOnly(), &source_oid);
                             defer object.deinit();
                             const parent_oid = if (object.content.commit.parents.items.len == 1) object.content.commit.parents.items[0] else return error.CommitMustHaveOneParent;
@@ -1486,10 +1486,10 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 
                     // create commit message
                     var commit_metadata: obj.CommitMetadata(repo_opts.hash) = switch (merge_input.kind) {
-                        .merge => .{
+                        .full => .{
                             .message = try std.fmt.allocPrint(arena.allocator(), "merge from {s}", .{source_name}),
                         },
-                        .cherry_pick => blk: {
+                        .pick => blk: {
                             const object = try obj.Object(repo_kind, repo_opts, .full).init(arena.allocator(), state.readOnly(), &source_oid);
                             switch (object.content) {
                                 .commit => break :blk object.content.commit.metadata,
@@ -1618,8 +1618,8 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 
                     // commit the change
                     commit_metadata.parent_oids = switch (merge_input.kind) {
-                        .merge => &.{ target_oid, source_oid },
-                        .cherry_pick => &.{base_oid},
+                        .full => &.{ target_oid, source_oid },
+                        .pick => &.{base_oid},
                     };
                     const commit_oid = try obj.writeCommit(repo_kind, repo_opts, state, allocator, commit_metadata);
 
@@ -1717,8 +1717,8 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     var base_oid: [hash.hexLen(repo_opts.hash)]u8 = undefined;
                     const target_oid = target_oid_maybe orelse return error.TargetOidNotFound;
                     switch (merge_input.kind) {
-                        .merge => base_oid = try commonAncestor(repo_kind, repo_opts, allocator, state.readOnly(), &target_oid, &source_oid),
-                        .cherry_pick => {
+                        .full => base_oid = try commonAncestor(repo_kind, repo_opts, allocator, state.readOnly(), &target_oid, &source_oid),
+                        .pick => {
                             var object = try obj.Object(repo_kind, repo_opts, .full).init(allocator, state.readOnly(), &source_oid);
                             defer object.deinit();
                             const parent_oid = if (object.content.commit.parents.items.len == 1) object.content.commit.parents.items[0] else return error.CommitMustHaveOneParent;
@@ -1731,8 +1731,8 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 
                     // commit the change
                     commit_metadata.parent_oids = switch (merge_input.kind) {
-                        .merge => &.{ target_oid, source_oid },
-                        .cherry_pick => &.{target_oid},
+                        .full => &.{ target_oid, source_oid },
+                        .pick => &.{target_oid},
                     };
                     const commit_oid = try obj.writeCommit(repo_kind, repo_opts, state, allocator, commit_metadata);
 
