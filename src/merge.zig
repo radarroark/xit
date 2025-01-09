@@ -1292,7 +1292,7 @@ pub const MergeAlgorithm = enum {
 pub fn MergeAction(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
     return union(enum) {
         new: struct {
-            source: ref.RefOrOid(hash_kind),
+            source: []const ref.RefOrOid(hash_kind),
             algo: MergeAlgorithm = switch (repo_kind) {
                 .git => .diff3,
                 .xit => .patch,
@@ -1362,8 +1362,14 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 
             switch (merge_input.action) {
                 .new => |action| {
+                    const source_ref_or_oid = switch (action.source.len) {
+                        0 => return error.InvalidNumberOfSources,
+                        1 => action.source[0],
+                        else => return error.OctopusMergeNotYetSupported,
+                    };
+
                     // cherry-picking requires an oid
-                    if (merge_input.kind == .pick and action.source != .oid) {
+                    if (merge_input.kind == .pick and source_ref_or_oid != .oid) {
                         return error.OidRequired;
                     }
 
@@ -1389,13 +1395,13 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 
                     // we need to return the source name so copy it into a new buffer
                     // so we an ensure it lives as long as the rest of the return struct
-                    const source_name = try arena.allocator().dupe(u8, switch (action.source) {
+                    const source_name = try arena.allocator().dupe(u8, switch (source_ref_or_oid) {
                         .ref => |rf| rf.name,
                         .oid => |oid| oid,
                     });
 
                     // get the source and target oid
-                    const source_oid = try ref.readRecur(repo_kind, repo_opts, state.readOnly(), action.source) orelse return error.InvalidTarget;
+                    const source_oid = try ref.readRecur(repo_kind, repo_opts, state.readOnly(), source_ref_or_oid) orelse return error.InvalidTarget;
                     const target_oid = target_oid_maybe orelse {
                         // the target branch is completely empty, so just set it to the source oid
                         try ref.writeRecur(repo_kind, repo_opts, state, "HEAD", &source_oid);

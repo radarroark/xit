@@ -184,7 +184,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
         tui: ?SubCommandKind,
         cli: ?SubCommand(repo_kind, hash_kind),
 
-        pub fn init(sub_cmd_args: *const SubCommandArgs) !Command(repo_kind, hash_kind) {
+        pub fn init(arena: *std.heap.ArenaAllocator, sub_cmd_args: *const SubCommandArgs) !Command(repo_kind, hash_kind) {
             if (sub_cmd_args.sub_command_kind) |sub_command_kind| {
                 const extra_args = sub_cmd_args.positional_args.items[1..];
                 const show_help = sub_cmd_args.map_args.contains("--help");
@@ -333,30 +333,25 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                             else
                                 return error.InvalidMergeKind;
 
-                            var merge_action_maybe: ?mrg.MergeAction(repo_kind, hash_kind) = switch (extra_args.len) {
-                                0 => null,
-                                1 => .{ .new = .{ .source = ref.RefOrOid(hash_kind).initFromUser(extra_args[0]) } },
-                                2 => .{ .new = .{ .source = .{ .ref = .{ .kind = .{ .remote = extra_args[0] }, .name = extra_args[1] } } } },
-                                else => return error.TooManyArgs,
-                            };
-                            if (sub_cmd_args.map_args.contains("--continue")) {
-                                if (merge_action_maybe != null) {
-                                    return error.ConflictingMergeArgs;
+                            const merge_action: mrg.MergeAction(repo_kind, hash_kind) =
+                                if (sub_cmd_args.map_args.contains("--continue"))
+                                .cont
+                            else blk: {
+                                var source = std.ArrayList(ref.RefOrOid(hash_kind)).init(arena.allocator());
+                                for (extra_args) |arg| {
+                                    try source.append(ref.RefOrOid(hash_kind).initFromUser(arg));
                                 }
-                                merge_action_maybe = .cont;
-                            }
-                            if (merge_action_maybe) |merge_action| {
-                                return .{
-                                    .cli = .{
-                                        .merge = .{
-                                            .kind = merge_kind,
-                                            .action = merge_action,
-                                        },
+                                break :blk .{ .new = .{ .source = try source.toOwnedSlice() } };
+                            };
+
+                            return .{
+                                .cli = .{
+                                    .merge = .{
+                                        .kind = merge_kind,
+                                        .action = merge_action,
                                     },
-                                };
-                            } else {
-                                return error.InsufficientMergeArgs;
-                            }
+                                },
+                            };
                         }
                     },
                     .config => {
@@ -462,24 +457,27 @@ test "command" {
     var args = std.ArrayList([]const u8).init(allocator);
     defer args.deinit();
 
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
     {
         var sub_cmd_args = try SubCommandArgs.init(allocator, &.{ "add", "--cli" });
         defer sub_cmd_args.deinit();
-        const command = try Command(repo_kind, hash_kind).init(&sub_cmd_args);
+        const command = try Command(repo_kind, hash_kind).init(&arena, &sub_cmd_args);
         try std.testing.expect(command == .help);
     }
 
     {
         var sub_cmd_args = try SubCommandArgs.init(allocator, &.{ "add", "file.txt" });
         defer sub_cmd_args.deinit();
-        const command = try Command(repo_kind, hash_kind).init(&sub_cmd_args);
+        const command = try Command(repo_kind, hash_kind).init(&arena, &sub_cmd_args);
         try std.testing.expect(command == .cli and command.cli.? == .add);
     }
 
     {
         var sub_cmd_args = try SubCommandArgs.init(allocator, &.{ "commit", "-m" });
         defer sub_cmd_args.deinit();
-        const command_or_err = Command(repo_kind, hash_kind).init(&sub_cmd_args);
+        const command_or_err = Command(repo_kind, hash_kind).init(&arena, &sub_cmd_args);
         if (command_or_err) |_| {
             return error.ExpectedError;
         } else |err| {
@@ -490,7 +488,7 @@ test "command" {
     {
         var sub_cmd_args = try SubCommandArgs.init(allocator, &.{ "commit", "-m", "let there be light" });
         defer sub_cmd_args.deinit();
-        const command = try Command(repo_kind, hash_kind).init(&sub_cmd_args);
+        const command = try Command(repo_kind, hash_kind).init(&arena, &sub_cmd_args);
         try std.testing.expect(command == .cli and command.cli.? == .commit);
         try std.testing.expect(std.mem.eql(u8, "let there be light", command.cli.?.commit.message));
     }
