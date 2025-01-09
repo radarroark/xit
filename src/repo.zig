@@ -1328,7 +1328,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                 .git => {
                     const fetch_result = try net.fetch(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, allocator, remote_name, parsed_uri);
                     const remote_ref = ref.Ref{ .kind = .{ .remote = remote_name }, .name = remote_ref_name };
-                    var merge_result = try mrg.Merge(repo_kind, repo_opts).init(.{ .core = &self.core, .extra = .{} }, allocator, .{ .action = .{ .new = .{ .ref = remote_ref } } });
+                    var merge_result = try mrg.Merge(repo_kind, repo_opts).init(.{ .core = &self.core, .extra = .{} }, allocator, .{ .action = .{ .new = .{ .source = .{ .ref = remote_ref } } } });
                     errdefer merge_result.deinit();
 
                     return .{
@@ -1352,7 +1352,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
                             const fetch_result = try net.fetch(repo_kind, repo_opts, state, ctx.allocator, ctx.remote_name, ctx.parsed_uri);
                             const remote_ref = ref.Ref{ .kind = .{ .remote = ctx.remote_name }, .name = ctx.remote_ref_name };
-                            var merge_result = try mrg.Merge(repo_kind, repo_opts).init(state, ctx.allocator, .{ .action = .{ .new = .{ .ref = remote_ref } } });
+                            var merge_result = try mrg.Merge(repo_kind, repo_opts).init(state, ctx.allocator, .{ .action = .{ .new = .{ .source = .{ .ref = remote_ref } } } });
                             errdefer merge_result.deinit();
 
                             ctx.pull_result.* = .{

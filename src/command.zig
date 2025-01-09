@@ -333,10 +333,10 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                             else
                                 return error.InvalidMergeKind;
 
-                            var merge_action_maybe: ?mrg.MergeAction(hash_kind) = switch (extra_args.len) {
+                            var merge_action_maybe: ?mrg.MergeAction(repo_kind, hash_kind) = switch (extra_args.len) {
                                 0 => null,
-                                1 => .{ .new = ref.RefOrOid(hash_kind).initFromUser(extra_args[0]) },
-                                2 => .{ .new = .{ .ref = .{ .kind = .{ .remote = extra_args[0] }, .name = extra_args[1] } } },
+                                1 => .{ .new = .{ .source = ref.RefOrOid(hash_kind).initFromUser(extra_args[0]) } },
+                                2 => .{ .new = .{ .source = .{ .ref = .{ .kind = .{ .remote = extra_args[0] }, .name = extra_args[1] } } } },
                                 else => return error.TooManyArgs,
                             };
                             if (sub_cmd_args.map_args.contains("--continue")) {

@@ -1289,9 +1289,15 @@ pub const MergeAlgorithm = enum {
     patch, // patch-based (xit only)
 };
 
-pub fn MergeAction(comptime hash_kind: hash.HashKind) type {
+pub fn MergeAction(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
     return union(enum) {
-        new: ref.RefOrOid(hash_kind),
+        new: struct {
+            source: ref.RefOrOid(hash_kind),
+            algo: MergeAlgorithm = switch (repo_kind) {
+                .git => .diff3,
+                .xit => .patch,
+            },
+        },
         cont,
     };
 }
@@ -1299,11 +1305,7 @@ pub fn MergeAction(comptime hash_kind: hash.HashKind) type {
 pub fn MergeInput(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
     return struct {
         kind: MergeKind = .merge,
-        algo: MergeAlgorithm = switch (repo_kind) {
-            .git => .diff3,
-            .xit => .patch,
-        },
-        action: MergeAction(hash_kind),
+        action: MergeAction(repo_kind, hash_kind),
     };
 }
 
@@ -1358,9 +1360,9 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
             const merge_msg_name = "MERGE_MSG";
 
             switch (merge_input.action) {
-                .new => |ref_or_oid| {
+                .new => |action| {
                     // cherry-picking requires an oid
-                    if (merge_input.kind == .cherry_pick and ref_or_oid != .oid) {
+                    if (merge_input.kind == .cherry_pick and action.source != .oid) {
                         return error.OidRequired;
                     }
 
@@ -1384,13 +1386,13 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 
                     // we need to return the source name so copy it into a new buffer
                     // so we an ensure it lives as long as the rest of the return struct
-                    const source_name = try arena.allocator().dupe(u8, switch (ref_or_oid) {
+                    const source_name = try arena.allocator().dupe(u8, switch (action.source) {
                         .ref => |rf| rf.name,
                         .oid => |oid| oid,
                     });
 
                     // get the oids for the three-way merge
-                    const source_oid = try ref.readRecur(repo_kind, repo_opts, state.readOnly(), ref_or_oid) orelse return error.InvalidTarget;
+                    const source_oid = try ref.readRecur(repo_kind, repo_opts, state.readOnly(), action.source) orelse return error.InvalidTarget;
                     const target_oid = target_oid_maybe orelse {
                         // the target branch is completely empty, so just set it to the source oid
                         try ref.writeRecur(repo_kind, repo_opts, state, "HEAD", &source_oid);
@@ -1454,7 +1456,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 
                     // look for same path conflicts while populating the clean diff
                     for (source_diff.changes.keys(), source_diff.changes.values()) |path, source_change| {
-                        const same_path_result = try samePathConflict(repo_kind, repo_opts, state, allocator, &base_oid, &target_oid, &source_oid, target_name, source_name, target_diff.changes.get(path), source_change, path, merge_input.algo);
+                        const same_path_result = try samePathConflict(repo_kind, repo_opts, state, allocator, &base_oid, &target_oid, &source_oid, target_name, source_name, target_diff.changes.get(path), source_change, path, action.algo);
                         if (same_path_result.change) |change| {
                             try clean_diff.changes.put(path, change);
                         }
