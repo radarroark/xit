@@ -32,15 +32,22 @@ pub const SubCommandKind = enum {
 };
 
 pub const SubCommandArgs = struct {
+    allocator: std.mem.Allocator,
+    arena: *std.heap.ArenaAllocator,
     sub_command_kind: ?SubCommandKind,
     positional_args: std.ArrayList([]const u8),
     map_args: std.StringArrayHashMap(?[]const u8),
 
     pub fn init(allocator: std.mem.Allocator, args: []const []const u8) !SubCommandArgs {
-        var positional_args = std.ArrayList([]const u8).init(allocator);
-        errdefer positional_args.deinit();
-        var map_args = std.StringArrayHashMap(?[]const u8).init(allocator);
-        errdefer map_args.deinit();
+        const arena = try allocator.create(std.heap.ArenaAllocator);
+        arena.* = std.heap.ArenaAllocator.init(allocator);
+        errdefer {
+            arena.deinit();
+            allocator.destroy(arena);
+        }
+
+        var positional_args = std.ArrayList([]const u8).init(arena.allocator());
+        var map_args = std.StringArrayHashMap(?[]const u8).init(arena.allocator());
 
         for (args) |arg| {
             if (arg.len == 0) {
@@ -69,6 +76,8 @@ pub const SubCommandArgs = struct {
 
         if (positional_args.items.len == 0) {
             return .{
+                .allocator = allocator,
+                .arena = arena,
                 .sub_command_kind = null,
                 .positional_args = positional_args,
                 .map_args = map_args,
@@ -117,6 +126,8 @@ pub const SubCommandArgs = struct {
                 null;
 
             return .{
+                .allocator = allocator,
+                .arena = arena,
                 .sub_command_kind = sub_command_kind,
                 .positional_args = positional_args,
                 .map_args = map_args,
@@ -125,8 +136,8 @@ pub const SubCommandArgs = struct {
     }
 
     pub fn deinit(self: *SubCommandArgs) void {
-        self.positional_args.deinit();
-        self.map_args.deinit();
+        self.arena.deinit();
+        self.allocator.destroy(self.arena);
     }
 };
 
@@ -184,7 +195,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
         tui: ?SubCommandKind,
         cli: ?SubCommand(repo_kind, hash_kind),
 
-        pub fn init(arena: *std.heap.ArenaAllocator, sub_cmd_args: *const SubCommandArgs) !Command(repo_kind, hash_kind) {
+        pub fn init(sub_cmd_args: *const SubCommandArgs) !Command(repo_kind, hash_kind) {
             if (sub_cmd_args.sub_command_kind) |sub_command_kind| {
                 const extra_args = sub_cmd_args.positional_args.items[1..];
                 const show_help = sub_cmd_args.map_args.contains("--help");
@@ -337,7 +348,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                                 if (sub_cmd_args.map_args.contains("--continue"))
                                 .cont
                             else blk: {
-                                var source = std.ArrayList(ref.RefOrOid(hash_kind)).init(arena.allocator());
+                                var source = std.ArrayList(ref.RefOrOid(hash_kind)).init(sub_cmd_args.arena.allocator());
                                 for (extra_args) |arg| {
                                     try source.append(ref.RefOrOid(hash_kind).initFromUser(arg));
                                 }
@@ -457,27 +468,24 @@ test "command" {
     var args = std.ArrayList([]const u8).init(allocator);
     defer args.deinit();
 
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
-
     {
         var sub_cmd_args = try SubCommandArgs.init(allocator, &.{ "add", "--cli" });
         defer sub_cmd_args.deinit();
-        const command = try Command(repo_kind, hash_kind).init(&arena, &sub_cmd_args);
+        const command = try Command(repo_kind, hash_kind).init(&sub_cmd_args);
         try std.testing.expect(command == .help);
     }
 
     {
         var sub_cmd_args = try SubCommandArgs.init(allocator, &.{ "add", "file.txt" });
         defer sub_cmd_args.deinit();
-        const command = try Command(repo_kind, hash_kind).init(&arena, &sub_cmd_args);
+        const command = try Command(repo_kind, hash_kind).init(&sub_cmd_args);
         try std.testing.expect(command == .cli and command.cli.? == .add);
     }
 
     {
         var sub_cmd_args = try SubCommandArgs.init(allocator, &.{ "commit", "-m" });
         defer sub_cmd_args.deinit();
-        const command_or_err = Command(repo_kind, hash_kind).init(&arena, &sub_cmd_args);
+        const command_or_err = Command(repo_kind, hash_kind).init(&sub_cmd_args);
         if (command_or_err) |_| {
             return error.ExpectedError;
         } else |err| {
@@ -488,7 +496,7 @@ test "command" {
     {
         var sub_cmd_args = try SubCommandArgs.init(allocator, &.{ "commit", "-m", "let there be light" });
         defer sub_cmd_args.deinit();
-        const command = try Command(repo_kind, hash_kind).init(&arena, &sub_cmd_args);
+        const command = try Command(repo_kind, hash_kind).init(&sub_cmd_args);
         try std.testing.expect(command == .cli and command.cli.? == .commit);
         try std.testing.expect(std.mem.eql(u8, "let there be light", command.cli.?.commit.message));
     }

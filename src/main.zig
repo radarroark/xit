@@ -151,10 +151,7 @@ pub fn run(
         var sub_cmd_args = try cmd.SubCommandArgs.init(allocator, args);
         defer sub_cmd_args.deinit();
 
-        var arena = std.heap.ArenaAllocator.init(allocator);
-        defer arena.deinit();
-
-        const command = try cmd.Command(repo_kind, repo_opts.hash).init(&arena, &sub_cmd_args);
+        const command = try cmd.Command(repo_kind, repo_opts.hash).init(&sub_cmd_args);
         switch (command) {
             .invalid => |invalid| {
                 try writers.err.print("\"{s}\" is not a valid command\n", .{invalid.name});
