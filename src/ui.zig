@@ -78,7 +78,7 @@ pub fn start(
     comptime repo_opts: rp.RepoOpts(repo_kind),
     repo: *rp.Repo(repo_kind, repo_opts),
     allocator: std.mem.Allocator,
-    sub_cmd_kind_maybe: ?cmd.SubCommandKind,
+    cmd_kind_maybe: ?cmd.CommandKind,
 ) !void {
     // init root widget
     var root = Widget(repo_kind, repo_opts){ .ui_root = try ui_root.Root(Widget(repo_kind, repo_opts), repo_kind, repo_opts).init(allocator, repo) };
@@ -94,8 +94,8 @@ pub fn start(
     }
 
     // focus on the correct tab if sub command is provided
-    if (sub_cmd_kind_maybe) |sub_cmd_kind| {
-        const child_id_maybe = switch (sub_cmd_kind) {
+    if (cmd_kind_maybe) |cmd_kind| {
+        const child_id_maybe = switch (cmd_kind) {
             .status, .diff => root.ui_root.box.children.values()[0].widget.ui_root_tabs.getChildFocusId(.status),
             .log => root.ui_root.box.children.values()[0].widget.ui_root_tabs.getChildFocusId(.log),
             else => null,

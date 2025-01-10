@@ -309,10 +309,10 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
         pub fn initWithCommand(
             allocator: std.mem.Allocator,
             opts: InitOpts,
-            sub_command: cmd.SubCommand(repo_kind, repo_opts.hash),
+            command: cmd.Command(repo_kind, repo_opts.hash),
             writers: Writers,
         ) !Repo(repo_kind, repo_opts) {
-            switch (sub_command) {
+            switch (command) {
                 .init => |init_cmd| {
                     return Repo(repo_kind, repo_opts).init(allocator, opts, init_cmd.dir) catch |err| switch (err) {
                         error.RepoAlreadyExists => {
@@ -345,10 +345,10 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
         pub fn runCommand(
             self: *Repo(repo_kind, repo_opts),
             allocator: std.mem.Allocator,
-            sub_command: cmd.SubCommand(repo_kind, repo_opts.hash),
+            command: cmd.Command(repo_kind, repo_opts.hash),
             writers: Writers,
         ) !void {
-            switch (sub_command) {
+            switch (command) {
                 .init => {},
                 .add => |add_cmd| {
                     try self.add(allocator, add_cmd.paths);

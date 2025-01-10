@@ -121,14 +121,14 @@ pub fn run(
 
         // if we are initing a new repo, just use the default hash kind
         {
-            const sub_cmd_kind_maybe = blk: {
-                var sub_cmd_args = try cmd.SubCommandArgs.init(allocator, args);
-                defer sub_cmd_args.deinit();
-                break :blk sub_cmd_args.sub_command_kind;
+            const cmd_kind_maybe = blk: {
+                var cmd_args = try cmd.CommandArgs.init(allocator, args);
+                defer cmd_args.deinit();
+                break :blk cmd_args.command_kind;
             };
 
-            if (sub_cmd_kind_maybe) |sub_cmd_kind| {
-                if (sub_cmd_kind == .init) {
+            if (cmd_kind_maybe) |cmd_kind| {
+                if (cmd_kind == .init) {
                     const default_hash = (rp.RepoOpts(repo_kind){}).hash;
                     try run(repo_kind, repo_opts.withHash(default_hash), allocator, args, cwd, writers);
                     return;
@@ -148,35 +148,34 @@ pub fn run(
             .sha256 => try run(repo_kind, repo_opts.withHash(.sha256), allocator, args, cwd, writers),
         }
     } else {
-        var sub_cmd_args = try cmd.SubCommandArgs.init(allocator, args);
-        defer sub_cmd_args.deinit();
+        var cmd_args = try cmd.CommandArgs.init(allocator, args);
+        defer cmd_args.deinit();
 
-        const command = try cmd.Command(repo_kind, repo_opts.hash).init(&sub_cmd_args);
-        switch (command) {
+        switch (try cmd.CommandMaybe(repo_kind, repo_opts.hash).init(&cmd_args)) {
             .invalid => |invalid| {
                 try writers.err.print("\"{s}\" is not a valid command\n", .{invalid.name});
                 try writers.out.print(USAGE, .{});
             },
-            .help => |sub_cmd_kind_maybe| {
-                if (sub_cmd_kind_maybe) |sub_cmd_kind| {
+            .help => |cmd_kind_maybe| {
+                if (cmd_kind_maybe) |cmd_kind| {
                     // TODO: print usage for each sub command
-                    switch (sub_cmd_kind) {
+                    switch (cmd_kind) {
                         else => try writers.out.print(USAGE, .{}),
                     }
                 } else {
                     try writers.out.print(USAGE, .{});
                 }
             },
-            .tui => |sub_cmd_kind_maybe| {
+            .tui => |cmd_kind_maybe| {
                 var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = cwd });
                 defer repo.deinit();
-                try ui.start(repo_kind, repo_opts, &repo, allocator, sub_cmd_kind_maybe);
+                try ui.start(repo_kind, repo_opts, &repo, allocator, cmd_kind_maybe);
             },
-            .cli => |sub_cmd_maybe| {
-                if (sub_cmd_maybe) |sub_cmd| {
-                    var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = cwd }, sub_cmd, writers);
+            .cli => |cli_cmd_maybe| {
+                if (cli_cmd_maybe) |cli_cmd| {
+                    var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = cwd }, cli_cmd, writers);
                     defer repo.deinit();
-                    try repo.runCommand(allocator, sub_cmd, writers);
+                    try repo.runCommand(allocator, cli_cmd, writers);
                 } else {
                     try writers.out.print(USAGE, .{});
                 }
