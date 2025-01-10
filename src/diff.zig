@@ -2,7 +2,7 @@ const std = @import("std");
 const rp = @import("./repo.zig");
 const st = @import("./status.zig");
 const hash = @import("./hash.zig");
-const io = @import("./io.zig");
+const fs = @import("./fs.zig");
 const idx = @import("./index.zig");
 const obj = @import("./object.zig");
 
@@ -12,7 +12,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
         path: []const u8,
         oid: [hash.byteLen(repo_opts.hash)]u8,
         oid_hex: [hash.hexLen(repo_opts.hash)]u8,
-        mode: ?io.Mode,
+        mode: ?fs.Mode,
         line_offsets: []usize,
         source: union(enum) {
             object: struct {
@@ -52,7 +52,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
             return iter;
         }
 
-        pub fn initFromWorkspace(state: rp.Repo(repo_kind, repo_opts).State(.read_only), allocator: std.mem.Allocator, path: []const u8, mode: io.Mode) !LineIterator(repo_kind, repo_opts) {
+        pub fn initFromWorkspace(state: rp.Repo(repo_kind, repo_opts).State(.read_only), allocator: std.mem.Allocator, path: []const u8, mode: fs.Mode) !LineIterator(repo_kind, repo_opts) {
             var file = try state.core.repo_dir.openFile(path, .{ .mode = .read_only });
             errdefer file.close();
 
@@ -117,7 +117,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
             return iter;
         }
 
-        pub fn initFromOid(state: rp.Repo(repo_kind, repo_opts).State(.read_only), allocator: std.mem.Allocator, path: []const u8, oid: *const [hash.byteLen(repo_opts.hash)]u8, mode_maybe: ?io.Mode) !LineIterator(repo_kind, repo_opts) {
+        pub fn initFromOid(state: rp.Repo(repo_kind, repo_opts).State(.read_only), allocator: std.mem.Allocator, path: []const u8, oid: *const [hash.byteLen(repo_opts.hash)]u8, mode_maybe: ?fs.Mode) !LineIterator(repo_kind, repo_opts) {
             const oid_hex = std.fmt.bytesToHex(oid, .lower);
             var object_reader = try obj.ObjectReader(repo_kind, repo_opts).init(allocator, state, &oid_hex);
             errdefer object_reader.deinit();
@@ -1094,7 +1094,7 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
 
             try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "diff --git a/{s} b/{s}", .{ line_iter_a.path, line_iter_b.path }));
 
-            var mode_maybe: ?io.Mode = null;
+            var mode_maybe: ?fs.Mode = null;
 
             if (line_iter_a.mode) |a_mode| {
                 if (line_iter_b.mode) |b_mode| {
@@ -1331,7 +1331,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                 .workspace => |workspace| {
                     if (next_index < workspace.status.conflicts.count()) {
                         const path = workspace.status.conflicts.keys()[next_index];
-                        const meta = try io.getMetadata(self.core.repo_dir, path);
+                        const meta = try fs.getMetadata(self.core.repo_dir, path);
                         const stage: usize = switch (workspace.conflict_diff_kind) {
                             .base => 1,
                             .target => 2,
@@ -1343,7 +1343,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                             var a = try LineIterator(repo_kind, repo_opts).initFromIndex(state, self.allocator, index_entry);
                             errdefer a.deinit();
                             var b = switch (meta.kind()) {
-                                .file => try LineIterator(repo_kind, repo_opts).initFromWorkspace(state, self.allocator, path, io.getMode(meta)),
+                                .file => try LineIterator(repo_kind, repo_opts).initFromWorkspace(state, self.allocator, path, fs.getMode(meta)),
                                 // in file/dir conflicts, `path` may be a directory which can't be diffed, so just make it nothing
                                 else => try LineIterator(repo_kind, repo_opts).initFromNothing(self.allocator, path),
                             };
@@ -1365,7 +1365,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                         const index_entries_for_path = workspace.status.index.entries.get(entry.path) orelse return error.EntryNotFound;
                         var a = try LineIterator(repo_kind, repo_opts).initFromIndex(state, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
                         errdefer a.deinit();
-                        var b = try LineIterator(repo_kind, repo_opts).initFromWorkspace(state, self.allocator, entry.path, io.getMode(entry.meta));
+                        var b = try LineIterator(repo_kind, repo_opts).initFromWorkspace(state, self.allocator, entry.path, fs.getMode(entry.meta));
                         errdefer b.deinit();
                         self.next_index += 1;
                         return .{ .path = entry.path, .a = a, .b = b };

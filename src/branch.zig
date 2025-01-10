@@ -1,7 +1,7 @@
 const std = @import("std");
 const hash = @import("./hash.zig");
 const ref = @import("./ref.zig");
-const io = @import("./io.zig");
+const fs = @import("./fs.zig");
 const rp = @import("./repo.zig");
 
 pub const BranchCommand = union(enum) {
@@ -55,7 +55,7 @@ pub fn add(
             defer if (subdir_maybe) |*subdir| subdir.close();
 
             // create lock file
-            var lock = try io.LockFile.init(if (subdir_maybe) |subdir| subdir else heads_dir, leaf_name);
+            var lock = try fs.LockFile.init(if (subdir_maybe) |subdir| subdir else heads_dir, leaf_name);
             defer lock.deinit();
 
             // get HEAD contents
@@ -128,7 +128,7 @@ pub fn remove(
             const ref_path = try heads_dir.realpath(input.name, &ref_buffer);
 
             // create lock file for HEAD
-            var head_lock = try io.LockFile.init(state.core.git_dir, "HEAD");
+            var head_lock = try fs.LockFile.init(state.core.git_dir, "HEAD");
             defer head_lock.deinit();
 
             // don't allow current branch to be deleted

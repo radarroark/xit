@@ -1,7 +1,7 @@
 const std = @import("std");
 const hash = @import("./hash.zig");
 const rp = @import("./repo.zig");
-const io = @import("./io.zig");
+const fs = @import("./fs.zig");
 
 // reordering is a breaking change
 const CompressKind = enum(u8) {
@@ -332,7 +332,7 @@ pub fn writeChunks(
             chunk_file.close();
         } else |err| switch (err) {
             error.FileNotFound => {
-                var lock = try io.LockFile.init(chunks_dir, &chunk_hash_hex);
+                var lock = try fs.LockFile.init(chunks_dir, &chunk_hash_hex);
                 defer lock.deinit();
 
                 // if it's utf8 text, try compressing it

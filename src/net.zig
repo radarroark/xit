@@ -3,7 +3,7 @@ const network = @import("network");
 const rp = @import("./repo.zig");
 const obj = @import("./object.zig");
 const hash = @import("./hash.zig");
-const io = @import("./io.zig");
+const fs = @import("./fs.zig");
 const pack = @import("./pack.zig");
 const ref = @import("./ref.zig");
 
@@ -208,7 +208,7 @@ pub fn fetch(
 
     // write pack file to temp file
     {
-        var lock = try io.LockFile.init(dir, "temp.pack");
+        var lock = try fs.LockFile.init(dir, "temp.pack");
         defer lock.deinit();
         while (true) {
             var read_buffer = [_]u8{0} ** 1024;

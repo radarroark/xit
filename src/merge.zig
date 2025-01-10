@@ -4,7 +4,7 @@ const obj = @import("./object.zig");
 const idx = @import("./index.zig");
 const ref = @import("./ref.zig");
 const cht = @import("./checkout.zig");
-const io = @import("./io.zig");
+const fs = @import("./fs.zig");
 const rp = @import("./repo.zig");
 const df = @import("./diff.zig");
 
@@ -1507,7 +1507,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     switch (repo_kind) {
                         .git => {
                             // create lock file
-                            var lock = try io.LockFile.init(state.core.git_dir, "index");
+                            var lock = try fs.LockFile.init(state.core.git_dir, "index");
                             defer lock.deinit();
 
                             // read index

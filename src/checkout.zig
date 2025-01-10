@@ -15,7 +15,7 @@ const hash = @import("./hash.zig");
 const obj = @import("./object.zig");
 const ref = @import("./ref.zig");
 const idx = @import("./index.zig");
-const io = @import("./io.zig");
+const fs = @import("./fs.zig");
 const rp = @import("./repo.zig");
 
 pub fn objectToFile(
@@ -65,7 +65,7 @@ pub fn objectToFile(
 
             // update each entry recursively
             for (tree_object.content.tree.entries.keys(), tree_object.content.tree.entries.values()) |sub_path, entry| {
-                const new_path = try io.joinPath(allocator, &.{ path, sub_path });
+                const new_path = try fs.joinPath(allocator, &.{ path, sub_path });
                 defer allocator.free(new_path);
                 try objectToFile(repo_kind, repo_opts, state, allocator, new_path, entry);
             }
@@ -173,7 +173,7 @@ fn untrackedParent(
     var parent = path;
     while (std.fs.path.dirname(parent)) |next_parent| {
         parent = next_parent;
-        const meta = io.getMetadata(repo_dir, next_parent) catch continue;
+        const meta = fs.getMetadata(repo_dir, next_parent) catch continue;
         if (meta.kind() != .file) continue;
         if (!index.entries.contains(next_parent)) {
             return next_parent;
@@ -192,7 +192,7 @@ fn untrackedFile(
     path: []const u8,
     index: idx.Index(repo_kind, repo_opts),
 ) !bool {
-    const meta = try io.getMetadata(repo_dir, path);
+    const meta = try fs.getMetadata(repo_dir, path);
     switch (meta.kind()) {
         .file => {
             return !index.entries.contains(path);
@@ -202,7 +202,7 @@ fn untrackedFile(
             defer dir.close();
             var iter = dir.iterate();
             while (try iter.next()) |dir_entry| {
-                const subpath = try io.joinPath(allocator, &.{ path, dir_entry.name });
+                const subpath = try fs.joinPath(allocator, &.{ path, dir_entry.name });
                 defer allocator.free(subpath);
                 if (try untrackedFile(repo_kind, repo_opts, allocator, repo_dir, subpath, index)) {
                     return true;
@@ -252,7 +252,7 @@ pub fn migrate(
                 result.conflict(allocator);
                 try result.data.conflict.stale_files.put(path, {});
             } else {
-                const meta = io.getMetadata(state.core.repo_dir, path) catch |err| switch (err) {
+                const meta = fs.getMetadata(state.core.repo_dir, path) catch |err| switch (err) {
                     error.FileNotFound, error.NotDir => {
                         // if the path doesn't exist in the workspace,
                         // but one of its parents *does* exist and isn't tracked
@@ -414,7 +414,7 @@ pub const Switch = struct {
         switch (repo_kind) {
             .git => {
                 // create lock file
-                var lock = try io.LockFile.init(state.core.git_dir, "index");
+                var lock = try fs.LockFile.init(state.core.git_dir, "index");
                 defer lock.deinit();
 
                 // read index

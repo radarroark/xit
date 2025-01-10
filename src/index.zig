@@ -4,7 +4,7 @@
 const std = @import("std");
 const obj = @import("./object.zig");
 const hash = @import("./hash.zig");
-const io = @import("./io.zig");
+const fs = @import("./fs.zig");
 const rp = @import("./repo.zig");
 const st = @import("./status.zig");
 
@@ -50,7 +50,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
             mtime_nsecs: u32,
             dev: u32,
             ino: u32,
-            mode: io.Mode,
+            mode: fs.Mode,
             uid: u32,
             gid: u32,
             file_size: u32,
@@ -216,7 +216,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
             // remove entries that are children of this path (file replaces directory)
             try self.removeChildren(path);
             // read the metadata
-            const meta = try io.getMetadata(state.core.repo_dir, path);
+            const meta = try fs.getMetadata(state.core.repo_dir, path);
             switch (meta.kind()) {
                 .file => {
                     // open file
@@ -232,8 +232,8 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     try obj.writeObject(repo_kind, repo_opts, state, file, reader, .{ .kind = .blob, .size = meta.size() }, &oid);
 
                     // add entry
-                    const times = io.getTimes(meta);
-                    const stat = try io.getStat(file);
+                    const times = fs.getTimes(meta);
+                    const stat = try fs.getStat(file);
                     const entry = Entry{
                         .ctime_secs = times.ctime_secs,
                         .ctime_nsecs = times.ctime_nsecs,
@@ -241,7 +241,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                         .mtime_nsecs = times.mtime_nsecs,
                         .dev = stat.dev,
                         .ino = stat.ino,
-                        .mode = io.getMode(meta),
+                        .mode = fs.getMode(meta),
                         .uid = stat.uid,
                         .gid = stat.gid,
                         .file_size = @intCast(meta.size()),
@@ -274,7 +274,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                         const subpath = if (std.mem.eql(u8, path, "."))
                             try self.arena.allocator().dupe(u8, entry.name)
                         else
-                            try io.joinPath(self.arena.allocator(), &.{ path, entry.name });
+                            try fs.joinPath(self.arena.allocator(), &.{ path, entry.name });
                         try self.addPath(state, subpath);
                     }
                 },
@@ -430,7 +430,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     try path_parts.append(component.name);
                 }
                 // allocate using the arena so it has the same lifetime as the overall Index instance
-                break :blk try io.joinPath(self.arena.allocator(), path_parts.items);
+                break :blk try fs.joinPath(self.arena.allocator(), path_parts.items);
             };
 
             // if the path doesn't exist, remove it, regardless of what the `action` is
@@ -611,10 +611,10 @@ pub fn indexDiffersFromWorkspace(
     file: std.fs.File,
     meta: std.fs.File.Metadata,
 ) !bool {
-    if (meta.size() != entry.file_size or !io.getMode(meta).eql(entry.mode)) {
+    if (meta.size() != entry.file_size or !fs.getMode(meta).eql(entry.mode)) {
         return true;
     } else {
-        const times = io.getTimes(meta);
+        const times = fs.getTimes(meta);
         if (times.ctime_secs != entry.ctime_secs or
             times.ctime_nsecs != entry.ctime_nsecs or
             times.mtime_secs != entry.mtime_secs or

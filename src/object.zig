@@ -6,7 +6,7 @@ const std = @import("std");
 const hash = @import("./hash.zig");
 const idx = @import("./index.zig");
 const ref = @import("./ref.zig");
-const io = @import("./io.zig");
+const fs = @import("./fs.zig");
 const rp = @import("./repo.zig");
 const pack = @import("./pack.zig");
 const chunk = @import("./chunk.zig");
@@ -29,7 +29,7 @@ pub const Tree = struct {
         self.entries.deinit();
     }
 
-    pub fn addBlobEntry(self: *Tree, mode: io.Mode, name: []const u8, oid: []const u8) !void {
+    pub fn addBlobEntry(self: *Tree, mode: fs.Mode, name: []const u8, oid: []const u8) !void {
         const entry = try std.fmt.allocPrint(self.allocator, "{s} {s}\x00{s}", .{ mode.toStr(), name, oid });
         errdefer self.allocator.free(entry);
         try self.entries.put(name, entry);
@@ -101,7 +101,7 @@ pub fn writeObject(
             }
 
             // create lock file
-            var lock = try io.LockFile.init(hash_prefix_dir, hash_suffix ++ ".uncompressed");
+            var lock = try fs.LockFile.init(hash_prefix_dir, hash_suffix ++ ".uncompressed");
             defer lock.deinit();
             try lock.lock_file.writeAll(header_str);
 
@@ -116,7 +116,7 @@ pub fn writeObject(
             }
 
             // create compressed lock file
-            var compressed_lock = try io.LockFile.init(hash_prefix_dir, hash_suffix);
+            var compressed_lock = try fs.LockFile.init(hash_prefix_dir, hash_suffix);
             defer compressed_lock.deinit();
             try compressZlib(repo_opts.read_size, lock.lock_file, compressed_lock.lock_file);
             compressed_lock.success = true;
@@ -188,12 +188,12 @@ fn writeTree(
             }
 
             // create lock file
-            var lock = try io.LockFile.init(tree_hash_prefix_dir, tree_hash_suffix ++ ".uncompressed");
+            var lock = try fs.LockFile.init(tree_hash_prefix_dir, tree_hash_suffix ++ ".uncompressed");
             defer lock.deinit();
             try lock.lock_file.writeAll(tree_bytes);
 
             // create compressed lock file
-            var compressed_lock = try io.LockFile.init(tree_hash_prefix_dir, tree_hash_suffix);
+            var compressed_lock = try fs.LockFile.init(tree_hash_prefix_dir, tree_hash_suffix);
             defer compressed_lock.deinit();
             try compressZlib(repo_opts.read_size, lock.lock_file, compressed_lock.lock_file);
             compressed_lock.success = true;
@@ -220,7 +220,7 @@ fn addIndexEntries(
     entries: [][]const u8,
 ) !void {
     for (entries) |name| {
-        const path = try io.joinPath(allocator, &.{ prefix, name });
+        const path = try fs.joinPath(allocator, &.{ prefix, name });
         defer allocator.free(path);
         if (index.entries.get(path)) |*entries_for_path| {
             const entry = entries_for_path[0] orelse return error.NullEntry;
@@ -369,12 +369,12 @@ pub fn writeCommit(
             const commit_hash_suffix = commit_hash_hex[2..];
 
             // create lock file
-            var lock = try io.LockFile.init(commit_hash_prefix_dir, commit_hash_suffix ++ ".uncompressed");
+            var lock = try fs.LockFile.init(commit_hash_prefix_dir, commit_hash_suffix ++ ".uncompressed");
             defer lock.deinit();
             try lock.lock_file.writeAll(commit);
 
             // create compressed lock file
-            var compressed_lock = try io.LockFile.init(commit_hash_prefix_dir, commit_hash_suffix);
+            var compressed_lock = try fs.LockFile.init(commit_hash_prefix_dir, commit_hash_suffix);
             defer compressed_lock.deinit();
             try compressZlib(repo_opts.read_size, lock.lock_file, compressed_lock.lock_file);
             compressed_lock.success = true;
@@ -438,7 +438,7 @@ pub fn TreeDiff(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts
                     const old_value = old_entry.value_ptr.*;
                     var path_list = if (path_list_maybe) |path_list| try path_list.clone() else std.ArrayList([]const u8).init(self.arena.allocator());
                     try path_list.append(old_key);
-                    const path = try io.joinPath(self.arena.allocator(), path_list.items);
+                    const path = try fs.joinPath(self.arena.allocator(), path_list.items);
                     if (new_entries.get(old_key)) |new_value| {
                         if (!old_value.eql(new_value)) {
                             const old_value_tree = old_value.isTree();
@@ -465,7 +465,7 @@ pub fn TreeDiff(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts
                     const new_value = new_entry.value_ptr.*;
                     var path_list = if (path_list_maybe) |path_list| try path_list.clone() else std.ArrayList([]const u8).init(self.arena.allocator());
                     try path_list.append(new_key);
-                    const path = try io.joinPath(self.arena.allocator(), path_list.items);
+                    const path = try fs.joinPath(self.arena.allocator(), path_list.items);
                     if (old_entries.get(new_key)) |_| {
                         continue;
                     } else if (new_value.isTree()) {
@@ -524,7 +524,7 @@ pub const ObjectKind = enum {
 pub fn TreeEntry(comptime hash_kind: hash.HashKind) type {
     return struct {
         oid: [hash.byteLen(hash_kind)]u8,
-        mode: io.Mode,
+        mode: fs.Mode,
 
         pub fn eql(self: TreeEntry(hash_kind), other: TreeEntry(hash_kind)) bool {
             return std.mem.eql(u8, &self.oid, &other.oid) and self.mode.eql(other.mode);
@@ -746,7 +746,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                                     error.EndOfStream => break,
                                     else => |e| return e,
                                 };
-                                const entry_mode: io.Mode = @bitCast(try std.fmt.parseInt(u32, entry_mode_str, 8));
+                                const entry_mode: fs.Mode = @bitCast(try std.fmt.parseInt(u32, entry_mode_str, 8));
                                 const entry_name = try reader.readUntilDelimiterAlloc(arena.allocator(), 0, repo_opts.max_read_size);
                                 var entry_oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
                                 try reader.readNoEof(&entry_oid);

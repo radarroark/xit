@@ -1,6 +1,6 @@
 const std = @import("std");
 const hash = @import("./hash.zig");
-const io = @import("./io.zig");
+const fs = @import("./fs.zig");
 const rp = @import("./repo.zig");
 
 pub const MAX_REF_CONTENT_SIZE = 512;
@@ -188,7 +188,7 @@ pub const RefList = struct {
             try next_path.append(entry.name);
             switch (entry.kind) {
                 .file => {
-                    const name = try io.joinPath(self.arena.allocator(), next_path.items);
+                    const name = try fs.joinPath(self.arena.allocator(), next_path.items);
                     try self.refs.put(name, .{ .kind = .local, .name = name });
                 },
                 .directory => {
@@ -337,7 +337,7 @@ pub fn write(
             if (std.fs.path.dirname(ref_path)) |ref_parent_path| {
                 try state.core.git_dir.makePath(ref_parent_path);
             }
-            var lock = try io.LockFile.init(state.core.git_dir, ref_path);
+            var lock = try fs.LockFile.init(state.core.git_dir, ref_path);
             defer lock.deinit();
             try lock.lock_file.writeAll(content);
             try lock.lock_file.writeAll("\n");

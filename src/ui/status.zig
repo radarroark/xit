@@ -11,7 +11,6 @@ const rp = @import("../repo.zig");
 const hash = @import("../hash.zig");
 const st = @import("../status.zig");
 const df = @import("../diff.zig");
-const io = @import("../io.zig");
 
 pub const StatusItem = struct {
     kind: st.StatusKind,

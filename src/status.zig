@@ -10,7 +10,7 @@ const idx = @import("./index.zig");
 const hash = @import("./hash.zig");
 const obj = @import("./object.zig");
 const ref = @import("./ref.zig");
-const io = @import("./io.zig");
+const fs = @import("./fs.zig");
 const rp = @import("./repo.zig");
 
 pub const IndexKind = enum {
@@ -170,7 +170,7 @@ fn addEntries(
     repo_dir: std.fs.Dir,
     path: []const u8,
 ) !bool {
-    const meta = try io.getMetadata(repo_dir, path);
+    const meta = try fs.getMetadata(repo_dir, path);
     switch (meta.kind()) {
         .file => {
             const file = try repo_dir.openFile(path, .{ .mode = .read_only });
@@ -213,7 +213,7 @@ fn addEntries(
                 const subpath = if (std.mem.eql(u8, path, "."))
                     try allocator.dupe(u8, entry.name)
                 else
-                    try io.joinPath(allocator, &.{ path, entry.name });
+                    try fs.joinPath(allocator, &.{ path, entry.name });
 
                 var grandchild_untracked = std.StringArrayHashMap(Status(repo_kind, repo_opts).Entry).init(allocator);
                 defer grandchild_untracked.deinit();
@@ -282,7 +282,7 @@ pub fn HeadTree(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts
                 .blob => {},
                 .tree => |tree| {
                     for (tree.entries.keys(), tree.entries.values()) |name, tree_entry| {
-                        const path = try io.joinPath(self.arena.allocator(), &.{ prefix, name });
+                        const path = try fs.joinPath(self.arena.allocator(), &.{ prefix, name });
                         if (tree_entry.isTree()) {
                             const oid_hex = std.fmt.bytesToHex(tree_entry.oid, .lower);
                             try self.read(state, path, &oid_hex);

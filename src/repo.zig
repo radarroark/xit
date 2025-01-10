@@ -7,7 +7,7 @@ const st = @import("./status.zig");
 const bch = @import("./branch.zig");
 const cht = @import("./checkout.zig");
 const ref = @import("./ref.zig");
-const io = @import("./io.zig");
+const fs = @import("./fs.zig");
 const df = @import("./diff.zig");
 const mrg = @import("./merge.zig");
 const cfg = @import("./config.zig");
@@ -695,7 +695,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
         pub fn add(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, paths: []const []const u8) !void {
             switch (repo_kind) {
                 .git => {
-                    var lock = try io.LockFile.init(self.core.git_dir, "index");
+                    var lock = try fs.LockFile.init(self.core.git_dir, "index");
                     defer lock.deinit();
 
                     var index = try idx.Index(repo_kind, repo_opts).init(allocator, .{ .core = &self.core, .extra = .{} });
@@ -751,7 +751,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             // TODO: add support for -r (removing dirs)
             switch (repo_kind) {
                 .git => {
-                    var lock = try io.LockFile.init(self.core.git_dir, "index");
+                    var lock = try fs.LockFile.init(self.core.git_dir, "index");
                     defer lock.deinit();
 
                     var index = try idx.Index(repo_kind, repo_opts).init(allocator, .{ .core = &self.core, .extra = .{} });
@@ -761,7 +761,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     defer head_tree.deinit();
 
                     for (paths) |path| {
-                        const meta = try io.getMetadata(self.core.repo_dir, path);
+                        const meta = try fs.getMetadata(self.core.repo_dir, path);
                         switch (meta.kind()) {
                             .file => {
                                 if (!opts.force) {
@@ -782,7 +782,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
                     if (opts.remove_from_workspace) {
                         for (paths) |path| {
-                            const meta = try io.getMetadata(self.core.repo_dir, path);
+                            const meta = try fs.getMetadata(self.core.repo_dir, path);
                             switch (meta.kind()) {
                                 .file => try self.core.repo_dir.deleteFile(path),
                                 else => return error.UnexpectedPathType,
@@ -813,7 +813,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             defer head_tree.deinit();
 
                             for (ctx.paths) |path| {
-                                const meta = try io.getMetadata(ctx.core.repo_dir, path);
+                                const meta = try fs.getMetadata(ctx.core.repo_dir, path);
                                 switch (meta.kind()) {
                                     .file => {
                                         if (!ctx.opts.force) {
@@ -834,7 +834,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
                             if (ctx.opts.remove_from_workspace) {
                                 for (ctx.paths) |path| {
-                                    const meta = try io.getMetadata(ctx.core.repo_dir, path);
+                                    const meta = try fs.getMetadata(ctx.core.repo_dir, path);
                                     switch (meta.kind()) {
                                         .file => try ctx.core.repo_dir.deleteFile(path),
                                         .directory => return error.CannotDeleteDir,
@@ -913,8 +913,8 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                 .not_added => |not_added| {
                     switch (not_added) {
                         .modified => {
-                            const meta = try io.getMetadata(self.core.repo_dir, path);
-                            const mode = io.getMode(meta);
+                            const meta = try fs.getMetadata(self.core.repo_dir, path);
+                            const mode = fs.getMode(meta);
 
                             const index_entries_for_path = stat.index.entries.get(path) orelse return error.EntryNotFound;
                             var a = try df.LineIterator(repo_kind, repo_opts).initFromIndex(state, allocator, index_entries_for_path[0] orelse return error.NullEntry);
@@ -934,8 +934,8 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     }
                 },
                 .not_tracked => {
-                    const meta = try io.getMetadata(self.core.repo_dir, path);
-                    const mode = io.getMode(meta);
+                    const meta = try fs.getMetadata(self.core.repo_dir, path);
+                    const mode = fs.getMode(meta);
 
                     var a = try df.LineIterator(repo_kind, repo_opts).initFromNothing(allocator, path);
                     errdefer a.deinit();
@@ -1118,7 +1118,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             defer conf.deinit();
             switch (repo_kind) {
                 .git => {
-                    var lock = try io.LockFile.init(self.core.git_dir, "config");
+                    var lock = try fs.LockFile.init(self.core.git_dir, "config");
                     defer lock.deinit();
 
                     try conf.add(.{ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } }, input);
@@ -1152,7 +1152,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             defer conf.deinit();
             switch (repo_kind) {
                 .git => {
-                    var lock = try io.LockFile.init(self.core.git_dir, "config");
+                    var lock = try fs.LockFile.init(self.core.git_dir, "config");
                     defer lock.deinit();
 
                     try conf.remove(.{ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } }, input);
@@ -1200,7 +1200,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             defer conf.deinit();
             switch (repo_kind) {
                 .git => {
-                    var lock = try io.LockFile.init(self.core.git_dir, "config");
+                    var lock = try fs.LockFile.init(self.core.git_dir, "config");
                     defer lock.deinit();
 
                     try conf.add(.{ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } }, new_input);
@@ -1240,7 +1240,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             defer conf.deinit();
             switch (repo_kind) {
                 .git => {
-                    var lock = try io.LockFile.init(self.core.git_dir, "config");
+                    var lock = try fs.LockFile.init(self.core.git_dir, "config");
                     defer lock.deinit();
 
                     try conf.remove(.{ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } }, new_input);
