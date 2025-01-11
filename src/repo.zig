@@ -53,6 +53,10 @@ pub const Writers = struct {
     err: std.io.AnyWriter = std.io.null_writer.any(),
 };
 
+pub const InitOpts = struct {
+    cwd: std.fs.Dir,
+};
+
 pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind)) type {
     return struct {
         core: Core,
@@ -134,10 +138,6 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                 }
             };
         }
-
-        pub const InitOpts = struct {
-            cwd: std.fs.Dir,
-        };
 
         pub fn init(allocator: std.mem.Allocator, opts: InitOpts, sub_path: []const u8) !Repo(repo_kind, repo_opts) {
             // get the root dir. if no path was given to the init command, this
@@ -312,20 +312,16 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             command: cmd.Command(repo_kind, repo_opts.hash),
             writers: Writers,
         ) !Repo(repo_kind, repo_opts) {
-            switch (command) {
-                .init => |init_cmd| {
-                    return Repo(repo_kind, repo_opts).init(allocator, opts, init_cmd.dir) catch |err| switch (err) {
-                        error.RepoAlreadyExists => {
-                            try writers.err.print("{s} is already a repository\n", .{init_cmd.dir});
-                            return err;
-                        },
-                        else => |e| return e,
-                    };
+            return switch (command) {
+                .init => |init_cmd| Repo(repo_kind, repo_opts).init(allocator, opts, init_cmd.dir) catch |err| switch (err) {
+                    error.RepoAlreadyExists => {
+                        try writers.err.print("{s} is already a repository\n", .{init_cmd.dir});
+                        return err;
+                    },
+                    else => |e| return e,
                 },
-                else => {
-                    return try Repo(repo_kind, repo_opts).open(allocator, opts);
-                },
-            }
+                else => try Repo(repo_kind, repo_opts).open(allocator, opts),
+            };
         }
 
         pub fn deinit(self: *Repo(repo_kind, repo_opts)) void {
