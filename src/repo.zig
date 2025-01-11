@@ -306,24 +306,6 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
-        pub fn initWithCommand(
-            allocator: std.mem.Allocator,
-            opts: InitOpts,
-            command: cmd.Command(repo_kind, repo_opts.hash),
-            writers: Writers,
-        ) !Repo(repo_kind, repo_opts) {
-            return switch (command) {
-                .init => |init_cmd| Repo(repo_kind, repo_opts).init(allocator, opts, init_cmd.dir) catch |err| switch (err) {
-                    error.RepoAlreadyExists => {
-                        try writers.err.print("{s} is already a repository\n", .{init_cmd.dir});
-                        return err;
-                    },
-                    else => |e| return e,
-                },
-                else => try Repo(repo_kind, repo_opts).open(allocator, opts),
-            };
-        }
-
         pub fn deinit(self: *Repo(repo_kind, repo_opts)) void {
             switch (repo_kind) {
                 .git => {
@@ -1365,6 +1347,41 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     );
                     return pull_result;
                 },
+            }
+        }
+    };
+}
+
+/// auto-detects the hash used by an existing repo
+pub fn AnyRepo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind)) type {
+    return union(hash.HashKind) {
+        none,
+        sha1: Repo(repo_kind, repo_opts.withHash(.sha1)),
+        sha256: Repo(repo_kind, repo_opts.withHash(.sha256)),
+
+        pub fn open(allocator: std.mem.Allocator, init_opts: InitOpts) !AnyRepo(repo_kind, repo_opts) {
+            switch (repo_opts.hash) {
+                .none => {
+                    const hash_kind = blk: {
+                        var repo = try Repo(repo_kind, repo_opts).open(allocator, init_opts);
+                        defer repo.deinit();
+                        break :blk try repo.hashKind();
+                    };
+                    return switch (hash_kind) {
+                        .none => .none,
+                        .sha1 => .{ .sha1 = try Repo(repo_kind, repo_opts.withHash(.sha1)).open(allocator, init_opts) },
+                        .sha256 => .{ .sha256 = try Repo(repo_kind, repo_opts.withHash(.sha256)).open(allocator, init_opts) },
+                    };
+                },
+                .sha1 => return .{ .sha1 = try Repo(repo_kind, repo_opts).open(allocator, init_opts) },
+                .sha256 => return .{ .sha256 = try Repo(repo_kind, repo_opts).open(allocator, init_opts) },
+            }
+        }
+
+        pub fn deinit(self: *AnyRepo(repo_kind, repo_opts)) void {
+            switch (self.*) {
+                .none => {},
+                inline else => |*case| case.deinit(),
             }
         }
     };

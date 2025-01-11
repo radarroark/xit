@@ -114,69 +114,75 @@ pub fn run(
     cwd: std.fs.Dir,
     writers: rp.Writers,
 ) !void {
-    if (repo_opts.hash == .none) {
-        // if the hash is set to none, it means we should try to auto-detect
-        // the hash kind that is being used by the repo. this will be useful
-        // in the future when we need to support multiple hash algorithms.
+    var cmd_args = try cmd.CommandArgs.init(allocator, args);
+    defer cmd_args.deinit();
 
-        // if we are initing a new repo, just use the default hash kind
-        {
-            const cmd_kind_maybe = blk: {
-                var cmd_args = try cmd.CommandArgs.init(allocator, args);
-                defer cmd_args.deinit();
-                break :blk cmd_args.command_kind;
-            };
-
+    switch (try cmd.CommandMaybe(repo_kind, repo_opts.hash).init(&cmd_args)) {
+        .invalid => |invalid| {
+            try writers.err.print("\"{s}\" is not a valid command\n", .{invalid.name});
+            try writers.out.print(USAGE, .{});
+        },
+        .help => |cmd_kind_maybe| {
             if (cmd_kind_maybe) |cmd_kind| {
-                if (cmd_kind == .init) {
-                    const default_hash = (rp.RepoOpts(repo_kind){}).hash;
-                    try run(repo_kind, repo_opts.withHash(default_hash), allocator, args, cwd, writers);
-                    return;
+                // TODO: print usage for each sub command
+                switch (cmd_kind) {
+                    else => try writers.out.print(USAGE, .{}),
                 }
-            }
-        }
-
-        // find the existing hash kind from the repo and include it in the repo opts
-        const hash_kind = blk: {
-            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = cwd });
-            defer repo.deinit();
-            break :blk try repo.hashKind();
-        };
-        switch (hash_kind) {
-            .none => return error.HashKindNotFound,
-            .sha1 => try run(repo_kind, repo_opts.withHash(.sha1), allocator, args, cwd, writers),
-            .sha256 => try run(repo_kind, repo_opts.withHash(.sha256), allocator, args, cwd, writers),
-        }
-    } else {
-        var cmd_args = try cmd.CommandArgs.init(allocator, args);
-        defer cmd_args.deinit();
-
-        switch (try cmd.CommandMaybe(repo_kind, repo_opts.hash).init(&cmd_args)) {
-            .invalid => |invalid| {
-                try writers.err.print("\"{s}\" is not a valid command\n", .{invalid.name});
+            } else {
                 try writers.out.print(USAGE, .{});
-            },
-            .help => |cmd_kind_maybe| {
-                if (cmd_kind_maybe) |cmd_kind| {
-                    // TODO: print usage for each sub command
-                    switch (cmd_kind) {
-                        else => try writers.out.print(USAGE, .{}),
-                    }
-                } else {
-                    try writers.out.print(USAGE, .{});
+            }
+        },
+        .tui => |cmd_kind_maybe| {
+            if (.none == repo_opts.hash) {
+                // if no hash was specified, use AnyRepo to detect the hash being used
+                var any_repo = try rp.AnyRepo(repo_kind, repo_opts).open(allocator, .{ .cwd = cwd });
+                defer any_repo.deinit();
+                switch (any_repo) {
+                    .none => return error.HashKindNotFound,
+                    .sha1 => |*repo| try ui.start(repo_kind, repo_opts.withHash(.sha1), repo, allocator, cmd_kind_maybe),
+                    .sha256 => |*repo| try ui.start(repo_kind, repo_opts.withHash(.sha256), repo, allocator, cmd_kind_maybe),
                 }
-            },
-            .tui => |cmd_kind_maybe| {
+            } else {
                 var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = cwd });
                 defer repo.deinit();
                 try ui.start(repo_kind, repo_opts, &repo, allocator, cmd_kind_maybe);
-            },
-            .cli => |cli_cmd| {
-                var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = cwd }, cli_cmd, writers);
-                defer repo.deinit();
-                try repo.runCommand(allocator, cli_cmd, writers);
-            },
-        }
+            }
+        },
+        .cli => |cli_cmd| {
+            switch (cli_cmd) {
+                .init => |init_cmd| {
+                    const new_repo_opts = comptime if (.none == repo_opts.hash)
+                        // if no hash was specified, just use the default hash
+                        repo_opts.withHash((rp.RepoOpts(repo_kind){}).hash)
+                    else
+                        repo_opts;
+                    var repo = try rp.Repo(repo_kind, new_repo_opts).init(allocator, .{ .cwd = cwd }, init_cmd.dir);
+                    defer repo.deinit();
+                },
+                else => {
+                    if (.none == repo_opts.hash) {
+                        // if no hash was specified, use AnyRepo to detect the hash being used
+                        var any_repo = try rp.AnyRepo(repo_kind, repo_opts).open(allocator, .{ .cwd = cwd });
+                        defer any_repo.deinit();
+                        switch (any_repo) {
+                            .none => return error.HashKindNotFound,
+                            .sha1 => |*repo| {
+                                const cmd_maybe = try cmd.Command(repo_kind, .sha1).init(&cmd_args);
+                                try repo.runCommand(allocator, cmd_maybe orelse return error.InvalidCommand, writers);
+                            },
+                            .sha256 => |*repo| {
+                                const cmd_maybe = try cmd.Command(repo_kind, .sha256).init(&cmd_args);
+                                try repo.runCommand(allocator, cmd_maybe orelse return error.InvalidCommand, writers);
+                            },
+                        }
+                    } else {
+                        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = cwd });
+                        defer repo.deinit();
+                        try repo.runCommand(allocator, cli_cmd, writers);
+                    }
+                },
+            }
+        },
     }
 }
 
