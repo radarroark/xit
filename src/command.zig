@@ -183,6 +183,214 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
             remote_name: []const u8,
             remote_ref_name: []const u8,
         },
+
+        pub fn init(command_kind: CommandKind, cmd_args: *const CommandArgs) !?Command(repo_kind, hash_kind) {
+            const extra_args = cmd_args.positional_args.items[1..];
+
+            switch (command_kind) {
+                .init => {
+                    if (extra_args.len == 0) {
+                        return .{ .init = .{ .dir = "." } };
+                    } else if (extra_args.len == 1) {
+                        return .{ .init = .{ .dir = extra_args[0] } };
+                    } else {
+                        return null;
+                    }
+                },
+                .add => {
+                    if (extra_args.len == 0) return null;
+
+                    return .{ .add = .{ .paths = extra_args } };
+                },
+                .unadd => {
+                    if (extra_args.len == 0) return null;
+
+                    return .{ .unadd = .{
+                        .paths = extra_args,
+                        .opts = .{
+                            .force = cmd_args.map_args.contains("-f"),
+                        },
+                    } };
+                },
+                .rm => {
+                    if (extra_args.len == 0) return null;
+
+                    return .{ .rm = .{
+                        .paths = extra_args,
+                        .opts = .{
+                            .force = cmd_args.map_args.contains("-f"),
+                            .remove_from_workspace = true,
+                        },
+                    } };
+                },
+                .reset => {
+                    if (extra_args.len != 1) return null;
+
+                    return .{ .reset = .{ .path = extra_args[0] } };
+                },
+                .commit => {
+                    // if a message is included, it must have a non-null value
+                    const message = if (cmd_args.map_args.get("-m")) |msg| (msg orelse return error.CommitMessageNotFound) else "";
+                    return .{ .commit = .{ .message = message } };
+                },
+                .status => return .status,
+                .diff => {
+                    const diff_opts: df.BasicDiffOptions(hash_kind) = if (cmd_args.map_args.contains("--staged"))
+                        .index
+                    else
+                        (if (cmd_args.map_args.contains("--base"))
+                            .{ .workspace = .{ .conflict_diff_kind = .base } }
+                        else if (cmd_args.map_args.contains("--ours"))
+                            .{ .workspace = .{ .conflict_diff_kind = .target } }
+                        else if (cmd_args.map_args.contains("--theirs"))
+                            .{ .workspace = .{ .conflict_diff_kind = .source } }
+                        else
+                            .{ .workspace = .{ .conflict_diff_kind = .target } });
+                    return .{ .diff = .{ .diff_opts = diff_opts } };
+                },
+                .branch => {
+                    if (extra_args.len == 0) return null;
+
+                    const cmd_name = extra_args[0];
+
+                    var cmd: bch.BranchCommand = undefined;
+                    if (std.mem.eql(u8, "list", cmd_name)) {
+                        cmd = .list;
+                    } else if (std.mem.eql(u8, "add", cmd_name)) {
+                        if (extra_args.len != 2) {
+                            return null;
+                        }
+                        cmd = .{ .add = .{ .name = extra_args[1] } };
+                    } else if (std.mem.eql(u8, "rm", cmd_name)) {
+                        if (extra_args.len != 2) {
+                            return null;
+                        }
+                        cmd = .{ .remove = .{ .name = extra_args[1] } };
+                    } else {
+                        return error.InvalidBranchCommand;
+                    }
+
+                    return .{ .branch = cmd };
+                },
+                .switch_head => {
+                    if (extra_args.len != 1) return null;
+
+                    return .{ .switch_head = .{ .target = extra_args[0] } };
+                },
+                .restore => {
+                    if (extra_args.len != 1) return null;
+
+                    return .{ .restore = .{ .path = extra_args[0] } };
+                },
+                .log => {
+                    if (extra_args.len != 0) return null;
+
+                    return .log;
+                },
+                .merge => {
+                    if (extra_args.len == 0) return null;
+
+                    const command_name = cmd_args.positional_args.items[0];
+                    const merge_kind: mrg.MergeKind = if (std.mem.eql(u8, "merge", command_name))
+                        .full
+                    else if (std.mem.eql(u8, "cherry-pick", command_name))
+                        .pick
+                    else
+                        return error.InvalidMergeKind;
+
+                    const merge_action: mrg.MergeAction(repo_kind, hash_kind) =
+                        if (cmd_args.map_args.contains("--continue"))
+                        .cont
+                    else blk: {
+                        var source = std.ArrayList(ref.RefOrOid(hash_kind)).init(cmd_args.arena.allocator());
+                        for (extra_args) |arg| {
+                            try source.append(ref.RefOrOid(hash_kind).initFromUser(arg));
+                        }
+                        break :blk .{ .new = .{ .source = try source.toOwnedSlice() } };
+                    };
+
+                    return .{
+                        .merge = .{
+                            .kind = merge_kind,
+                            .action = merge_action,
+                        },
+                    };
+                },
+                .config => {
+                    if (extra_args.len == 0) return null;
+
+                    const cmd_name = extra_args[0];
+
+                    var cmd: cfg.ConfigCommand = undefined;
+                    if (std.mem.eql(u8, "list", cmd_name)) {
+                        cmd = .list;
+                    } else if (std.mem.eql(u8, "add", cmd_name)) {
+                        if (extra_args.len != 3) {
+                            return null;
+                        }
+                        cmd = .{ .add = .{
+                            .name = extra_args[1],
+                            .value = extra_args[2],
+                        } };
+                    } else if (std.mem.eql(u8, "rm", cmd_name)) {
+                        if (extra_args.len != 2) {
+                            return null;
+                        }
+                        cmd = .{ .remove = .{
+                            .name = extra_args[1],
+                        } };
+                    } else {
+                        return error.InvalidConfigCommand;
+                    }
+
+                    return .{ .config = cmd };
+                },
+                .remote => {
+                    if (extra_args.len == 0) return null;
+
+                    const cmd_name = extra_args[0];
+
+                    var cmd: cfg.ConfigCommand = undefined;
+                    if (std.mem.eql(u8, "list", cmd_name)) {
+                        cmd = .list;
+                    } else if (std.mem.eql(u8, "add", cmd_name)) {
+                        if (extra_args.len != 3) {
+                            return null;
+                        }
+                        cmd = .{ .add = .{
+                            .name = extra_args[1],
+                            .value = extra_args[2],
+                        } };
+                    } else if (std.mem.eql(u8, "rm", cmd_name)) {
+                        if (extra_args.len != 2) {
+                            return null;
+                        }
+                        cmd = .{ .remove = .{
+                            .name = extra_args[1],
+                        } };
+                    } else {
+                        return error.InvalidRemoteCommand;
+                    }
+
+                    return .{ .remote = cmd };
+                },
+                .fetch => {
+                    if (extra_args.len != 1) return null;
+
+                    return .{ .fetch = .{
+                        .remote_name = extra_args[0],
+                    } };
+                },
+                .pull => {
+                    if (extra_args.len != 2) return null;
+
+                    return .{ .pull = .{
+                        .remote_name = extra_args[0],
+                        .remote_ref_name = extra_args[1],
+                    } };
+                },
+            }
+        }
     };
 }
 
@@ -201,254 +409,18 @@ pub fn CommandMaybe(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.Ha
         pub fn init(cmd_args: *const CommandArgs) !CommandMaybe(repo_kind, hash_kind) {
             if (cmd_args.command_kind) |command_kind| {
                 const extra_args = cmd_args.positional_args.items[1..];
-                const show_help = cmd_args.map_args.contains("--help");
 
-                switch (command_kind) {
-                    .init => {
-                        if (extra_args.len == 0) {
-                            return .{ .cli = .{ .init = .{ .dir = "." } } };
-                        } else if (extra_args.len == 1) {
-                            return .{ .cli = .{ .init = .{ .dir = extra_args[0] } } };
-                        } else {
-                            return .{ .help = .init };
-                        }
-                    },
-                    .add => {
-                        if (extra_args.len == 0 or show_help) {
-                            return .{ .help = .add };
-                        } else {
-                            return .{ .cli = .{ .add = .{ .paths = extra_args } } };
-                        }
-                    },
-                    .unadd => {
-                        if (extra_args.len == 0 or show_help) {
-                            return .{ .help = .unadd };
-                        } else {
-                            return .{ .cli = .{ .unadd = .{
-                                .paths = extra_args,
-                                .opts = .{
-                                    .force = cmd_args.map_args.contains("-f"),
-                                },
-                            } } };
-                        }
-                    },
-                    .rm => {
-                        if (extra_args.len == 0 or show_help) {
-                            return .{ .help = .rm };
-                        } else {
-                            return .{ .cli = .{ .rm = .{
-                                .paths = extra_args,
-                                .opts = .{
-                                    .force = cmd_args.map_args.contains("-f"),
-                                    .remove_from_workspace = true,
-                                },
-                            } } };
-                        }
-                    },
-                    .reset => {
-                        if (extra_args.len != 1 or show_help) {
-                            return .{ .help = .reset };
-                        } else {
-                            return .{ .cli = .{ .reset = .{ .path = extra_args[0] } } };
-                        }
-                    },
-                    .commit => {
-                        // if a message is included, it must have a non-null value
-                        const message = if (cmd_args.map_args.get("-m")) |msg| (msg orelse return error.CommitMessageNotFound) else "";
-                        return .{ .cli = .{ .commit = .{ .message = message } } };
-                    },
-                    .status => {
-                        if (extra_args.len > 0 or show_help) {
-                            return .{ .help = .status };
-                        } else if (cmd_args.map_args.contains("--cli")) {
-                            return .{ .cli = .status };
-                        } else {
-                            return .{ .tui = .status };
-                        }
-                    },
-                    .diff => {
-                        if (extra_args.len > 0 or show_help) {
-                            return .{ .help = .diff };
-                        } else if (cmd_args.map_args.contains("--cli")) {
-                            const diff_opts: df.BasicDiffOptions(hash_kind) = if (cmd_args.map_args.contains("--staged"))
-                                .index
-                            else
-                                (if (cmd_args.map_args.contains("--base"))
-                                    .{ .workspace = .{ .conflict_diff_kind = .base } }
-                                else if (cmd_args.map_args.contains("--ours"))
-                                    .{ .workspace = .{ .conflict_diff_kind = .target } }
-                                else if (cmd_args.map_args.contains("--theirs"))
-                                    .{ .workspace = .{ .conflict_diff_kind = .source } }
-                                else
-                                    .{ .workspace = .{ .conflict_diff_kind = .target } });
-                            return .{ .cli = .{ .diff = .{ .diff_opts = diff_opts } } };
-                        } else {
-                            return .{ .tui = .diff };
-                        }
-                    },
-                    .branch => {
-                        if (extra_args.len == 0 or show_help) {
-                            return .{ .help = .branch };
-                        } else {
-                            const cmd_name = extra_args[0];
-
-                            var cmd: bch.BranchCommand = undefined;
-                            if (std.mem.eql(u8, "list", cmd_name)) {
-                                cmd = .list;
-                            } else if (std.mem.eql(u8, "add", cmd_name)) {
-                                if (extra_args.len != 2) {
-                                    return error.WrongNumberOfBranchArgs;
-                                }
-                                cmd = .{ .add = .{ .name = extra_args[1] } };
-                            } else if (std.mem.eql(u8, "rm", cmd_name)) {
-                                if (extra_args.len != 2) {
-                                    return error.WrongNumberOfBranchArgs;
-                                }
-                                cmd = .{ .remove = .{ .name = extra_args[1] } };
-                            } else {
-                                return error.InvalidBranchCommand;
-                            }
-
-                            return .{ .cli = .{ .branch = cmd } };
-                        }
-                    },
-                    .switch_head => {
-                        if (extra_args.len != 1 or show_help) {
-                            return .{ .help = .switch_head };
-                        } else {
-                            return .{ .cli = .{ .switch_head = .{ .target = extra_args[0] } } };
-                        }
-                    },
-                    .restore => {
-                        if (extra_args.len != 1 or show_help) {
-                            return .{ .help = .restore };
-                        } else {
-                            return .{ .cli = .{ .restore = .{ .path = extra_args[0] } } };
-                        }
-                    },
-                    .log => {
-                        if (extra_args.len != 0 or show_help) {
-                            return .{ .help = .log };
-                        } else if (cmd_args.map_args.contains("--cli")) {
-                            return .{ .cli = .log };
-                        } else {
-                            return .{ .tui = .log };
-                        }
-                    },
-                    .merge => {
-                        if (show_help) {
-                            return .{ .help = .merge };
-                        } else {
-                            const command_name = cmd_args.positional_args.items[0];
-                            const merge_kind: mrg.MergeKind = if (std.mem.eql(u8, "merge", command_name))
-                                .full
-                            else if (std.mem.eql(u8, "cherry-pick", command_name))
-                                .pick
-                            else
-                                return error.InvalidMergeKind;
-
-                            const merge_action: mrg.MergeAction(repo_kind, hash_kind) =
-                                if (cmd_args.map_args.contains("--continue"))
-                                .cont
-                            else blk: {
-                                var source = std.ArrayList(ref.RefOrOid(hash_kind)).init(cmd_args.arena.allocator());
-                                for (extra_args) |arg| {
-                                    try source.append(ref.RefOrOid(hash_kind).initFromUser(arg));
-                                }
-                                break :blk .{ .new = .{ .source = try source.toOwnedSlice() } };
-                            };
-
-                            return .{
-                                .cli = .{
-                                    .merge = .{
-                                        .kind = merge_kind,
-                                        .action = merge_action,
-                                    },
-                                },
-                            };
-                        }
-                    },
-                    .config => {
-                        if (extra_args.len == 0 or show_help) {
-                            return .{ .help = .config };
-                        } else {
-                            const cmd_name = extra_args[0];
-
-                            var cmd: cfg.ConfigCommand = undefined;
-                            if (std.mem.eql(u8, "list", cmd_name)) {
-                                cmd = .list;
-                            } else if (std.mem.eql(u8, "add", cmd_name)) {
-                                if (extra_args.len != 3) {
-                                    return error.WrongNumberOfConfigArgs;
-                                }
-                                cmd = .{ .add = .{
-                                    .name = extra_args[1],
-                                    .value = extra_args[2],
-                                } };
-                            } else if (std.mem.eql(u8, "rm", cmd_name)) {
-                                if (extra_args.len != 2) {
-                                    return error.WrongNumberOfConfigArgs;
-                                }
-                                cmd = .{ .remove = .{
-                                    .name = extra_args[1],
-                                } };
-                            } else {
-                                return error.InvalidConfigCommand;
-                            }
-
-                            return .{ .cli = .{ .config = cmd } };
-                        }
-                    },
-                    .remote => {
-                        if (extra_args.len == 0 or show_help) {
-                            return .{ .help = .remote };
-                        } else {
-                            const cmd_name = extra_args[0];
-
-                            var cmd: cfg.ConfigCommand = undefined;
-                            if (std.mem.eql(u8, "list", cmd_name)) {
-                                cmd = .list;
-                            } else if (std.mem.eql(u8, "add", cmd_name)) {
-                                if (extra_args.len != 3) {
-                                    return error.WrongNumberOfRemoteArgs;
-                                }
-                                cmd = .{ .add = .{
-                                    .name = extra_args[1],
-                                    .value = extra_args[2],
-                                } };
-                            } else if (std.mem.eql(u8, "rm", cmd_name)) {
-                                if (extra_args.len != 2) {
-                                    return error.WrongNumberofRemoteArgs;
-                                }
-                                cmd = .{ .remove = .{
-                                    .name = extra_args[1],
-                                } };
-                            } else {
-                                return error.InvalidRemoteCommand;
-                            }
-
-                            return .{ .cli = .{ .remote = cmd } };
-                        }
-                    },
-                    .fetch => {
-                        if (extra_args.len != 1 or show_help) {
-                            return .{ .help = .fetch };
-                        } else {
-                            return .{ .cli = .{ .fetch = .{
-                                .remote_name = extra_args[0],
-                            } } };
-                        }
-                    },
-                    .pull => {
-                        if (extra_args.len != 2 or show_help) {
-                            return .{ .help = .pull };
-                        } else {
-                            return .{ .cli = .{ .pull = .{
-                                .remote_name = extra_args[0],
-                                .remote_ref_name = extra_args[1],
-                            } } };
-                        }
-                    },
+                if (cmd_args.map_args.contains("--help")) {
+                    return .{ .help = command_kind };
+                } else if (extra_args.len == 0 and switch (command_kind) {
+                    .status, .diff, .log => true,
+                    else => false,
+                }) {
+                    return .{ .tui = command_kind };
+                } else if (try Command(repo_kind, hash_kind).init(command_kind, cmd_args)) |cmd| {
+                    return .{ .cli = cmd };
+                } else {
+                    return .{ .help = command_kind };
                 }
             } else if (cmd_args.positional_args.items.len > 0) {
                 return .{ .invalid = .{ .name = cmd_args.positional_args.items[0] } };
