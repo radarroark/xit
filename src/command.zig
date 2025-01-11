@@ -35,7 +35,8 @@ pub const CommandArgs = struct {
     allocator: std.mem.Allocator,
     arena: *std.heap.ArenaAllocator,
     command_kind: ?CommandKind,
-    positional_args: std.ArrayList([]const u8),
+    command_name: ?[]const u8,
+    positional_args: []const []const u8,
     map_args: std.StringArrayHashMap(?[]const u8),
 
     pub fn init(allocator: std.mem.Allocator, args: []const []const u8) !CommandArgs {
@@ -74,16 +75,19 @@ pub const CommandArgs = struct {
             }
         }
 
-        if (positional_args.items.len == 0) {
+        const args_slice = try positional_args.toOwnedSlice();
+        if (args_slice.len == 0) {
             return .{
                 .allocator = allocator,
                 .arena = arena,
                 .command_kind = null,
-                .positional_args = positional_args,
+                .command_name = null,
+                .positional_args = args_slice,
                 .map_args = map_args,
             };
         } else {
-            const command_name = positional_args.items[0];
+            const command_name = args_slice[0];
+            const extra_args = args_slice[1..];
 
             const command_kind: ?CommandKind =
                 if (std.mem.eql(u8, command_name, "init"))
@@ -129,7 +133,8 @@ pub const CommandArgs = struct {
                 .allocator = allocator,
                 .arena = arena,
                 .command_kind = command_kind,
-                .positional_args = positional_args,
+                .command_name = command_name,
+                .positional_args = extra_args,
                 .map_args = map_args,
             };
         }
@@ -141,6 +146,8 @@ pub const CommandArgs = struct {
     }
 };
 
+/// parses the args into a format that can be directly used by a repo.
+/// if any additional allocation needs to be done, the arena inside the cmd args will be used.
 pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
     return union(CommandKind) {
         init: struct {
@@ -184,39 +191,38 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
             remote_ref_name: []const u8,
         },
 
-        pub fn init(command_kind: CommandKind, cmd_args: *const CommandArgs) !?Command(repo_kind, hash_kind) {
-            const extra_args = cmd_args.positional_args.items[1..];
-
+        pub fn init(cmd_args: *const CommandArgs) !?Command(repo_kind, hash_kind) {
+            const command_kind = cmd_args.command_kind orelse return null;
             switch (command_kind) {
                 .init => {
-                    if (extra_args.len == 0) {
+                    if (cmd_args.positional_args.len == 0) {
                         return .{ .init = .{ .dir = "." } };
-                    } else if (extra_args.len == 1) {
-                        return .{ .init = .{ .dir = extra_args[0] } };
+                    } else if (cmd_args.positional_args.len == 1) {
+                        return .{ .init = .{ .dir = cmd_args.positional_args[0] } };
                     } else {
                         return null;
                     }
                 },
                 .add => {
-                    if (extra_args.len == 0) return null;
+                    if (cmd_args.positional_args.len == 0) return null;
 
-                    return .{ .add = .{ .paths = extra_args } };
+                    return .{ .add = .{ .paths = cmd_args.positional_args } };
                 },
                 .unadd => {
-                    if (extra_args.len == 0) return null;
+                    if (cmd_args.positional_args.len == 0) return null;
 
                     return .{ .unadd = .{
-                        .paths = extra_args,
+                        .paths = cmd_args.positional_args,
                         .opts = .{
                             .force = cmd_args.map_args.contains("-f"),
                         },
                     } };
                 },
                 .rm => {
-                    if (extra_args.len == 0) return null;
+                    if (cmd_args.positional_args.len == 0) return null;
 
                     return .{ .rm = .{
-                        .paths = extra_args,
+                        .paths = cmd_args.positional_args,
                         .opts = .{
                             .force = cmd_args.map_args.contains("-f"),
                             .remove_from_workspace = true,
@@ -224,9 +230,9 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                     } };
                 },
                 .reset => {
-                    if (extra_args.len != 1) return null;
+                    if (cmd_args.positional_args.len != 1) return null;
 
-                    return .{ .reset = .{ .path = extra_args[0] } };
+                    return .{ .reset = .{ .path = cmd_args.positional_args[0] } };
                 },
                 .commit => {
                     // if a message is included, it must have a non-null value
@@ -249,23 +255,23 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                     return .{ .diff = .{ .diff_opts = diff_opts } };
                 },
                 .branch => {
-                    if (extra_args.len == 0) return null;
+                    if (cmd_args.positional_args.len == 0) return null;
 
-                    const cmd_name = extra_args[0];
+                    const cmd_name = cmd_args.positional_args[0];
 
                     var cmd: bch.BranchCommand = undefined;
                     if (std.mem.eql(u8, "list", cmd_name)) {
                         cmd = .list;
                     } else if (std.mem.eql(u8, "add", cmd_name)) {
-                        if (extra_args.len != 2) {
+                        if (cmd_args.positional_args.len != 2) {
                             return null;
                         }
-                        cmd = .{ .add = .{ .name = extra_args[1] } };
+                        cmd = .{ .add = .{ .name = cmd_args.positional_args[1] } };
                     } else if (std.mem.eql(u8, "rm", cmd_name)) {
-                        if (extra_args.len != 2) {
+                        if (cmd_args.positional_args.len != 2) {
                             return null;
                         }
-                        cmd = .{ .remove = .{ .name = extra_args[1] } };
+                        cmd = .{ .remove = .{ .name = cmd_args.positional_args[1] } };
                     } else {
                         return error.InvalidBranchCommand;
                     }
@@ -273,24 +279,24 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                     return .{ .branch = cmd };
                 },
                 .switch_head => {
-                    if (extra_args.len != 1) return null;
+                    if (cmd_args.positional_args.len != 1) return null;
 
-                    return .{ .switch_head = .{ .target = extra_args[0] } };
+                    return .{ .switch_head = .{ .target = cmd_args.positional_args[0] } };
                 },
                 .restore => {
-                    if (extra_args.len != 1) return null;
+                    if (cmd_args.positional_args.len != 1) return null;
 
-                    return .{ .restore = .{ .path = extra_args[0] } };
+                    return .{ .restore = .{ .path = cmd_args.positional_args[0] } };
                 },
                 .log => {
-                    if (extra_args.len != 0) return null;
+                    if (cmd_args.positional_args.len != 0) return null;
 
                     return .log;
                 },
                 .merge => {
-                    if (extra_args.len == 0) return null;
+                    if (cmd_args.positional_args.len == 0) return null;
 
-                    const command_name = cmd_args.positional_args.items[0];
+                    const command_name = cmd_args.command_name orelse return error.InvalidMergeKind;
                     const merge_kind: mrg.MergeKind = if (std.mem.eql(u8, "merge", command_name))
                         .full
                     else if (std.mem.eql(u8, "cherry-pick", command_name))
@@ -303,7 +309,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                         .cont
                     else blk: {
                         var source = std.ArrayList(ref.RefOrOid(hash_kind)).init(cmd_args.arena.allocator());
-                        for (extra_args) |arg| {
+                        for (cmd_args.positional_args) |arg| {
                             try source.append(ref.RefOrOid(hash_kind).initFromUser(arg));
                         }
                         break :blk .{ .new = .{ .source = try source.toOwnedSlice() } };
@@ -317,27 +323,27 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                     };
                 },
                 .config => {
-                    if (extra_args.len == 0) return null;
+                    if (cmd_args.positional_args.len == 0) return null;
 
-                    const cmd_name = extra_args[0];
+                    const cmd_name = cmd_args.positional_args[0];
 
                     var cmd: cfg.ConfigCommand = undefined;
                     if (std.mem.eql(u8, "list", cmd_name)) {
                         cmd = .list;
                     } else if (std.mem.eql(u8, "add", cmd_name)) {
-                        if (extra_args.len != 3) {
+                        if (cmd_args.positional_args.len != 3) {
                             return null;
                         }
                         cmd = .{ .add = .{
-                            .name = extra_args[1],
-                            .value = extra_args[2],
+                            .name = cmd_args.positional_args[1],
+                            .value = cmd_args.positional_args[2],
                         } };
                     } else if (std.mem.eql(u8, "rm", cmd_name)) {
-                        if (extra_args.len != 2) {
+                        if (cmd_args.positional_args.len != 2) {
                             return null;
                         }
                         cmd = .{ .remove = .{
-                            .name = extra_args[1],
+                            .name = cmd_args.positional_args[1],
                         } };
                     } else {
                         return error.InvalidConfigCommand;
@@ -346,27 +352,27 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                     return .{ .config = cmd };
                 },
                 .remote => {
-                    if (extra_args.len == 0) return null;
+                    if (cmd_args.positional_args.len == 0) return null;
 
-                    const cmd_name = extra_args[0];
+                    const cmd_name = cmd_args.positional_args[0];
 
                     var cmd: cfg.ConfigCommand = undefined;
                     if (std.mem.eql(u8, "list", cmd_name)) {
                         cmd = .list;
                     } else if (std.mem.eql(u8, "add", cmd_name)) {
-                        if (extra_args.len != 3) {
+                        if (cmd_args.positional_args.len != 3) {
                             return null;
                         }
                         cmd = .{ .add = .{
-                            .name = extra_args[1],
-                            .value = extra_args[2],
+                            .name = cmd_args.positional_args[1],
+                            .value = cmd_args.positional_args[2],
                         } };
                     } else if (std.mem.eql(u8, "rm", cmd_name)) {
-                        if (extra_args.len != 2) {
+                        if (cmd_args.positional_args.len != 2) {
                             return null;
                         }
                         cmd = .{ .remove = .{
-                            .name = extra_args[1],
+                            .name = cmd_args.positional_args[1],
                         } };
                     } else {
                         return error.InvalidRemoteCommand;
@@ -375,18 +381,18 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                     return .{ .remote = cmd };
                 },
                 .fetch => {
-                    if (extra_args.len != 1) return null;
+                    if (cmd_args.positional_args.len != 1) return null;
 
                     return .{ .fetch = .{
-                        .remote_name = extra_args[0],
+                        .remote_name = cmd_args.positional_args[0],
                     } };
                 },
                 .pull => {
-                    if (extra_args.len != 2) return null;
+                    if (cmd_args.positional_args.len != 2) return null;
 
                     return .{ .pull = .{
-                        .remote_name = extra_args[0],
-                        .remote_ref_name = extra_args[1],
+                        .remote_name = cmd_args.positional_args[0],
+                        .remote_ref_name = cmd_args.positional_args[1],
                     } };
                 },
             }
@@ -395,8 +401,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
 }
 
 /// parses the given args into a command if valid, and determines how it should be run
-/// (via the TUI or CLI). if any additional allocation needs to be done, the arena
-/// inside the cmd args will be used, so this object must not outlive the cmd args.
+/// (via the TUI or CLI).
 pub fn CommandMaybe(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
     return union(enum) {
         invalid: struct {
@@ -407,27 +412,27 @@ pub fn CommandMaybe(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.Ha
         cli: Command(repo_kind, hash_kind),
 
         pub fn init(cmd_args: *const CommandArgs) !CommandMaybe(repo_kind, hash_kind) {
-            const use_cli = cmd_args.map_args.contains("--cli");
+            const show_help = cmd_args.map_args.contains("--help");
+            const force_cli = cmd_args.map_args.contains("--cli");
 
             if (cmd_args.command_kind) |command_kind| {
-                const extra_args = cmd_args.positional_args.items[1..];
-                const show_help = cmd_args.map_args.contains("--help");
-
                 if (show_help) {
                     return .{ .help = command_kind };
-                } else if (extra_args.len == 0 and !use_cli and switch (command_kind) {
+                } else if (cmd_args.positional_args.len == 0 and !force_cli and switch (command_kind) {
                     .status, .diff, .log => true,
                     else => false,
                 }) {
                     return .{ .tui = command_kind };
-                } else if (try Command(repo_kind, hash_kind).init(command_kind, cmd_args)) |cmd| {
+                } else if (try Command(repo_kind, hash_kind).init(cmd_args)) |cmd| {
                     return .{ .cli = cmd };
                 } else {
                     return .{ .help = command_kind };
                 }
-            } else if (cmd_args.positional_args.items.len > 0) {
-                return .{ .invalid = .{ .name = cmd_args.positional_args.items[0] } };
-            } else if (cmd_args.map_args.count() == 0 and !use_cli) {
+            } else if (cmd_args.command_name) |command_name| {
+                return .{ .invalid = .{ .name = command_name } };
+            } else if (show_help) {
+                return .{ .help = null };
+            } else if (!force_cli) {
                 return .{ .tui = null };
             } else {
                 return .{ .help = null };
