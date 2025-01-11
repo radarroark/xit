@@ -404,15 +404,18 @@ pub fn CommandMaybe(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.Ha
         },
         help: ?CommandKind,
         tui: ?CommandKind,
-        cli: ?Command(repo_kind, hash_kind),
+        cli: Command(repo_kind, hash_kind),
 
         pub fn init(cmd_args: *const CommandArgs) !CommandMaybe(repo_kind, hash_kind) {
+            const use_cli = cmd_args.map_args.contains("--cli");
+
             if (cmd_args.command_kind) |command_kind| {
                 const extra_args = cmd_args.positional_args.items[1..];
+                const show_help = cmd_args.map_args.contains("--help");
 
-                if (cmd_args.map_args.contains("--help")) {
+                if (show_help) {
                     return .{ .help = command_kind };
-                } else if (extra_args.len == 0 and switch (command_kind) {
+                } else if (extra_args.len == 0 and !use_cli and switch (command_kind) {
                     .status, .diff, .log => true,
                     else => false,
                 }) {
@@ -424,12 +427,10 @@ pub fn CommandMaybe(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.Ha
                 }
             } else if (cmd_args.positional_args.items.len > 0) {
                 return .{ .invalid = .{ .name = cmd_args.positional_args.items[0] } };
+            } else if (cmd_args.map_args.count() == 0 and !use_cli) {
+                return .{ .tui = null };
             } else {
-                if (cmd_args.map_args.count() == 0) {
-                    return .{ .tui = null };
-                } else {
-                    return .{ .cli = null };
-                }
+                return .{ .help = null };
             }
         }
     };
@@ -454,7 +455,7 @@ test "command" {
         var cmd_args = try CommandArgs.init(allocator, &.{ "add", "file.txt" });
         defer cmd_args.deinit();
         const command = try CommandMaybe(repo_kind, hash_kind).init(&cmd_args);
-        try std.testing.expect(command == .cli and command.cli.? == .add);
+        try std.testing.expect(command == .cli and command.cli == .add);
     }
 
     {
@@ -472,7 +473,7 @@ test "command" {
         var cmd_args = try CommandArgs.init(allocator, &.{ "commit", "-m", "let there be light" });
         defer cmd_args.deinit();
         const command = try CommandMaybe(repo_kind, hash_kind).init(&cmd_args);
-        try std.testing.expect(command == .cli and command.cli.? == .commit);
-        try std.testing.expect(std.mem.eql(u8, "let there be light", command.cli.?.commit.message));
+        try std.testing.expect(command == .cli and command.cli == .commit);
+        try std.testing.expect(std.mem.eql(u8, "let there be light", command.cli.commit.message));
     }
 }

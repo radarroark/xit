@@ -171,14 +171,10 @@ pub fn run(
                 defer repo.deinit();
                 try ui.start(repo_kind, repo_opts, &repo, allocator, cmd_kind_maybe);
             },
-            .cli => |cli_cmd_maybe| {
-                if (cli_cmd_maybe) |cli_cmd| {
-                    var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = cwd }, cli_cmd, writers);
-                    defer repo.deinit();
-                    try repo.runCommand(allocator, cli_cmd, writers);
-                } else {
-                    try writers.out.print(USAGE, .{});
-                }
+            .cli => |cli_cmd| {
+                var repo = try rp.Repo(repo_kind, repo_opts).initWithCommand(allocator, .{ .cwd = cwd }, cli_cmd, writers);
+                defer repo.deinit();
+                try repo.runCommand(allocator, cli_cmd, writers);
             },
         }
     }
