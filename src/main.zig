@@ -117,7 +117,7 @@ pub fn run(
     var cmd_args = try cmd.CommandArgs.init(allocator, args);
     defer cmd_args.deinit();
 
-    switch (try cmd.CommandMaybe(repo_kind, repo_opts.hash).init(&cmd_args)) {
+    switch (try cmd.CommandDispatch(repo_kind, repo_opts.hash).init(&cmd_args)) {
         .invalid => |invalid| {
             try writers.err.print("\"{s}\" is not a valid command\n", .{invalid.name});
             try writers.out.print(USAGE, .{});

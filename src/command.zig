@@ -402,7 +402,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
 
 /// parses the given args into a command if valid, and determines how it should be run
 /// (via the TUI or CLI).
-pub fn CommandMaybe(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
+pub fn CommandDispatch(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
     return union(enum) {
         invalid: struct {
             name: []const u8,
@@ -411,7 +411,7 @@ pub fn CommandMaybe(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.Ha
         tui: ?CommandKind,
         cli: Command(repo_kind, hash_kind),
 
-        pub fn init(cmd_args: *const CommandArgs) !CommandMaybe(repo_kind, hash_kind) {
+        pub fn init(cmd_args: *const CommandArgs) !CommandDispatch(repo_kind, hash_kind) {
             const show_help = cmd_args.map_args.contains("--help");
             const force_cli = cmd_args.map_args.contains("--cli");
 
@@ -452,21 +452,21 @@ test "command" {
     {
         var cmd_args = try CommandArgs.init(allocator, &.{ "add", "--cli" });
         defer cmd_args.deinit();
-        const command = try CommandMaybe(repo_kind, hash_kind).init(&cmd_args);
+        const command = try CommandDispatch(repo_kind, hash_kind).init(&cmd_args);
         try std.testing.expect(command == .help);
     }
 
     {
         var cmd_args = try CommandArgs.init(allocator, &.{ "add", "file.txt" });
         defer cmd_args.deinit();
-        const command = try CommandMaybe(repo_kind, hash_kind).init(&cmd_args);
+        const command = try CommandDispatch(repo_kind, hash_kind).init(&cmd_args);
         try std.testing.expect(command == .cli and command.cli == .add);
     }
 
     {
         var cmd_args = try CommandArgs.init(allocator, &.{ "commit", "-m" });
         defer cmd_args.deinit();
-        const command_or_err = CommandMaybe(repo_kind, hash_kind).init(&cmd_args);
+        const command_or_err = CommandDispatch(repo_kind, hash_kind).init(&cmd_args);
         if (command_or_err) |_| {
             return error.ExpectedError;
         } else |err| {
@@ -477,7 +477,7 @@ test "command" {
     {
         var cmd_args = try CommandArgs.init(allocator, &.{ "commit", "-m", "let there be light" });
         defer cmd_args.deinit();
-        const command = try CommandMaybe(repo_kind, hash_kind).init(&cmd_args);
+        const command = try CommandDispatch(repo_kind, hash_kind).init(&cmd_args);
         try std.testing.expect(command == .cli and command.cli == .commit);
         try std.testing.expect(std.mem.eql(u8, "let there be light", command.cli.commit.message));
     }
