@@ -564,13 +564,13 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
-        fn printMergeResult(result: *const mrg.Merge(repo_kind, repo_opts), writers: anytype) !void {
-            for (result.auto_resolved_conflicts.keys()) |path| {
-                if (result.changes.contains(path)) {
+        fn printMergeResult(merge_result: *const mrg.Merge(repo_kind, repo_opts), writers: anytype) !void {
+            for (merge_result.auto_resolved_conflicts.keys()) |path| {
+                if (merge_result.changes.contains(path)) {
                     try writers.out.print("Auto-merging {s}\n", .{path});
                 }
             }
-            switch (result.data) {
+            switch (merge_result.result) {
                 .success => {},
                 .nothing => {
                     try writers.out.print("Already up to date.\n", .{});
@@ -586,12 +586,12 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             else
                                 "directory/file";
                             const dir_branch_name = if (conflict.target != null)
-                                result.source_name
+                                merge_result.source_name
                             else
-                                result.target_name;
+                                merge_result.target_name;
                             try writers.err.print("CONFLICT ({s}): There is a directory with name {s} in {s}. Adding {s} as {s}\n", .{ conflict_type, path, dir_branch_name, path, renamed.path });
                         } else {
-                            if (result.changes.contains(path)) {
+                            if (merge_result.changes.contains(path)) {
                                 try writers.out.print("Auto-merging {s}\n", .{path});
                             }
                             if (conflict.target != null and conflict.source != null) {
@@ -606,9 +606,9 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                                 else
                                     "delete/modify";
                                 const deleted_branch_name, const modified_branch_name = if (conflict.target != null)
-                                    .{ result.source_name, result.target_name }
+                                    .{ merge_result.source_name, merge_result.target_name }
                                 else
-                                    .{ result.target_name, result.source_name };
+                                    .{ merge_result.target_name, merge_result.source_name };
                                 try writers.err.print("CONFLICT ({s}): {s} deleted in {s} and modified in {s}\n", .{ conflict_type, path, deleted_branch_name, modified_branch_name });
                             }
                         }
@@ -1052,20 +1052,20 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             switch (repo_kind) {
                 .git => return try mrg.Merge(repo_kind, repo_opts).init(.{ .core = &self.core, .extra = .{} }, allocator, input),
                 .xit => {
-                    var result: mrg.Merge(repo_kind, repo_opts) = undefined;
+                    var merge_result: mrg.Merge(repo_kind, repo_opts) = undefined;
 
                     const Ctx = struct {
                         core: *Repo(repo_kind, repo_opts).Core,
                         allocator: std.mem.Allocator,
                         input: mrg.MergeInput(repo_kind, repo_opts.hash),
-                        result: *mrg.Merge(repo_kind, repo_opts),
+                        merge_result: *mrg.Merge(repo_kind, repo_opts),
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            ctx.result.* = try mrg.Merge(repo_kind, repo_opts).init(state, ctx.allocator, ctx.input);
+                            ctx.merge_result.* = try mrg.Merge(repo_kind, repo_opts).init(state, ctx.allocator, ctx.input);
                             // no need to make a new transaction if nothing was done
-                            if (.nothing == ctx.result.data) {
+                            if (.nothing == ctx.merge_result.result) {
                                 return error.CancelTransaction;
                             }
                         }
@@ -1074,13 +1074,13 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
                     history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
-                        Ctx{ .core = &self.core, .allocator = allocator, .input = input, .result = &result },
+                        Ctx{ .core = &self.core, .allocator = allocator, .input = input, .merge_result = &merge_result },
                     ) catch |err| switch (err) {
                         error.CancelTransaction => {},
                         else => |e| return e,
                     };
 
-                    return result;
+                    return merge_result;
                 },
             }
         }

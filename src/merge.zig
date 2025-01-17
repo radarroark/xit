@@ -1318,7 +1318,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
         base_oid: [hash.hexLen(repo_opts.hash)]u8,
         target_name: []const u8,
         source_name: []const u8,
-        data: union(enum) {
+        result: union(enum) {
             success: struct {
                 oid: [hash.hexLen(repo_opts.hash)]u8,
             },
@@ -1424,7 +1424,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                             .base_oid = [_]u8{0} ** hash.hexLen(repo_opts.hash),
                             .target_name = target_name,
                             .source_name = source_name,
-                            .data = .fast_forward,
+                            .result = .fast_forward,
                         };
                     };
 
@@ -1453,7 +1453,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                             .base_oid = base_oid,
                             .target_name = target_name,
                             .source_name = source_name,
-                            .data = .nothing,
+                            .result = .nothing,
                         };
                     }
 
@@ -1550,7 +1550,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                                     .base_oid = base_oid,
                                     .target_name = target_name,
                                     .source_name = source_name,
-                                    .data = .{ .conflict = .{ .conflicts = conflicts } },
+                                    .result = .{ .conflict = .{ .conflicts = conflicts } },
                                 };
                             }
                         },
@@ -1598,7 +1598,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                                     .base_oid = base_oid,
                                     .target_name = target_name,
                                     .source_name = source_name,
-                                    .data = .{ .conflict = .{ .conflicts = conflicts } },
+                                    .result = .{ .conflict = .{ .conflicts = conflicts } },
                                 };
                             } else {
                                 // if any file conflicts were auto-resolved, there will be temporary state that must be cleaned up
@@ -1618,7 +1618,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                             .base_oid = base_oid,
                             .target_name = target_name,
                             .source_name = source_name,
-                            .data = .fast_forward,
+                            .result = .fast_forward,
                         };
                     }
 
@@ -1637,7 +1637,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                         .base_oid = base_oid,
                         .target_name = target_name,
                         .source_name = source_name,
-                        .data = .{ .success = .{ .oid = commit_oid } },
+                        .result = .{ .success = .{ .oid = commit_oid } },
                     };
                 },
                 .cont => {
@@ -1761,7 +1761,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                         .base_oid = base_oid,
                         .target_name = target_name,
                         .source_name = source_name,
-                        .data = .{ .success = .{ .oid = commit_oid } },
+                        .result = .{ .success = .{ .oid = commit_oid } },
                     };
                 },
             }
