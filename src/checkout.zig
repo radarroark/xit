@@ -221,7 +221,7 @@ pub fn migrate(
     allocator: std.mem.Allocator,
     tree_diff: obj.TreeDiff(repo_kind, repo_opts),
     index: *idx.Index(repo_kind, repo_opts),
-    result_maybe: ?*Switch,
+    result_maybe: ?*Switch(repo_kind, repo_opts),
 ) !void {
     var add_files = std.StringArrayHashMap(obj.TreeEntry(repo_opts.hash)).init(allocator);
     defer add_files.deinit();
@@ -376,114 +376,122 @@ pub fn restore(
     try objectToFile(repo_kind, repo_opts, state, allocator, path, tree_entry);
 }
 
-pub const Switch = struct {
-    data: union(enum) {
-        success,
-        conflict: struct {
-            stale_files: std.StringArrayHashMap(void),
-            stale_dirs: std.StringArrayHashMap(void),
-            untracked_overwritten: std.StringArrayHashMap(void),
-            untracked_removed: std.StringArrayHashMap(void),
+pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
+    return struct {
+        data: union(enum) {
+            success,
+            conflict: struct {
+                stale_files: std.StringArrayHashMap(void),
+                stale_dirs: std.StringArrayHashMap(void),
+                untracked_overwritten: std.StringArrayHashMap(void),
+                untracked_removed: std.StringArrayHashMap(void),
+            },
         },
-    },
 
-    pub const Options = struct {
-        force: bool,
-    };
+        pub const Options = struct {
+            force: bool,
+            target_oid: ?*const [hash.hexLen(repo_opts.hash)]u8 = null,
+        };
 
-    pub fn init(
-        comptime repo_kind: rp.RepoKind,
-        comptime repo_opts: rp.RepoOpts(repo_kind),
-        state: rp.Repo(repo_kind, repo_opts).State(.read_write),
-        allocator: std.mem.Allocator,
-        target: []const u8,
-        options: Options,
-    ) !Switch {
-        // get the current commit and target oid
-        const current_oid = try ref.readHead(repo_kind, repo_opts, state.readOnly());
-        const target_oid = try ref.readRecur(repo_kind, repo_opts, state.readOnly(), ref.RefOrOid(repo_opts.hash).initFromUser(target)) orelse return error.InvalidTarget;
+        /// TODO: this is confusingly designed right now because `target` can be
+        /// either an oid or branch name, and you can also specify `options.target_oid`.
+        /// in reality it should take either an oid or a (branch name, optional target oid)
+        /// combo. but we'll clean this up another time...
+        pub fn init(
+            state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+            allocator: std.mem.Allocator,
+            target: []const u8,
+            options: Options,
+        ) !Switch(repo_kind, repo_opts) {
+            // get the current commit and target oid
+            const current_oid_maybe = try ref.readHeadMaybe(repo_kind, repo_opts, state.readOnly());
+            const target_oid = if (options.target_oid) |oid|
+                oid.*
+            else
+                try ref.readRecur(repo_kind, repo_opts, state.readOnly(), ref.RefOrOid(repo_opts.hash).initFromUser(target)) orelse return error.InvalidTarget;
 
-        // compare the commits
-        var tree_diff = obj.TreeDiff(repo_kind, repo_opts).init(allocator);
-        defer tree_diff.deinit();
-        try tree_diff.compare(state.readOnly(), current_oid, target_oid, null);
+            // compare the commits
+            var tree_diff = obj.TreeDiff(repo_kind, repo_opts).init(allocator);
+            defer tree_diff.deinit();
+            try tree_diff.compare(state.readOnly(), current_oid_maybe, target_oid, null);
 
-        var result = Switch{ .data = .{ .success = {} } };
-        errdefer result.deinit();
+            var result = Switch(repo_kind, repo_opts){ .data = .{ .success = {} } };
+            errdefer result.deinit();
 
-        switch (repo_kind) {
-            .git => {
-                // create lock file
-                var lock = try fs.LockFile.init(state.core.git_dir, "index");
-                defer lock.deinit();
+            switch (repo_kind) {
+                .git => {
+                    // create lock file
+                    var lock = try fs.LockFile.init(state.core.git_dir, "index");
+                    defer lock.deinit();
 
-                // read index
-                var index = try idx.Index(repo_kind, repo_opts).init(allocator, state.readOnly());
-                defer index.deinit();
+                    // read index
+                    var index = try idx.Index(repo_kind, repo_opts).init(allocator, state.readOnly());
+                    defer index.deinit();
 
-                // update the working tree
-                try migrate(repo_kind, repo_opts, state, allocator, tree_diff, &index, if (options.force) null else &result);
+                    // update the working tree
+                    try migrate(repo_kind, repo_opts, state, allocator, tree_diff, &index, if (options.force) null else &result);
 
-                // return early if conflict
-                if (result.data == .conflict) {
-                    return result;
-                }
+                    // return early if conflict
+                    if (result.data == .conflict) {
+                        return result;
+                    }
 
-                // update the index
-                try index.write(allocator, .{ .core = state.core, .extra = .{ .lock_file_maybe = lock.lock_file } });
+                    // update the index
+                    try index.write(allocator, .{ .core = state.core, .extra = .{ .lock_file_maybe = lock.lock_file } });
 
-                // update HEAD
-                try ref.writeHead(repo_kind, repo_opts, state, target, target_oid);
+                    // update HEAD
+                    try ref.writeHead(repo_kind, repo_opts, state, target, target_oid);
 
-                // finish lock
-                lock.success = true;
-            },
-            .xit => {
-                // read index
-                var index = try idx.Index(repo_kind, repo_opts).init(allocator, state.readOnly());
-                defer index.deinit();
-
-                // update the working tree
-                try migrate(repo_kind, repo_opts, state, allocator, tree_diff, &index, if (options.force) null else &result);
-
-                // return early if conflict
-                if (result.data == .conflict) {
-                    return result;
-                }
-
-                // update the index
-                try index.write(allocator, state);
-
-                // update HEAD
-                try ref.writeHead(repo_kind, repo_opts, state, target, target_oid);
-            },
-        }
-
-        return result;
-    }
-
-    pub fn deinit(self: *Switch) void {
-        switch (self.data) {
-            .success => {},
-            .conflict => |*result_conflict| {
-                result_conflict.stale_files.deinit();
-                result_conflict.stale_dirs.deinit();
-                result_conflict.untracked_overwritten.deinit();
-                result_conflict.untracked_removed.deinit();
-            },
-        }
-    }
-
-    pub fn conflict(self: *Switch, allocator: std.mem.Allocator) void {
-        if (self.data != .conflict) {
-            self.data = .{
-                .conflict = .{
-                    .stale_files = std.StringArrayHashMap(void).init(allocator),
-                    .stale_dirs = std.StringArrayHashMap(void).init(allocator),
-                    .untracked_overwritten = std.StringArrayHashMap(void).init(allocator),
-                    .untracked_removed = std.StringArrayHashMap(void).init(allocator),
+                    // finish lock
+                    lock.success = true;
                 },
-            };
+                .xit => {
+                    // read index
+                    var index = try idx.Index(repo_kind, repo_opts).init(allocator, state.readOnly());
+                    defer index.deinit();
+
+                    // update the working tree
+                    try migrate(repo_kind, repo_opts, state, allocator, tree_diff, &index, if (options.force) null else &result);
+
+                    // return early if conflict
+                    if (result.data == .conflict) {
+                        return result;
+                    }
+
+                    // update the index
+                    try index.write(allocator, state);
+
+                    // update HEAD
+                    try ref.writeHead(repo_kind, repo_opts, state, target, target_oid);
+                },
+            }
+
+            return result;
         }
-    }
-};
+
+        pub fn deinit(self: *Switch(repo_kind, repo_opts)) void {
+            switch (self.data) {
+                .success => {},
+                .conflict => |*result_conflict| {
+                    result_conflict.stale_files.deinit();
+                    result_conflict.stale_dirs.deinit();
+                    result_conflict.untracked_overwritten.deinit();
+                    result_conflict.untracked_removed.deinit();
+                },
+            }
+        }
+
+        pub fn conflict(self: *Switch(repo_kind, repo_opts), allocator: std.mem.Allocator) void {
+            if (self.data != .conflict) {
+                self.data = .{
+                    .conflict = .{
+                        .stale_files = std.StringArrayHashMap(void).init(allocator),
+                        .stale_dirs = std.StringArrayHashMap(void).init(allocator),
+                        .untracked_overwritten = std.StringArrayHashMap(void).init(allocator),
+                        .untracked_removed = std.StringArrayHashMap(void).init(allocator),
+                    },
+                };
+            }
+        }
+    };
+}

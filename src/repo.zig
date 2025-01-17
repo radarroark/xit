@@ -999,23 +999,23 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
-        pub fn switchHead(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, target: []const u8, options: cht.Switch.Options) !cht.Switch {
+        pub fn switchHead(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, target: []const u8, options: cht.Switch(repo_kind, repo_opts).Options) !cht.Switch(repo_kind, repo_opts) {
             switch (repo_kind) {
-                .git => return try cht.Switch.init(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, allocator, target, options),
+                .git => return try cht.Switch(repo_kind, repo_opts).init(.{ .core = &self.core, .extra = .{} }, allocator, target, options),
                 .xit => {
-                    var result: cht.Switch = undefined;
+                    var result: cht.Switch(repo_kind, repo_opts) = undefined;
 
                     const Ctx = struct {
                         core: *Repo(repo_kind, repo_opts).Core,
                         allocator: std.mem.Allocator,
                         target: []const u8,
-                        options: cht.Switch.Options,
-                        result: *cht.Switch,
+                        options: cht.Switch(repo_kind, repo_opts).Options,
+                        result: *cht.Switch(repo_kind, repo_opts),
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            ctx.result.* = try cht.Switch.init(repo_kind, repo_opts, state, ctx.allocator, ctx.target, ctx.options);
+                            ctx.result.* = try cht.Switch(repo_kind, repo_opts).init(state, ctx.allocator, ctx.target, ctx.options);
                         }
                     };
 
