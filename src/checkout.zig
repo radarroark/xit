@@ -249,21 +249,21 @@ pub fn migrate(
         if (result_maybe) |result| {
             const entry_maybe = if (index.entries.get(path)) |*entries_for_path| (entries_for_path[0] orelse return error.NullEntry) else null;
             if (compareTreeToIndex(repo_kind, repo_opts, change.old, entry_maybe) != .none and compareTreeToIndex(repo_kind, repo_opts, change.new, entry_maybe) != .none) {
-                result.conflict(allocator);
-                try result.data.conflict.stale_files.put(path, {});
+                result.setConflict(allocator);
+                try result.conflict.stale_files.put(path, {});
             } else {
                 const meta = fs.getMetadata(state.core.repo_dir, path) catch |err| switch (err) {
                     error.FileNotFound, error.NotDir => {
                         // if the path doesn't exist in the workspace,
                         // but one of its parents *does* exist and isn't tracked
                         if (untrackedParent(repo_kind, repo_opts, state.core.repo_dir, path, index.*)) |_| {
-                            result.conflict(allocator);
+                            result.setConflict(allocator);
                             if (entry_maybe) |_| {
-                                try result.data.conflict.stale_files.put(path, {});
+                                try result.conflict.stale_files.put(path, {});
                             } else if (change.new) |_| {
-                                try result.data.conflict.untracked_overwritten.put(path, {});
+                                try result.conflict.untracked_overwritten.put(path, {});
                             } else {
-                                try result.data.conflict.untracked_removed.put(path, {});
+                                try result.conflict.untracked_removed.put(path, {});
                             }
                         }
                         continue;
@@ -276,24 +276,24 @@ pub fn migrate(
                         defer file.close();
                         // if the path is a file that differs from the index
                         if (try compareIndexToWorkspace(repo_kind, repo_opts, entry_maybe, file) != .none) {
-                            result.conflict(allocator);
+                            result.setConflict(allocator);
                             if (entry_maybe) |_| {
-                                try result.data.conflict.stale_files.put(path, {});
+                                try result.conflict.stale_files.put(path, {});
                             } else if (change.new) |_| {
-                                try result.data.conflict.untracked_overwritten.put(path, {});
+                                try result.conflict.untracked_overwritten.put(path, {});
                             } else {
-                                try result.data.conflict.untracked_removed.put(path, {});
+                                try result.conflict.untracked_removed.put(path, {});
                             }
                         }
                     },
                     .directory => {
                         // if the path is a dir with a descendent that isn't in the index
                         if (try untrackedFile(repo_kind, repo_opts, allocator, state.core.repo_dir, path, index.*)) {
-                            result.conflict(allocator);
+                            result.setConflict(allocator);
                             if (entry_maybe) |_| {
-                                try result.data.conflict.stale_files.put(path, {});
+                                try result.conflict.stale_files.put(path, {});
                             } else {
-                                try result.data.conflict.stale_dirs.put(path, {});
+                                try result.conflict.stale_dirs.put(path, {});
                             }
                         }
                     },
@@ -304,7 +304,7 @@ pub fn migrate(
     }
 
     if (result_maybe) |result| {
-        if (result.data == .conflict) {
+        if (.conflict == result.*) {
             return;
         }
     }
@@ -377,15 +377,13 @@ pub fn restore(
 }
 
 pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
-    return struct {
-        data: union(enum) {
-            success,
-            conflict: struct {
-                stale_files: std.StringArrayHashMap(void),
-                stale_dirs: std.StringArrayHashMap(void),
-                untracked_overwritten: std.StringArrayHashMap(void),
-                untracked_removed: std.StringArrayHashMap(void),
-            },
+    return union(enum) {
+        success,
+        conflict: struct {
+            stale_files: std.StringArrayHashMap(void),
+            stale_dirs: std.StringArrayHashMap(void),
+            untracked_overwritten: std.StringArrayHashMap(void),
+            untracked_removed: std.StringArrayHashMap(void),
         },
 
         pub const Options = struct {
@@ -415,7 +413,7 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             defer tree_diff.deinit();
             try tree_diff.compare(state.readOnly(), current_oid_maybe, target_oid, null);
 
-            var result = Switch(repo_kind, repo_opts){ .data = .{ .success = {} } };
+            var result = Switch(repo_kind, repo_opts){ .success = {} };
             errdefer result.deinit();
 
             switch (repo_kind) {
@@ -432,7 +430,7 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     try migrate(repo_kind, repo_opts, state, allocator, tree_diff, &index, if (options.force) null else &result);
 
                     // return early if conflict
-                    if (result.data == .conflict) {
+                    if (.conflict == result) {
                         return result;
                     }
 
@@ -454,7 +452,7 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     try migrate(repo_kind, repo_opts, state, allocator, tree_diff, &index, if (options.force) null else &result);
 
                     // return early if conflict
-                    if (result.data == .conflict) {
+                    if (.conflict == result) {
                         return result;
                     }
 
@@ -470,7 +468,7 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
         }
 
         pub fn deinit(self: *Switch(repo_kind, repo_opts)) void {
-            switch (self.data) {
+            switch (self.*) {
                 .success => {},
                 .conflict => |*result_conflict| {
                     result_conflict.stale_files.deinit();
@@ -481,9 +479,9 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             }
         }
 
-        pub fn conflict(self: *Switch(repo_kind, repo_opts), allocator: std.mem.Allocator) void {
-            if (self.data != .conflict) {
-                self.data = .{
+        pub fn setConflict(self: *Switch(repo_kind, repo_opts), allocator: std.mem.Allocator) void {
+            if (.conflict != self.*) {
+                self.* = .{
                     .conflict = .{
                         .stale_files = std.StringArrayHashMap(void).init(allocator),
                         .stale_dirs = std.StringArrayHashMap(void).init(allocator),

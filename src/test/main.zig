@@ -561,8 +561,8 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                 defer repo.deinit();
                 var result = try repo.switchHead(allocator, &commit1, .{ .force = false });
                 defer result.deinit();
-                try std.testing.expect(result.data == .conflict);
-                try std.testing.expectEqual(1, result.data.conflict.stale_files.count());
+                try std.testing.expect(.conflict == result);
+                try std.testing.expectEqual(1, result.conflict.stale_files.count());
             }
 
             // delete the file
@@ -586,7 +586,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                 defer repo.deinit();
                 var result = try repo.switchHead(allocator, &commit1, .{ .force = false });
                 defer result.deinit();
-                try std.testing.expect(result.data == .conflict);
+                try std.testing.expect(.conflict == result);
             }
 
             // delete the file
@@ -609,8 +609,8 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                 defer repo.deinit();
                 var result = try repo.switchHead(allocator, &commit1, .{ .force = false });
                 defer result.deinit();
-                try std.testing.expect(result.data == .conflict);
-                try std.testing.expectEqual(1, result.data.conflict.stale_files.count());
+                try std.testing.expect(.conflict == result);
+                try std.testing.expectEqual(1, result.conflict.stale_files.count());
             }
 
             // change the file back
@@ -638,8 +638,8 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                 defer repo.deinit();
                 var result = try repo.switchHead(allocator, &commit1, .{ .force = false });
                 defer result.deinit();
-                try std.testing.expect(result.data == .conflict);
-                try std.testing.expectEqual(1, result.data.conflict.stale_dirs.count());
+                try std.testing.expect(.conflict == result);
+                try std.testing.expectEqual(1, result.conflict.stale_dirs.count());
             }
 
             // delete the dir
