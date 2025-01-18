@@ -280,7 +280,9 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                 .switch_head => {
                     if (cmd_args.positional_args.len != 1) return null;
 
-                    return .{ .switch_head = res.SwitchInput(hash_kind).init(cmd_args.positional_args[0]) };
+                    return .{
+                        .switch_head = .{ .target = rf.RefOrOid(hash_kind).initFromUser(cmd_args.positional_args[0]) },
+                    };
                 },
                 .restore => {
                     if (cmd_args.positional_args.len != 1) return null;

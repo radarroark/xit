@@ -381,12 +381,6 @@ pub fn SwitchInput(comptime hash_kind: hash.HashKind) type {
         target: rf.RefOrOid(hash_kind),
         force: bool = false,
         new_oid: ?*const [hash.hexLen(hash_kind)]u8 = null,
-
-        pub fn init(input: []const u8) SwitchInput(hash_kind) {
-            return .{
-                .target = rf.RefOrOid(hash_kind).initFromUser(input),
-            };
-        }
     };
 }
 
