@@ -3,7 +3,7 @@ const hash = @import("../hash.zig");
 const rp = @import("../repo.zig");
 const obj = @import("../object.zig");
 const pack = @import("../pack.zig");
-const ref = @import("../ref.zig");
+const rf = @import("../ref.zig");
 
 const c = @cImport({
     @cInclude("git2.h");
@@ -211,7 +211,7 @@ test "pack" {
         var r = try rp.Repo(.git, repo_opts).open(allocator, .{ .cwd = repo_dir });
         defer r.deinit();
 
-        const head_oid = try ref.readHead(.git, repo_opts, .{ .core = &r.core, .extra = .{} });
+        const head_oid = try rf.readHead(.git, repo_opts, .{ .core = &r.core, .extra = .{} });
 
         var obj_iter = try obj.ObjectIterator(.git, repo_opts, .raw).init(allocator, .{ .core = &r.core, .extra = .{} }, &.{head_oid}, .{ .recursive = true });
         defer obj_iter.deinit();

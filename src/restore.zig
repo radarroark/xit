@@ -13,7 +13,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const hash = @import("./hash.zig");
 const obj = @import("./object.zig");
-const ref = @import("./ref.zig");
+const rf = @import("./ref.zig");
 const idx = @import("./index.zig");
 const fs = @import("./fs.zig");
 const rp = @import("./repo.zig");
@@ -351,7 +351,7 @@ pub fn restore(
     path: []const u8,
 ) !void {
     // get the current commit
-    const current_oid = try ref.readHead(repo_kind, repo_opts, state);
+    const current_oid = try rf.readHead(repo_kind, repo_opts, state);
     var commit_object = try obj.Object(repo_kind, repo_opts, .full).init(allocator, state, &current_oid);
     defer commit_object.deinit();
 
@@ -404,11 +404,11 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             options: SwitchOptions(repo_opts.hash),
         ) !Switch(repo_kind, repo_opts) {
             // get the current commit and target oid
-            const current_oid_maybe = try ref.readHeadMaybe(repo_kind, repo_opts, state.readOnly());
+            const current_oid_maybe = try rf.readHeadMaybe(repo_kind, repo_opts, state.readOnly());
             const target_oid = if (options.target_oid) |oid|
                 oid.*
             else
-                try ref.readRecur(repo_kind, repo_opts, state.readOnly(), ref.RefOrOid(repo_opts.hash).initFromUser(target)) orelse return error.InvalidTarget;
+                try rf.readRecur(repo_kind, repo_opts, state.readOnly(), rf.RefOrOid(repo_opts.hash).initFromUser(target)) orelse return error.InvalidTarget;
 
             // compare the commits
             var tree_diff = obj.TreeDiff(repo_kind, repo_opts).init(allocator);
@@ -440,7 +440,7 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     try index.write(allocator, .{ .core = state.core, .extra = .{ .lock_file_maybe = lock.lock_file } });
 
                     // update HEAD
-                    try ref.writeHead(repo_kind, repo_opts, state, target, target_oid);
+                    try rf.writeHead(repo_kind, repo_opts, state, target, target_oid);
 
                     // finish lock
                     lock.success = true;
@@ -462,7 +462,7 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     try index.write(allocator, state);
 
                     // update HEAD
-                    try ref.writeHead(repo_kind, repo_opts, state, target, target_oid);
+                    try rf.writeHead(repo_kind, repo_opts, state, target, target_oid);
                 },
             }
 

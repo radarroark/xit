@@ -1,6 +1,6 @@
 const std = @import("std");
 const hash = @import("./hash.zig");
-const ref = @import("./ref.zig");
+const rf = @import("./ref.zig");
 const fs = @import("./fs.zig");
 const rp = @import("./repo.zig");
 
@@ -19,7 +19,7 @@ pub const RemoveBranchInput = struct {
 };
 
 pub fn validateName(name: []const u8) bool {
-    return ref.validateName(name) and !std.mem.eql(u8, "HEAD", name);
+    return rf.validateName(name) and !std.mem.eql(u8, "HEAD", name);
 }
 
 pub fn add(
@@ -59,7 +59,7 @@ pub fn add(
             defer lock.deinit();
 
             // get HEAD contents
-            const head_file_buffer = try ref.readHead(repo_kind, repo_opts, state.readOnly());
+            const head_file_buffer = try rf.readHead(repo_kind, repo_opts, state.readOnly());
 
             // write to lock file
             try lock.lock_file.writeAll(&head_file_buffer);
@@ -78,7 +78,7 @@ pub fn add(
             try ref_name_cursor.writeIfEmpty(.{ .bytes = name });
 
             // store ref content
-            const head_file_buffer = try ref.readHead(repo_kind, repo_opts, state.readOnly());
+            const head_file_buffer = try rf.readHead(repo_kind, repo_opts, state.readOnly());
             const ref_content_set_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "ref-content-set"));
             const ref_content_set = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(ref_content_set_cursor);
             var ref_content_cursor = try ref_content_set.putKeyCursor(hash.hashInt(repo_opts.hash, &head_file_buffer));
@@ -93,8 +93,8 @@ pub fn add(
             try heads.put(name_hash, .{ .slot = ref_content_cursor.slot() });
 
             // get current branch name
-            var current_branch_name_buffer = [_]u8{0} ** ref.MAX_REF_CONTENT_SIZE;
-            const current_branch_name = try ref.readHeadName(repo_kind, repo_opts, state.readOnly(), &current_branch_name_buffer);
+            var current_branch_name_buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
+            const current_branch_name = try rf.readHeadName(repo_kind, repo_opts, state.readOnly(), &current_branch_name_buffer);
 
             // if there is a branch map for the current branch,
             // make one for the new branch with the same value
@@ -132,8 +132,8 @@ pub fn remove(
             defer head_lock.deinit();
 
             // don't allow current branch to be deleted
-            var current_branch_name_buffer = [_]u8{0} ** ref.MAX_REF_CONTENT_SIZE;
-            const current_branch_name = try ref.readHeadName(repo_kind, repo_opts, state.readOnly(), &current_branch_name_buffer);
+            var current_branch_name_buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
+            const current_branch_name = try rf.readHeadName(repo_kind, repo_opts, state.readOnly(), &current_branch_name_buffer);
             if (std.mem.eql(u8, current_branch_name, input.name)) {
                 return error.CannotDeleteCurrentBranch;
             }
@@ -159,8 +159,8 @@ pub fn remove(
         },
         .xit => {
             // don't allow current branch to be deleted
-            var current_branch_name_buffer = [_]u8{0} ** ref.MAX_REF_CONTENT_SIZE;
-            const current_branch_name = try ref.readHeadName(repo_kind, repo_opts, state.readOnly(), &current_branch_name_buffer);
+            var current_branch_name_buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
+            const current_branch_name = try rf.readHeadName(repo_kind, repo_opts, state.readOnly(), &current_branch_name_buffer);
             if (std.mem.eql(u8, current_branch_name, input.name)) {
                 return error.CannotDeleteCurrentBranch;
             }

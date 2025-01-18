@@ -6,7 +6,7 @@ const idx = @import("./index.zig");
 const st = @import("./status.zig");
 const bch = @import("./branch.zig");
 const res = @import("./restore.zig");
-const ref = @import("./ref.zig");
+const rf = @import("./ref.zig");
 const fs = @import("./fs.zig");
 const df = @import("./diff.zig");
 const mrg = @import("./merge.zig");
@@ -178,7 +178,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
                     // update HEAD
                     const state = State(.read_write){ .core = &self.core, .extra = .{} };
-                    try ref.writeHead(repo_kind, repo_opts, state, "master", null);
+                    try rf.writeHead(repo_kind, repo_opts, state, "master", null);
 
                     return self;
                 },
@@ -218,7 +218,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            try ref.writeHead(repo_kind, repo_opts, state, "master", null);
+                            try rf.writeHead(repo_kind, repo_opts, state, "master", null);
                         }
                     };
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
@@ -483,9 +483,9 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             var ref_list = try self.listBranches(allocator);
                             defer ref_list.deinit();
 
-                            for (ref_list.refs.values()) |rf| {
-                                const prefix = if (std.mem.eql(u8, current_branch, rf.name)) "*" else " ";
-                                try writers.out.print("{s} {s}\n", .{ prefix, rf.name });
+                            for (ref_list.refs.values()) |ref| {
+                                const prefix = if (std.mem.eql(u8, current_branch, ref.name)) "*" else " ";
+                                try writers.out.print("{s} {s}\n", .{ prefix, ref.name });
                             }
                         },
                         .add => try self.addBranch(branch_cmd.add),
@@ -942,13 +942,13 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
         pub fn currentBranch(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator) ![]const u8 {
             var moment = try self.core.latestMoment();
             const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
-            return try ref.readHeadNameAlloc(repo_kind, repo_opts, state, allocator);
+            return try rf.readHeadNameAlloc(repo_kind, repo_opts, state, allocator);
         }
 
-        pub fn listBranches(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator) !ref.RefList {
+        pub fn listBranches(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator) !rf.RefList {
             var moment = try self.core.latestMoment();
             const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
-            return try ref.RefList.init(repo_kind, repo_opts, state, allocator);
+            return try rf.RefList.init(repo_kind, repo_opts, state, allocator);
         }
 
         pub fn addBranch(self: *Repo(repo_kind, repo_opts), input: bch.AddBranchInput) !void {
@@ -1043,7 +1043,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             if (start_oids_maybe) |start_oids| {
                 return try obj.ObjectIterator(repo_kind, repo_opts, .full).init(allocator, state, start_oids, options);
             } else {
-                const start_oids = if (try ref.readHeadMaybe(repo_kind, repo_opts, state)) |head_oid| &.{head_oid} else &.{};
+                const start_oids = if (try rf.readHeadMaybe(repo_kind, repo_opts, state)) |head_oid| &.{head_oid} else &.{};
                 return try obj.ObjectIterator(repo_kind, repo_opts, .full).init(allocator, state, start_oids, options);
             }
         }
@@ -1305,7 +1305,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             switch (repo_kind) {
                 .git => {
                     const fetch_result = try net.fetch(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, allocator, remote_name, parsed_uri);
-                    const remote_ref = ref.Ref{ .kind = .{ .remote = remote_name }, .name = remote_ref_name };
+                    const remote_ref = rf.Ref{ .kind = .{ .remote = remote_name }, .name = remote_ref_name };
                     var merge_result = try mrg.Merge(repo_kind, repo_opts).init(.{ .core = &self.core, .extra = .{} }, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = remote_ref }} } } });
                     errdefer merge_result.deinit();
 
@@ -1329,7 +1329,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
 
                             const fetch_result = try net.fetch(repo_kind, repo_opts, state, ctx.allocator, ctx.remote_name, ctx.parsed_uri);
-                            const remote_ref = ref.Ref{ .kind = .{ .remote = ctx.remote_name }, .name = ctx.remote_ref_name };
+                            const remote_ref = rf.Ref{ .kind = .{ .remote = ctx.remote_name }, .name = ctx.remote_ref_name };
                             var merge_result = try mrg.Merge(repo_kind, repo_opts).init(state, ctx.allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = remote_ref }} } } });
                             errdefer merge_result.deinit();
 

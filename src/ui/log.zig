@@ -9,7 +9,6 @@ const ui_diff = @import("./diff.zig");
 const rp = @import("../repo.zig");
 const hash = @import("../hash.zig");
 const df = @import("../diff.zig");
-const ref = @import("../ref.zig");
 const obj = @import("../object.zig");
 
 pub fn LogCommitList(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {

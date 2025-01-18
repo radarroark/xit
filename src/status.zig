@@ -9,7 +9,7 @@ const std = @import("std");
 const idx = @import("./index.zig");
 const hash = @import("./hash.zig");
 const obj = @import("./object.zig");
-const ref = @import("./ref.zig");
+const rf = @import("./ref.zig");
 const fs = @import("./fs.zig");
 const rp = @import("./repo.zig");
 
@@ -260,7 +260,7 @@ pub fn HeadTree(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts
             errdefer tree.deinit();
 
             // if head points to a valid object, read it
-            if (try ref.readHeadMaybe(repo_kind, repo_opts, state)) |head_file_buffer| {
+            if (try rf.readHeadMaybe(repo_kind, repo_opts, state)) |head_file_buffer| {
                 var commit_object = try obj.Object(repo_kind, repo_opts, .full).init(allocator, state, &head_file_buffer);
                 defer commit_object.deinit();
                 try tree.read(state, "", &commit_object.content.commit.tree);

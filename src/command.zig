@@ -8,7 +8,7 @@ const idx = @import("./index.zig");
 const obj = @import("./object.zig");
 const cfg = @import("./config.zig");
 const bch = @import("./branch.zig");
-const ref = @import("./ref.zig");
+const rf = @import("./ref.zig");
 const hash = @import("./hash.zig");
 
 pub const CommandKind = enum {
@@ -308,9 +308,9 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                         if (cmd_args.map_args.contains("--continue"))
                         .cont
                     else blk: {
-                        var source = std.ArrayList(ref.RefOrOid(hash_kind)).init(cmd_args.arena.allocator());
+                        var source = std.ArrayList(rf.RefOrOid(hash_kind)).init(cmd_args.arena.allocator());
                         for (cmd_args.positional_args) |arg| {
-                            try source.append(ref.RefOrOid(hash_kind).initFromUser(arg));
+                            try source.append(rf.RefOrOid(hash_kind).initFromUser(arg));
                         }
                         break :blk .{ .new = .{ .source = try source.toOwnedSlice() } };
                     };

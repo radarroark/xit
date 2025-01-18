@@ -3,7 +3,7 @@ const rp = @import("./repo.zig");
 const hash = @import("./hash.zig");
 const st = @import("./status.zig");
 const df = @import("./diff.zig");
-const ref = @import("./ref.zig");
+const rf = @import("./ref.zig");
 
 pub fn NodeId(comptime hash_kind: hash.HashKind) type {
     return packed struct {
@@ -457,8 +457,8 @@ pub fn writeAndApplyPatches(
     commit_oid: *const [hash.hexLen(repo_opts.hash)]u8,
 ) !void {
     // get current branch name
-    var current_branch_name_buffer = [_]u8{0} ** ref.MAX_REF_CONTENT_SIZE;
-    const current_branch_name = try ref.readHeadName(.xit, repo_opts, state.readOnly(), &current_branch_name_buffer);
+    var current_branch_name_buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
+    const current_branch_name = try rf.readHeadName(.xit, repo_opts, state.readOnly(), &current_branch_name_buffer);
 
     const branch_name_hash = hash.hashInt(repo_opts.hash, current_branch_name);
 

@@ -5,7 +5,7 @@
 const std = @import("std");
 const hash = @import("./hash.zig");
 const idx = @import("./index.zig");
-const ref = @import("./ref.zig");
+const rf = @import("./ref.zig");
 const fs = @import("./fs.zig");
 const rp = @import("./repo.zig");
 const pack = @import("./pack.zig");
@@ -307,7 +307,7 @@ pub fn writeCommit(
 ) ![hash.hexLen(repo_opts.hash)]u8 {
     var commit_hash_bytes_buffer = [_]u8{0} ** hash.byteLen(repo_opts.hash);
     const parent_oids = if (metadata.parent_oids) |oids| oids else blk: {
-        const head_oid_maybe = try ref.readHeadMaybe(repo_kind, repo_opts, state.readOnly());
+        const head_oid_maybe = try rf.readHeadMaybe(repo_kind, repo_opts, state.readOnly());
         break :blk if (head_oid_maybe) |head_oid| &.{head_oid} else &.{};
     };
 
@@ -380,14 +380,14 @@ pub fn writeCommit(
             compressed_lock.success = true;
 
             // write commit id to HEAD
-            try ref.writeRecur(repo_kind, repo_opts, state, "HEAD", &commit_hash_hex);
+            try rf.writeRecur(repo_kind, repo_opts, state, "HEAD", &commit_hash_hex);
         },
         .xit => {
             var stream = std.io.fixedBufferStream(commit_contents);
             try chunk.writeChunks(repo_opts, state, stream.reader(), commit_hash, commit_contents.len, "commit");
 
             // write commit id to HEAD
-            try ref.writeRecur(repo_kind, repo_opts, state, "HEAD", &commit_hash_hex);
+            try rf.writeRecur(repo_kind, repo_opts, state, "HEAD", &commit_hash_hex);
         },
     }
 

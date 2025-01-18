@@ -5,7 +5,7 @@ const obj = @import("./object.zig");
 const hash = @import("./hash.zig");
 const fs = @import("./fs.zig");
 const pack = @import("./pack.zig");
-const ref = @import("./ref.zig");
+const rf = @import("./ref.zig");
 
 const TIMEOUT_MICRO_SECS: u32 = 2_000_000;
 
@@ -258,12 +258,12 @@ pub fn fetch(
 
     // update refs
     for (ref_to_oid.keys(), ref_to_oid.values()) |remote_ref_path, oid| {
-        var buffer = [_]u8{0} ** ref.MAX_REF_CONTENT_SIZE;
-        const ref_path = if (ref.Ref.initFromPath(remote_ref_path)) |rf|
-            try std.fmt.bufPrint(&buffer, "refs/remotes/{s}/{s}", .{ remote_name, rf.name })
+        var buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
+        const ref_path = if (rf.Ref.initFromPath(remote_ref_path)) |ref|
+            try std.fmt.bufPrint(&buffer, "refs/remotes/{s}/{s}", .{ remote_name, ref.name })
         else
             try std.fmt.bufPrint(&buffer, "refs/remotes/{s}/{s}", .{ remote_name, remote_ref_path });
-        try ref.writeRecur(repo_kind, repo_opts, state, ref_path, oid);
+        try rf.writeRecur(repo_kind, repo_opts, state, ref_path, oid);
     }
 
     return .{

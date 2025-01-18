@@ -2,7 +2,7 @@ const std = @import("std");
 const hash = @import("./hash.zig");
 const obj = @import("./object.zig");
 const idx = @import("./index.zig");
-const ref = @import("./ref.zig");
+const rf = @import("./ref.zig");
 const res = @import("./restore.zig");
 const fs = @import("./fs.zig");
 const rp = @import("./repo.zig");
@@ -1292,7 +1292,7 @@ pub const MergeAlgorithm = enum {
 pub fn MergeAction(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
     return union(enum) {
         new: struct {
-            source: []const ref.RefOrOid(hash_kind),
+            source: []const rf.RefOrOid(hash_kind),
             algo: MergeAlgorithm = switch (repo_kind) {
                 .git => .diff3,
                 .xit => .patch,
@@ -1344,8 +1344,8 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
             }
 
             // get the current branch name and oid
-            const target_name = try ref.readHeadNameAlloc(repo_kind, repo_opts, state.readOnly(), arena.allocator());
-            const target_oid_maybe = try ref.readHeadMaybe(repo_kind, repo_opts, state.readOnly());
+            const target_name = try rf.readHeadNameAlloc(repo_kind, repo_opts, state.readOnly(), arena.allocator());
+            const target_oid_maybe = try rf.readHeadMaybe(repo_kind, repo_opts, state.readOnly());
 
             // init the diff that we will use for the migration and the conflicts maps.
             // they're using the arena because they'll be included in the result.
@@ -1396,15 +1396,15 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     // we need to return the source name so copy it into a new buffer
                     // so we an ensure it lives as long as the rest of the return struct
                     const source_name = try arena.allocator().dupe(u8, switch (source_ref_or_oid) {
-                        .ref => |rf| rf.name,
+                        .ref => |ref| ref.name,
                         .oid => |oid| oid,
                     });
 
                     // get the source and target oid
-                    const source_oid = try ref.readRecur(repo_kind, repo_opts, state.readOnly(), source_ref_or_oid) orelse return error.InvalidTarget;
+                    const source_oid = try rf.readRecur(repo_kind, repo_opts, state.readOnly(), source_ref_or_oid) orelse return error.InvalidTarget;
                     const target_oid = target_oid_maybe orelse {
                         // the target branch is completely empty, so just set it to the source oid
-                        try ref.writeRecur(repo_kind, repo_opts, state, "HEAD", &source_oid);
+                        try rf.writeRecur(repo_kind, repo_opts, state, "HEAD", &source_oid);
 
                         // make a TreeDiff that adds all files from source
                         try clean_diff.compare(state.readOnly(), null, source_oid, null);
@@ -1609,7 +1609,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 
                     if (std.mem.eql(u8, &target_oid, &base_oid)) {
                         // the base ancestor is the target oid, so just update HEAD
-                        try ref.writeRecur(repo_kind, repo_opts, state, "HEAD", &source_oid);
+                        try rf.writeRecur(repo_kind, repo_opts, state, "HEAD", &source_oid);
                         return .{
                             .arena = arena,
                             .allocator = allocator,

@@ -8,7 +8,7 @@ const main = @import("../main.zig");
 const hash = @import("../hash.zig");
 const idx = @import("../index.zig");
 const obj = @import("../object.zig");
-const ref = @import("../ref.zig");
+const rf = @import("../ref.zig");
 const rp = @import("../repo.zig");
 const df = @import("../diff.zig");
 const mrg = @import("../merge.zig");
@@ -167,7 +167,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                 {
                     var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
                     defer repo.deinit();
-                    const head_file_buffer = try ref.readHead(repo_kind, repo_opts, .{ .core = &repo.core, .extra = .{} });
+                    const head_file_buffer = try rf.readHead(repo_kind, repo_opts, .{ .core = &repo.core, .extra = .{} });
                     var objects_dir = try test_state.git_dir.openDir("objects", .{});
                     defer objects_dir.close();
                     var hash_prefix_dir = try objects_dir.openDir(head_file_buffer[0..2], .{});
@@ -218,7 +218,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                 defer repo.deinit();
                 var moment = try repo.core.latestMoment();
                 const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-                const head_file_buffer = try ref.readHead(repo_kind, repo_opts, state);
+                const head_file_buffer = try rf.readHead(repo_kind, repo_opts, state);
                 const chunk_info_cursor_maybe = try moment.cursor.readPath(void, &.{
                     .{ .hash_map_get = .{ .value = hash.hashInt(repo_opts.hash, "object-id->chunk-info") } },
                     .{ .hash_map_get = .{ .value = try hash.hexToInt(repo_opts.hash, &head_file_buffer) } },
@@ -234,7 +234,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-        break :blk try ref.readHead(repo_kind, repo_opts, state);
+        break :blk try rf.readHead(repo_kind, repo_opts, state);
     };
 
     const new_hello_txt_content =
@@ -443,7 +443,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                 {
                     var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
                     defer repo.deinit();
-                    const head_file_buffer = try ref.readHead(repo_kind, repo_opts, .{ .core = &repo.core, .extra = .{} });
+                    const head_file_buffer = try rf.readHead(repo_kind, repo_opts, .{ .core = &repo.core, .extra = .{} });
                     var objects_dir = try test_state.git_dir.openDir("objects", .{});
                     defer objects_dir.close();
                     var hash_prefix_dir = try objects_dir.openDir(head_file_buffer[0..2], .{});
@@ -474,7 +474,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                 defer repo.deinit();
                 var moment = try repo.core.latestMoment();
                 const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-                const head_file_buffer = try ref.readHead(repo_kind, repo_opts, state);
+                const head_file_buffer = try rf.readHead(repo_kind, repo_opts, state);
                 const chunk_info_cursor_maybe = try moment.cursor.readPath(void, &.{
                     .{ .hash_map_get = .{ .value = hash.hashInt(repo_opts.hash, "object-id->chunk-info") } },
                     .{ .hash_map_get = .{ .value = try hash.hexToInt(repo_opts.hash, &head_file_buffer) } },
@@ -490,7 +490,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-        break :blk try ref.readHead(repo_kind, repo_opts, state);
+        break :blk try rf.readHead(repo_kind, repo_opts, state);
     };
 
     // tree diff
@@ -1076,8 +1076,8 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-        try std.testing.expectEqual(commit2, try ref.readHead(repo_kind, repo_opts, state));
-        try std.testing.expectEqual(commit2, try ref.readRecur(repo_kind, repo_opts, state, ref.RefOrOid(repo_opts.hash).initFromUser("stuff")));
+        try std.testing.expectEqual(commit2, try rf.readHead(repo_kind, repo_opts, state));
+        try std.testing.expectEqual(commit2, try rf.readRecur(repo_kind, repo_opts, state, rf.RefOrOid(repo_opts.hash).initFromUser("stuff")));
     }
 
     // list all branches
@@ -1149,7 +1149,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-        break :blk try ref.readHead(repo_kind, repo_opts, state);
+        break :blk try rf.readHead(repo_kind, repo_opts, state);
     };
 
     // create a branch with slashes
@@ -1205,7 +1205,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-        break :blk try ref.readHead(repo_kind, repo_opts, state);
+        break :blk try rf.readHead(repo_kind, repo_opts, state);
     };
 
     // make sure the most recent branch name points to the most recent commit
@@ -1214,7 +1214,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-        try std.testing.expectEqual(commit3, try ref.readRecur(repo_kind, repo_opts, state, ref.RefOrOid(repo_opts.hash).initFromUser("master")));
+        try std.testing.expectEqual(commit3, try rf.readRecur(repo_kind, repo_opts, state, rf.RefOrOid(repo_opts.hash).initFromUser("master")));
     }
 
     // log
@@ -1278,7 +1278,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-        break :blk try ref.readHead(repo_kind, repo_opts, state);
+        break :blk try rf.readHead(repo_kind, repo_opts, state);
     };
 
     // config
