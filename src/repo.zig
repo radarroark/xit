@@ -178,7 +178,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
                     // update HEAD
                     const state = State(.read_write){ .core = &self.core, .extra = .{} };
-                    try rf.writeHead(repo_kind, repo_opts, state, .{ .ref = .{ .kind = .local, .name = "master" } }, null);
+                    try rf.replaceHead(repo_kind, repo_opts, state, .{ .ref = .{ .kind = .local, .name = "master" } });
 
                     return self;
                 },
@@ -218,7 +218,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            try rf.writeHead(repo_kind, repo_opts, state, .{ .ref = .{ .kind = .local, .name = "master" } }, null);
+                            try rf.replaceHead(repo_kind, repo_opts, state, .{ .ref = .{ .kind = .local, .name = "master" } });
                         }
                     };
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());

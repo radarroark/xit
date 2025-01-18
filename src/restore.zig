@@ -378,9 +378,11 @@ pub fn restore(
 
 pub fn SwitchInput(comptime hash_kind: hash.HashKind) type {
     return struct {
-        target: rf.RefOrOid(hash_kind),
+        head: union(enum) {
+            replace: rf.RefOrOid(hash_kind),
+            update: *const [hash.hexLen(hash_kind)]u8,
+        },
         force: bool = false,
-        new_oid: ?*const [hash.hexLen(hash_kind)]u8 = null,
     };
 }
 
@@ -401,10 +403,10 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
         ) !Switch(repo_kind, repo_opts) {
             // get the current commit and target oid
             const current_oid_maybe = try rf.readHeadMaybe(repo_kind, repo_opts, state.readOnly());
-            const target_oid = if (input.new_oid) |new_oid|
-                new_oid.*
-            else
-                (try rf.readRecur(repo_kind, repo_opts, state.readOnly(), input.target)) orelse return error.InvalidTarget;
+            const target_oid = switch (input.head) {
+                .replace => |ref_or_oid| (try rf.readRecur(repo_kind, repo_opts, state.readOnly(), ref_or_oid)) orelse return error.InvalidTarget,
+                .update => |oid| oid.*,
+            };
 
             // compare the commits
             var tree_diff = obj.TreeDiff(repo_kind, repo_opts).init(allocator);
@@ -436,7 +438,10 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     try index.write(allocator, .{ .core = state.core, .extra = .{ .lock_file_maybe = lock.lock_file } });
 
                     // update HEAD
-                    try rf.writeHead(repo_kind, repo_opts, state, input.target, input.new_oid);
+                    switch (input.head) {
+                        .replace => |ref_or_oid| try rf.replaceHead(repo_kind, repo_opts, state, ref_or_oid),
+                        .update => |oid| try rf.updateHead(repo_kind, repo_opts, state, oid),
+                    }
 
                     // finish lock
                     lock.success = true;
@@ -458,7 +463,10 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     try index.write(allocator, state);
 
                     // update HEAD
-                    try rf.writeHead(repo_kind, repo_opts, state, input.target, input.new_oid);
+                    switch (input.head) {
+                        .replace => |ref_or_oid| try rf.replaceHead(repo_kind, repo_opts, state, ref_or_oid),
+                        .update => |oid| try rf.updateHead(repo_kind, repo_opts, state, oid),
+                    }
                 },
             }
 
