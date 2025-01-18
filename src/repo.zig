@@ -5,7 +5,7 @@ const cmd = @import("./command.zig");
 const idx = @import("./index.zig");
 const st = @import("./status.zig");
 const bch = @import("./branch.zig");
-const cht = @import("./checkout.zig");
+const res = @import("./restore.zig");
 const ref = @import("./ref.zig");
 const fs = @import("./fs.zig");
 const df = @import("./diff.zig");
@@ -999,23 +999,23 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
-        pub fn switchHead(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, target: []const u8, options: cht.Switch(repo_kind, repo_opts).Options) !cht.Switch(repo_kind, repo_opts) {
+        pub fn switchHead(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, target: []const u8, options: res.Switch(repo_kind, repo_opts).Options) !res.Switch(repo_kind, repo_opts) {
             switch (repo_kind) {
-                .git => return try cht.Switch(repo_kind, repo_opts).init(.{ .core = &self.core, .extra = .{} }, allocator, target, options),
+                .git => return try res.Switch(repo_kind, repo_opts).init(.{ .core = &self.core, .extra = .{} }, allocator, target, options),
                 .xit => {
-                    var result: cht.Switch(repo_kind, repo_opts) = undefined;
+                    var result: res.Switch(repo_kind, repo_opts) = undefined;
 
                     const Ctx = struct {
                         core: *Repo(repo_kind, repo_opts).Core,
                         allocator: std.mem.Allocator,
                         target: []const u8,
-                        options: cht.Switch(repo_kind, repo_opts).Options,
-                        result: *cht.Switch(repo_kind, repo_opts),
+                        options: res.Switch(repo_kind, repo_opts).Options,
+                        result: *res.Switch(repo_kind, repo_opts),
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            ctx.result.* = try cht.Switch(repo_kind, repo_opts).init(state, ctx.allocator, ctx.target, ctx.options);
+                            ctx.result.* = try res.Switch(repo_kind, repo_opts).init(state, ctx.allocator, ctx.target, ctx.options);
                         }
                     };
 
@@ -1033,7 +1033,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
         pub fn restore(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, path: []const u8) !void {
             var moment = try self.core.latestMoment();
             const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
-            try cht.restore(repo_kind, repo_opts, state, allocator, path);
+            try res.restore(repo_kind, repo_opts, state, allocator, path);
         }
 
         pub fn log(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, start_oids_maybe: ?[]const [hash.hexLen(repo_opts.hash)]u8) !obj.ObjectIterator(repo_kind, repo_opts, .full) {

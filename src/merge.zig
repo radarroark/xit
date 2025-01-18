@@ -3,7 +3,7 @@ const hash = @import("./hash.zig");
 const obj = @import("./object.zig");
 const idx = @import("./index.zig");
 const ref = @import("./ref.zig");
-const cht = @import("./checkout.zig");
+const res = @import("./restore.zig");
 const fs = @import("./fs.zig");
 const rp = @import("./repo.zig");
 const df = @import("./diff.zig");
@@ -1414,7 +1414,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                         defer index.deinit();
 
                         // update the working tree
-                        try cht.migrate(repo_kind, repo_opts, state, allocator, clean_diff, &index, null);
+                        try res.migrate(repo_kind, repo_opts, state, allocator, clean_diff, &index, null);
 
                         return .{
                             .arena = arena,
@@ -1515,14 +1515,14 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                             defer index.deinit();
 
                             // update the working tree
-                            try cht.migrate(repo_kind, repo_opts, state, allocator, clean_diff, &index, null);
+                            try res.migrate(repo_kind, repo_opts, state, allocator, clean_diff, &index, null);
 
                             for (conflicts.keys(), conflicts.values()) |path, conflict| {
                                 // add conflict to index
                                 try index.addConflictEntries(path, .{ conflict.base, conflict.target, conflict.source });
                                 // write renamed file if necessary
                                 if (conflict.renamed) |renamed| {
-                                    try cht.objectToFile(repo_kind, repo_opts, state.readOnly(), allocator, renamed.path, renamed.tree_entry);
+                                    try res.objectToFile(repo_kind, repo_opts, state.readOnly(), allocator, renamed.path, renamed.tree_entry);
                                 }
                             }
 
@@ -1560,14 +1560,14 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                             defer index.deinit();
 
                             // update the working tree
-                            try cht.migrate(repo_kind, repo_opts, state, allocator, clean_diff, &index, null);
+                            try res.migrate(repo_kind, repo_opts, state, allocator, clean_diff, &index, null);
 
                             for (conflicts.keys(), conflicts.values()) |path, conflict| {
                                 // add conflict to index
                                 try index.addConflictEntries(path, .{ conflict.base, conflict.target, conflict.source });
                                 // write renamed file if necessary
                                 if (conflict.renamed) |renamed| {
-                                    try cht.objectToFile(repo_kind, repo_opts, state.readOnly(), allocator, renamed.path, renamed.tree_entry);
+                                    try res.objectToFile(repo_kind, repo_opts, state.readOnly(), allocator, renamed.path, renamed.tree_entry);
                                 }
                             }
 
