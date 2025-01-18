@@ -417,11 +417,17 @@ pub fn writeHead(
     new_oid_maybe: ?*const [hash.hexLen(repo_opts.hash)]u8,
 ) !void {
     var buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
-    const content = if (new_oid_maybe) |new_oid|
-        new_oid
-    else switch (target) {
-        .oid => |oid| oid,
-        .ref => |ref| try std.fmt.bufPrint(&buffer, "ref: refs/heads/{s}", .{ref.name}),
-    };
-    try write(repo_kind, repo_opts, state, "HEAD", content);
+    if (new_oid_maybe) |new_oid| {
+        try writeRecur(repo_kind, repo_opts, state, "HEAD", new_oid);
+    } else {
+        const content = switch (target) {
+            .oid => |oid| oid,
+            .ref => |ref| blk: {
+                var path_buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
+                const path = try ref.toPath(&path_buffer);
+                break :blk try std.fmt.bufPrint(&buffer, "ref: {s}", .{path});
+            },
+        };
+        try write(repo_kind, repo_opts, state, "HEAD", content);
+    }
 }
