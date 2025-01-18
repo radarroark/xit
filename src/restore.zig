@@ -376,10 +376,17 @@ pub fn restore(
     try objectToFile(repo_kind, repo_opts, state, allocator, path, tree_entry);
 }
 
-pub fn SwitchOptions(comptime hash_kind: hash.HashKind) type {
+pub fn SwitchInput(comptime hash_kind: hash.HashKind) type {
     return struct {
-        force: bool,
-        target_oid: ?*const [hash.hexLen(hash_kind)]u8 = null,
+        target: rf.RefOrOid(hash_kind),
+        force: bool = false,
+        new_oid: ?*const [hash.hexLen(hash_kind)]u8 = null,
+
+        pub fn init(input: []const u8) SwitchInput(hash_kind) {
+            return .{
+                .target = rf.RefOrOid(hash_kind).initFromUser(input),
+            };
+        }
     };
 }
 
@@ -393,22 +400,17 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             untracked_removed: std.StringArrayHashMap(void),
         },
 
-        /// TODO: this is confusingly designed right now because `target` can be
-        /// either an oid or branch name, and you can also specify `options.target_oid`.
-        /// in reality it should take either an oid or a (branch name, optional target oid)
-        /// combo. but we'll clean this up another time...
         pub fn init(
             state: rp.Repo(repo_kind, repo_opts).State(.read_write),
             allocator: std.mem.Allocator,
-            target: []const u8,
-            options: SwitchOptions(repo_opts.hash),
+            input: SwitchInput(repo_opts.hash),
         ) !Switch(repo_kind, repo_opts) {
             // get the current commit and target oid
             const current_oid_maybe = try rf.readHeadMaybe(repo_kind, repo_opts, state.readOnly());
-            const target_oid = if (options.target_oid) |oid|
-                oid.*
+            const target_oid = if (input.new_oid) |new_oid|
+                new_oid.*
             else
-                try rf.readRecur(repo_kind, repo_opts, state.readOnly(), rf.RefOrOid(repo_opts.hash).initFromUser(target)) orelse return error.InvalidTarget;
+                (try rf.readRecur(repo_kind, repo_opts, state.readOnly(), input.target)) orelse return error.InvalidTarget;
 
             // compare the commits
             var tree_diff = obj.TreeDiff(repo_kind, repo_opts).init(allocator);
@@ -429,7 +431,7 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     defer index.deinit();
 
                     // update the working tree
-                    try migrate(repo_kind, repo_opts, state, allocator, tree_diff, &index, if (options.force) null else &result);
+                    try migrate(repo_kind, repo_opts, state, allocator, tree_diff, &index, if (input.force) null else &result);
 
                     // return early if conflict
                     if (.conflict == result) {
@@ -440,7 +442,7 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     try index.write(allocator, .{ .core = state.core, .extra = .{ .lock_file_maybe = lock.lock_file } });
 
                     // update HEAD
-                    try rf.writeHead(repo_kind, repo_opts, state, target, target_oid);
+                    try rf.writeHead(repo_kind, repo_opts, state, input.target, input.new_oid);
 
                     // finish lock
                     lock.success = true;
@@ -451,7 +453,7 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     defer index.deinit();
 
                     // update the working tree
-                    try migrate(repo_kind, repo_opts, state, allocator, tree_diff, &index, if (options.force) null else &result);
+                    try migrate(repo_kind, repo_opts, state, allocator, tree_diff, &index, if (input.force) null else &result);
 
                     // return early if conflict
                     if (.conflict == result) {
@@ -462,7 +464,7 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     try index.write(allocator, state);
 
                     // update HEAD
-                    try rf.writeHead(repo_kind, repo_opts, state, target, target_oid);
+                    try rf.writeHead(repo_kind, repo_opts, state, input.target, input.new_oid);
                 },
             }
 

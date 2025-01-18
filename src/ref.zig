@@ -413,19 +413,15 @@ pub fn writeHead(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
-    target: []const u8,
-    oid_hex_maybe: ?[hash.hexLen(repo_opts.hash)]u8,
+    target: RefOrOid(repo_opts.hash),
+    new_oid_maybe: ?*const [hash.hexLen(repo_opts.hash)]u8,
 ) !void {
     var buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
-    const content =
-        // target is a ref, so make HEAD point to it
-        if (try readRecur(repo_kind, repo_opts, state.readOnly(), .{ .ref = .{ .kind = .local, .name = target } }) != null)
-        try std.fmt.bufPrint(&buffer, "ref: refs/heads/{s}", .{target})
-        // the HEAD is detached, so just update it with the oid
-    else if (oid_hex_maybe) |oid_hex|
-        &oid_hex
-        // point HEAD at the ref, even though the ref doesn't exist
-    else
-        try std.fmt.bufPrint(&buffer, "ref: refs/heads/{s}", .{target});
+    const content = if (new_oid_maybe) |new_oid|
+        new_oid
+    else switch (target) {
+        .oid => |oid| oid,
+        .ref => |ref| try std.fmt.bufPrint(&buffer, "ref: refs/heads/{s}", .{ref.name}),
+    };
     try write(repo_kind, repo_opts, state, "HEAD", content);
 }

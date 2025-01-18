@@ -178,7 +178,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
                     // update HEAD
                     const state = State(.read_write){ .core = &self.core, .extra = .{} };
-                    try rf.writeHead(repo_kind, repo_opts, state, "master", null);
+                    try rf.writeHead(repo_kind, repo_opts, state, .{ .ref = .{ .kind = .local, .name = "master" } }, null);
 
                     return self;
                 },
@@ -218,7 +218,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            try rf.writeHead(repo_kind, repo_opts, state, "master", null);
+                            try rf.writeHead(repo_kind, repo_opts, state, .{ .ref = .{ .kind = .local, .name = "master" } }, null);
                         }
                     };
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
@@ -493,7 +493,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     }
                 },
                 .switch_head => |switch_head_cmd| {
-                    var result = try self.switchHead(allocator, switch_head_cmd.target, .{ .force = false });
+                    var result = try self.switchHead(allocator, switch_head_cmd);
                     defer result.deinit();
                 },
                 .restore => |restore_cmd| {
@@ -999,30 +999,29 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
-        pub fn switchHead(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, target: []const u8, options: res.SwitchOptions(repo_opts.hash)) !res.Switch(repo_kind, repo_opts) {
+        pub fn switchHead(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: res.SwitchInput(repo_opts.hash)) !res.Switch(repo_kind, repo_opts) {
             switch (repo_kind) {
-                .git => return try res.Switch(repo_kind, repo_opts).init(.{ .core = &self.core, .extra = .{} }, allocator, target, options),
+                .git => return try res.Switch(repo_kind, repo_opts).init(.{ .core = &self.core, .extra = .{} }, allocator, input),
                 .xit => {
                     var result: res.Switch(repo_kind, repo_opts) = undefined;
 
                     const Ctx = struct {
                         core: *Repo(repo_kind, repo_opts).Core,
                         allocator: std.mem.Allocator,
-                        target: []const u8,
-                        options: res.SwitchOptions(repo_opts.hash),
+                        input: res.SwitchInput(repo_opts.hash),
                         result: *res.Switch(repo_kind, repo_opts),
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            ctx.result.* = try res.Switch(repo_kind, repo_opts).init(state, ctx.allocator, ctx.target, ctx.options);
+                            ctx.result.* = try res.Switch(repo_kind, repo_opts).init(state, ctx.allocator, ctx.input);
                         }
                     };
 
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
                     try history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
-                        Ctx{ .core = &self.core, .allocator = allocator, .target = target, .options = options, .result = &result },
+                        Ctx{ .core = &self.core, .allocator = allocator, .input = input, .result = &result },
                     );
 
                     return result;
