@@ -376,6 +376,13 @@ pub fn restore(
     try objectToFile(repo_kind, repo_opts, state, allocator, path, tree_entry);
 }
 
+pub fn SwitchOptions(comptime hash_kind: hash.HashKind) type {
+    return struct {
+        force: bool,
+        target_oid: ?*const [hash.hexLen(hash_kind)]u8 = null,
+    };
+}
+
 pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return union(enum) {
         success,
@@ -386,11 +393,6 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             untracked_removed: std.StringArrayHashMap(void),
         },
 
-        pub const Options = struct {
-            force: bool,
-            target_oid: ?*const [hash.hexLen(repo_opts.hash)]u8 = null,
-        };
-
         /// TODO: this is confusingly designed right now because `target` can be
         /// either an oid or branch name, and you can also specify `options.target_oid`.
         /// in reality it should take either an oid or a (branch name, optional target oid)
@@ -399,7 +401,7 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             state: rp.Repo(repo_kind, repo_opts).State(.read_write),
             allocator: std.mem.Allocator,
             target: []const u8,
-            options: Options,
+            options: SwitchOptions(repo_opts.hash),
         ) !Switch(repo_kind, repo_opts) {
             // get the current commit and target oid
             const current_oid_maybe = try ref.readHeadMaybe(repo_kind, repo_opts, state.readOnly());

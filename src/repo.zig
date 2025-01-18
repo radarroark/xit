@@ -999,7 +999,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
-        pub fn switchHead(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, target: []const u8, options: res.Switch(repo_kind, repo_opts).Options) !res.Switch(repo_kind, repo_opts) {
+        pub fn switchHead(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, target: []const u8, options: res.SwitchOptions(repo_opts.hash)) !res.Switch(repo_kind, repo_opts) {
             switch (repo_kind) {
                 .git => return try res.Switch(repo_kind, repo_opts).init(.{ .core = &self.core, .extra = .{} }, allocator, target, options),
                 .xit => {
@@ -1009,7 +1009,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         core: *Repo(repo_kind, repo_opts).Core,
                         allocator: std.mem.Allocator,
                         target: []const u8,
-                        options: res.Switch(repo_kind, repo_opts).Options,
+                        options: res.SwitchOptions(repo_opts.hash),
                         result: *res.Switch(repo_kind, repo_opts),
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
