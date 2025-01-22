@@ -20,7 +20,7 @@ Using xit as a library
 
 * While xit doesn't pull in third-party libraries, you can and should use xit as a library in your Zig projects. Even if you don't care about xit as a version control system, you can use its git implementation to programmatically read and write to git repos. Think of it as a modern, pure-Zig alternative to libgit2.
 
-* After adding xit as a library with the Zig build system, you'll be able to use it programmatically through the `Repo` struct. Here's a simple example:
+* After adding xit as a library with the Zig build system, you'll be able to use it programmatically through the `Repo` struct. I made [a starter project](https://github.com/radarroark/xitstarter) showing how to do this:
 
 ```zig
 const xit = @import("xit");

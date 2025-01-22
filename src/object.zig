@@ -285,7 +285,7 @@ fn sign(
     process.stderr_behavior = .Inherit;
     const term = try process.spawnAndWait();
     if (0 != term.Exited) {
-        return error.CommitSigningFailed;
+        return error.ObjectSigningFailed;
     }
 
     // read the sig
@@ -409,7 +409,7 @@ pub fn writeCommit(
                     try header_lines.append(sig_line);
                 }
 
-                const message = metadata_lines.pop(); // remove the message
+                const message = metadata_lines.pop() orelse unreachable; // remove the message
                 try metadata_lines.appendSlice(header_lines.items); // add the sig
                 try metadata_lines.append(message); // add the message back
             }
@@ -815,7 +815,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                                 else => |e| return e,
                             };
                             const entry_mode: fs.Mode = @bitCast(try std.fmt.parseInt(u32, entry_mode_str, 8));
-                            switch (entry_mode.object_type) {
+                            switch (entry_mode.content.object_type) {
                                 .symbolic_link => return error.SymLinksNotSupported,
                                 .gitlink => return error.SubmodulesNotSupported,
                                 else => {},

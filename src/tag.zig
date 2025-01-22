@@ -55,9 +55,9 @@ pub fn remove(
             defer tags_dir.close();
 
             // get absolute paths
-            var tags_dir_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
+            var tags_dir_buffer = [_]u8{0} ** std.fs.max_path_bytes;
             const tags_dir_path = try tags_dir.realpath(".", &tags_dir_buffer);
-            var ref_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
+            var ref_buffer = [_]u8{0} ** std.fs.max_path_bytes;
             const ref_path = try tags_dir.realpath(input.name, &ref_buffer);
 
             // delete file

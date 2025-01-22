@@ -87,7 +87,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     };
 
     // get repo path for libgit
-    var repo_path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
+    var repo_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
     const repo_path: [*c]const u8 = @ptrCast(try work_dir.realpath(".", &repo_path_buffer));
 
     // make sure we can get status before first commit

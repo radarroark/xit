@@ -21,7 +21,7 @@ pub fn RootTabs(comptime Widget: type) type {
             var box = try wgt.Box(Widget).init(allocator, null, .horiz);
             errdefer box.deinit();
 
-            inline for (@typeInfo(FocusKind).Enum.fields) |focus_kind_field| {
+            inline for (@typeInfo(FocusKind).@"enum".fields) |focus_kind_field| {
                 const focus_kind: FocusKind = @enumFromInt(focus_kind_field.value);
                 const name = switch (focus_kind) {
                     .log => "log",
@@ -118,7 +118,7 @@ pub fn Root(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime rep
             var box = try wgt.Box(Widget).init(allocator, null, .vert);
             errdefer box.deinit();
 
-            inline for (@typeInfo(FocusKind).Enum.fields) |focus_kind_field| {
+            inline for (@typeInfo(FocusKind).@"enum".fields) |focus_kind_field| {
                 const focus_kind: FocusKind = @enumFromInt(focus_kind_field.value);
                 switch (focus_kind) {
                     .tabs => {

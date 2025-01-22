@@ -52,13 +52,15 @@ pub const Mode = packed struct(u32) {
         gitlink = 0o16,
     };
 
-    unix_permission: u9,
-    unused: u3 = 0,
-    object_type: ObjectType,
+    content: packed struct(u16) {
+        unix_permission: u9,
+        unused: u3 = 0,
+        object_type: ObjectType,
+    },
     padding: u16 = 0,
 
     pub fn toStr(self: Mode) []const u8 {
-        return if (self.unix_permission == 0o755) "100755" else "100644";
+        return if (self.content.unix_permission == 0o755) "100755" else "100644";
     }
 
     pub fn eql(self: Mode, m2: Mode) bool {
@@ -72,8 +74,10 @@ pub fn getMode(meta: std.fs.File.Metadata) Mode {
         else => meta.permissions().inner.unixHas(std.fs.File.PermissionsUnix.Class.user, .execute),
     };
     return .{
-        .unix_permission = if (is_executable) 0o755 else 0o644,
-        .object_type = .regular_file,
+        .content = .{
+            .unix_permission = if (is_executable) 0o755 else 0o644,
+            .object_type = .regular_file,
+        },
     };
 }
 
@@ -179,9 +183,9 @@ pub fn relativePath(allocator: std.mem.Allocator, work_dir: std.fs.Dir, cwd: std
     defer allocator.free(cwd_path);
     const input_path =
         if (std.fs.path.isAbsolute(path))
-        try allocator.dupe(u8, path)
-    else
-        try std.fs.path.resolve(allocator, &.{ cwd_path, path });
+            try allocator.dupe(u8, path)
+        else
+            try std.fs.path.resolve(allocator, &.{ cwd_path, path });
     defer allocator.free(input_path);
 
     // make sure the input path is in the repo

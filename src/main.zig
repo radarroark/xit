@@ -115,7 +115,7 @@ pub fn run(
                 switch (any_repo) {
                     .none => return error.HashKindNotFound,
                     inline else => |*repo| {
-                        const cmd_maybe = try cmd.Command(repo.self_repo_kind, repo.self_repo_opts.hash).init(&cmd_args);
+                        const cmd_maybe = try cmd.Command(repo.self_repo_kind, repo.self_repo_opts.hash).initMaybe(&cmd_args);
                         try runCommand(repo.self_repo_kind, repo.self_repo_opts, repo, allocator, cmd_maybe orelse return error.InvalidCommand, writers);
                     },
                 }

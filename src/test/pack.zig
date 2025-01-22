@@ -35,7 +35,7 @@ test "pack" {
     defer work_dir.close();
 
     // get repo path for libgit
-    var repo_path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
+    var repo_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
     const repo_path: [*c]const u8 = @ptrCast(try work_dir.realpath(".", &repo_path_buffer));
 
     // init repo
@@ -126,7 +126,7 @@ test "pack" {
         var parent_commit: ?*c.git_commit = null;
         try std.testing.expectEqual(0, c.git_commit_lookup(&parent_commit, repo, c.git_object_id(parent_object)));
         defer c.git_commit_free(parent_commit);
-        var parents = [_]?*c.git_commit{parent_commit};
+        var parents = [_]?*const c.git_commit{parent_commit};
 
         // make the commit
         var tree_oid: c.git_oid = undefined;

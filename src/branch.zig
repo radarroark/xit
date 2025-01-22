@@ -130,9 +130,9 @@ pub fn remove(
             defer heads_dir.close();
 
             // get absolute paths
-            var heads_dir_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
+            var heads_dir_buffer = [_]u8{0} ** std.fs.max_path_bytes;
             const heads_dir_path = try heads_dir.realpath(".", &heads_dir_buffer);
-            var ref_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
+            var ref_buffer = [_]u8{0} ** std.fs.max_path_bytes;
             const ref_path = try heads_dir.realpath(input.name, &ref_buffer);
 
             // create lock file for HEAD

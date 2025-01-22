@@ -106,10 +106,10 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                             .oid = try reader.readBytesNoEof(hash.byteLen(repo_opts.hash)),
                             .flags = @bitCast(try reader.readInt(u16, .big)),
                             .extended_flags = null, // TODO: read this if necessary
-                            .path = try reader.readUntilDelimiterAlloc(self.arena.allocator(), 0, std.fs.MAX_PATH_BYTES),
+                            .path = try reader.readUntilDelimiterAlloc(self.arena.allocator(), 0, std.fs.max_path_bytes),
                         };
-                        if (entry.mode.unix_permission != 0o755) { // ensure mode is valid
-                            entry.mode.unix_permission = 0o644;
+                        if (entry.mode.content.unix_permission != 0o755) { // ensure mode is valid
+                            entry.mode.content.unix_permission = 0o644;
                         }
                         if (entry.path.len != entry.flags.name_length) {
                             return error.InvalidPathSize;
@@ -159,8 +159,8 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                                     .extended_flags = null, // TODO: read this if necessary
                                     .path = path,
                                 };
-                                if (entry.mode.unix_permission != 0o755) { // ensure mode is valid
-                                    entry.mode.unix_permission = 0o644;
+                                if (entry.mode.content.unix_permission != 0o755) { // ensure mode is valid
+                                    entry.mode.content.unix_permission = 0o644;
                                 }
                                 if (entry.path.len != entry.flags.name_length) {
                                     return error.InvalidPathSize;
@@ -371,7 +371,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
             file_size: u64,
             stage: u2,
         ) !void {
-            if (tree_entry.mode.object_type != .regular_file) {
+            if (tree_entry.mode.content.object_type != .regular_file) {
                 return error.InvalidObjectKind;
             }
             const path = if (path_parts.len == 0) return error.InvalidPath else try fs.joinPath(self.arena.allocator(), path_parts);

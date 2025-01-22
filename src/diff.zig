@@ -411,153 +411,150 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp
             ins_end: usize,
         };
 
-        fn diff(self: *MyersDiffIterator(repo_kind, repo_opts), start_action: Action) !?Action {
-            var action = start_action;
+        fn diff(self: *MyersDiffIterator(repo_kind, repo_opts), action: Action) !?Action {
             var i = self.i;
             var j = self.j;
             var n = self.n;
             var m = self.m;
             var z = self.z;
 
-            while (true) {
-                switch (action) {
-                    .push => {
-                        z_block: while (n > 0 and m > 0) {
-                            @memset(self.b, 0);
+            action: switch (action) {
+                .push => {
+                    z_block: while (n > 0 and m > 0) {
+                        @memset(self.b, 0);
 
-                            const w = n - m;
-                            const l = n + m;
-                            const parity = l & 1;
-                            const offsetx = i + n - 1;
-                            const offsety = j + m - 1;
-                            const hmax = @as(usize, @intCast(l + parity)) / 2;
-                            var zz: isize = 0;
+                        const w = n - m;
+                        const l = n + m;
+                        const parity = l & 1;
+                        const offsetx = i + n - 1;
+                        const offsety = j + m - 1;
+                        const hmax = @as(usize, @intCast(l + parity)) / 2;
+                        var zz: isize = 0;
 
-                            h_loop: for (0..hmax + 1) |h| {
-                                const hh: isize = @intCast(h);
-                                const kmin: isize = 2 * @max(0, hh - m) - hh;
-                                const kmax: isize = hh - 2 * @max(0, hh - n);
+                        h_loop: for (0..hmax + 1) |h| {
+                            const hh: isize = @intCast(h);
+                            const kmin: isize = 2 * @max(0, hh - m) - hh;
+                            const kmax: isize = hh - 2 * @max(0, hh - n);
 
-                                // forwards
-                                var k: isize = kmin;
-                                while (k <= kmax) {
-                                    defer k += 2;
-                                    const gkm = self.b[@intCast(k - 1 - z * @divFloor(k - 1, z))];
-                                    const gkp = self.b[@intCast(k + 1 - z * @divFloor(k + 1, z))];
-                                    const u = if (k == -hh or (k != hh and gkm < gkp)) gkp else gkm + 1;
-                                    const v = u - k;
-                                    var x = u;
-                                    var y = v;
-                                    while (x < n and y < m and try self.eq(@intCast(i + x), @intCast(j + y))) {
-                                        x += 1;
-                                        y += 1;
-                                    }
-                                    self.b[@intCast(k - z * @divFloor(k, z))] = x;
-                                    zz = w - k;
-                                    if (parity == 1 and zz >= 1 - hh and zz < hh and x + self.b[@intCast(z + zz - z * @divFloor(zz, z))] >= n) {
-                                        if (h > 1 or x != u) {
-                                            try self.stack.append(i + x);
-                                            try self.stack.append(n - x);
-                                            try self.stack.append(j + y);
-                                            try self.stack.append(m - y);
-                                            n = u;
-                                            m = v;
-                                            z = 2 * (@min(n, m) + 1);
-                                            continue :z_block;
-                                        } else break :h_loop;
-                                    }
+                            // forwards
+                            var k: isize = kmin;
+                            while (k <= kmax) {
+                                defer k += 2;
+                                const gkm = self.b[@intCast(k - 1 - z * @divFloor(k - 1, z))];
+                                const gkp = self.b[@intCast(k + 1 - z * @divFloor(k + 1, z))];
+                                const u = if (k == -hh or (k != hh and gkm < gkp)) gkp else gkm + 1;
+                                const v = u - k;
+                                var x = u;
+                                var y = v;
+                                while (x < n and y < m and try self.eq(@intCast(i + x), @intCast(j + y))) {
+                                    x += 1;
+                                    y += 1;
                                 }
-
-                                // backwards
-                                k = kmin;
-                                while (k <= kmax) {
-                                    defer k += 2;
-                                    const pkm = self.b[@intCast(z + k - 1 - z * @divFloor(k - 1, z))];
-                                    const pkp = self.b[@intCast(z + k + 1 - z * @divFloor(k + 1, z))];
-                                    const u = if (k == -hh or (k != hh and pkm < pkp)) pkp else pkm + 1;
-                                    const v = u - k;
-                                    var x = u;
-                                    var y = v;
-                                    while (x < n and y < m and try self.eq(@intCast(offsetx - x), @intCast(offsety - y))) {
-                                        x += 1;
-                                        y += 1;
-                                    }
-                                    self.b[@intCast(z + k - z * @divFloor(k, z))] = x;
-                                    zz = w - k;
-                                    if (parity == 0 and zz >= -hh and zz <= hh and x + self.b[@intCast(zz - z * @divFloor(zz, z))] >= n) {
-                                        if (h > 0 or x != u) {
-                                            try self.stack.append(i + n - u);
-                                            try self.stack.append(u);
-                                            try self.stack.append(j + m - v);
-                                            try self.stack.append(v);
-                                            n = n - x;
-                                            m = m - y;
-                                            z = 2 * (@min(n, m) + 1);
-                                            continue :z_block;
-                                        } else break :h_loop;
-                                    }
+                                self.b[@intCast(k - z * @divFloor(k, z))] = x;
+                                zz = w - k;
+                                if (parity == 1 and zz >= 1 - hh and zz < hh and x + self.b[@intCast(z + zz - z * @divFloor(zz, z))] >= n) {
+                                    if (h > 1 or x != u) {
+                                        try self.stack.append(i + x);
+                                        try self.stack.append(n - x);
+                                        try self.stack.append(j + y);
+                                        try self.stack.append(m - y);
+                                        n = u;
+                                        m = v;
+                                        z = 2 * (@min(n, m) + 1);
+                                        continue :z_block;
+                                    } else break :h_loop;
                                 }
                             }
 
-                            if (n == m) {
-                                continue;
+                            // backwards
+                            k = kmin;
+                            while (k <= kmax) {
+                                defer k += 2;
+                                const pkm = self.b[@intCast(z + k - 1 - z * @divFloor(k - 1, z))];
+                                const pkp = self.b[@intCast(z + k + 1 - z * @divFloor(k + 1, z))];
+                                const u = if (k == -hh or (k != hh and pkm < pkp)) pkp else pkm + 1;
+                                const v = u - k;
+                                var x = u;
+                                var y = v;
+                                while (x < n and y < m and try self.eq(@intCast(offsetx - x), @intCast(offsety - y))) {
+                                    x += 1;
+                                    y += 1;
+                                }
+                                self.b[@intCast(z + k - z * @divFloor(k, z))] = x;
+                                zz = w - k;
+                                if (parity == 0 and zz >= -hh and zz <= hh and x + self.b[@intCast(zz - z * @divFloor(zz, z))] >= n) {
+                                    if (h > 0 or x != u) {
+                                        try self.stack.append(i + n - u);
+                                        try self.stack.append(u);
+                                        try self.stack.append(j + m - v);
+                                        try self.stack.append(v);
+                                        n = n - x;
+                                        m = m - y;
+                                        z = 2 * (@min(n, m) + 1);
+                                        continue :z_block;
+                                    } else break :h_loop;
+                                }
                             }
-                            if (m > n) {
-                                i += n;
-                                j += n;
-                                m -= n;
-                                n = 0;
-                            } else {
-                                i += m;
-                                j += m;
-                                n -= m;
-                                m = 0;
-                            }
-
-                            break;
                         }
 
-                        action = .pop;
+                        if (n == m) {
+                            continue;
+                        }
+                        if (m > n) {
+                            i += n;
+                            j += n;
+                            m -= n;
+                            n = 0;
+                        } else {
+                            i += m;
+                            j += m;
+                            n -= m;
+                            m = 0;
+                        }
 
-                        if (n + m != 0) {
-                            if (self.range_maybe) |*range| {
-                                if (range.del_end == i or range.ins_end == j) {
-                                    range.del_end = @intCast(i + n);
-                                    range.ins_end = @intCast(j + m);
-                                    continue;
-                                }
-                            }
+                        break;
+                    }
 
-                            const range_maybe = self.range_maybe;
-                            self.range_maybe = .{
-                                .del_start = @intCast(i),
-                                .del_end = @intCast(i + n),
-                                .ins_start = @intCast(j),
-                                .ins_end = @intCast(j + m),
-                            };
-
-                            if (range_maybe) |range| {
-                                self.deferred_range = range;
-                                self.i = i;
-                                self.n = n;
-                                self.j = j;
-                                self.m = m;
-                                self.z = z;
-                                return .pop;
+                    if (n + m != 0) {
+                        if (self.range_maybe) |*range| {
+                            if (range.del_end == i or range.ins_end == j) {
+                                range.del_end = @intCast(i + n);
+                                range.ins_end = @intCast(j + m);
+                                continue :action .pop;
                             }
                         }
-                    },
-                    .pop => {
-                        if (self.stack.items.len == 0) return null;
 
-                        m = self.stack.pop();
-                        j = self.stack.pop();
-                        n = self.stack.pop();
-                        i = self.stack.pop();
-                        z = 2 * (@min(n, m) + 1);
-                        action = .push;
-                    },
-                }
+                        const range_maybe = self.range_maybe;
+                        self.range_maybe = .{
+                            .del_start = @intCast(i),
+                            .del_end = @intCast(i + n),
+                            .ins_start = @intCast(j),
+                            .ins_end = @intCast(j + m),
+                        };
+
+                        if (range_maybe) |range| {
+                            self.deferred_range = range;
+                            self.i = i;
+                            self.n = n;
+                            self.j = j;
+                            self.m = m;
+                            self.z = z;
+                            return .pop;
+                        }
+                    }
+
+                    continue :action .pop;
+                },
+                .pop => {
+                    if (self.stack.items.len == 0) return null;
+
+                    m = self.stack.pop() orelse unreachable;
+                    j = self.stack.pop() orelse unreachable;
+                    n = self.stack.pop() orelse unreachable;
+                    i = self.stack.pop() orelse unreachable;
+                    z = 2 * (@min(n, m) + 1);
+                    continue :action .push;
+                },
             }
         }
 
@@ -1067,7 +1064,7 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
 
             if (line_iter_a.mode) |a_mode| {
                 if (line_iter_b.mode) |b_mode| {
-                    if (a_mode.unix_permission != b_mode.unix_permission) {
+                    if (a_mode.content.unix_permission != b_mode.content.unix_permission) {
                         try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "old mode {s}", .{a_mode.toStr()}));
                         try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "new mode {s}", .{b_mode.toStr()}));
                     } else {

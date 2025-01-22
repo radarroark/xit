@@ -15,7 +15,7 @@ pub fn TreeEntry(comptime hash_kind: hash.HashKind) type {
         }
 
         pub fn isTree(self: TreeEntry(hash_kind)) bool {
-            return self.mode.object_type == .tree;
+            return self.mode.content.object_type == .tree;
         }
     };
 }

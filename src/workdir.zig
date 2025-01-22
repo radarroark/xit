@@ -441,7 +441,7 @@ pub fn objectToFile(
 ) !void {
     const oid_hex = std.fmt.bytesToHex(tree_entry.oid, .lower);
 
-    switch (tree_entry.mode.object_type) {
+    switch (tree_entry.mode.content.object_type) {
         .regular_file => {
             // open the reader
             var obj_rdr = try obj.ObjectReader(repo_kind, repo_opts).init(allocator, state, &oid_hex);
@@ -455,7 +455,7 @@ pub fn objectToFile(
             // open the out file
             const out_flags: std.fs.File.CreateFlags = switch (builtin.os.tag) {
                 .windows => .{},
-                else => .{ .mode = @as(u32, @bitCast(tree_entry.mode)) },
+                else => .{ .mode = @as(u16, @bitCast(tree_entry.mode.content)) },
             };
             const out_file = try state.core.work_dir.createFile(path, out_flags);
             defer out_file.close();

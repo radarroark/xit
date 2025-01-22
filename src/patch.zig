@@ -14,7 +14,7 @@ pub fn LineId(comptime hash_kind: hash.HashKind) type {
         line: u64,
         patch_id: hash.HashInt(hash_kind),
 
-        pub const Int = @typeInfo(LineId(hash_kind)).Struct.backing_integer.?;
+        pub const Int = @typeInfo(LineId(hash_kind)).@"struct".backing_integer.?;
         pub const byte_size = @bitSizeOf(LineId(hash_kind)) / 8;
         pub const first_int: Int = 0;
         pub const first_bytes: [byte_size]u8 = [_]u8{0} ** byte_size;

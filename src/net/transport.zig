@@ -132,11 +132,11 @@ pub fn Transport(
 }
 
 const transports = std.StaticStringMap(TransportDefinition).initComptime(.{
-    .{ "git://", .{ .wire = .raw } },
-    .{ "http://", .{ .wire = .http } },
-    .{ "https://", .{ .wire = .http } },
-    .{ "file://", .file },
-    .{ "ssh://", .{ .wire = .ssh } },
+    .{ "git://", TransportDefinition{ .wire = .raw } },
+    .{ "http://", TransportDefinition{ .wire = .http } },
+    .{ "https://", TransportDefinition{ .wire = .http } },
+    .{ "file://", TransportDefinition.file },
+    .{ "ssh://", TransportDefinition{ .wire = .ssh } },
 });
 
 pub const TransportDefinition = union(TransportKind) {

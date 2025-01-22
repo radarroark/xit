@@ -213,7 +213,7 @@ pub fn StatusTabs(comptime Widget: type, comptime repo_kind: rp.RepoKind, compti
         arena: *std.heap.ArenaAllocator,
         allocator: std.mem.Allocator,
 
-        const tab_count = @typeInfo(work.IndexStatusKind).Enum.fields.len;
+        const tab_count = @typeInfo(work.IndexStatusKind).@"enum".fields.len;
 
         pub fn init(allocator: std.mem.Allocator, status: *work.Status(repo_kind, repo_opts)) !StatusTabs(Widget, repo_kind, repo_opts) {
             var box = try wgt.Box(Widget).init(allocator, null, .horiz);
@@ -234,7 +234,7 @@ pub fn StatusTabs(comptime Widget: type, comptime repo_kind: rp.RepoKind, compti
 
             var selected_maybe: ?work.IndexStatusKind = null;
 
-            inline for (@typeInfo(work.IndexStatusKind).Enum.fields, 0..) |field, i| {
+            inline for (@typeInfo(work.IndexStatusKind).@"enum".fields, 0..) |field, i| {
                 const index_kind: work.IndexStatusKind = @enumFromInt(field.value);
                 if (selected_maybe == null and counts[i] > 0) {
                     selected_maybe = index_kind;
@@ -370,7 +370,7 @@ pub fn StatusContent(comptime Widget: type, comptime repo_kind: rp.RepoKind, com
             var box = try wgt.Box(Widget).init(allocator, null, .horiz);
             errdefer box.deinit();
 
-            inline for (@typeInfo(FocusKind).Enum.fields) |focus_kind_field| {
+            inline for (@typeInfo(FocusKind).@"enum".fields) |focus_kind_field| {
                 const focus_kind: FocusKind = @enumFromInt(focus_kind_field.value);
                 switch (focus_kind) {
                     .status_list => {
@@ -544,7 +544,7 @@ pub fn Status(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime r
             var box = try wgt.Box(Widget).init(allocator, null, .vert);
             errdefer box.deinit();
 
-            inline for (@typeInfo(FocusKind).Enum.fields) |focus_kind_field| {
+            inline for (@typeInfo(FocusKind).@"enum".fields) |focus_kind_field| {
                 const focus_kind: FocusKind = @enumFromInt(focus_kind_field.value);
                 switch (focus_kind) {
                     .status_tabs => {
@@ -556,7 +556,7 @@ pub fn Status(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime r
                         var stack = wgt.Stack(Widget).init(allocator);
                         errdefer stack.deinit();
 
-                        inline for (@typeInfo(work.IndexStatusKind).Enum.fields) |index_kind_field| {
+                        inline for (@typeInfo(work.IndexStatusKind).@"enum".fields) |index_kind_field| {
                             const index_kind: work.IndexStatusKind = @enumFromInt(index_kind_field.value);
                             var status_content = try StatusContent(Widget, repo_kind, repo_opts).init(allocator, repo, status_ptr, index_kind);
                             errdefer status_content.deinit();

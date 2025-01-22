@@ -1,14 +1,14 @@
 .{
-    .name = "xit",
+    .name = .xit,
     .version = "0.0.0",
     .dependencies = .{
         .xitdb = .{
-            .url = "git+https://github.com/radarroark/xitdb#1cf5fa7db86c5717376f8ccc0f869568fa55ec40",
-            .hash = "122031b6a49f3cd25a41e836fd76b260d247c60b0db0de1d3e58238c89889b1cc908",
+            .url = "git+https://github.com/radarroark/xitdb#3e6004cb05c682c81d82c16114861f406837d7ec",
+            .hash = "xitdb-0.0.0-EEFkxttHAwAhxvrEGl479YF4R2SJ4NyThHIt1Lahk3Za",
         },
         .xitui = .{
-            .url = "git+https://github.com/radarroark/xitui#41ad3e53ec75bdc3d46908645f47e2284b890859",
-            .hash = "12208157611514822a7752c6d5a7eaa510e949fa5df7d36f4d539546395b79014409",
+            .url = "git+https://github.com/radarroark/xitui#c0e2c98fff436ddffb98d02f7f5063d7cc5b73a5",
+            .hash = "xitui-0.0.0--YPVyPf3AABml4I5Jx5R-m30P2F77yQUei_W01MW6Wmz",
         },
     },
     .paths = .{
@@ -18,4 +18,5 @@
         "src",
         "LICENSE",
     },
+    .fingerprint = 0x46f485310ce7bd51,
 }

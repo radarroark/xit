@@ -341,11 +341,11 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
                                             try process.stdin.?.writeAll(request_body);
                                         }
 
-                                        var stdout = std.ArrayList(u8).init(core.allocator);
-                                        defer stdout.deinit();
-                                        var stderr = std.ArrayList(u8).init(core.allocator);
-                                        defer stderr.deinit();
-                                        try process.collectOutput(&stdout, &stderr, 1024 * 1024);
+                                        var stdout = std.ArrayListUnmanaged(u8){};
+                                        defer stdout.deinit(core.allocator);
+                                        var stderr = std.ArrayListUnmanaged(u8){};
+                                        defer stderr.deinit(core.allocator);
+                                        try process.collectOutput(core.allocator, &stdout, &stderr, 1024 * 1024);
 
                                         _ = try process.wait();
 
@@ -457,7 +457,7 @@ fn testFetch(
     // add remote
     {
         // get repo path
-        var repo_path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
+        var repo_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
         const repo_path = try server_dir.realpath(".", &repo_path_buffer);
 
         if (.windows == builtin.os.tag) {
@@ -509,11 +509,11 @@ fn testFetch(
         .{ .refspecs = refspecs, .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
     ) catch |err| {
         if (false) {
-            var stdout = std.ArrayList(u8).init(allocator);
-            defer stdout.deinit();
-            var stderr = std.ArrayList(u8).init(allocator);
-            defer stderr.deinit();
-            try server.core.process.collectOutput(&stdout, &stderr, 1024 * 1024);
+            var stdout = std.ArrayListUnmanaged(u8){};
+            defer stdout.deinit(allocator);
+            var stderr = std.ArrayListUnmanaged(u8){};
+            defer stderr.deinit(allocator);
+            try server.core.process.collectOutput(allocator, &stdout, &stderr, 1024 * 1024);
             if (stdout.items.len > 0) std.debug.print("server output:\n{s}\n", .{stdout.items});
             if (stderr.items.len > 0) std.debug.print("server error:\n{s}\n", .{stderr.items});
         }
@@ -556,11 +556,11 @@ fn testFetch(
         .{ .refspecs = refspecs, .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
     ) catch |err| {
         if (false) {
-            var stdout = std.ArrayList(u8).init(allocator);
-            defer stdout.deinit();
-            var stderr = std.ArrayList(u8).init(allocator);
-            defer stderr.deinit();
-            try server.core.process.collectOutput(&stdout, &stderr, 1024 * 1024);
+            var stdout = std.ArrayListUnmanaged(u8){};
+            defer stdout.deinit(allocator);
+            var stderr = std.ArrayListUnmanaged(u8){};
+            defer stderr.deinit(allocator);
+            try server.core.process.collectOutput(allocator, &stdout, &stderr, 1024 * 1024);
             if (stdout.items.len > 0) std.debug.print("server output:\n{s}\n", .{stdout.items});
             if (stderr.items.len > 0) std.debug.print("server error:\n{s}\n", .{stderr.items});
         }
@@ -650,7 +650,7 @@ fn testPush(
     // add remote
     {
         // get repo path
-        var repo_path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
+        var repo_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
         const repo_path = try server_dir.realpath(".", &repo_path_buffer);
 
         if (.windows == builtin.os.tag) {
@@ -698,11 +698,11 @@ fn testPush(
         .{ .refspecs = refspecs, .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
     ) catch |err| {
         if (false) {
-            var stdout = std.ArrayList(u8).init(allocator);
-            defer stdout.deinit();
-            var stderr = std.ArrayList(u8).init(allocator);
-            defer stderr.deinit();
-            try server.core.process.collectOutput(&stdout, &stderr, 1024 * 1024);
+            var stdout = std.ArrayListUnmanaged(u8){};
+            defer stdout.deinit(allocator);
+            var stderr = std.ArrayListUnmanaged(u8){};
+            defer stderr.deinit(allocator);
+            try server.core.process.collectOutput(allocator, &stdout, &stderr, 1024 * 1024);
             if (stdout.items.len > 0) std.debug.print("server output:\n{s}\n", .{stdout.items});
             if (stderr.items.len > 0) std.debug.print("server error:\n{s}\n", .{stderr.items});
         }
@@ -739,11 +739,11 @@ fn testPush(
         .{ .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
     ) catch |err| {
         if (false) {
-            var stdout = std.ArrayList(u8).init(allocator);
-            defer stdout.deinit();
-            var stderr = std.ArrayList(u8).init(allocator);
-            defer stderr.deinit();
-            try server.core.process.collectOutput(&stdout, &stderr, 1024 * 1024);
+            var stdout = std.ArrayListUnmanaged(u8){};
+            defer stdout.deinit(allocator);
+            var stderr = std.ArrayListUnmanaged(u8){};
+            defer stderr.deinit(allocator);
+            try server.core.process.collectOutput(allocator, &stdout, &stderr, 1024 * 1024);
             if (stdout.items.len > 0) std.debug.print("server output:\n{s}\n", .{stdout.items});
             if (stderr.items.len > 0) std.debug.print("server error:\n{s}\n", .{stderr.items});
         }
@@ -770,11 +770,11 @@ fn testPush(
         .{ .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
     ) catch |err| {
         if (false) {
-            var stdout = std.ArrayList(u8).init(allocator);
-            defer stdout.deinit();
-            var stderr = std.ArrayList(u8).init(allocator);
-            defer stderr.deinit();
-            try server.core.process.collectOutput(&stdout, &stderr, 1024 * 1024);
+            var stdout = std.ArrayListUnmanaged(u8){};
+            defer stdout.deinit(allocator);
+            var stderr = std.ArrayListUnmanaged(u8){};
+            defer stderr.deinit(allocator);
+            try server.core.process.collectOutput(allocator, &stdout, &stderr, 1024 * 1024);
             if (stdout.items.len > 0) std.debug.print("server output:\n{s}\n", .{stdout.items});
             if (stderr.items.len > 0) std.debug.print("server error:\n{s}\n", .{stderr.items});
         }
@@ -840,7 +840,7 @@ fn testClone(
     // get remote url
     const remote_url = blk: {
         // get repo path
-        var repo_path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
+        var repo_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
         const repo_path = try server_dir.realpath(".", &repo_path_buffer);
 
         if (.windows == builtin.os.tag) {
@@ -859,8 +859,8 @@ fn testClone(
     };
     defer allocator.free(remote_url);
 
-    var repo_path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
-    const repo_path: []const u8 = @ptrCast(try client_dir.realpath(".", &repo_path_buffer));
+    var repo_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
+    const repo_path = try client_dir.realpath(".", &repo_path_buffer);
 
     const is_ssh = switch (transport_def) {
         .file => false,
@@ -886,11 +886,11 @@ fn testClone(
         .{ .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
     ) catch |err| {
         if (false) {
-            var stdout = std.ArrayList(u8).init(allocator);
-            defer stdout.deinit();
-            var stderr = std.ArrayList(u8).init(allocator);
-            defer stderr.deinit();
-            try server.core.process.collectOutput(&stdout, &stderr, 1024 * 1024);
+            var stdout = std.ArrayListUnmanaged(u8){};
+            defer stdout.deinit(allocator);
+            var stderr = std.ArrayListUnmanaged(u8){};
+            defer stderr.deinit(allocator);
+            try server.core.process.collectOutput(allocator, &stdout, &stderr, 1024 * 1024);
             if (stdout.items.len > 0) std.debug.print("server output:\n{s}\n", .{stdout.items});
             if (stderr.items.len > 0) std.debug.print("server error:\n{s}\n", .{stderr.items});
         }

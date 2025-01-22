@@ -334,7 +334,7 @@ fn commandHelp(command_kind: CommandKind) Help {
 pub fn printHelp(cmd_kind_maybe: ?CommandKind, writer: std.io.AnyWriter) !void {
     const print_indent = comptime blk: {
         var indent = 0;
-        for (0..@typeInfo(CommandKind).Enum.fields.len) |i| {
+        for (0..@typeInfo(CommandKind).@"enum".fields.len) |i| {
             indent = @max(commandHelp(@enumFromInt(i)).name.len, indent);
         }
         indent += 2;
@@ -361,7 +361,7 @@ pub fn printHelp(cmd_kind_maybe: ?CommandKind, writer: std.io.AnyWriter) !void {
         }
     } else {
         try writer.print("help: xit <command> [<args>]\n\n", .{});
-        inline for (@typeInfo(CommandKind).Enum.fields) |field| {
+        inline for (@typeInfo(CommandKind).@"enum".fields) |field| {
             const help = commandHelp(@enumFromInt(field.value));
             // name and description
             try writer.print("{s}", .{help.name});
@@ -441,7 +441,7 @@ pub const CommandArgs = struct {
             const command_name = args_slice[0];
             const extra_args = args_slice[1..];
 
-            const command_kind: ?CommandKind = inline for (0..@typeInfo(CommandKind).Enum.fields.len) |i| {
+            const command_kind: ?CommandKind = inline for (0..@typeInfo(CommandKind).@"enum".fields.len) |i| {
                 if (std.mem.eql(u8, command_name, commandHelp(@enumFromInt(i)).name)) {
                     break @enumFromInt(i);
                 }
@@ -528,7 +528,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
             refspec: []const u8,
         },
 
-        pub fn init(cmd_args: *CommandArgs) !?Command(repo_kind, hash_kind) {
+        pub fn initMaybe(cmd_args: *CommandArgs) !?Command(repo_kind, hash_kind) {
             const command_kind = cmd_args.command_kind orelse return null;
             switch (command_kind) {
                 .init => {
@@ -885,7 +885,7 @@ pub fn CommandDispatch(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash
                     else => false,
                 }) {
                     return .{ .tui = command_kind };
-                } else if (try Command(repo_kind, hash_kind).init(cmd_args)) |cmd| {
+                } else if (try Command(repo_kind, hash_kind).initMaybe(cmd_args)) |cmd| {
                     return .{ .cli = cmd };
                 } else {
                     return .{ .help = command_kind };
