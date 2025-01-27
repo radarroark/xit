@@ -60,15 +60,18 @@ pub const CommandArgs = struct {
                 const keys = map_args.keys();
                 if (keys.len > 0) {
                     const last_key = keys[keys.len - 1];
-                    const last_val = map_args.get(last_key);
-                    // if there isn't a spot for this arg in the map,
-                    // it is a positional arg
-                    if (last_val == null or last_val.? != null) {
+                    const last_val_maybe = map_args.get(last_key);
+                    if (last_val_maybe) |last_val| {
+                        // if the last key doesn't have a value yet, add it
+                        if (last_val == null) {
+                            try map_args.put(last_key, arg);
+                        }
+                        // otherwise, it's a positional arg
+                        else {
+                            try positional_args.append(arg);
+                        }
+                    } else {
                         try positional_args.append(arg);
-                    }
-                    // otherwise put it in the map
-                    else if (last_val.? == null) {
-                        try map_args.put(last_key, arg);
                     }
                 } else {
                     try positional_args.append(arg);
