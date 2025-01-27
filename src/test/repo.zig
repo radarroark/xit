@@ -158,7 +158,7 @@ fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
         defer result.deinit();
     }
     const commit_j = blk: {
-        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{rf.RefOrOid(repo_opts.hash).initFromUser("foo")} } } });
+        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .local, .name = "foo" } }} } } });
         defer merge.deinit();
         try std.testing.expect(.success == merge.result);
         break :blk merge.result.success.oid;
@@ -180,7 +180,7 @@ fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 
     // if we try merging foo again, it does nothing
     {
-        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{rf.RefOrOid(repo_opts.hash).initFromUser("foo")} } } });
+        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .local, .name = "foo" } }} } } });
         defer merge.deinit();
         try std.testing.expect(.nothing == merge.result);
     }
@@ -189,7 +189,7 @@ fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
     {
         var switch_result = try repo.switchHead(allocator, .{ .head = .{ .replace = .{ .ref = .{ .kind = .local, .name = "foo" } } } });
         defer switch_result.deinit();
-        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{rf.RefOrOid(repo_opts.hash).initFromUser("master")} } } });
+        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .local, .name = "master" } }} } } });
         defer merge.deinit();
         try std.testing.expect(.fast_forward == merge.result);
 
@@ -229,7 +229,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         fn run(repo: *rp.Repo(repo_kind, repo_opts)) !void {
             // can't merge again with an unresolved merge
             {
-                var result_or_err = repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{rf.RefOrOid(repo_opts.hash).initFromUser("foo")} } } });
+                var result_or_err = repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .local, .name = "foo" } }} } } });
                 if (result_or_err) |*result| {
                     defer result.deinit();
                     return error.ExpectedMergeToAbort;
@@ -299,7 +299,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             defer result.deinit();
         }
         {
-            var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{rf.RefOrOid(repo_opts.hash).initFromUser("foo")} } } });
+            var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .local, .name = "foo" } }} } } });
             defer merge.deinit();
             try std.testing.expect(.conflict == merge.result);
 
@@ -356,7 +356,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
 
         // if we try merging foo again, it does nothing
         {
-            var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{rf.RefOrOid(repo_opts.hash).initFromUser("foo")} } } });
+            var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .local, .name = "foo" } }} } } });
             defer merge.deinit();
             try std.testing.expect(.nothing == merge.result);
         }
@@ -408,7 +408,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             defer result.deinit();
         }
         {
-            var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{rf.RefOrOid(repo_opts.hash).initFromUser("foo")} } } });
+            var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .local, .name = "foo" } }} } } });
             defer merge.deinit();
             try std.testing.expect(.success == merge.result);
 
@@ -443,7 +443,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
 
         // if we try merging foo again, it does nothing
         {
-            var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{rf.RefOrOid(repo_opts.hash).initFromUser("foo")} } } });
+            var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .local, .name = "foo" } }} } } });
             defer merge.deinit();
             try std.testing.expect(.nothing == merge.result);
         }
@@ -483,7 +483,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             defer result.deinit();
         }
         {
-            var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{rf.RefOrOid(repo_opts.hash).initFromUser("foo")} } } });
+            var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .local, .name = "foo" } }} } } });
             defer merge.deinit();
             try std.testing.expect(.conflict == merge.result);
         }
@@ -518,7 +518,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
 
         // if we try merging foo again, it does nothing
         {
-            var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{rf.RefOrOid(repo_opts.hash).initFromUser("foo")} } } });
+            var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .local, .name = "foo" } }} } } });
             defer merge.deinit();
             try std.testing.expect(.nothing == merge.result);
         }
@@ -558,7 +558,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             defer result.deinit();
         }
         {
-            var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{rf.RefOrOid(repo_opts.hash).initFromUser("foo")} } } });
+            var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .local, .name = "foo" } }} } } });
             defer merge.deinit();
             try std.testing.expect(.conflict == merge.result);
         }
@@ -591,7 +591,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
 
         // if we try merging foo again, it does nothing
         {
-            var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{rf.RefOrOid(repo_opts.hash).initFromUser("foo")} } } });
+            var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .local, .name = "foo" } }} } } });
             defer merge.deinit();
             try std.testing.expect(.nothing == merge.result);
         }
@@ -631,7 +631,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             defer result.deinit();
         }
         {
-            var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{rf.RefOrOid(repo_opts.hash).initFromUser("foo")} } } });
+            var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .local, .name = "foo" } }} } } });
             defer merge.deinit();
             try std.testing.expect(.conflict == merge.result);
         }
@@ -670,7 +670,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
 
         // if we try merging foo again, it does nothing
         {
-            var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{rf.RefOrOid(repo_opts.hash).initFromUser("foo")} } } });
+            var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .local, .name = "foo" } }} } } });
             defer merge.deinit();
             try std.testing.expect(.nothing == merge.result);
         }
@@ -710,7 +710,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             defer result.deinit();
         }
         {
-            var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{rf.RefOrOid(repo_opts.hash).initFromUser("foo")} } } });
+            var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .local, .name = "foo" } }} } } });
             defer merge.deinit();
             try std.testing.expect(.conflict == merge.result);
         }
@@ -747,7 +747,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
 
         // if we try merging foo again, it does nothing
         {
-            var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{rf.RefOrOid(repo_opts.hash).initFromUser("foo")} } } });
+            var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .local, .name = "foo" } }} } } });
             defer merge.deinit();
             try std.testing.expect(.nothing == merge.result);
         }
@@ -830,7 +830,7 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind, comptime repo_op
     _ = try repo.commit(allocator, .{ .message = "b" });
 
     {
-        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{rf.RefOrOid(repo_opts.hash).initFromUser("foo")} } } });
+        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .local, .name = "foo" } }} } } });
         defer merge.deinit();
         try std.testing.expect(.conflict == merge.result);
     }
@@ -858,7 +858,7 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind, comptime repo_op
 
     // if we try merging foo again, it does nothing
     {
-        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{rf.RefOrOid(repo_opts.hash).initFromUser("foo")} } } });
+        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .local, .name = "foo" } }} } } });
         defer merge.deinit();
         try std.testing.expect(.nothing == merge.result);
     }
@@ -965,7 +965,7 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
             defer result.deinit();
         }
         {
-            var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{rf.RefOrOid(repo_opts.hash).initFromUser("foo")} } } });
+            var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .local, .name = "foo" } }} } } });
             defer merge.deinit();
             try std.testing.expect(.success == merge.result);
 
@@ -1017,7 +1017,7 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
 
         // if we try merging foo again, it does nothing
         {
-            var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{rf.RefOrOid(repo_opts.hash).initFromUser("foo")} } } });
+            var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .local, .name = "foo" } }} } } });
             defer merge.deinit();
             try std.testing.expect(.nothing == merge.result);
         }
@@ -1118,7 +1118,7 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
             defer result.deinit();
         }
         {
-            var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{rf.RefOrOid(repo_opts.hash).initFromUser("foo")} } } });
+            var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .local, .name = "foo" } }} } } });
             defer merge.deinit();
 
             const f_txt = try repo.core.repo_dir.openFile("f.txt", .{ .mode = .read_only });
@@ -1496,7 +1496,7 @@ fn testLog(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo
         defer result.deinit();
     }
     const commit_g = blk: {
-        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{rf.RefOrOid(repo_opts.hash).initFromUser("foo")} } } });
+        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .local, .name = "foo" } }} } } });
         defer merge.deinit();
         try std.testing.expect(.success == merge.result);
         break :blk merge.result.success.oid;

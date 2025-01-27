@@ -1077,7 +1077,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
         try std.testing.expectEqual(commit2, try rf.readHead(repo_kind, repo_opts, state));
-        try std.testing.expectEqual(commit2, try rf.readRecur(repo_kind, repo_opts, state, rf.RefOrOid(repo_opts.hash).initFromUser("stuff")));
+        try std.testing.expectEqual(commit2, try rf.readRecur(repo_kind, repo_opts, state, .{ .ref = .{ .kind = .local, .name = "stuff" } }));
     }
 
     // list all branches
@@ -1214,7 +1214,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-        try std.testing.expectEqual(commit3, try rf.readRecur(repo_kind, repo_opts, state, rf.RefOrOid(repo_opts.hash).initFromUser("master")));
+        try std.testing.expectEqual(commit3, try rf.readRecur(repo_kind, repo_opts, state, .{ .ref = .{ .kind = .local, .name = "master" } }));
     }
 
     // log
