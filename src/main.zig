@@ -65,8 +65,11 @@ const USAGE =
     \\              (list branches)
     \\                  xit branch list
     \\
-    \\switch        Switch branches
+    \\switch        Switch working tree to a branch or commit id
+    \\              (switch to branch)
     \\                  xit switch mybranch
+    \\              (switch to commit id)
+    \\                  xit switch --detach a1b2c3...
     \\
     \\restore       Restore working tree files
     \\                  xit restore myfile.txt

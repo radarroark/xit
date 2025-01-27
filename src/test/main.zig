@@ -648,7 +648,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     }
 
     // switch to first commit
-    try main.run(repo_kind, repo_opts, allocator, &.{ "switch", &commit1 }, repo_dir, .{});
+    try main.run(repo_kind, repo_opts, allocator, &.{ "switch", "--detach", &commit1 }, repo_dir, .{});
 
     // the working tree was updated
     {

@@ -281,11 +281,32 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                     return .{ .branch = cmd };
                 },
                 .switch_head => {
-                    if (cmd_args.positional_args.len != 1) return null;
-
-                    return .{
-                        .switch_head = .{ .head = .{ .replace = rf.RefOrOid(hash_kind).initFromUser(cmd_args.positional_args[0]) } },
+                    const ref_or_oid: rf.RefOrOid(hash_kind) = blk: {
+                        if (cmd_args.map_args.get("--detach")) |oid_maybe| {
+                            if (oid_maybe) |oid| {
+                                if (oid.len == hash.hexLen(hash_kind)) {
+                                    break :blk .{ .oid = oid[0..comptime hash.hexLen(hash_kind)] };
+                                } else {
+                                    return error.InvalidObjectId;
+                                }
+                            } else if (cmd_args.positional_args.len == 1) {
+                                const oid = cmd_args.positional_args[0];
+                                if (oid.len == hash.hexLen(hash_kind)) {
+                                    break :blk .{ .oid = oid[0..comptime hash.hexLen(hash_kind)] };
+                                } else {
+                                    return error.InvalidObjectId;
+                                }
+                            } else {
+                                return null;
+                            }
+                        } else if (cmd_args.positional_args.len == 1) {
+                            break :blk .{ .ref = .{ .kind = .local, .name = cmd_args.positional_args[0] } };
+                        } else {
+                            return null;
+                        }
                     };
+
+                    return .{ .switch_head = .{ .head = .{ .replace = ref_or_oid } } };
                 },
                 .restore => {
                     if (cmd_args.positional_args.len != 1) return null;
