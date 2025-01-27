@@ -95,9 +95,14 @@ pub fn RefOrOid(comptime hash_kind: hash.HashKind) type {
             }
         }
 
-        pub fn initFromUser(content: []const u8) RefOrOid(hash_kind) {
-            if (isOid(content)) {
-                return .{ .oid = content[0..comptime hash.hexLen(hash_kind)] };
+        pub fn initFromUser(content: []const u8) ?RefOrOid(hash_kind) {
+            if (content[0] == ':') {
+                const oid = content[1..];
+                if (isOid(oid)) {
+                    return .{ .oid = oid[0..comptime hash.hexLen(hash_kind)] };
+                } else {
+                    return null;
+                }
             } else {
                 return .{ .ref = .{ .kind = .local, .name = content } };
             }

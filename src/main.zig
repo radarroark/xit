@@ -69,7 +69,7 @@ const USAGE =
     \\              (switch to branch)
     \\                  xit switch mybranch
     \\              (switch to commit id)
-    \\                  xit switch --detach a1b2c3...
+    \\                  xit switch :a1b2c3...
     \\
     \\restore       Restore working tree files
     \\                  xit restore myfile.txt
@@ -81,11 +81,13 @@ const USAGE =
     \\                  xit log --cli
     \\
     \\merge         Join two or more development histories together
+    \\              (merge branch)
     \\                  xit merge mybranch
+    \\              (merge commit id)
+    \\                  xit merge :a1b2c3...
     \\
     \\cherry-pick   Apply the changes introduced by an existing commit
-    \\              (must be the entire oid for now)
-    \\                  xit cherry-pick a1b2c3...
+    \\                  xit cherry-pick :a1b2c3...
     \\
     \\config        Add, remove, and list config options
     \\              (add config)

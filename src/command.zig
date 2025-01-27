@@ -281,32 +281,10 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                     return .{ .branch = cmd };
                 },
                 .switch_head => {
-                    const ref_or_oid: rf.RefOrOid(hash_kind) = blk: {
-                        if (cmd_args.map_args.get("--detach")) |oid_maybe| {
-                            if (oid_maybe) |oid| {
-                                if (oid.len == hash.hexLen(hash_kind)) {
-                                    break :blk .{ .oid = oid[0..comptime hash.hexLen(hash_kind)] };
-                                } else {
-                                    return error.InvalidObjectId;
-                                }
-                            } else if (cmd_args.positional_args.len == 1) {
-                                const oid = cmd_args.positional_args[0];
-                                if (oid.len == hash.hexLen(hash_kind)) {
-                                    break :blk .{ .oid = oid[0..comptime hash.hexLen(hash_kind)] };
-                                } else {
-                                    return error.InvalidObjectId;
-                                }
-                            } else {
-                                return null;
-                            }
-                        } else if (cmd_args.positional_args.len == 1) {
-                            break :blk .{ .ref = .{ .kind = .local, .name = cmd_args.positional_args[0] } };
-                        } else {
-                            return null;
-                        }
-                    };
+                    if (cmd_args.positional_args.len != 1) return null;
+                    const target = cmd_args.positional_args[0];
 
-                    return .{ .switch_head = .{ .head = .{ .replace = ref_or_oid } } };
+                    return .{ .switch_head = .{ .head = .{ .replace = rf.RefOrOid(hash_kind).initFromUser(target) orelse return null } } };
                 },
                 .restore => {
                     if (cmd_args.positional_args.len != 1) return null;
@@ -335,7 +313,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                     else blk: {
                         var source = std.ArrayList(rf.RefOrOid(hash_kind)).init(cmd_args.arena.allocator());
                         for (cmd_args.positional_args) |arg| {
-                            try source.append(rf.RefOrOid(hash_kind).initFromUser(arg));
+                            try source.append(rf.RefOrOid(hash_kind).initFromUser(arg) orelse return null);
                         }
                         break :blk .{ .new = .{ .source = try source.toOwnedSlice() } };
                     };
