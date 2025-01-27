@@ -1368,11 +1368,6 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                         else => return error.OctopusMergeNotYetSupported,
                     };
 
-                    // cherry-picking requires an oid
-                    if (merge_input.kind == .pick and source_ref_or_oid != .oid) {
-                        return error.OidRequired;
-                    }
-
                     // make sure there is no unfinished merge in progress
                     switch (repo_kind) {
                         .git => {
