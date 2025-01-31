@@ -163,6 +163,21 @@ pub fn run(
                         repo_opts;
                     var repo = try rp.Repo(repo_kind, new_repo_opts).init(allocator, .{ .cwd = cwd }, init_cmd.dir);
                     defer repo.deinit();
+
+                    // add default user config
+                    try repo.addConfig(allocator, .{ .name = "user.name", .value = "fixme" });
+                    try repo.addConfig(allocator, .{ .name = "user.email", .value = "fix@me" });
+
+                    try writers.out.print(
+                        \\congrats, you just created a new repo! aren't you special.
+                        \\try setting a few config values. if you're too lazy, the
+                        \\default ones will be used, and you'll be like one of those
+                        \\low-effort people who make slides with times new roman font.
+                        \\
+                        \\    xit config add user.name foo
+                        \\    xit config add user.email foo@bar
+                        \\
+                    , .{});
                 },
                 else => {
                     if (.none == repo_opts.hash) {
