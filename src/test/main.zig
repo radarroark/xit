@@ -1328,7 +1328,6 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             defer config.deinit();
 
             const user_section = config.sections.get("user").?;
-            try std.testing.expectEqual(1, user_section.count());
             try std.testing.expectEqualStrings("radar roark", user_section.get("name").?);
         }
 

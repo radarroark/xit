@@ -10,6 +10,7 @@ const fs = @import("./fs.zig");
 const rp = @import("./repo.zig");
 const pack = @import("./pack.zig");
 const chunk = @import("./chunk.zig");
+const cfg = @import("./config.zig");
 
 pub const Tree = struct {
     entries: std.StringArrayHashMap([]const u8),
@@ -269,31 +270,38 @@ pub fn CommitMetadata(comptime hash_kind: hash.HashKind) type {
 fn createCommitContents(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
+    state: rp.Repo(repo_kind, repo_opts).State(.read_only),
     allocator: std.mem.Allocator,
     tree_hash_hex: *const [hash.hexLen(repo_opts.hash)]u8,
     metadata: CommitMetadata(repo_opts.hash),
     parent_oids: []const [hash.hexLen(repo_opts.hash)]u8,
 ) ![]const u8 {
-    var metadata_lines = std.ArrayList([]const u8).init(allocator);
-    defer {
-        for (metadata_lines.items) |line| {
-            allocator.free(line);
-        }
-        metadata_lines.deinit();
-    }
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
 
-    try metadata_lines.append(try std.fmt.allocPrint(allocator, "tree {s}", .{tree_hash_hex.*}));
+    var config = try cfg.Config(repo_kind, repo_opts).init(state, arena.allocator());
+    defer config.deinit();
+
+    var metadata_lines = std.ArrayList([]const u8).init(arena.allocator());
+
+    try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "tree {s}", .{tree_hash_hex.*}));
 
     for (parent_oids) |parent_oid| {
-        try metadata_lines.append(try std.fmt.allocPrint(allocator, "parent {s}", .{parent_oid}));
+        try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "parent {s}", .{parent_oid}));
     }
 
-    // TODO: read author and committer from config
-    const author = metadata.author orelse "radar <radar@foo.com> 1512325222 +0000";
+    const author = metadata.author orelse blk: {
+        const user_section = config.sections.get("user") orelse return error.UserConfigNotFound;
+        const name = user_section.get("name") orelse return error.UserConfigNotFound;
+        const email = user_section.get("email") orelse return error.UserConfigNotFound;
+        break :blk try std.fmt.allocPrint(arena.allocator(), "{s} <{s}>", .{ name, email });
+    };
+    try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "author {s} 1512325222 +0000", .{author}));
+
     const committer = metadata.committer orelse author;
-    try metadata_lines.append(try std.fmt.allocPrint(allocator, "author {s}", .{author}));
-    try metadata_lines.append(try std.fmt.allocPrint(allocator, "committer {s}", .{committer}));
-    try metadata_lines.append(try std.fmt.allocPrint(allocator, "\n{s}", .{metadata.message}));
+    try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "committer {s} 1512325222 +0000", .{committer}));
+
+    try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "\n{s}", .{metadata.message}));
 
     return try std.mem.join(allocator, "\n", metadata_lines.items);
 }
@@ -341,7 +349,7 @@ pub fn writeCommit(
     }
 
     // create commit contents
-    const commit_contents = try createCommitContents(repo_kind, repo_opts, allocator, &tree_hash_hex, metadata, parent_oids);
+    const commit_contents = try createCommitContents(repo_kind, repo_opts, state.readOnly(), allocator, &tree_hash_hex, metadata, parent_oids);
     defer allocator.free(commit_contents);
 
     // create commit header
