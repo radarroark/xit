@@ -285,10 +285,11 @@ fn createCommitContents(
     var metadata_lines = std.ArrayList([]const u8).init(arena.allocator());
 
     try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "tree {s}", .{tree_hash_hex.*}));
-
     for (parent_oids) |parent_oid| {
         try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "parent {s}", .{parent_oid}));
     }
+
+    const ts = repo_opts.current_time orelse std.time.timestamp();
 
     const author = metadata.author orelse blk: {
         const user_section = config.sections.get("user") orelse return error.UserConfigNotFound;
@@ -296,10 +297,10 @@ fn createCommitContents(
         const email = user_section.get("email") orelse return error.UserConfigNotFound;
         break :blk try std.fmt.allocPrint(arena.allocator(), "{s} <{s}>", .{ name, email });
     };
-    try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "author {s} 1512325222 +0000", .{author}));
+    try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "author {s} {} +0000", .{ author, ts }));
 
     const committer = metadata.committer orelse author;
-    try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "committer {s} 1512325222 +0000", .{committer}));
+    try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "committer {s} {} +0000", .{ committer, ts }));
 
     try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "\n{s}", .{metadata.message}));
 

@@ -26,6 +26,7 @@ pub fn RepoOpts(comptime repo_kind: RepoKind) type {
         max_read_size: usize = 2048,
         max_line_size: usize = 10_000,
         max_line_count: usize = 10_000_000,
+        current_time: ?i64 = null,
         extra: Extra = .{},
 
         pub const Extra = switch (repo_kind) {
