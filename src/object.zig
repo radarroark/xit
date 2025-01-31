@@ -305,6 +305,61 @@ fn createCommitContents(
 
     try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "\n{s}", .{metadata.message}));
 
+    // sign commit if necessary
+    if (config.sections.get("user")) |user_section| {
+        if (user_section.get("signingkey")) |signing_key| {
+            const content = try std.mem.join(arena.allocator(), "\n", metadata_lines.items);
+            const dir = switch (repo_kind) {
+                .git => state.core.git_dir,
+                .xit => state.core.xit_dir,
+            };
+
+            // write the commit content to a file
+            const content_file_name = "xit_signing_buffer";
+            const content_file = try dir.createFile(content_file_name, .{ .truncate = true, .lock = .exclusive });
+            defer {
+                content_file.close();
+                dir.deleteFile(content_file_name) catch {};
+            }
+            try content_file.writeAll(content);
+
+            // sign the file
+            const content_file_path = try dir.realpathAlloc(arena.allocator(), content_file_name);
+            var process = std.process.Child.init(
+                &.{ "ssh-keygen", "-Y", "sign", "-n", "git", "-f", signing_key, content_file_path },
+                allocator,
+            );
+            process.stdin_behavior = .Inherit;
+            process.stdout_behavior = .Inherit;
+            process.stderr_behavior = .Inherit;
+            const term = try process.spawnAndWait();
+            if (0 != term.Exited) {
+                return error.CommitSigningFailed;
+            }
+
+            // read the sig
+            const sig_file_name = content_file_name ++ ".sig";
+            const sig_file = try dir.openFile(sig_file_name, .{ .mode = .read_only });
+            defer {
+                sig_file.close();
+                dir.deleteFile(sig_file_name) catch {};
+            }
+            const sig_file_reader = sig_file.reader();
+            var sig_lines = std.ArrayList([]const u8).init(arena.allocator());
+            while (try sig_file_reader.readUntilDelimiterOrEofAlloc(arena.allocator(), '\n', repo_opts.max_read_size)) |line| {
+                const sig_line = if (sig_lines.items.len == 0)
+                    try std.fmt.allocPrint(arena.allocator(), "gpgsig {s}", .{line})
+                else
+                    try std.fmt.allocPrint(arena.allocator(), " {s}", .{line});
+                try sig_lines.append(sig_line);
+            }
+
+            const message = metadata_lines.pop(); // remove the message
+            try metadata_lines.appendSlice(sig_lines.items); // add the sig
+            try metadata_lines.append(message); // add the message back
+        }
+    }
+
     return try std.mem.join(allocator, "\n", metadata_lines.items);
 }
 
