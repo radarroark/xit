@@ -1535,7 +1535,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 
                                 const merge_msg = try state.core.git_dir.createFile(merge_msg_name, .{ .truncate = true, .lock = .exclusive });
                                 defer merge_msg.close();
-                                try merge_msg.writeAll(commit_metadata.message);
+                                try merge_msg.writeAll(commit_metadata.message orelse "");
 
                                 return .{
                                     .arena = arena,
@@ -1583,7 +1583,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                                 try merge_head_cursor.write(.{ .bytes = &source_oid });
 
                                 var message_cursor = try merge_in_progress.putCursor(hash.hashInt(repo_opts.hash, merge_msg_name));
-                                try message_cursor.write(.{ .bytes = commit_metadata.message });
+                                try message_cursor.write(.{ .bytes = commit_metadata.message orelse "" });
 
                                 return .{
                                     .arena = arena,

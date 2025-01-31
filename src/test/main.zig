@@ -1060,7 +1060,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         // read commit
         var commit_object = try obj.Object(repo_kind, repo_opts, .full).init(allocator, state, &commit2);
         defer commit_object.deinit();
-        try std.testing.expectEqualStrings("second commit", commit_object.content.commit.metadata.message);
+        try std.testing.expectEqualStrings("second commit", commit_object.content.commit.metadata.message.?);
 
         // read tree
         var tree_object = try obj.Object(repo_kind, repo_opts, .full).init(allocator, state, &commit_object.content.commit.tree);
@@ -1225,20 +1225,44 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     {
         var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
-        var iter = try repo.log(allocator, &.{commit3});
+        var iter = try repo.log(allocator, null);
         defer iter.deinit();
 
-        var object3 = try iter.next();
-        try std.testing.expectEqual(commit3, object3.?.oid);
-        object3.?.deinit();
+        {
+            var object = try iter.next() orelse return error.ExpectedObject;
+            defer object.deinit();
+            try std.testing.expectEqual(commit3, object.oid);
 
-        var object2 = try iter.next();
-        try std.testing.expectEqual(commit2, object2.?.oid);
-        object2.?.deinit();
+            try object.object_reader.reset();
+            try object.object_reader.seekTo(object.content.commit.message_position);
+            const message = try object.object_reader.reader.reader().readAllAlloc(allocator, repo_opts.max_read_size);
+            defer allocator.free(message);
+            try std.testing.expectEqualStrings("third commit", message);
+        }
 
-        var object1 = try iter.next();
-        try std.testing.expectEqual(commit1, object1.?.oid);
-        object1.?.deinit();
+        {
+            var object = try iter.next() orelse return error.ExpectedObject;
+            defer object.deinit();
+            try std.testing.expectEqual(commit2, object.oid);
+
+            try object.object_reader.reset();
+            try object.object_reader.seekTo(object.content.commit.message_position);
+            const message = try object.object_reader.reader.reader().readAllAlloc(allocator, repo_opts.max_read_size);
+            defer allocator.free(message);
+            try std.testing.expectEqualStrings("second commit", message);
+        }
+
+        {
+            var object = try iter.next() orelse return error.ExpectedObject;
+            defer object.deinit();
+            try std.testing.expectEqual(commit1, object.oid);
+
+            try object.object_reader.reset();
+            try object.object_reader.seekTo(object.content.commit.message_position);
+            const message = try object.object_reader.reader.reader().readAllAlloc(allocator, repo_opts.max_read_size);
+            defer allocator.free(message);
+            try std.testing.expectEqualStrings("first commit", message);
+        }
 
         try std.testing.expectEqual(null, try iter.next());
     }

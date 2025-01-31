@@ -482,6 +482,6 @@ test "command" {
         defer cmd_args.deinit();
         const command = try CommandDispatch(repo_kind, hash_kind).init(&cmd_args);
         try std.testing.expect(command == .cli and command.cli == .commit);
-        try std.testing.expect(std.mem.eql(u8, "let there be light", command.cli.commit.message));
+        try std.testing.expect(std.mem.eql(u8, "let there be light", command.cli.commit.message.?));
     }
 }

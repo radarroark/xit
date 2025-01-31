@@ -261,7 +261,7 @@ pub fn CommitMetadata(comptime hash_kind: hash.HashKind) type {
     return struct {
         author: ?[]const u8 = null,
         committer: ?[]const u8 = null,
-        message: []const u8 = "",
+        message: ?[]const u8 = null,
         parent_oids: ?[]const [hash.hexLen(hash_kind)]u8 = null,
         allow_empty: bool = false,
     };
@@ -303,7 +303,7 @@ fn createCommitContents(
     const committer = metadata.committer orelse author;
     try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "committer {s} {} +0000", .{ committer, ts }));
 
-    try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "\n{s}", .{metadata.message}));
+    try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "\n{s}", .{metadata.message orelse ""}));
 
     // sign commit if necessary
     if (config.sections.get("user")) |user_section| {
@@ -737,6 +737,7 @@ pub fn ObjectContent(comptime hash_kind: hash.HashKind) type {
             tree: [hash.hexLen(hash_kind)]u8,
             parents: std.ArrayList([hash.hexLen(hash_kind)]u8),
             metadata: CommitMetadata(hash_kind),
+            message_position: u64,
         },
     };
 }
@@ -840,12 +841,15 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                             .object_reader = obj_rdr,
                         },
                         .full => {
+                            var read_len: usize = 0;
+
                             // read the content kind
                             const content_kind = try reader.readUntilDelimiterAlloc(allocator, ' ', repo_opts.max_read_size);
                             defer allocator.free(content_kind);
                             if (!std.mem.eql(u8, "tree", content_kind)) {
                                 return error.InvalidCommitContentKind;
                             }
+                            read_len += content_kind.len + 1;
 
                             // read the tree hash
                             var tree_hash = [_]u8{0} ** (hash.hexLen(repo_opts.hash) + 1);
@@ -853,6 +857,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                             if (tree_hash_slice.len != hash.hexLen(repo_opts.hash)) {
                                 return error.InvalidCommitTreeHash;
                             }
+                            read_len += tree_hash_slice.len + 1;
 
                             // init the content
                             var content = ObjectContent(repo_opts.hash){
@@ -860,12 +865,14 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                                     .tree = tree_hash_slice[0..comptime hash.hexLen(repo_opts.hash)].*,
                                     .parents = std.ArrayList([hash.hexLen(repo_opts.hash)]u8).init(arena.allocator()),
                                     .metadata = .{},
+                                    .message_position = 0,
                                 },
                             };
 
                             // read the metadata
                             while (true) {
                                 const line = try reader.readUntilDelimiterAlloc(arena.allocator(), '\n', repo_opts.max_read_size);
+                                read_len += line.len + 1;
                                 if (line.len == 0) {
                                     break;
                                 }
@@ -889,8 +896,10 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                                 }
                             }
 
-                            // read the message
-                            content.commit.metadata.message = try reader.readAllAlloc(arena.allocator(), repo_opts.max_read_size);
+                            content.commit.message_position = read_len;
+
+                            // read only the first line
+                            content.commit.metadata.message = try reader.readUntilDelimiterOrEofAlloc(arena.allocator(), '\n', repo_opts.max_read_size);
 
                             return .{
                                 .allocator = allocator,

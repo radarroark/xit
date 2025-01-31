@@ -102,8 +102,8 @@ pub fn main() !void {
         defer xit_repo.deinit();
 
         for (0..commits.items.len) |i| {
-            const commit_object = commits.items[commits.items.len - i - 1];
-            try writers.out.print("Creating commit: {s}", .{commit_object.content.commit.metadata.message});
+            var commit_object = commits.items[commits.items.len - i - 1];
+            try writers.out.print("Creating commit: {s}\n", .{commit_object.content.commit.metadata.message orelse ""});
 
             var switch_result = try git_repo.switchHead(allocator, .{ .head = .{ .replace = .{ .oid = &commit_object.oid } }, .force = true });
             defer switch_result.deinit();

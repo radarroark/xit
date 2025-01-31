@@ -510,8 +510,11 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             try writers.out.print("Author {s}\n", .{author});
                         }
                         try writers.out.print("\n", .{});
-                        var split_iter = std.mem.split(u8, commit_object.content.commit.metadata.message, "\n");
-                        while (split_iter.next()) |line| {
+
+                        try commit_object.object_reader.reset();
+                        try commit_object.object_reader.seekTo(commit_object.content.commit.message_position);
+                        while (try commit_object.object_reader.reader.reader().readUntilDelimiterOrEofAlloc(allocator, '\n', repo_opts.max_read_size)) |line| {
+                            defer allocator.free(line);
                             try writers.out.print("    {s}\n", .{line});
                         }
                         try writers.out.print("\n", .{});

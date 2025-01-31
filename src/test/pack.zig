@@ -194,16 +194,16 @@ test "pack" {
     for (
         &[_]*c.git_oid{ &commit_oid1, &commit_oid2 },
         &[_][]const u8{ "let there be light", "add license" },
-    ) |commit_oid, message| {
+    ) |commit_oid, expected_message| {
         var commit_oid_hex = [_]u8{0} ** hash.hexLen(repo_opts.hash);
         try std.testing.expectEqual(0, c.git_oid_fmt(@ptrCast(&commit_oid_hex), commit_oid));
 
         var r = try rp.Repo(.git, repo_opts).open(allocator, .{ .cwd = repo_dir });
         defer r.deinit();
 
-        var object = try obj.Object(.git, repo_opts, .full).init(allocator, .{ .core = &r.core, .extra = .{} }, &commit_oid_hex);
-        defer object.deinit();
-        try std.testing.expectEqualStrings(message, object.content.commit.metadata.message);
+        var commit_object = try obj.Object(.git, repo_opts, .full).init(allocator, .{ .core = &r.core, .extra = .{} }, &commit_oid_hex);
+        defer commit_object.deinit();
+        try std.testing.expectEqualStrings(expected_message, commit_object.content.commit.metadata.message.?);
     }
 
     // write and read a pack object
