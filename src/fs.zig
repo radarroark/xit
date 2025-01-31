@@ -16,7 +16,10 @@ pub const LockFile = struct {
         var lock_name_buffer = [_]u8{0} ** lock_name_buffer_size;
         const lock_name = try std.fmt.bufPrint(&lock_name_buffer, "{s}.lock", .{file_name});
         const lock_file = try dir.createFile(lock_name, .{ .truncate = true, .lock = .exclusive, .read = true });
-        errdefer dir.deleteFile(lock_name) catch {};
+        errdefer {
+            lock_file.close();
+            dir.deleteFile(lock_name) catch {};
+        }
         return .{
             .dir = dir,
             .file_name = file_name,
