@@ -289,9 +289,10 @@ fn createCommitContents(
         try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "parent {s}", .{parent_oid}));
     }
 
-    const ts = repo_opts.current_time orelse std.time.timestamp();
+    const ts = if (repo_opts.is_test) 0 else std.time.timestamp();
 
     const author = metadata.author orelse blk: {
+        if (repo_opts.is_test) break :blk "radar <radar@roark>";
         const user_section = config.sections.get("user") orelse return error.UserConfigNotFound;
         const name = user_section.get("name") orelse return error.UserConfigNotFound;
         const email = user_section.get("email") orelse return error.UserConfigNotFound;

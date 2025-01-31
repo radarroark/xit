@@ -26,7 +26,7 @@ pub fn RepoOpts(comptime repo_kind: RepoKind) type {
         max_read_size: usize = 2048,
         max_line_size: usize = 10_000,
         max_line_count: usize = 10_000_000,
-        current_time: ?i64 = null,
+        is_test: bool = false,
         extra: Extra = .{},
 
         pub const Extra = switch (repo_kind) {
@@ -181,10 +181,6 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     const state = State(.read_write){ .core = &self.core, .extra = .{} };
                     try rf.replaceHead(repo_kind, repo_opts, state, .{ .ref = .{ .kind = .local, .name = "master" } });
 
-                    // add default user config
-                    try self.addConfig(allocator, .{ .name = "user.name", .value = "fixme" });
-                    try self.addConfig(allocator, .{ .name = "user.email", .value = "fix@me" });
-
                     return self;
                 },
                 .xit => {
@@ -231,10 +227,6 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         .{ .slot = try history.getSlot(-1) },
                         Ctx{ .core = &self.core },
                     );
-
-                    // add default user config
-                    try self.addConfig(allocator, .{ .name = "user.name", .value = "fixme" });
-                    try self.addConfig(allocator, .{ .name = "user.email", .value = "fix@me" });
 
                     return self;
                 },

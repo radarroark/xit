@@ -81,8 +81,8 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 }
 
 test "simple" {
-    try testSimple(.git, .{});
-    try testSimple(.xit, .{});
+    try testSimple(.git, .{ .is_test = true });
+    try testSimple(.xit, .{ .is_test = true });
 }
 
 fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) !void {
@@ -206,8 +206,8 @@ fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 }
 
 test "merge" {
-    try testMerge(.git, .{});
-    try testMerge(.xit, .{});
+    try testMerge(.git, .{ .is_test = true });
+    try testMerge(.xit, .{ .is_test = true });
 }
 
 fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) !void {
@@ -756,8 +756,8 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
 
 test "merge conflict" {
     // read and write objects in small increments to help uncover bugs
-    try testMergeConflict(.git, .{ .read_size = 1 });
-    try testMergeConflict(.xit, .{ .read_size = 1, .extra = .{
+    try testMergeConflict(.git, .{ .read_size = 1, .is_test = true });
+    try testMergeConflict(.xit, .{ .read_size = 1, .is_test = true, .extra = .{
         .chunk_opts = .{ .min_size = 1, .avg_size = 2, .max_size = 4, .normalization = .level1 },
     } });
 }
@@ -891,8 +891,8 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind, comptime repo_op
 }
 
 test "merge conflict binary" {
-    try testMergeConflictBinary(.git, .{});
-    try testMergeConflictBinary(.xit, .{});
+    try testMergeConflictBinary(.git, .{ .is_test = true });
+    try testMergeConflictBinary(.xit, .{ .is_test = true });
 }
 
 /// demonstrates an example of git shuffling lines unexpectedly
@@ -1206,8 +1206,8 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
 }
 
 test "merge conflict shuffle" {
-    try testMergeConflictShuffle(.git, .{});
-    try testMergeConflictShuffle(.xit, .{});
+    try testMergeConflictShuffle(.git, .{ .is_test = true });
+    try testMergeConflictShuffle(.xit, .{ .is_test = true });
 }
 
 fn testCherryPick(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) !void {
@@ -1285,8 +1285,8 @@ fn testCherryPick(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOp
 }
 
 test "cherry-pick" {
-    try testCherryPick(.git, .{});
-    try testCherryPick(.xit, .{});
+    try testCherryPick(.git, .{ .is_test = true });
+    try testCherryPick(.xit, .{ .is_test = true });
 }
 
 fn testCherryPickConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) !void {
@@ -1435,8 +1435,8 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
 }
 
 test "cherry-pick conflict" {
-    try testCherryPickConflict(.git, .{});
-    try testCherryPickConflict(.xit, .{});
+    try testCherryPickConflict(.git, .{ .is_test = true });
+    try testCherryPickConflict(.xit, .{ .is_test = true });
 }
 
 fn testLog(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) !void {
@@ -1569,6 +1569,6 @@ fn testLog(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo
 }
 
 test "log" {
-    try testLog(.git, .{});
-    try testLog(.xit, .{});
+    try testLog(.git, .{ .is_test = true });
+    try testLog(.xit, .{ .is_test = true });
 }

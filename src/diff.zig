@@ -718,7 +718,7 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp
 
 test "myers diff" {
     const repo_kind = rp.RepoKind.git;
-    const repo_opts = rp.RepoOpts(repo_kind){};
+    const repo_opts = rp.RepoOpts(.git){ .is_test = true };
     const allocator = std.testing.allocator;
     {
         const lines1 = "A\nB\nC\nA\nB\nB\nA";
@@ -955,7 +955,7 @@ pub fn Diff3Iterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
 
 test "diff3" {
     const repo_kind = rp.RepoKind.git;
-    const repo_opts = rp.RepoOpts(repo_kind){};
+    const repo_opts = rp.RepoOpts(.git){ .is_test = true };
     const allocator = std.testing.allocator;
 
     const orig_lines =

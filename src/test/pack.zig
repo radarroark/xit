@@ -12,7 +12,7 @@ const c = @cImport({
 test "pack" {
     const allocator = std.testing.allocator;
     const temp_dir_name = "temp-test-pack";
-    const repo_opts = rp.RepoOpts(.git){};
+    const repo_opts = rp.RepoOpts(.git){ .is_test = true };
 
     // start libgit
     _ = c.git_libgit2_init();
