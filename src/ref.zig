@@ -256,7 +256,10 @@ pub fn read(
             // look for packed ref
             if (state.core.git_dir.openFile("packed-refs", .{ .mode = .read_only })) |packed_refs_file| {
                 defer packed_refs_file.close();
-                const reader = packed_refs_file.reader();
+
+                var buffered_reader = std.io.bufferedReaderSize(repo_opts.read_size, packed_refs_file.reader());
+                const reader = buffered_reader.reader();
+
                 var read_buffer = [_]u8{0} ** repo_opts.max_read_size;
                 while (try reader.readUntilDelimiterOrEof(&read_buffer, '\n')) |line| {
                     const trimmed_line = std.mem.trim(u8, line, " ");
