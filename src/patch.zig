@@ -23,22 +23,18 @@ const ChangeKind = enum(u8) {
     delete_node,
 };
 
-/// TODO: turn this into an iterator all entries don't need to be in memory at the same time
 fn createPatchEntries(
     comptime repo_opts: rp.RepoOpts(.xit),
     moment: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write),
     branch: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write),
     allocator: std.mem.Allocator,
     arena: *std.heap.ArenaAllocator,
-    line_iter_pair: *df.LineIteratorPair(.xit, repo_opts),
+    myers_diff_iter: *df.MyersDiffIterator(.xit, repo_opts),
     path_hash: hash.HashInt(repo_opts.hash),
     patch_hash: hash.HashInt(repo_opts.hash),
     patch_entries: *std.ArrayList([]const u8),
     patch_offsets: *std.ArrayList(u64),
 ) !void {
-    var myers_diff_iter = try df.MyersDiffIterator(.xit, repo_opts).init(allocator, &line_iter_pair.a, &line_iter_pair.b);
-    defer myers_diff_iter.deinit();
-
     // get path slot
     const path_set_cursor = (try moment.getCursor(hash.hashInt(repo_opts.hash, "path-set"))) orelse return error.KeyNotFound;
     const path_set = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(path_set_cursor);
@@ -147,7 +143,8 @@ fn patchHash(
     moment: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write),
     branch: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write),
     allocator: std.mem.Allocator,
-    line_iter_pair: *df.LineIteratorPair(.xit, repo_opts),
+    myers_diff_iter: *df.MyersDiffIterator(.xit, repo_opts),
+    new_oid: *const [hash.byteLen(repo_opts.hash)]u8,
     path_hash: hash.HashInt(repo_opts.hash),
 ) ![hash.byteLen(repo_opts.hash)]u8 {
     var patch_entries = std.ArrayList([]const u8).init(allocator);
@@ -159,7 +156,7 @@ fn patchHash(
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    try createPatchEntries(repo_opts, moment, branch, allocator, &arena, line_iter_pair, path_hash, 0, &patch_entries, &patch_offsets);
+    try createPatchEntries(repo_opts, moment, branch, allocator, &arena, myers_diff_iter, path_hash, 0, &patch_entries, &patch_offsets);
 
     var hasher = hash.Hasher(repo_opts.hash).init();
 
@@ -167,7 +164,7 @@ fn patchHash(
         hasher.update(patch_entry);
     }
 
-    hasher.update(&line_iter_pair.b.oid);
+    hasher.update(new_oid);
     for (patch_offsets.items) |patch_offset| {
         var buffer = [_]u8{0} ** (@bitSizeOf(u64) / 8);
         std.mem.writeInt(u64, &buffer, patch_offset, .big);
@@ -187,8 +184,15 @@ fn writePatch(
     line_iter_pair: *df.LineIteratorPair(.xit, repo_opts),
     path_hash: hash.HashInt(repo_opts.hash),
 ) ![hash.byteLen(repo_opts.hash)]u8 {
-    const patch_hash_bytes = try patchHash(repo_opts, moment, branch, allocator, line_iter_pair, path_hash);
+    var myers_diff_iter = try df.MyersDiffIterator(.xit, repo_opts).init(allocator, &line_iter_pair.a, &line_iter_pair.b);
+    defer myers_diff_iter.deinit();
+
+    const new_oid = &line_iter_pair.b.oid;
+
+    const patch_hash_bytes = try patchHash(repo_opts, moment, branch, allocator, &myers_diff_iter, new_oid, path_hash);
     const patch_hash = hash.bytesToInt(repo_opts.hash, &patch_hash_bytes);
+
+    try myers_diff_iter.reset();
 
     // exit early if patch already exists
     if (try moment.cursor.readPath(void, &.{
@@ -217,7 +221,7 @@ fn writePatch(
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    try createPatchEntries(repo_opts, moment, branch, allocator, &arena, line_iter_pair, path_hash, patch_hash, &patch_entries, &patch_offsets);
+    try createPatchEntries(repo_opts, moment, branch, allocator, &arena, &myers_diff_iter, path_hash, patch_hash, &patch_entries, &patch_offsets);
 
     var change_list_writer = try change_list_cursor.writer();
     for (patch_entries.items) |patch_entry| {
@@ -226,7 +230,7 @@ fn writePatch(
     try change_list_writer.finish();
 
     var offset_list_writer = try offset_list_cursor.writer();
-    try offset_list_writer.writeAll(&line_iter_pair.b.oid);
+    try offset_list_writer.writeAll(new_oid);
     for (patch_offsets.items) |patch_offset| {
         try offset_list_writer.writeInt(u64, patch_offset, .big);
     }
