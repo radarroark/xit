@@ -1,7 +1,8 @@
 const std = @import("std");
-const rp = @import("./repo.zig");
-const hash = @import("./hash.zig");
-const net = @import("./net.zig");
+const xit = @import("xit");
+const rp = xit.repo;
+const hash = xit.hash;
+const net = xit.net;
 
 const c = @cImport({
     @cInclude("git2.h");

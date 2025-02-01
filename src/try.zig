@@ -3,9 +3,9 @@
 //! way to test things out safely.
 
 const std = @import("std");
-const mn = @import("./main.zig");
-const rp = @import("./repo.zig");
-const obj = @import("./object.zig");
+const xit = @import("xit");
+const rp = xit.repo;
+const obj = xit.object;
 
 const COMMIT_COUNT = 5;
 
@@ -144,5 +144,5 @@ pub fn main() !void {
         try args.append(arg);
     }
 
-    try mn.run(.xit, .{}, allocator, args.items, temp_dir, writers);
+    try xit.main.run(.xit, .{}, allocator, args.items, temp_dir, writers);
 }

@@ -2,12 +2,13 @@
 //! runs with both git and xit modes.
 
 const std = @import("std");
-const hash = @import("../hash.zig");
-const rp = @import("../repo.zig");
-const rf = @import("../ref.zig");
-const obj = @import("../object.zig");
-const mrg = @import("../merge.zig");
-const df = @import("../diff.zig");
+const xit = @import("xit");
+const hash = xit.hash;
+const rp = xit.repo;
+const rf = xit.ref;
+const obj = xit.object;
+const mrg = xit.merge;
+const df = xit.diff;
 
 fn addFile(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind), repo: *rp.Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, path: []const u8, content: []const u8) !void {
     if (std.fs.path.dirname(path)) |parent_path| {

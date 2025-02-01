@@ -1,9 +1,10 @@
 const std = @import("std");
-const hash = @import("../hash.zig");
-const rp = @import("../repo.zig");
-const obj = @import("../object.zig");
-const pack = @import("../pack.zig");
-const rf = @import("../ref.zig");
+const xit = @import("xit");
+const hash = xit.hash;
+const rp = xit.repo;
+const obj = xit.object;
+const pack = xit.pack;
+const rf = xit.ref;
 
 const c = @cImport({
     @cInclude("git2.h");
