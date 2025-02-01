@@ -76,6 +76,18 @@ pub const Ref = struct {
     }
 };
 
+fn isOid(comptime hash_kind: hash.HashKind, content: []const u8) bool {
+    if (content.len != hash.hexLen(hash_kind)) {
+        return false;
+    }
+    for (content) |ch| {
+        if (!std.ascii.isHex(ch)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 pub fn RefOrOid(comptime hash_kind: hash.HashKind) type {
     return union(enum) {
         ref: Ref,
@@ -88,7 +100,7 @@ pub fn RefOrOid(comptime hash_kind: hash.HashKind) type {
                 } else {
                     return null;
                 }
-            } else if (isOid(content)) {
+            } else if (isOid(hash_kind, content)) {
                 return .{ .oid = content[0..comptime hash.hexLen(hash_kind)] };
             } else {
                 return null;
@@ -98,7 +110,7 @@ pub fn RefOrOid(comptime hash_kind: hash.HashKind) type {
         pub fn initFromUser(content: []const u8) ?RefOrOid(hash_kind) {
             if (content[0] == ':') {
                 const oid = content[1..];
-                if (isOid(oid)) {
+                if (isOid(hash_kind, oid)) {
                     return .{ .oid = oid[0..comptime hash.hexLen(hash_kind)] };
                 } else {
                     return null;
@@ -106,18 +118,6 @@ pub fn RefOrOid(comptime hash_kind: hash.HashKind) type {
             } else {
                 return .{ .ref = .{ .kind = .local, .name = content } };
             }
-        }
-
-        fn isOid(content: []const u8) bool {
-            if (content.len != hash.hexLen(hash_kind)) {
-                return false;
-            }
-            for (content) |ch| {
-                if (!std.ascii.isHex(ch)) {
-                    return false;
-                }
-            }
-            return true;
         }
     };
 }
@@ -243,13 +243,42 @@ pub fn read(
 ) ![]u8 {
     switch (repo_kind) {
         .git => {
-            const ref_file = state.core.git_dir.openFile(ref_path, .{ .mode = .read_only }) catch |err| switch (err) {
-                error.FileNotFound => return error.RefNotFound,
+            // look for loose ref
+            if (state.core.git_dir.openFile(ref_path, .{ .mode = .read_only })) |ref_file| {
+                defer ref_file.close();
+                const size = try ref_file.reader().readAll(buffer);
+                return std.mem.sliceTo(buffer[0..size], '\n');
+            } else |err| switch (err) {
+                error.FileNotFound => {},
                 else => |e| return e,
-            };
-            defer ref_file.close();
-            const size = try ref_file.reader().readAll(buffer);
-            return std.mem.sliceTo(buffer[0..size], '\n');
+            }
+
+            // look for packed ref
+            if (state.core.git_dir.openFile("packed-refs", .{ .mode = .read_only })) |packed_refs_file| {
+                defer packed_refs_file.close();
+                const reader = packed_refs_file.reader();
+                var read_buffer = [_]u8{0} ** repo_opts.max_read_size;
+                while (try reader.readUntilDelimiterOrEof(&read_buffer, '\n')) |line| {
+                    const trimmed_line = std.mem.trim(u8, line, " ");
+                    if (std.mem.startsWith(u8, trimmed_line, "#")) {
+                        continue;
+                    }
+
+                    var split_iter = std.mem.splitScalar(u8, trimmed_line, ' ');
+                    const oid_hex = split_iter.next() orelse continue;
+                    const path = split_iter.next() orelse continue;
+
+                    if (isOid(repo_opts.hash, oid_hex) and std.mem.eql(u8, ref_path, path)) {
+                        @memcpy(buffer[0..oid_hex.len], oid_hex);
+                        return buffer[0..oid_hex.len];
+                    }
+                }
+            } else |err| switch (err) {
+                error.FileNotFound => {},
+                else => |e| return e,
+            }
+
+            return error.RefNotFound;
         },
         .xit => {
             var map = state.extra.moment.*;
