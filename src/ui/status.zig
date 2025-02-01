@@ -284,7 +284,7 @@ pub fn StatusTabs(comptime Widget: type, comptime repo_kind: rp.RepoKind, compti
                     const index = blk: {
                         switch (key) {
                             .arrow_left => {
-                                break :blk current_index - 1;
+                                break :blk current_index -| 1;
                             },
                             .arrow_right => {
                                 if (current_index + 1 < children.count()) {
