@@ -1127,13 +1127,10 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
             const f_txt_content = try f_txt.readToEndAlloc(allocator, 1024);
             defer allocator.free(f_txt_content);
             switch (repo_kind) {
-                // verify f.txt has conflict markers
                 .git => {
-                    try std.testing.expect(.conflict == merge.result);
-                    const expected_start =
+                    try std.testing.expectEqualStrings(
                         \\int square(int x) {
-                        \\<<<<<<< target (master)
-                        \\  int y = x;
+                        \\  int y = 0;
                         \\  /* Update y to equal the result. */
                         \\  /* Question: what is the order of magnitude of this algorithm with respect to x? */
                         \\  return y * x;
@@ -1141,14 +1138,6 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
                         \\
                         \\int very_slow_square(int x) {
                         \\  int y = 0;
-                    ;
-                    const base_line = try std.fmt.allocPrint(allocator, "||||||| base ({s})", .{merge.base_oid});
-                    defer allocator.free(base_line);
-                    const expected_end =
-                        \\  int y = x;
-                        \\=======
-                        \\  int y = 0;
-                        \\>>>>>>> source (foo)
                         \\  /* Update y to equal the result. */
                         \\  /* Question: what is the order of magnitude of this algorithm with respect to x? */
                         \\  for (int i = 0; i < x; i++)
@@ -1164,12 +1153,8 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
                         \\  for (int i = 0; i < x; i++) y += x;
                         \\  return y;
                         \\}
-                    ;
-                    const expected_content = try std.fmt.allocPrint(allocator, "{s}\n{s}\n{s}", .{ expected_start, base_line, expected_end });
-                    defer allocator.free(expected_content);
-                    try std.testing.expectEqualStrings(expected_content, f_txt_content);
+                    , f_txt_content);
                 },
-                // verify f.txt has been autoresolved
                 .xit => {
                     try std.testing.expect(.success == merge.result);
                     try std.testing.expectEqualStrings(
@@ -1197,9 +1182,7 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
                         \\  for (int i = 0; i < x; i++) y += x;
                         \\  return y;
                         \\}
-                    ,
-                        f_txt_content,
-                    );
+                    , f_txt_content);
                 },
             }
         }

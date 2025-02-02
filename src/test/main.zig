@@ -320,8 +320,8 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                 defer hunk_iter.deinit();
                 if (std.mem.eql(u8, "hello.txt", line_iter_pair.path)) {
                     try std.testing.expectEqualStrings("diff --git a/hello.txt b/hello.txt", hunk_iter.header_lines.items[0]);
-                    const expected_hunks = &[_][]const df.MyersDiffIterator(repo_kind, repo_opts).Edit{
-                        &[_]df.MyersDiffIterator(repo_kind, repo_opts).Edit{
+                    const expected_hunks = &[_][]const df.Edit{
+                        &[_]df.Edit{
                             .{ .eql = .{ .old_line = .{ .num = 2 }, .new_line = .{ .num = 2 } } },
                             .{ .eql = .{ .old_line = .{ .num = 3 }, .new_line = .{ .num = 3 } } },
                             .{ .eql = .{ .old_line = .{ .num = 4 }, .new_line = .{ .num = 4 } } },
@@ -331,7 +331,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                             .{ .eql = .{ .old_line = .{ .num = 7 }, .new_line = .{ .num = 7 } } },
                             .{ .eql = .{ .old_line = .{ .num = 8 }, .new_line = .{ .num = 8 } } },
                         },
-                        &[_]df.MyersDiffIterator(repo_kind, repo_opts).Edit{
+                        &[_]df.Edit{
                             .{ .del = .{ .old_line = .{ .num = 9 } } },
                             .{ .del = .{ .old_line = .{ .num = 10 } } },
                             .{ .ins = .{ .new_line = .{ .num = 9 } } },
@@ -340,7 +340,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                             .{ .eql = .{ .old_line = .{ .num = 12 }, .new_line = .{ .num = 12 } } },
                             .{ .eql = .{ .old_line = .{ .num = 13 }, .new_line = .{ .num = 13 } } },
                         },
-                        &[_]df.MyersDiffIterator(repo_kind, repo_opts).Edit{
+                        &[_]df.Edit{
                             .{ .eql = .{ .old_line = .{ .num = 14 }, .new_line = .{ .num = 14 } } },
                             .{ .del = .{ .old_line = .{ .num = 15 } } },
                             .{ .ins = .{ .new_line = .{ .num = 15 } } },

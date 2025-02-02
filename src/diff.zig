@@ -310,358 +310,329 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
     };
 }
 
+pub const Line = struct {
+    num: usize,
+    offset: u64 = 0,
+};
+
+pub const Edit = union(enum) {
+    eql: struct {
+        old_line: Line,
+        new_line: Line,
+    },
+    ins: struct {
+        new_line: Line,
+    },
+    del: struct {
+        old_line: Line,
+    },
+
+    pub fn withoutOffset(self: Edit) Edit {
+        var new_self = self;
+        switch (new_self) {
+            .eql => |*eql| {
+                eql.old_line.offset = 0;
+                eql.new_line.offset = 0;
+            },
+            .ins => |*ins| ins.new_line.offset = 0,
+            .del => |*del| del.old_line.offset = 0,
+        }
+        return new_self;
+    }
+};
+
 pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return struct {
         allocator: std.mem.Allocator,
-        points: std.ArrayList([2]Point),
+        cache: std.ArrayList(Edit),
+        stack: std.ArrayList(isize),
+        action: ?Action,
+        b: []isize,
+        i: isize,
+        j: isize,
+        n: isize,
+        m: isize,
+        z: isize,
+        range_maybe: ?Range,
+        deferred_range: Range,
         line_iter_a: *LineIterator(repo_kind, repo_opts),
         line_iter_b: *LineIterator(repo_kind, repo_opts),
         next_index: usize,
+        x_index: usize,
+        y_index: usize,
 
-        pub const Line = struct {
-            num: usize,
-            offset: u64 = 0,
+        fn eq(self: *const MyersDiffIterator(repo_kind, repo_opts), i: usize, j: usize) !bool {
+            const line_a = try self.line_iter_a.get(i);
+            defer self.line_iter_a.allocator.free(line_a);
+            const line_b = try self.line_iter_b.get(j);
+            defer self.line_iter_b.allocator.free(line_b);
+            return std.mem.eql(u8, line_a, line_b);
+        }
+
+        pub const Action = enum {
+            push,
+            pop,
         };
 
-        pub const Edit = union(enum) {
-            eql: struct {
-                old_line: Line,
-                new_line: Line,
-            },
-            ins: struct {
-                new_line: Line,
-            },
-            del: struct {
-                old_line: Line,
-            },
-
-            pub fn withoutOffset(self: Edit) Edit {
-                var new_self = self;
-                switch (new_self) {
-                    .eql => |*eql| {
-                        eql.old_line.offset = 0;
-                        eql.new_line.offset = 0;
-                    },
-                    .ins => |*ins| ins.new_line.offset = 0,
-                    .del => |*del| del.old_line.offset = 0,
-                }
-                return new_self;
-            }
+        pub const Range = struct {
+            del_start: usize,
+            del_end: usize,
+            ins_start: usize,
+            ins_end: usize,
         };
 
-        const Point = struct {
-            x: usize,
-            y: usize,
-        };
+        fn diff(self: *MyersDiffIterator(repo_kind, repo_opts), start_action: Action) !?Action {
+            var action = start_action;
+            var i = self.i;
+            var j = self.j;
+            var n = self.n;
+            var m = self.m;
+            var z = self.z;
 
-        const Box = struct {
-            left: usize,
-            top: usize,
-            right: usize,
-            bottom: usize,
-
-            fn width(self: Box) usize {
-                return self.right - self.left;
-            }
-
-            fn height(self: Box) usize {
-                return self.bottom - self.top;
-            }
-
-            fn size(self: Box) usize {
-                return self.width() + self.height();
-            }
-
-            fn delta(self: Box) isize {
-                const w: isize = @intCast(self.width());
-                const h: isize = @intCast(self.height());
-                return w - h;
-            }
-
-            fn absIndex(i: isize, len: usize) usize {
-                return if (i < 0) len - @abs(i) else @intCast(i);
-            }
-
-            fn forward(self: Box, vf: []isize, vb: []isize, d: usize, line_iter_a: *LineIterator(repo_kind, repo_opts), line_iter_b: *LineIterator(repo_kind, repo_opts)) !?[2]Point {
-                const line_count_a = line_iter_a.count();
-                const line_count_b = line_iter_b.count();
-
-                const dd: isize = @intCast(d);
-                for (0..d + 1) |i| {
-                    const ii: isize = @intCast(i);
-                    const kk: isize = dd - ii * 2;
-                    const cc: isize = kk - self.delta();
-
-                    var px: isize = undefined;
-                    var xx: isize = undefined;
-                    if (kk == -dd or (kk != dd and vf[absIndex(kk - 1, vf.len)] < vf[absIndex(kk + 1, vf.len)])) {
-                        px = vf[absIndex(kk + 1, vf.len)];
-                        xx = px;
-                    } else {
-                        px = vf[absIndex(kk - 1, vf.len)];
-                        xx = px + 1;
-                    }
-
-                    const left: isize = @intCast(self.left);
-                    const right: isize = @intCast(self.right);
-                    const top: isize = @intCast(self.top);
-                    const bottom: isize = @intCast(self.bottom);
-
-                    var yy = top + (xx - left) - kk;
-                    const py = if (d == 0 or xx != px) yy else yy - 1;
-
-                    while (true) {
-                        if (xx < right and yy < bottom) {
-                            const line_a = try line_iter_a.get(absIndex(xx, line_count_a));
-                            defer line_iter_a.allocator.free(line_a);
-                            const line_b = try line_iter_b.get(absIndex(yy, line_count_b));
-                            defer line_iter_b.allocator.free(line_b);
-                            if (std.mem.eql(u8, line_a, line_b)) {
-                                xx += 1;
-                                yy += 1;
-                                continue;
-                            }
-                        }
-                        break;
-                    }
-
-                    vf[absIndex(kk, vf.len)] = xx;
-
-                    if (@abs(self.delta()) % 2 != 0 and -(dd - 1) <= cc and cc <= (dd - 1) and yy >= vb[absIndex(cc, vb.len)]) {
-                        return [2]Point{
-                            .{ .x = @intCast(px), .y = @intCast(py) },
-                            .{ .x = @intCast(xx), .y = @intCast(yy) },
-                        };
-                    }
-                }
-
-                return null;
-            }
-
-            fn backward(self: Box, vf: []isize, vb: []isize, d: usize, line_iter_a: *LineIterator(repo_kind, repo_opts), line_iter_b: *LineIterator(repo_kind, repo_opts)) !?[2]Point {
-                const line_count_a = line_iter_a.count();
-                const line_count_b = line_iter_b.count();
-
-                const dd: isize = @intCast(d);
-                for (0..d + 1) |i| {
-                    const ii: isize = @intCast(i);
-                    const cc: isize = dd - ii * 2;
-                    const kk: isize = cc + self.delta();
-
-                    var py: isize = undefined;
-                    var yy: isize = undefined;
-                    if (cc == -dd or (cc != dd and vb[absIndex(cc - 1, vb.len)] > vb[absIndex(cc + 1, vb.len)])) {
-                        py = vb[absIndex(cc + 1, vb.len)];
-                        yy = py;
-                    } else {
-                        py = vb[absIndex(cc - 1, vb.len)];
-                        yy = py - 1;
-                    }
-
-                    const left: isize = @intCast(self.left);
-                    const top: isize = @intCast(self.top);
-
-                    var xx = left + (yy - top) + kk;
-                    const px = if (d == 0 or yy != py) xx else xx + 1;
-
-                    while (true) {
-                        if (xx > left and yy > top) {
-                            const line_a = try line_iter_a.get(absIndex(xx - 1, line_count_a));
-                            defer line_iter_a.allocator.free(line_a);
-                            const line_b = try line_iter_b.get(absIndex(yy - 1, line_count_b));
-                            defer line_iter_b.allocator.free(line_b);
-                            if (std.mem.eql(u8, line_a, line_b)) {
-                                xx -= 1;
-                                yy -= 1;
-                                continue;
-                            }
-                        }
-                        break;
-                    }
-
-                    vb[absIndex(cc, vb.len)] = yy;
-
-                    if (@abs(self.delta()) % 2 == 0 and -dd <= kk and kk <= dd and xx <= vf[absIndex(kk, vf.len)]) {
-                        return [2]Point{
-                            .{ .x = @intCast(xx), .y = @intCast(yy) },
-                            .{ .x = @intCast(px), .y = @intCast(py) },
-                        };
-                    }
-                }
-
-                return null;
-            }
-
-            fn midpoint(self: Box, allocator: std.mem.Allocator, line_iter_a: *LineIterator(repo_kind, repo_opts), line_iter_b: *LineIterator(repo_kind, repo_opts)) !?[2]Point {
-                if (self.size() == 0) {
-                    return null;
-                }
-
-                const box_size: f64 = @floatFromInt(self.size());
-                const max: usize = @intFromFloat(std.math.ceil(box_size / 2));
-
-                var vf = try allocator.alloc(isize, 2 * max + 1);
-                defer allocator.free(vf);
-                for (vf) |*item| {
-                    item.* = 0;
-                }
-                vf[1] = @intCast(self.left);
-
-                var vb = try allocator.alloc(isize, 2 * max + 1);
-                defer allocator.free(vb);
-                for (vb) |*item| {
-                    item.* = 0;
-                }
-                vb[1] = @intCast(self.bottom);
-
-                for (0..max + 1) |d| {
-                    if (try self.forward(vf, vb, d, line_iter_a, line_iter_b)) |snake| {
-                        return snake;
-                    }
-                    if (try self.backward(vf, vb, d, line_iter_a, line_iter_b)) |snake| {
-                        return snake;
-                    }
-                }
-
-                return null;
-            }
-
-            fn findPath(self: Box, allocator: std.mem.Allocator, line_iter_a: *LineIterator(repo_kind, repo_opts), line_iter_b: *LineIterator(repo_kind, repo_opts)) !?std.DoublyLinkedList(Point) {
-                if (try self.midpoint(allocator, line_iter_a, line_iter_b)) |snake| {
-                    const start, const finish = snake;
-
-                    const head_box = Box{ .left = self.left, .top = self.top, .right = start.x, .bottom = start.y };
-                    const tail_box = Box{ .left = finish.x, .top = finish.y, .right = self.right, .bottom = self.bottom };
-
-                    const head_maybe = try head_box.findPath(allocator, line_iter_a, line_iter_b);
-                    const tail_maybe = try tail_box.findPath(allocator, line_iter_a, line_iter_b);
-
-                    var head_list = std.DoublyLinkedList(Point){};
-                    if (head_maybe) |head| {
-                        head_list = head;
-                    } else {
-                        var node = try allocator.create(std.DoublyLinkedList(Point).Node);
-                        node.data = start;
-                        head_list.append(node);
-                    }
-
-                    var tail_list = std.DoublyLinkedList(Point){};
-                    if (tail_maybe) |tail| {
-                        tail_list = tail;
-                    } else {
-                        var node = try allocator.create(std.DoublyLinkedList(Point).Node);
-                        node.data = finish;
-                        tail_list.append(node);
-                    }
-
-                    head_list.concatByMoving(&tail_list);
-
-                    return head_list;
-                } else {
-                    return null;
-                }
-            }
-        };
-
-        fn walkDiagonal(p1: Point, p2: Point, line_iter_a: *LineIterator(repo_kind, repo_opts), line_iter_b: *LineIterator(repo_kind, repo_opts), out: *std.ArrayList([2]Point)) !Point {
-            var p = p1;
             while (true) {
-                if (p.x < p2.x and p.y < p2.y) {
-                    const line_a = try line_iter_a.get(p.x);
-                    defer line_iter_a.allocator.free(line_a);
-                    const line_b = try line_iter_b.get(p.y);
-                    defer line_iter_b.allocator.free(line_b);
-                    if (std.mem.eql(u8, line_a, line_b)) {
-                        try out.append([2]Point{ p, .{ .x = p.x + 1, .y = p.y + 1 } });
-                        p.x += 1;
-                        p.y += 1;
-                        continue;
-                    }
+                switch (action) {
+                    .push => {
+                        z_block: while (n > 0 and m > 0) {
+                            @memset(self.b, 0);
+
+                            const w = n - m;
+                            const l = n + m;
+                            const parity = l & 1;
+                            const offsetx = i + n - 1;
+                            const offsety = j + m - 1;
+                            const hmax = @as(usize, @intCast(l + parity)) / 2;
+                            var zz: isize = 0;
+
+                            h_loop: for (0..hmax + 1) |h| {
+                                const hh: isize = @intCast(h);
+                                const kmin: isize = 2 * @max(0, hh - m) - hh;
+                                const kmax: isize = hh - 2 * @max(0, hh - n);
+
+                                // forwards
+                                var k: isize = kmin;
+                                while (k <= kmax) {
+                                    defer k += 2;
+                                    const gkm = self.b[@intCast(k - 1 - z * @divFloor(k - 1, z))];
+                                    const gkp = self.b[@intCast(k + 1 - z * @divFloor(k + 1, z))];
+                                    const u = if (k == -hh or (k != hh and gkm < gkp)) gkp else gkm + 1;
+                                    const v = u - k;
+                                    var x = u;
+                                    var y = v;
+                                    while (x < n and y < m and try self.eq(@intCast(i + x), @intCast(j + y))) {
+                                        x += 1;
+                                        y += 1;
+                                    }
+                                    self.b[@intCast(k - z * @divFloor(k, z))] = x;
+                                    zz = w - k;
+                                    if (parity == 1 and zz >= 1 - hh and zz < hh and x + self.b[@intCast(z + zz - z * @divFloor(zz, z))] >= n) {
+                                        if (h > 1 or x != u) {
+                                            try self.stack.append(i + x);
+                                            try self.stack.append(n - x);
+                                            try self.stack.append(j + y);
+                                            try self.stack.append(m - y);
+                                            n = u;
+                                            m = v;
+                                            z = 2 * (@min(n, m) + 1);
+                                            continue :z_block;
+                                        } else break :h_loop;
+                                    }
+                                }
+
+                                // backwards
+                                k = kmin;
+                                while (k <= kmax) {
+                                    defer k += 2;
+                                    const pkm = self.b[@intCast(z + k - 1 - z * @divFloor(k - 1, z))];
+                                    const pkp = self.b[@intCast(z + k + 1 - z * @divFloor(k + 1, z))];
+                                    const u = if (k == -hh or (k != hh and pkm < pkp)) pkp else pkm + 1;
+                                    const v = u - k;
+                                    var x = u;
+                                    var y = v;
+                                    while (x < n and y < m and try self.eq(@intCast(offsetx - x), @intCast(offsety - y))) {
+                                        x += 1;
+                                        y += 1;
+                                    }
+                                    self.b[@intCast(z + k - z * @divFloor(k, z))] = x;
+                                    zz = w - k;
+                                    if (parity == 0 and zz >= -hh and zz <= hh and x + self.b[@intCast(zz - z * @divFloor(zz, z))] >= n) {
+                                        if (h > 0 or x != u) {
+                                            try self.stack.append(i + n - u);
+                                            try self.stack.append(u);
+                                            try self.stack.append(j + m - v);
+                                            try self.stack.append(v);
+                                            n = n - x;
+                                            m = m - y;
+                                            z = 2 * (@min(n, m) + 1);
+                                            continue :z_block;
+                                        } else break :h_loop;
+                                    }
+                                }
+                            }
+
+                            if (n == m) {
+                                continue;
+                            }
+                            if (m > n) {
+                                i += n;
+                                j += n;
+                                m -= n;
+                                n = 0;
+                            } else {
+                                i += m;
+                                j += m;
+                                n -= m;
+                                m = 0;
+                            }
+
+                            break;
+                        }
+
+                        action = .pop;
+
+                        if (n + m != 0) {
+                            if (self.range_maybe) |*range| {
+                                if (range.del_end == i or range.ins_end == j) {
+                                    range.del_end = @intCast(i + n);
+                                    range.ins_end = @intCast(j + m);
+                                    continue;
+                                }
+                            }
+
+                            const range_maybe = self.range_maybe;
+                            self.range_maybe = .{
+                                .del_start = @intCast(i),
+                                .del_end = @intCast(i + n),
+                                .ins_start = @intCast(j),
+                                .ins_end = @intCast(j + m),
+                            };
+
+                            if (range_maybe) |range| {
+                                self.deferred_range = range;
+                                self.i = i;
+                                self.n = n;
+                                self.j = j;
+                                self.m = m;
+                                self.z = z;
+                                return .pop;
+                            }
+                        }
+                    },
+                    .pop => {
+                        if (self.stack.items.len == 0) return null;
+
+                        m = self.stack.pop();
+                        j = self.stack.pop();
+                        n = self.stack.pop();
+                        i = self.stack.pop();
+                        z = 2 * (@min(n, m) + 1);
+                        action = .push;
+                    },
                 }
-                break;
             }
-            return p;
         }
 
         pub fn init(allocator: std.mem.Allocator, line_iter_a: *LineIterator(repo_kind, repo_opts), line_iter_b: *LineIterator(repo_kind, repo_opts)) !MyersDiffIterator(repo_kind, repo_opts) {
-            var points = std.ArrayList([2]Point).init(allocator);
-            errdefer points.deinit();
+            const n = line_iter_a.count();
+            const m = line_iter_b.count();
+            const z = (@min(n, m) + 1) * 2;
 
-            var arena = std.heap.ArenaAllocator.init(allocator);
-            defer arena.deinit();
-
-            const box = Box{ .left = 0, .top = 0, .right = line_iter_a.count(), .bottom = line_iter_b.count() };
-            if (try box.findPath(arena.allocator(), line_iter_a, line_iter_b)) |path| {
-                var node = path.first orelse return error.ExpectedFirstNode;
-                while (true) {
-                    const next_node = node.next orelse break;
-                    const next_p = next_node.data;
-
-                    var p = try walkDiagonal(node.data, next_p, line_iter_a, line_iter_b, &points);
-                    if (next_p.x - p.x < next_p.y - p.y) {
-                        try points.append([2]Point{ p, .{ .x = p.x, .y = p.y + 1 } });
-                        p.y += 1;
-                    } else if (next_p.x - p.x > next_p.y - p.y) {
-                        try points.append([2]Point{ p, .{ .x = p.x + 1, .y = p.y } });
-                        p.x += 1;
-                    }
-                    _ = try walkDiagonal(p, next_p, line_iter_a, line_iter_b, &points);
-
-                    node = next_node;
-                }
-            }
+            const b = try allocator.alloc(isize, 2 * z);
+            errdefer allocator.free(b);
+            @memset(b, 0);
 
             return MyersDiffIterator(repo_kind, repo_opts){
                 .allocator = allocator,
-                .points = points,
+                .cache = std.ArrayList(Edit).init(allocator),
+                .stack = std.ArrayList(isize).init(allocator),
+                .action = .push,
+                .b = b,
+                .i = 0,
+                .j = 0,
+                .n = @intCast(n),
+                .m = @intCast(m),
+                .z = @intCast(z),
+                .range_maybe = null,
+                .deferred_range = std.mem.zeroInit(Range, .{}),
                 .line_iter_a = line_iter_a,
                 .line_iter_b = line_iter_b,
                 .next_index = 0,
+                .x_index = 0,
+                .y_index = 0,
             };
         }
 
         pub fn next(self: *MyersDiffIterator(repo_kind, repo_opts)) !?Edit {
-            if (self.next_index == self.points.items.len) {
-                return null;
+            if (self.next_index >= self.cache.items.len) {
+                const action = try self.diff(self.action orelse return null);
+                self.action = action;
+
+                const range = if (.pop == action)
+                    self.deferred_range
+                else if (self.range_maybe) |range|
+                    range
+                else
+                    return null;
+
+                const sx: usize = @intCast(range.del_start);
+                const ex: usize = @intCast(range.del_end);
+                const sy: usize = @intCast(range.ins_start);
+                const ey: usize = @intCast(range.ins_end);
+
+                for (self.x_index..sx, self.y_index..sy) |old_idx, new_idx| {
+                    const old_offset = self.line_iter_a.line_offsets[old_idx];
+                    const new_offset = self.line_iter_b.line_offsets[new_idx];
+                    try self.cache.append(.{
+                        .eql = .{
+                            .old_line = .{ .num = old_idx + 1, .offset = old_offset },
+                            .new_line = .{ .num = new_idx + 1, .offset = new_offset },
+                        },
+                    });
+                }
+
+                for (sx..ex) |old_idx| {
+                    const old_offset = self.line_iter_a.line_offsets[old_idx];
+                    try self.cache.append(.{
+                        .del = .{
+                            .old_line = .{ .num = old_idx + 1, .offset = old_offset },
+                        },
+                    });
+                }
+
+                for (sy..ey) |new_idx| {
+                    const new_offset = self.line_iter_b.line_offsets[new_idx];
+                    try self.cache.append(.{
+                        .ins = .{
+                            .new_line = .{ .num = new_idx + 1, .offset = new_offset },
+                        },
+                    });
+                }
+
+                if (null == action) {
+                    for (ex..self.line_iter_a.count(), ey..self.line_iter_b.count()) |old_idx, new_idx| {
+                        const old_offset = self.line_iter_a.line_offsets[old_idx];
+                        const new_offset = self.line_iter_b.line_offsets[new_idx];
+                        try self.cache.append(.{
+                            .eql = .{
+                                .old_line = .{ .num = old_idx + 1, .offset = old_offset },
+                                .new_line = .{ .num = new_idx + 1, .offset = new_offset },
+                            },
+                        });
+                    }
+                }
+
+                self.x_index = ex;
+                self.y_index = ey;
             }
 
-            const p1, const p2 = self.points.items[self.next_index];
+            const edit = self.cache.items[self.next_index];
             self.next_index += 1;
-
-            if (p1.x == p2.x) {
-                const new_idx = p1.y;
-                const new_offset = self.line_iter_b.line_offsets[new_idx];
-                return .{
-                    .ins = .{
-                        .new_line = .{ .num = new_idx + 1, .offset = new_offset },
-                    },
-                };
-            } else if (p1.y == p2.y) {
-                const old_idx = p1.x;
-                const old_offset = self.line_iter_a.line_offsets[old_idx];
-                return .{
-                    .del = .{
-                        .old_line = .{ .num = old_idx + 1, .offset = old_offset },
-                    },
-                };
-            } else {
-                const old_idx = p1.x;
-                const new_idx = p1.y;
-                const old_offset = self.line_iter_a.line_offsets[old_idx];
-                const new_offset = self.line_iter_b.line_offsets[new_idx];
-                return .{
-                    .eql = .{
-                        .old_line = .{ .num = old_idx + 1, .offset = old_offset },
-                        .new_line = .{ .num = new_idx + 1, .offset = new_offset },
-                    },
-                };
-            }
+            return edit;
         }
 
         pub fn get(self: *MyersDiffIterator(repo_kind, repo_opts), old_line: usize) !?usize {
-            // TODO: cache result so we don't have to scan the file every time
-            try self.reset();
-            while (try self.next()) |edit| {
+            while (try self.next()) |_| {}
+
+            for (self.cache.items) |edit| {
                 if (.eql == edit) {
                     if (edit.eql.old_line.num < old_line) {
                         continue;
@@ -690,7 +661,9 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp
         }
 
         pub fn deinit(self: *MyersDiffIterator(repo_kind, repo_opts)) void {
-            self.points.deinit();
+            self.allocator.free(self.b);
+            self.cache.deinit();
+            self.stack.deinit();
         }
     };
 }
@@ -706,20 +679,20 @@ test "myers diff" {
         defer line_iter1.deinit();
         var line_iter2 = try LineIterator(repo_kind, repo_opts).initFromBuffer(allocator, lines2);
         defer line_iter2.deinit();
-        const expected_diff = [_]MyersDiffIterator(repo_kind, repo_opts).Edit{
+        const expected_diff = [_]Edit{
             .{ .del = .{ .old_line = .{ .num = 1 } } },
-            .{ .del = .{ .old_line = .{ .num = 2 } } },
-            .{ .eql = .{ .old_line = .{ .num = 3 }, .new_line = .{ .num = 1 } } },
-            .{ .del = .{ .old_line = .{ .num = 4 } } },
-            .{ .eql = .{ .old_line = .{ .num = 5 }, .new_line = .{ .num = 2 } } },
-            .{ .ins = .{ .new_line = .{ .num = 3 } } },
-            .{ .eql = .{ .old_line = .{ .num = 6 }, .new_line = .{ .num = 4 } } },
+            .{ .ins = .{ .new_line = .{ .num = 1 } } },
+            .{ .eql = .{ .old_line = .{ .num = 2 }, .new_line = .{ .num = 2 } } },
+            .{ .del = .{ .old_line = .{ .num = 3 } } },
+            .{ .eql = .{ .old_line = .{ .num = 4 }, .new_line = .{ .num = 3 } } },
+            .{ .eql = .{ .old_line = .{ .num = 5 }, .new_line = .{ .num = 4 } } },
+            .{ .del = .{ .old_line = .{ .num = 6 } } },
             .{ .eql = .{ .old_line = .{ .num = 7 }, .new_line = .{ .num = 5 } } },
             .{ .ins = .{ .new_line = .{ .num = 6 } } },
         };
         var myers_diff_iter = try MyersDiffIterator(repo_kind, repo_opts).init(allocator, &line_iter1, &line_iter2);
         defer myers_diff_iter.deinit();
-        var actual_diff = std.ArrayList(MyersDiffIterator(repo_kind, repo_opts).Edit).init(allocator);
+        var actual_diff = std.ArrayList(Edit).init(allocator);
         defer actual_diff.deinit();
         while (try myers_diff_iter.next()) |edit| {
             try actual_diff.append(edit);
@@ -736,13 +709,13 @@ test "myers diff" {
         defer line_iter1.deinit();
         var line_iter2 = try LineIterator(repo_kind, repo_opts).initFromBuffer(allocator, lines2);
         defer line_iter2.deinit();
-        const expected_diff = [_]MyersDiffIterator(repo_kind, repo_opts).Edit{
+        const expected_diff = [_]Edit{
             .{ .del = .{ .old_line = .{ .num = 1 } } },
             .{ .ins = .{ .new_line = .{ .num = 1 } } },
         };
         var myers_diff_iter = try MyersDiffIterator(repo_kind, repo_opts).init(allocator, &line_iter1, &line_iter2);
         defer myers_diff_iter.deinit();
-        var actual_diff = std.ArrayList(MyersDiffIterator(repo_kind, repo_opts).Edit).init(allocator);
+        var actual_diff = std.ArrayList(Edit).init(allocator);
         defer actual_diff.deinit();
         while (try myers_diff_iter.next()) |edit| {
             try actual_diff.append(edit);
@@ -991,7 +964,7 @@ test "diff3" {
 
 pub fn Hunk(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return struct {
-        edits: std.ArrayList(MyersDiffIterator(repo_kind, repo_opts).Edit),
+        edits: std.ArrayList(Edit),
         allocator: std.mem.Allocator,
 
         pub fn deinit(self: *Hunk(repo_kind, repo_opts)) void {
@@ -1116,7 +1089,7 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                 .found_edit = false,
                 .margin = 0,
                 .next_hunk = Hunk(repo_kind, repo_opts){
-                    .edits = std.ArrayList(MyersDiffIterator(repo_kind, repo_opts).Edit).init(allocator),
+                    .edits = std.ArrayList(Edit).init(allocator),
                     .allocator = allocator,
                 },
             };
@@ -1158,7 +1131,7 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                         if (self.found_edit) {
                             const hunk = self.next_hunk;
                             self.next_hunk = Hunk(repo_kind, repo_opts){
-                                .edits = std.ArrayList(MyersDiffIterator(repo_kind, repo_opts).Edit).init(self.allocator),
+                                .edits = std.ArrayList(Edit).init(self.allocator),
                                 .allocator = self.allocator,
                             };
                             self.found_edit = false;
@@ -1174,7 +1147,7 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                             // return the last hunk
                             const hunk = self.next_hunk;
                             self.next_hunk = Hunk(repo_kind, repo_opts){
-                                .edits = std.ArrayList(MyersDiffIterator(repo_kind, repo_opts).Edit).init(self.allocator),
+                                .edits = std.ArrayList(Edit).init(self.allocator),
                                 .allocator = self.allocator,
                             };
                             self.found_edit = false;
@@ -1206,7 +1179,7 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
             self.margin = 0;
             self.next_hunk.deinit();
             self.next_hunk = Hunk(repo_kind, repo_opts){
-                .edits = std.ArrayList(MyersDiffIterator(repo_kind, repo_opts).Edit).init(self.allocator),
+                .edits = std.ArrayList(Edit).init(self.allocator),
                 .allocator = self.allocator,
             };
         }
