@@ -844,7 +844,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                             .object_reader = obj_rdr,
                         },
                         .full => {
-                            var position: usize = 0;
+                            var position: u64 = 0;
 
                             // read the content kind
                             const content_kind = try reader.readUntilDelimiterAlloc(allocator, ' ', repo_opts.max_read_size);
