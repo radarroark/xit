@@ -350,12 +350,15 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                     if (std.mem.eql(u8, "list", cmd_name)) {
                         cmd = .list;
                     } else if (std.mem.eql(u8, "add", cmd_name)) {
-                        if (cmd_args.positional_args.len != 3) {
+                        if (cmd_args.positional_args.len < 3) {
                             return null;
                         }
                         cmd = .{ .add = .{
                             .name = cmd_args.positional_args[1],
-                            .value = cmd_args.positional_args[2],
+                            .value = if (cmd_args.positional_args.len == 3)
+                                cmd_args.positional_args[2]
+                            else
+                                try std.mem.join(cmd_args.arena.allocator(), " ", cmd_args.positional_args[2..]),
                         } };
                     } else if (std.mem.eql(u8, "rm", cmd_name)) {
                         if (cmd_args.positional_args.len != 2) {
@@ -508,6 +511,7 @@ test "command" {
         try std.testing.expectEqualStrings("add", @tagName(command.cli));
     }
 
+    // arg requires value
     {
         var cmd_args = try CommandArgs.init(allocator, &.{ "commit", "-m" });
         defer cmd_args.deinit();
@@ -523,6 +527,16 @@ test "command" {
         try std.testing.expectEqualStrings("let there be light", command.cli.commit.message.?);
     }
 
+    // extra config add args are joined
+    {
+        var cmd_args = try CommandArgs.init(allocator, &.{ "config", "add", "user.name", "radar", "roark" });
+        defer cmd_args.deinit();
+        const command = try CommandDispatch(repo_kind, hash_kind).init(&cmd_args);
+        try std.testing.expectEqualStrings("cli", @tagName(command));
+        try std.testing.expectEqualStrings("radar roark", command.cli.config.add.value);
+    }
+
+    // invalid command and arg
     {
         var cmd_args = try CommandArgs.init(allocator, &.{ "stats", "--clii" });
         defer cmd_args.deinit();
@@ -532,6 +546,7 @@ test "command" {
         try std.testing.expectEqualStrings("stats", command.invalid.command);
     }
 
+    // invalid arg
     {
         var cmd_args = try CommandArgs.init(allocator, &.{ "status", "--clii" });
         defer cmd_args.deinit();
