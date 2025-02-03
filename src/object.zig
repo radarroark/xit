@@ -841,7 +841,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                             .object_reader = obj_rdr,
                         },
                         .full => {
-                            var read_len: usize = 0;
+                            var position: usize = 0;
 
                             // read the content kind
                             const content_kind = try reader.readUntilDelimiterAlloc(allocator, ' ', repo_opts.max_read_size);
@@ -849,7 +849,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                             if (!std.mem.eql(u8, "tree", content_kind)) {
                                 return error.InvalidCommitContentKind;
                             }
-                            read_len += content_kind.len + 1;
+                            position += content_kind.len + 1;
 
                             // read the tree hash
                             var tree_hash = [_]u8{0} ** (hash.hexLen(repo_opts.hash) + 1);
@@ -857,7 +857,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                             if (tree_hash_slice.len != hash.hexLen(repo_opts.hash)) {
                                 return error.InvalidCommitTreeHash;
                             }
-                            read_len += tree_hash_slice.len + 1;
+                            position += tree_hash_slice.len + 1;
 
                             // init the content
                             var content = ObjectContent(repo_opts.hash){
@@ -872,7 +872,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                             // read the metadata
                             while (true) {
                                 const line = try reader.readUntilDelimiterAlloc(arena.allocator(), '\n', repo_opts.max_read_size);
-                                read_len += line.len + 1;
+                                position += line.len + 1;
                                 if (line.len == 0) {
                                     break;
                                 }
@@ -896,7 +896,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                                 }
                             }
 
-                            content.commit.message_position = read_len;
+                            content.commit.message_position = position;
 
                             // read only the first line
                             content.commit.metadata.message = try reader.readUntilDelimiterOrEofAlloc(arena.allocator(), '\n', repo_opts.max_read_size);
