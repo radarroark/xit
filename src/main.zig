@@ -123,93 +123,81 @@ pub fn run(
     defer cmd_args.deinit();
 
     switch (try cmd.CommandDispatch(repo_kind, repo_opts.hash).init(&cmd_args)) {
-        .invalid => |invalid| {
-            switch (invalid) {
-                .command => |command| {
-                    try writers.err.print("\"{s}\" is not a valid command\n", .{command});
-                    try writers.out.print(USAGE, .{});
-                },
-                .argument => |argument| {
-                    try writers.err.print("\"{s}\" is not a valid argument\n", .{argument.value});
-                    try writers.out.print(USAGE, .{});
-                },
-            }
-        },
-        .help => |cmd_kind_maybe| {
-            if (cmd_kind_maybe) |cmd_kind| {
-                // TODO: print usage for each sub command
-                switch (cmd_kind) {
-                    else => try writers.out.print(USAGE, .{}),
-                }
-            } else {
+        .invalid => |invalid| switch (invalid) {
+            .command => |command| {
+                try writers.err.print("\"{s}\" is not a valid command\n", .{command});
                 try writers.out.print(USAGE, .{});
-            }
+            },
+            .argument => |argument| {
+                try writers.err.print("\"{s}\" is not a valid argument\n", .{argument.value});
+                try writers.out.print(USAGE, .{});
+            },
         },
-        .tui => |cmd_kind_maybe| {
-            if (.none == repo_opts.hash) {
+        .help => |cmd_kind_maybe| if (cmd_kind_maybe) |cmd_kind| switch (cmd_kind) {
+            // TODO: print usage for each sub command
+            else => try writers.out.print(USAGE, .{}),
+        } else {
+            try writers.out.print(USAGE, .{});
+        },
+        .tui => |cmd_kind_maybe| if (.none == repo_opts.hash) {
+            // if no hash was specified, use AnyRepo to detect the hash being used
+            var any_repo = try rp.AnyRepo(repo_kind, repo_opts).open(allocator, .{ .cwd = cwd });
+            defer any_repo.deinit();
+            switch (any_repo) {
+                .none => return error.HashKindNotFound,
+                .sha1 => |*repo| try ui.start(repo_kind, repo_opts.withHash(.sha1), repo, allocator, cmd_kind_maybe),
+                .sha256 => |*repo| try ui.start(repo_kind, repo_opts.withHash(.sha256), repo, allocator, cmd_kind_maybe),
+            }
+        } else {
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = cwd });
+            defer repo.deinit();
+            try ui.start(repo_kind, repo_opts, &repo, allocator, cmd_kind_maybe);
+        },
+        .cli => |cli_cmd| switch (cli_cmd) {
+            .init => |init_cmd| {
+                const new_repo_opts = comptime if (.none == repo_opts.hash)
+                    // if no hash was specified, just use the default hash
+                    repo_opts.withHash((rp.RepoOpts(repo_kind){}).hash)
+                else
+                    repo_opts;
+                var repo = try rp.Repo(repo_kind, new_repo_opts).init(allocator, .{ .cwd = cwd }, init_cmd.dir);
+                defer repo.deinit();
+
+                // add default user config
+                try repo.addConfig(allocator, .{ .name = "user.name", .value = "fixme" });
+                try repo.addConfig(allocator, .{ .name = "user.email", .value = "fix@me" });
+
+                try writers.out.print(
+                    \\congrats, you just created a new repo! aren't you special.
+                    \\try setting your name and email. if you're too lazy, the
+                    \\default ones will be used, and you'll be like one of those
+                    \\low-effort people who make slides with times new roman font.
+                    \\
+                    \\    xit config add user.name foo
+                    \\    xit config add user.email foo@bar
+                    \\
+                , .{});
+            },
+            else => if (.none == repo_opts.hash) {
                 // if no hash was specified, use AnyRepo to detect the hash being used
                 var any_repo = try rp.AnyRepo(repo_kind, repo_opts).open(allocator, .{ .cwd = cwd });
                 defer any_repo.deinit();
                 switch (any_repo) {
                     .none => return error.HashKindNotFound,
-                    .sha1 => |*repo| try ui.start(repo_kind, repo_opts.withHash(.sha1), repo, allocator, cmd_kind_maybe),
-                    .sha256 => |*repo| try ui.start(repo_kind, repo_opts.withHash(.sha256), repo, allocator, cmd_kind_maybe),
+                    .sha1 => |*repo| {
+                        const cmd_maybe = try cmd.Command(repo_kind, .sha1).init(&cmd_args);
+                        try repo.runCommand(allocator, cmd_maybe orelse return error.InvalidCommand, writers);
+                    },
+                    .sha256 => |*repo| {
+                        const cmd_maybe = try cmd.Command(repo_kind, .sha256).init(&cmd_args);
+                        try repo.runCommand(allocator, cmd_maybe orelse return error.InvalidCommand, writers);
+                    },
                 }
             } else {
                 var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = cwd });
                 defer repo.deinit();
-                try ui.start(repo_kind, repo_opts, &repo, allocator, cmd_kind_maybe);
-            }
-        },
-        .cli => |cli_cmd| {
-            switch (cli_cmd) {
-                .init => |init_cmd| {
-                    const new_repo_opts = comptime if (.none == repo_opts.hash)
-                        // if no hash was specified, just use the default hash
-                        repo_opts.withHash((rp.RepoOpts(repo_kind){}).hash)
-                    else
-                        repo_opts;
-                    var repo = try rp.Repo(repo_kind, new_repo_opts).init(allocator, .{ .cwd = cwd }, init_cmd.dir);
-                    defer repo.deinit();
-
-                    // add default user config
-                    try repo.addConfig(allocator, .{ .name = "user.name", .value = "fixme" });
-                    try repo.addConfig(allocator, .{ .name = "user.email", .value = "fix@me" });
-
-                    try writers.out.print(
-                        \\congrats, you just created a new repo! aren't you special.
-                        \\try setting a few config values. if you're too lazy, the
-                        \\default ones will be used, and you'll be like one of those
-                        \\low-effort people who make slides with times new roman font.
-                        \\
-                        \\    xit config add user.name foo
-                        \\    xit config add user.email foo@bar
-                        \\
-                    , .{});
-                },
-                else => {
-                    if (.none == repo_opts.hash) {
-                        // if no hash was specified, use AnyRepo to detect the hash being used
-                        var any_repo = try rp.AnyRepo(repo_kind, repo_opts).open(allocator, .{ .cwd = cwd });
-                        defer any_repo.deinit();
-                        switch (any_repo) {
-                            .none => return error.HashKindNotFound,
-                            .sha1 => |*repo| {
-                                const cmd_maybe = try cmd.Command(repo_kind, .sha1).init(&cmd_args);
-                                try repo.runCommand(allocator, cmd_maybe orelse return error.InvalidCommand, writers);
-                            },
-                            .sha256 => |*repo| {
-                                const cmd_maybe = try cmd.Command(repo_kind, .sha256).init(&cmd_args);
-                                try repo.runCommand(allocator, cmd_maybe orelse return error.InvalidCommand, writers);
-                            },
-                        }
-                    } else {
-                        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = cwd });
-                        defer repo.deinit();
-                        try repo.runCommand(allocator, cli_cmd, writers);
-                    }
-                },
-            }
+                try repo.runCommand(allocator, cli_cmd, writers);
+            },
         },
     }
 }
