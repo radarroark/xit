@@ -902,7 +902,14 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                             content.commit.message_position = position;
 
                             // read only the first line
-                            content.commit.metadata.message = try reader.readUntilDelimiterOrEofAlloc(arena.allocator(), '\n', repo_opts.max_read_size);
+                            content.commit.metadata.message = reader.readUntilDelimiterOrEofAlloc(
+                                arena.allocator(),
+                                '\n',
+                                repo_opts.max_read_size,
+                            ) catch |err| switch (err) {
+                                error.StreamTooLong => null,
+                                else => |e| return e,
+                            };
 
                             return .{
                                 .allocator = allocator,
