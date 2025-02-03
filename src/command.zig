@@ -39,6 +39,7 @@ pub const CommandArgs = struct {
     command_name: ?[]const u8,
     positional_args: []const []const u8,
     map_args: std.StringArrayHashMap(?[]const u8),
+    unused_args: std.StringArrayHashMap(void),
 
     pub fn init(allocator: std.mem.Allocator, args: []const []const u8) !CommandArgs {
         const arena = try allocator.create(std.heap.ArenaAllocator);
@@ -50,12 +51,14 @@ pub const CommandArgs = struct {
 
         var positional_args = std.ArrayList([]const u8).init(arena.allocator());
         var map_args = std.StringArrayHashMap(?[]const u8).init(arena.allocator());
+        var unused_args = std.StringArrayHashMap(void).init(arena.allocator());
 
         for (args) |arg| {
             if (arg.len == 0) {
                 continue;
             } else if (arg.len > 1 and arg[0] == '-') {
                 try map_args.put(arg, null);
+                try unused_args.put(arg, {});
             } else {
                 const keys = map_args.keys();
                 if (keys.len > 0) {
@@ -88,6 +91,7 @@ pub const CommandArgs = struct {
                 .command_name = null,
                 .positional_args = args_slice,
                 .map_args = map_args,
+                .unused_args = unused_args,
             };
         } else {
             const command_name = args_slice[0];
@@ -140,6 +144,7 @@ pub const CommandArgs = struct {
                 .command_name = command_name,
                 .positional_args = extra_args,
                 .map_args = map_args,
+                .unused_args = unused_args,
             };
         }
     }
@@ -147,6 +152,16 @@ pub const CommandArgs = struct {
     pub fn deinit(self: *CommandArgs) void {
         self.arena.deinit();
         self.allocator.destroy(self.arena);
+    }
+
+    pub fn contains(self: *CommandArgs, arg: []const u8) bool {
+        _ = self.unused_args.orderedRemove(arg);
+        return self.map_args.contains(arg);
+    }
+
+    pub fn get(self: *CommandArgs, arg: []const u8) ??[]const u8 {
+        _ = self.unused_args.orderedRemove(arg);
+        return self.map_args.get(arg);
     }
 };
 
@@ -193,7 +208,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
             remote_ref_name: []const u8,
         },
 
-        pub fn init(cmd_args: *const CommandArgs) !?Command(repo_kind, hash_kind) {
+        pub fn init(cmd_args: *CommandArgs) !?Command(repo_kind, hash_kind) {
             const command_kind = cmd_args.command_kind orelse return null;
             switch (command_kind) {
                 .init => {
@@ -216,7 +231,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                     return .{ .unadd = .{
                         .paths = cmd_args.positional_args,
                         .opts = .{
-                            .force = cmd_args.map_args.contains("-f"),
+                            .force = cmd_args.contains("-f"),
                         },
                     } };
                 },
@@ -226,7 +241,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                     return .{ .rm = .{
                         .paths = cmd_args.positional_args,
                         .opts = .{
-                            .force = cmd_args.map_args.contains("-f"),
+                            .force = cmd_args.contains("-f"),
                             .remove_from_workspace = true,
                         },
                     } };
@@ -238,19 +253,19 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                 },
                 .commit => {
                     // if a message is included, it must have a non-null value
-                    const message = if (cmd_args.map_args.get("-m")) |msg| (msg orelse return error.CommitMessageNotFound) else "";
+                    const message = if (cmd_args.get("-m")) |msg| (msg orelse return error.CommitMessageNotFound) else "";
                     return .{ .commit = .{ .message = message } };
                 },
                 .status => return .status,
                 .diff => {
-                    const diff_opts: df.BasicDiffOptions(hash_kind) = if (cmd_args.map_args.contains("--staged"))
+                    const diff_opts: df.BasicDiffOptions(hash_kind) = if (cmd_args.contains("--staged"))
                         .index
                     else
-                        (if (cmd_args.map_args.contains("--base"))
+                        (if (cmd_args.contains("--base"))
                             .{ .workspace = .{ .conflict_diff_kind = .base } }
-                        else if (cmd_args.map_args.contains("--ours"))
+                        else if (cmd_args.contains("--ours"))
                             .{ .workspace = .{ .conflict_diff_kind = .target } }
-                        else if (cmd_args.map_args.contains("--theirs"))
+                        else if (cmd_args.contains("--theirs"))
                             .{ .workspace = .{ .conflict_diff_kind = .source } }
                         else
                             .{ .workspace = .{ .conflict_diff_kind = .target } });
@@ -275,7 +290,8 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                         }
                         cmd = .{ .remove = .{ .name = cmd_args.positional_args[1] } };
                     } else {
-                        return error.InvalidBranchCommand;
+                        try cmd_args.unused_args.put(cmd_name, {});
+                        return null;
                     }
 
                     return .{ .branch = cmd };
@@ -308,7 +324,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                         return error.InvalidMergeKind;
 
                     const merge_action: mrg.MergeAction(repo_kind, hash_kind) =
-                        if (cmd_args.map_args.contains("--continue"))
+                        if (cmd_args.contains("--continue"))
                         .cont
                     else blk: {
                         var source = std.ArrayList(rf.RefOrOid(hash_kind)).init(cmd_args.arena.allocator());
@@ -349,7 +365,8 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                             .name = cmd_args.positional_args[1],
                         } };
                     } else {
-                        return error.InvalidConfigCommand;
+                        try cmd_args.unused_args.put(cmd_name, {});
+                        return null;
                     }
 
                     return .{ .config = cmd };
@@ -378,7 +395,8 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                             .name = cmd_args.positional_args[1],
                         } };
                     } else {
-                        return error.InvalidRemoteCommand;
+                        try cmd_args.unused_args.put(cmd_name, {});
+                        return null;
                     }
 
                     return .{ .remote = cmd };
@@ -407,16 +425,39 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
 /// (via the TUI or CLI).
 pub fn CommandDispatch(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
     return union(enum) {
-        invalid: struct {
-            name: []const u8,
+        invalid: union(enum) {
+            command: []const u8,
+            argument: struct {
+                command: ?CommandKind,
+                value: []const u8,
+            },
         },
         help: ?CommandKind,
         tui: ?CommandKind,
         cli: Command(repo_kind, hash_kind),
 
-        pub fn init(cmd_args: *const CommandArgs) !CommandDispatch(repo_kind, hash_kind) {
-            const show_help = cmd_args.map_args.contains("--help");
-            const force_cli = cmd_args.map_args.contains("--cli");
+        pub fn init(cmd_args: *CommandArgs) !CommandDispatch(repo_kind, hash_kind) {
+            const dispatch = try initIgnoreUnused(cmd_args);
+            if (cmd_args.unused_args.count() > 0) {
+                return .{
+                    .invalid = .{
+                        .argument = .{
+                            .command = switch (dispatch) {
+                                .invalid => return dispatch, // if there was already an error, return it instead
+                                .help, .tui => |cmd_kind_maybe| cmd_kind_maybe,
+                                .cli => |command| command,
+                            },
+                            .value = cmd_args.unused_args.keys()[0],
+                        },
+                    },
+                };
+            }
+            return dispatch;
+        }
+
+        pub fn initIgnoreUnused(cmd_args: *CommandArgs) !CommandDispatch(repo_kind, hash_kind) {
+            const show_help = cmd_args.contains("--help");
+            const force_cli = cmd_args.contains("--cli");
 
             if (cmd_args.command_kind) |command_kind| {
                 if (show_help) {
@@ -432,7 +473,7 @@ pub fn CommandDispatch(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash
                     return .{ .help = command_kind };
                 }
             } else if (cmd_args.command_name) |command_name| {
-                return .{ .invalid = .{ .name = command_name } };
+                return .{ .invalid = .{ .command = command_name } };
             } else if (show_help) {
                 return .{ .help = null };
             } else if (!force_cli) {
@@ -456,32 +497,48 @@ test "command" {
         var cmd_args = try CommandArgs.init(allocator, &.{ "add", "--cli" });
         defer cmd_args.deinit();
         const command = try CommandDispatch(repo_kind, hash_kind).init(&cmd_args);
-        try std.testing.expect(command == .help);
+        try std.testing.expectEqualStrings("help", @tagName(command));
     }
 
     {
         var cmd_args = try CommandArgs.init(allocator, &.{ "add", "file.txt" });
         defer cmd_args.deinit();
         const command = try CommandDispatch(repo_kind, hash_kind).init(&cmd_args);
-        try std.testing.expect(command == .cli and command.cli == .add);
+        try std.testing.expectEqualStrings("cli", @tagName(command));
+        try std.testing.expectEqualStrings("add", @tagName(command.cli));
     }
 
     {
         var cmd_args = try CommandArgs.init(allocator, &.{ "commit", "-m" });
         defer cmd_args.deinit();
         const command_or_err = CommandDispatch(repo_kind, hash_kind).init(&cmd_args);
-        if (command_or_err) |_| {
-            return error.ExpectedError;
-        } else |err| {
-            try std.testing.expect(error.CommitMessageNotFound == err);
-        }
+        try std.testing.expectError(error.CommitMessageNotFound, command_or_err);
     }
 
     {
         var cmd_args = try CommandArgs.init(allocator, &.{ "commit", "-m", "let there be light" });
         defer cmd_args.deinit();
         const command = try CommandDispatch(repo_kind, hash_kind).init(&cmd_args);
-        try std.testing.expect(command == .cli and command.cli == .commit);
-        try std.testing.expect(std.mem.eql(u8, "let there be light", command.cli.commit.message.?));
+        try std.testing.expectEqualStrings("cli", @tagName(command));
+        try std.testing.expectEqualStrings("let there be light", command.cli.commit.message.?);
+    }
+
+    {
+        var cmd_args = try CommandArgs.init(allocator, &.{ "stats", "--clii" });
+        defer cmd_args.deinit();
+        const command = try CommandDispatch(repo_kind, hash_kind).init(&cmd_args);
+        try std.testing.expectEqualStrings("invalid", @tagName(command));
+        try std.testing.expectEqualStrings("command", @tagName(command.invalid));
+        try std.testing.expectEqualStrings("stats", command.invalid.command);
+    }
+
+    {
+        var cmd_args = try CommandArgs.init(allocator, &.{ "status", "--clii" });
+        defer cmd_args.deinit();
+        const command = try CommandDispatch(repo_kind, hash_kind).init(&cmd_args);
+        try std.testing.expectEqualStrings("invalid", @tagName(command));
+        try std.testing.expectEqualStrings("argument", @tagName(command.invalid));
+        try std.testing.expectEqualStrings("status", @tagName(command.invalid.argument.command.?));
+        try std.testing.expectEqualStrings("--clii", command.invalid.argument.value);
     }
 }

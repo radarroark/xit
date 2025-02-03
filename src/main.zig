@@ -124,8 +124,16 @@ pub fn run(
 
     switch (try cmd.CommandDispatch(repo_kind, repo_opts.hash).init(&cmd_args)) {
         .invalid => |invalid| {
-            try writers.err.print("\"{s}\" is not a valid command\n", .{invalid.name});
-            try writers.out.print(USAGE, .{});
+            switch (invalid) {
+                .command => |command| {
+                    try writers.err.print("\"{s}\" is not a valid command\n", .{command});
+                    try writers.out.print(USAGE, .{});
+                },
+                .argument => |argument| {
+                    try writers.err.print("\"{s}\" is not a valid argument\n", .{argument.value});
+                    try writers.out.print(USAGE, .{});
+                },
+            }
         },
         .help => |cmd_kind_maybe| {
             if (cmd_kind_maybe) |cmd_kind| {
