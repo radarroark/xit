@@ -14,6 +14,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
         oid_hex: [hash.hexLen(repo_opts.hash)]u8,
         mode: ?fs.Mode,
         line_offsets: []usize,
+        next_line: usize,
         source: union(enum) {
             object: struct {
                 object_reader: obj.ObjectReader(repo_kind, repo_opts),
@@ -41,6 +42,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                 .oid_hex = oid_hex,
                 .mode = entry.mode,
                 .line_offsets = undefined,
+                .next_line = 0,
                 .source = .{
                     .object = .{
                         .object_reader = object_reader,
@@ -70,6 +72,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                 .oid_hex = std.fmt.bytesToHex(&oid, .lower),
                 .mode = mode,
                 .line_offsets = undefined,
+                .next_line = 0,
                 .source = .{
                     .workspace = .{
                         .file = file,
@@ -89,6 +92,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                 .oid_hex = [_]u8{0} ** hash.hexLen(repo_opts.hash),
                 .mode = null,
                 .line_offsets = undefined,
+                .next_line = 0,
                 .source = .nothing,
             };
             try iter.validateLines();
@@ -106,6 +110,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                 .oid_hex = oid_hex,
                 .mode = entry.mode,
                 .line_offsets = undefined,
+                .next_line = 0,
                 .source = .{
                     .object = .{
                         .object_reader = object_reader,
@@ -128,6 +133,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                 .oid_hex = oid_hex,
                 .mode = mode_maybe,
                 .line_offsets = undefined,
+                .next_line = 0,
                 .source = .{
                     .object = .{
                         .object_reader = object_reader,
@@ -147,6 +153,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                 .oid_hex = [_]u8{0} ** hash.hexLen(repo_opts.hash),
                 .mode = null,
                 .line_offsets = undefined,
+                .next_line = 0,
                 .source = .{
                     .buffer = .{
                         .iter = std.mem.splitScalar(u8, buffer, '\n'),
@@ -180,7 +187,9 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                             try line_arr.append(buffer[0]);
                         }
                     }
-                    return try line_arr.toOwnedSlice();
+                    const line = try line_arr.toOwnedSlice();
+                    self.next_line += 1;
+                    return line;
                 },
                 .workspace => |*workspace| {
                     if (workspace.eof) {
@@ -192,13 +201,16 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                         error.EndOfStream => workspace.eof = true,
                         else => |e| return e,
                     };
-                    return try line_arr.toOwnedSlice();
+                    const line = try line_arr.toOwnedSlice();
+                    self.next_line += 1;
+                    return line;
                 },
                 .buffer => |*buffer| {
                     if (buffer.iter.next()) |line| {
                         const line_copy = try self.allocator.alloc(u8, line.len);
                         errdefer self.allocator.free(line_copy);
                         @memcpy(line_copy, line);
+                        self.next_line += 1;
                         return line_copy;
                     } else {
                         return null;
@@ -209,12 +221,13 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
             }
         }
 
-        pub fn get(self: *LineIterator(repo_kind, repo_opts), index: usize) ![]const u8 {
-            try self.seekTo(self.line_offsets[index]);
+        pub fn get(self: *LineIterator(repo_kind, repo_opts), line_num: usize) ![]const u8 {
+            try self.seekTo(line_num);
             return try self.next() orelse return error.ExpectedLine;
         }
 
         pub fn reset(self: *LineIterator(repo_kind, repo_opts)) !void {
+            self.next_line = 0;
             switch (self.source) {
                 .object => |*object| {
                     object.eof = false;
@@ -245,12 +258,26 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
             self.allocator.free(self.line_offsets);
         }
 
-        fn seekTo(self: *LineIterator(repo_kind, repo_opts), position: u64) !void {
-            try self.reset();
+        fn seekTo(self: *LineIterator(repo_kind, repo_opts), line_num: u64) !void {
+            // optimization: if we're already on the correct line, there is no need to seek
+            if (line_num == self.next_line) {
+                return;
+            }
+
+            const position = self.line_offsets[line_num];
+
             switch (self.source) {
-                .object => |*object| try object.object_reader.seekTo(position),
-                .workspace => |*workspace| try workspace.file.seekTo(position),
+                .object => |*object| {
+                    // we don't call reset here because ObjectReader.seekTo already calls it
+                    object.eof = false;
+                    try object.object_reader.seekTo(position);
+                },
+                .workspace => |*workspace| {
+                    try self.reset();
+                    try workspace.file.seekTo(position);
+                },
                 .buffer => {
+                    try self.reset();
                     var line_count: usize = 0;
                     while (self.line_offsets[line_count] < position) {
                         if (try self.next()) |line| {
@@ -262,6 +289,8 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                 .nothing => {},
                 .binary => {},
             }
+
+            self.next_line = line_num;
         }
 
         /// reads each line to populate line_offsets and ensure
