@@ -691,7 +691,10 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
 
         pub fn seekTo(self: *ObjectReader(repo_kind, repo_opts), position: u64) !void {
             switch (repo_kind) {
-                .git => try self.reader.unbuffered_reader.skipBytes(position), // assumes that reset() has just been called!
+                .git => {
+                    try self.reset();
+                    try self.reader.unbuffered_reader.skipBytes(position);
+                },
                 .xit => try self.reader.unbuffered_reader.seekTo(position),
             }
         }

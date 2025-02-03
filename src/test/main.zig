@@ -1234,7 +1234,6 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             defer object.deinit();
             try std.testing.expectEqual(commit3, object.oid);
 
-            try object.object_reader.reset();
             try object.object_reader.seekTo(object.content.commit.message_position);
             const message = try object.object_reader.reader.reader().readAllAlloc(allocator, repo_opts.max_read_size);
             defer allocator.free(message);
@@ -1246,7 +1245,6 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             defer object.deinit();
             try std.testing.expectEqual(commit2, object.oid);
 
-            try object.object_reader.reset();
             try object.object_reader.seekTo(object.content.commit.message_position);
             const message = try object.object_reader.reader.reader().readAllAlloc(allocator, repo_opts.max_read_size);
             defer allocator.free(message);
@@ -1258,7 +1256,6 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             defer object.deinit();
             try std.testing.expectEqual(commit1, object.oid);
 
-            try object.object_reader.reset();
             try object.object_reader.seekTo(object.content.commit.message_position);
             const message = try object.object_reader.reader.reader().readAllAlloc(allocator, repo_opts.max_read_size);
             defer allocator.free(message);
