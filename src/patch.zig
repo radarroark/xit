@@ -27,7 +27,6 @@ fn createPatchEntries(
     comptime repo_opts: rp.RepoOpts(.xit),
     moment: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write),
     branch: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write),
-    allocator: std.mem.Allocator,
     arena: *std.heap.ArenaAllocator,
     myers_diff_iter: *df.MyersDiffIterator(.xit, repo_opts),
     path_hash: hash.HashInt(repo_opts.hash),
@@ -54,8 +53,6 @@ fn createPatchEntries(
     var last_node = LastNodeId{ .id = @bitCast(NodeId(repo_opts.hash).first_int), .origin = .old };
 
     while (try myers_diff_iter.next()) |edit| {
-        defer edit.deinit(allocator);
-
         switch (edit) {
             .eql => |eql| {
                 var node_id_list_cursor = node_id_list_cursor_maybe orelse return error.NodeListNotFound;
@@ -156,7 +153,7 @@ fn patchHash(
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    try createPatchEntries(repo_opts, moment, branch, allocator, &arena, myers_diff_iter, path_hash, 0, &patch_entries, &patch_offsets);
+    try createPatchEntries(repo_opts, moment, branch, &arena, myers_diff_iter, path_hash, 0, &patch_entries, &patch_offsets);
 
     var hasher = hash.Hasher(repo_opts.hash).init();
 
@@ -221,7 +218,7 @@ fn writePatch(
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    try createPatchEntries(repo_opts, moment, branch, allocator, &arena, &myers_diff_iter, path_hash, patch_hash, &patch_entries, &patch_offsets);
+    try createPatchEntries(repo_opts, moment, branch, &arena, &myers_diff_iter, path_hash, patch_hash, &patch_entries, &patch_offsets);
 
     var change_list_writer = try change_list_cursor.writer();
     for (patch_entries.items) |patch_entry| {

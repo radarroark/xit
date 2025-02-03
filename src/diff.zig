@@ -320,7 +320,6 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp
 
         pub const Line = struct {
             num: usize,
-            text: []const u8,
             offset: u64 = 0,
         };
 
@@ -347,17 +346,6 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp
                     .del => |*del| del.old_line.offset = 0,
                 }
                 return new_self;
-            }
-
-            pub fn deinit(self: Edit, allocator: std.mem.Allocator) void {
-                switch (self) {
-                    .eql => |eql| {
-                        allocator.free(eql.old_line.text);
-                        allocator.free(eql.new_line.text);
-                    },
-                    .ins => |ins| allocator.free(ins.new_line.text),
-                    .del => |del| allocator.free(del.old_line.text),
-                }
             }
         };
 
@@ -643,21 +631,17 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp
             if (p1.x == p2.x) {
                 const new_idx = p1.y;
                 const new_offset = self.line_iter_b.line_offsets[new_idx];
-                const line_b = try self.line_iter_b.get(new_idx);
-                errdefer self.allocator.free(line_b);
                 return .{
                     .ins = .{
-                        .new_line = .{ .num = new_idx + 1, .text = line_b, .offset = new_offset },
+                        .new_line = .{ .num = new_idx + 1, .offset = new_offset },
                     },
                 };
             } else if (p1.y == p2.y) {
                 const old_idx = p1.x;
                 const old_offset = self.line_iter_a.line_offsets[old_idx];
-                const line_a = try self.line_iter_a.get(old_idx);
-                errdefer self.allocator.free(line_a);
                 return .{
                     .del = .{
-                        .old_line = .{ .num = old_idx + 1, .text = line_a, .offset = old_offset },
+                        .old_line = .{ .num = old_idx + 1, .offset = old_offset },
                     },
                 };
             } else {
@@ -665,14 +649,10 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp
                 const new_idx = p1.y;
                 const old_offset = self.line_iter_a.line_offsets[old_idx];
                 const new_offset = self.line_iter_b.line_offsets[new_idx];
-                const line_a = try self.line_iter_a.get(old_idx);
-                errdefer self.allocator.free(line_a);
-                const line_b = try self.line_iter_b.get(new_idx);
-                errdefer self.allocator.free(line_b);
                 return .{
                     .eql = .{
-                        .old_line = .{ .num = old_idx + 1, .text = line_a, .offset = old_offset },
-                        .new_line = .{ .num = new_idx + 1, .text = line_b, .offset = new_offset },
+                        .old_line = .{ .num = old_idx + 1, .offset = old_offset },
+                        .new_line = .{ .num = new_idx + 1, .offset = new_offset },
                     },
                 };
             }
@@ -682,7 +662,6 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp
             // TODO: cache result so we don't have to scan the file every time
             try self.reset();
             while (try self.next()) |edit| {
-                defer edit.deinit(self.allocator);
                 if (.eql == edit) {
                     if (edit.eql.old_line.num < old_line) {
                         continue;
@@ -728,25 +707,20 @@ test "myers diff" {
         var line_iter2 = try LineIterator(repo_kind, repo_opts).initFromBuffer(allocator, lines2);
         defer line_iter2.deinit();
         const expected_diff = [_]MyersDiffIterator(repo_kind, repo_opts).Edit{
-            .{ .del = .{ .old_line = .{ .num = 1, .text = "A" } } },
-            .{ .del = .{ .old_line = .{ .num = 2, .text = "B" } } },
-            .{ .eql = .{ .old_line = .{ .num = 3, .text = "C" }, .new_line = .{ .num = 1, .text = "C" } } },
-            .{ .del = .{ .old_line = .{ .num = 4, .text = "A" } } },
-            .{ .eql = .{ .old_line = .{ .num = 5, .text = "B" }, .new_line = .{ .num = 2, .text = "B" } } },
-            .{ .ins = .{ .new_line = .{ .num = 3, .text = "A" } } },
-            .{ .eql = .{ .old_line = .{ .num = 6, .text = "B" }, .new_line = .{ .num = 4, .text = "B" } } },
-            .{ .eql = .{ .old_line = .{ .num = 7, .text = "A" }, .new_line = .{ .num = 5, .text = "A" } } },
-            .{ .ins = .{ .new_line = .{ .num = 6, .text = "C" } } },
+            .{ .del = .{ .old_line = .{ .num = 1 } } },
+            .{ .del = .{ .old_line = .{ .num = 2 } } },
+            .{ .eql = .{ .old_line = .{ .num = 3 }, .new_line = .{ .num = 1 } } },
+            .{ .del = .{ .old_line = .{ .num = 4 } } },
+            .{ .eql = .{ .old_line = .{ .num = 5 }, .new_line = .{ .num = 2 } } },
+            .{ .ins = .{ .new_line = .{ .num = 3 } } },
+            .{ .eql = .{ .old_line = .{ .num = 6 }, .new_line = .{ .num = 4 } } },
+            .{ .eql = .{ .old_line = .{ .num = 7 }, .new_line = .{ .num = 5 } } },
+            .{ .ins = .{ .new_line = .{ .num = 6 } } },
         };
         var myers_diff_iter = try MyersDiffIterator(repo_kind, repo_opts).init(allocator, &line_iter1, &line_iter2);
         defer myers_diff_iter.deinit();
         var actual_diff = std.ArrayList(MyersDiffIterator(repo_kind, repo_opts).Edit).init(allocator);
-        defer {
-            for (actual_diff.items) |edit| {
-                edit.deinit(allocator);
-            }
-            actual_diff.deinit();
-        }
+        defer actual_diff.deinit();
         while (try myers_diff_iter.next()) |edit| {
             try actual_diff.append(edit);
         }
@@ -763,18 +737,13 @@ test "myers diff" {
         var line_iter2 = try LineIterator(repo_kind, repo_opts).initFromBuffer(allocator, lines2);
         defer line_iter2.deinit();
         const expected_diff = [_]MyersDiffIterator(repo_kind, repo_opts).Edit{
-            .{ .del = .{ .old_line = .{ .num = 1, .text = "hello, world!" } } },
-            .{ .ins = .{ .new_line = .{ .num = 1, .text = "goodbye, world!" } } },
+            .{ .del = .{ .old_line = .{ .num = 1 } } },
+            .{ .ins = .{ .new_line = .{ .num = 1 } } },
         };
         var myers_diff_iter = try MyersDiffIterator(repo_kind, repo_opts).init(allocator, &line_iter1, &line_iter2);
         defer myers_diff_iter.deinit();
         var actual_diff = std.ArrayList(MyersDiffIterator(repo_kind, repo_opts).Edit).init(allocator);
-        defer {
-            for (actual_diff.items) |edit| {
-                edit.deinit(allocator);
-            }
-            actual_diff.deinit();
-        }
+        defer actual_diff.deinit();
         while (try myers_diff_iter.next()) |edit| {
             try actual_diff.append(edit);
         }
@@ -1026,9 +995,6 @@ pub fn Hunk(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         allocator: std.mem.Allocator,
 
         pub fn deinit(self: *Hunk(repo_kind, repo_opts)) void {
-            for (self.edits.items) |edit| {
-                edit.deinit(self.allocator);
-            }
             self.edits.deinit();
         }
 
@@ -1162,7 +1128,6 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
             if (!self.eof) {
                 while (true) {
                     if (try self.myers_diff.next()) |edit| {
-                        errdefer edit.deinit(self.allocator);
                         try self.next_hunk.edits.append(edit);
 
                         if (edit == .eql) {
@@ -1178,8 +1143,7 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                             // remove the first line (which is
                             // guaranteed to be an eql edit)
                             else if (self.margin > max_margin) {
-                                const removed_edit = self.next_hunk.edits.orderedRemove(0);
-                                removed_edit.deinit(self.allocator);
+                                _ = self.next_hunk.edits.orderedRemove(0);
                                 self.margin -= 1;
                                 continue;
                             }

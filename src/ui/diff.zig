@@ -72,7 +72,7 @@ pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime rep
                                 hunk_iter.header_lines.clearAndFree();
                             }
                             if (try hunk_iter.next()) |hunk| {
-                                try self.addHunk(hunk);
+                                try self.addHunk(hunk_iter, hunk);
                             } else {
                                 self.hunk_iter = null;
                             }
@@ -237,7 +237,11 @@ pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime rep
             try self.box.children.values()[0].widget.scroll.child.box.children.put(text_box.getFocus().id, .{ .widget = .{ .text_box = text_box }, .rect = null, .min_size = null });
         }
 
-        pub fn addHunk(self: *Diff(Widget, repo_kind, repo_opts), hunk: df.Hunk(repo_kind, repo_opts)) !void {
+        pub fn addHunk(
+            self: *Diff(Widget, repo_kind, repo_opts),
+            hunk_iter: *const df.HunkIterator(repo_kind, repo_opts),
+            hunk: df.Hunk(repo_kind, repo_opts),
+        ) !void {
             const buf = blk: {
                 var arr = std.ArrayList(u8).init(self.allocator);
                 errdefer arr.deinit();
@@ -252,17 +256,19 @@ pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime rep
                     offsets.ins_count,
                 });
                 for (hunk.edits.items) |edit| {
+                    const line = switch (edit) {
+                        .eql => |eql| try hunk_iter.line_iter_b.get(eql.new_line.num - 1),
+                        .ins => |ins| try hunk_iter.line_iter_b.get(ins.new_line.num - 1),
+                        .del => |del| try hunk_iter.line_iter_a.get(del.old_line.num - 1),
+                    };
+                    defer hunk_iter.allocator.free(line);
                     try writer.print("{s} {s}\n", .{
                         switch (edit) {
                             .eql => " ",
                             .ins => "+",
                             .del => "-",
                         },
-                        switch (edit) {
-                            .eql => |eql| eql.new_line.text,
-                            .ins => |ins| ins.new_line.text,
-                            .del => |del| del.old_line.text,
-                        },
+                        line,
                     });
                 }
 
