@@ -460,9 +460,9 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             });
                             for (hunk.edits.items) |edit| {
                                 const line = switch (edit) {
-                                    .eql => |eql| try hunk_iter.line_iter_b.get(eql.new_line.num - 1),
-                                    .ins => |ins| try hunk_iter.line_iter_b.get(ins.new_line.num - 1),
-                                    .del => |del| try hunk_iter.line_iter_a.get(del.old_line.num - 1),
+                                    .eql => |eql| try hunk_iter.line_iter_b.get(eql.new_line.num),
+                                    .ins => |ins| try hunk_iter.line_iter_b.get(ins.new_line.num),
+                                    .del => |del| try hunk_iter.line_iter_a.get(del.old_line.num),
                                 };
                                 defer hunk_iter.allocator.free(line);
                                 try writers.out.print("{s} {s}\n", .{

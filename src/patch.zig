@@ -57,7 +57,7 @@ fn createPatchEntries(
             .eql => |eql| {
                 var node_id_list_cursor = node_id_list_cursor_maybe orelse return error.NodeListNotFound;
                 var node_id_list_reader = try node_id_list_cursor.reader();
-                try node_id_list_reader.seekTo((eql.old_line.num - 1) * @sizeOf(u64));
+                try node_id_list_reader.seekTo(eql.old_line.num * @sizeOf(u64));
 
                 const node_id_position = try node_id_list_reader.readInt(u64, .big);
                 var node_id_cursor = rp.Repo(.xit, repo_opts).DB.Cursor(.read_only){
@@ -110,7 +110,7 @@ fn createPatchEntries(
 
                 var node_id_list_cursor = node_id_list_cursor_maybe orelse return error.NodeListNotFound;
                 var node_id_list_reader = try node_id_list_cursor.reader();
-                try node_id_list_reader.seekTo((del.old_line.num - 1) * @sizeOf(u64));
+                try node_id_list_reader.seekTo(del.old_line.num * @sizeOf(u64));
 
                 const node_id_position = try node_id_list_reader.readInt(u64, .big);
                 var node_id_cursor = rp.Repo(.xit, repo_opts).DB.Cursor(.read_only){

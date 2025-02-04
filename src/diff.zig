@@ -612,8 +612,8 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp
                     const new_offset = self.line_iter_b.line_offsets[new_idx];
                     try self.cache.append(.{
                         .eql = .{
-                            .old_line = .{ .num = old_idx + 1, .offset = old_offset },
-                            .new_line = .{ .num = new_idx + 1, .offset = new_offset },
+                            .old_line = .{ .num = old_idx, .offset = old_offset },
+                            .new_line = .{ .num = new_idx, .offset = new_offset },
                         },
                     });
                 }
@@ -622,7 +622,7 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp
                     const old_offset = self.line_iter_a.line_offsets[old_idx];
                     try self.cache.append(.{
                         .del = .{
-                            .old_line = .{ .num = old_idx + 1, .offset = old_offset },
+                            .old_line = .{ .num = old_idx, .offset = old_offset },
                         },
                     });
                 }
@@ -631,7 +631,7 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp
                     const new_offset = self.line_iter_b.line_offsets[new_idx];
                     try self.cache.append(.{
                         .ins = .{
-                            .new_line = .{ .num = new_idx + 1, .offset = new_offset },
+                            .new_line = .{ .num = new_idx, .offset = new_offset },
                         },
                     });
                 }
@@ -642,8 +642,8 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp
                         const new_offset = self.line_iter_b.line_offsets[new_idx];
                         try self.cache.append(.{
                             .eql = .{
-                                .old_line = .{ .num = old_idx + 1, .offset = old_offset },
-                                .new_line = .{ .num = new_idx + 1, .offset = new_offset },
+                                .old_line = .{ .num = old_idx, .offset = old_offset },
+                                .new_line = .{ .num = new_idx, .offset = new_offset },
                             },
                         });
                     }
@@ -709,15 +709,15 @@ test "myers diff" {
         var line_iter2 = try LineIterator(repo_kind, repo_opts).initFromBuffer(allocator, lines2);
         defer line_iter2.deinit();
         const expected_diff = [_]Edit{
-            .{ .del = .{ .old_line = .{ .num = 1 } } },
-            .{ .ins = .{ .new_line = .{ .num = 1 } } },
-            .{ .eql = .{ .old_line = .{ .num = 2 }, .new_line = .{ .num = 2 } } },
-            .{ .del = .{ .old_line = .{ .num = 3 } } },
+            .{ .del = .{ .old_line = .{ .num = 0 } } },
+            .{ .ins = .{ .new_line = .{ .num = 0 } } },
+            .{ .eql = .{ .old_line = .{ .num = 1 }, .new_line = .{ .num = 1 } } },
+            .{ .del = .{ .old_line = .{ .num = 2 } } },
+            .{ .eql = .{ .old_line = .{ .num = 3 }, .new_line = .{ .num = 2 } } },
             .{ .eql = .{ .old_line = .{ .num = 4 }, .new_line = .{ .num = 3 } } },
-            .{ .eql = .{ .old_line = .{ .num = 5 }, .new_line = .{ .num = 4 } } },
-            .{ .del = .{ .old_line = .{ .num = 6 } } },
-            .{ .eql = .{ .old_line = .{ .num = 7 }, .new_line = .{ .num = 5 } } },
-            .{ .ins = .{ .new_line = .{ .num = 6 } } },
+            .{ .del = .{ .old_line = .{ .num = 5 } } },
+            .{ .eql = .{ .old_line = .{ .num = 6 }, .new_line = .{ .num = 4 } } },
+            .{ .ins = .{ .new_line = .{ .num = 5 } } },
         };
         var myers_diff_iter = try MyersDiffIterator(repo_kind, repo_opts).init(allocator, &line_iter1, &line_iter2);
         defer myers_diff_iter.deinit();
@@ -739,8 +739,8 @@ test "myers diff" {
         var line_iter2 = try LineIterator(repo_kind, repo_opts).initFromBuffer(allocator, lines2);
         defer line_iter2.deinit();
         const expected_diff = [_]Edit{
-            .{ .del = .{ .old_line = .{ .num = 1 } } },
-            .{ .ins = .{ .new_line = .{ .num = 1 } } },
+            .{ .del = .{ .old_line = .{ .num = 0 } } },
+            .{ .ins = .{ .new_line = .{ .num = 0 } } },
         };
         var myers_diff_iter = try MyersDiffIterator(repo_kind, repo_opts).init(allocator, &line_iter1, &line_iter2);
         defer myers_diff_iter.deinit();
@@ -811,7 +811,7 @@ pub fn Diff3Iterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             }
 
             // find next mismatch
-            var i: usize = 1;
+            var i: usize = 0;
             while (self.inBounds(i) and
                 try self.isMatch(&self.myers_diff_iter_a, self.line_a, i) and
                 try self.isMatch(&self.myers_diff_iter_b, self.line_b, i))
@@ -820,10 +820,10 @@ pub fn Diff3Iterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             }
 
             if (self.inBounds(i)) {
-                if (i == 1) {
+                if (i == 0) {
                     // find next match
-                    var o = self.line_o + 1;
-                    while (o <= self.line_count_o and (!(try self.myers_diff_iter_a.contains(o)) or !(try self.myers_diff_iter_b.contains(o)))) {
+                    var o = self.line_o;
+                    while (o < self.line_count_o and (!(try self.myers_diff_iter_a.contains(o)) or !(try self.myers_diff_iter_b.contains(o)))) {
                         o += 1;
                     }
                     if (try self.myers_diff_iter_a.get(o)) |a| {
@@ -832,9 +832,9 @@ pub fn Diff3Iterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                             const line_o = self.line_o;
                             const line_a = self.line_a;
                             const line_b = self.line_b;
-                            self.line_o = o - 1;
-                            self.line_a = a - 1;
-                            self.line_b = b - 1;
+                            self.line_o = o;
+                            self.line_a = a;
+                            self.line_b = b;
                             return chunk(
                                 lineRange(line_o, self.line_o),
                                 lineRange(line_a, self.line_a),
@@ -848,9 +848,9 @@ pub fn Diff3Iterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                     const line_o = self.line_o;
                     const line_a = self.line_a;
                     const line_b = self.line_b;
-                    self.line_o += i - 1;
-                    self.line_a += i - 1;
-                    self.line_b += i - 1;
+                    self.line_o += i;
+                    self.line_a += i;
+                    self.line_b += i;
                     return chunk(
                         lineRange(line_o, self.line_o),
                         lineRange(line_a, self.line_a),
@@ -866,7 +866,7 @@ pub fn Diff3Iterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                 lineRange(self.line_o, self.line_count_o),
                 lineRange(self.line_a, self.line_count_a),
                 lineRange(self.line_b, self.line_count_b),
-                i > 1,
+                i > 0,
             );
         }
 
@@ -885,9 +885,9 @@ pub fn Diff3Iterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         }
 
         fn inBounds(self: Diff3Iterator(repo_kind, repo_opts), i: usize) bool {
-            return self.line_o + i <= self.line_count_o or
-                self.line_a + i <= self.line_count_a or
-                self.line_b + i <= self.line_count_b;
+            return self.line_o + i < self.line_count_o or
+                self.line_a + i < self.line_count_a or
+                self.line_b + i < self.line_count_b;
         }
 
         fn isMatch(self: Diff3Iterator(repo_kind, repo_opts), myers_diff_iter: *MyersDiffIterator(repo_kind, repo_opts), offset: usize, i: usize) !bool {

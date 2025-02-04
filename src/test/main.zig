@@ -322,31 +322,31 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                     try std.testing.expectEqualStrings("diff --git a/hello.txt b/hello.txt", hunk_iter.header_lines.items[0]);
                     const expected_hunks = &[_][]const df.Edit{
                         &[_]df.Edit{
+                            .{ .eql = .{ .old_line = .{ .num = 1 }, .new_line = .{ .num = 1 } } },
                             .{ .eql = .{ .old_line = .{ .num = 2 }, .new_line = .{ .num = 2 } } },
                             .{ .eql = .{ .old_line = .{ .num = 3 }, .new_line = .{ .num = 3 } } },
-                            .{ .eql = .{ .old_line = .{ .num = 4 }, .new_line = .{ .num = 4 } } },
-                            .{ .del = .{ .old_line = .{ .num = 5 } } },
-                            .{ .ins = .{ .new_line = .{ .num = 5 } } },
+                            .{ .del = .{ .old_line = .{ .num = 4 } } },
+                            .{ .ins = .{ .new_line = .{ .num = 4 } } },
+                            .{ .eql = .{ .old_line = .{ .num = 5 }, .new_line = .{ .num = 5 } } },
                             .{ .eql = .{ .old_line = .{ .num = 6 }, .new_line = .{ .num = 6 } } },
                             .{ .eql = .{ .old_line = .{ .num = 7 }, .new_line = .{ .num = 7 } } },
-                            .{ .eql = .{ .old_line = .{ .num = 8 }, .new_line = .{ .num = 8 } } },
                         },
                         &[_]df.Edit{
+                            .{ .del = .{ .old_line = .{ .num = 8 } } },
                             .{ .del = .{ .old_line = .{ .num = 9 } } },
-                            .{ .del = .{ .old_line = .{ .num = 10 } } },
+                            .{ .ins = .{ .new_line = .{ .num = 8 } } },
                             .{ .ins = .{ .new_line = .{ .num = 9 } } },
-                            .{ .ins = .{ .new_line = .{ .num = 10 } } },
+                            .{ .eql = .{ .old_line = .{ .num = 10 }, .new_line = .{ .num = 10 } } },
                             .{ .eql = .{ .old_line = .{ .num = 11 }, .new_line = .{ .num = 11 } } },
                             .{ .eql = .{ .old_line = .{ .num = 12 }, .new_line = .{ .num = 12 } } },
-                            .{ .eql = .{ .old_line = .{ .num = 13 }, .new_line = .{ .num = 13 } } },
                         },
                         &[_]df.Edit{
-                            .{ .eql = .{ .old_line = .{ .num = 14 }, .new_line = .{ .num = 14 } } },
-                            .{ .del = .{ .old_line = .{ .num = 15 } } },
-                            .{ .ins = .{ .new_line = .{ .num = 15 } } },
+                            .{ .eql = .{ .old_line = .{ .num = 13 }, .new_line = .{ .num = 13 } } },
+                            .{ .del = .{ .old_line = .{ .num = 14 } } },
+                            .{ .ins = .{ .new_line = .{ .num = 14 } } },
+                            .{ .eql = .{ .old_line = .{ .num = 15 }, .new_line = .{ .num = 15 } } },
                             .{ .eql = .{ .old_line = .{ .num = 16 }, .new_line = .{ .num = 16 } } },
                             .{ .eql = .{ .old_line = .{ .num = 17 }, .new_line = .{ .num = 17 } } },
-                            .{ .eql = .{ .old_line = .{ .num = 18 }, .new_line = .{ .num = 18 } } },
                         },
                     };
                     for (expected_hunks) |expected_hunk| {
