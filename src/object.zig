@@ -744,7 +744,14 @@ pub fn ObjectContent(comptime hash_kind: hash.HashKind) type {
             metadata: CommitMetadata(hash_kind),
             message_position: u64,
         },
-        tag,
+        tag: struct {
+            target: [hash.hexLen(hash_kind)]u8,
+            kind: ObjectKind,
+            name: []const u8,
+            tagger: []const u8,
+            message: ?[]const u8,
+            message_position: u64,
+        },
     };
 }
 
@@ -850,7 +857,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                         const content_kind = try reader.readUntilDelimiterAlloc(allocator, ' ', repo_opts.max_read_size);
                         defer allocator.free(content_kind);
                         if (!std.mem.eql(u8, "tree", content_kind)) {
-                            return error.InvalidCommitContentKind;
+                            return error.InvalidObject;
                         }
                         position += content_kind.len + 1;
 
@@ -858,7 +865,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                         var tree_hash = [_]u8{0} ** (hash.hexLen(repo_opts.hash) + 1);
                         const tree_hash_slice = try reader.readUntilDelimiter(&tree_hash, '\n');
                         if (tree_hash_slice.len != hash.hexLen(repo_opts.hash)) {
-                            return error.InvalidCommitTreeHash;
+                            return error.InvalidObject;
                         }
                         position += tree_hash_slice.len + 1;
 
@@ -888,7 +895,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
                                 if (std.mem.eql(u8, "parent", key)) {
                                     if (value.len != hash.hexLen(repo_opts.hash)) {
-                                        return error.InvalidCommitParentHash;
+                                        return error.InvalidObject;
                                     }
                                     try content.commit.parents.append(value[0..comptime hash.hexLen(repo_opts.hash)].*);
                                 } else if (std.mem.eql(u8, "author", key)) {
@@ -930,14 +937,69 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                         .len = obj_rdr.header.size,
                         .object_reader = obj_rdr,
                     },
-                    // TODO: parse tag object
-                    .full => return .{
-                        .allocator = allocator,
-                        .arena = arena,
-                        .content = .tag,
-                        .oid = oid.*,
-                        .len = obj_rdr.header.size,
-                        .object_reader = obj_rdr,
+                    .full => {
+                        var position: u64 = 0;
+
+                        // init the content
+                        var content = ObjectContent(repo_opts.hash){
+                            .tag = .{
+                                .target = undefined,
+                                .kind = undefined,
+                                .name = undefined,
+                                .tagger = undefined,
+                                .message = null,
+                                .message_position = 0,
+                            },
+                        };
+
+                        // read the fields
+                        var fields = std.StringArrayHashMap([]const u8).init(allocator);
+                        defer fields.deinit();
+                        while (true) {
+                            const line = try reader.readUntilDelimiterAlloc(arena.allocator(), '\n', repo_opts.max_read_size);
+                            position += line.len + 1;
+                            if (line.len == 0) {
+                                break;
+                            }
+                            if (std.mem.indexOf(u8, line, " ")) |line_idx| {
+                                if (line_idx == line.len) {
+                                    break;
+                                }
+                                const key = line[0..line_idx];
+                                const value = line[line_idx + 1 ..];
+                                try fields.put(key, value);
+                            }
+                        }
+
+                        const target = fields.get("object") orelse return error.InvalidObject;
+                        if (target.len != hash.hexLen(repo_opts.hash)) {
+                            return error.InvalidObject;
+                        }
+                        content.tag.target = target[0..comptime hash.hexLen(repo_opts.hash)].*;
+                        content.tag.kind = try ObjectKind.init(fields.get("type") orelse return error.InvalidObject);
+                        content.tag.name = fields.get("tag") orelse return error.InvalidObject;
+                        content.tag.tagger = fields.get("tagger") orelse return error.InvalidObject;
+
+                        content.tag.message_position = position;
+
+                        // read only the first line
+                        content.tag.message = reader.readUntilDelimiterOrEofAlloc(
+                            arena.allocator(),
+                            '\n',
+                            repo_opts.max_read_size,
+                        ) catch |err| switch (err) {
+                            error.StreamTooLong => null,
+                            else => |e| return e,
+                        };
+
+                        return .{
+                            .allocator = allocator,
+                            .arena = arena,
+                            .content = content,
+                            .oid = oid.*,
+                            .len = obj_rdr.header.size,
+                            .object_reader = obj_rdr,
+                        };
                     },
                 },
             }
