@@ -963,10 +963,7 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Re
             errdefer self.deinit();
 
             for (start_oids) |start_oid| {
-                var node = try allocator.create(std.DoublyLinkedList([hash.hexLen(repo_opts.hash)]u8).Node);
-                errdefer allocator.destroy(node);
-                node.data = start_oid;
-                self.oid_queue.append(node);
+                try self.include(&start_oid);
             }
 
             return self;
@@ -990,7 +987,7 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Re
                         .raw => {
                             var object = try Object(repo_kind, repo_opts, .full).init(self.allocator, state, &next_oid);
                             defer object.deinit();
-                            try self.addToQueue(object.content);
+                            try self.includeContent(object.content);
 
                             var raw_object = try Object(repo_kind, repo_opts, .raw).init(self.allocator, state, &next_oid);
                             errdefer raw_object.deinit();
@@ -1000,7 +997,7 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Re
                         .full => {
                             var object = try Object(repo_kind, repo_opts, .full).init(self.allocator, state, &next_oid);
                             errdefer object.deinit();
-                            try self.addToQueue(object.content);
+                            try self.includeContent(object.content);
                             self.object = object;
                             return &self.object;
                         },
@@ -1010,7 +1007,7 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Re
             return null;
         }
 
-        fn addToQueue(self: *ObjectIterator(repo_kind, repo_opts, load_kind), content: ObjectContent(repo_opts.hash)) !void {
+        fn includeContent(self: *ObjectIterator(repo_kind, repo_opts, load_kind), content: ObjectContent(repo_opts.hash)) !void {
             switch (content) {
                 .blob => {},
                 .tree => |tree| {
@@ -1043,6 +1040,13 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Re
                     }
                 },
             }
+        }
+
+        pub fn include(self: *ObjectIterator(repo_kind, repo_opts, load_kind), oid: *const [hash.hexLen(repo_opts.hash)]u8) !void {
+            var node = try self.allocator.create(std.DoublyLinkedList([hash.hexLen(repo_opts.hash)]u8).Node);
+            errdefer self.allocator.destroy(node);
+            node.data = oid.*;
+            self.oid_queue.append(node);
         }
 
         pub fn exclude(self: *ObjectIterator(repo_kind, repo_opts, load_kind), oid: *const [hash.hexLen(repo_opts.hash)]u8) !void {
