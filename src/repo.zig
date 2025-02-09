@@ -1041,15 +1041,17 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
         }
 
         pub fn log(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, start_oids_maybe: ?[]const [hash.hexLen(repo_opts.hash)]u8) !obj.ObjectIterator(repo_kind, repo_opts, .full) {
-            const options = .{ .recursive = false };
             var moment = try self.core.latestMoment();
             const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
-            if (start_oids_maybe) |start_oids| {
-                return try obj.ObjectIterator(repo_kind, repo_opts, .full).init(allocator, state, start_oids, options);
-            } else {
-                const start_oids = if (try rf.readHeadMaybe(repo_kind, repo_opts, state)) |head_oid| &.{head_oid} else &.{};
-                return try obj.ObjectIterator(repo_kind, repo_opts, .full).init(allocator, state, start_oids, options);
+            var iter = try obj.ObjectIterator(repo_kind, repo_opts, .full).init(allocator, state, .{ .recursive = false });
+            errdefer iter.deinit();
+
+            const start_oids = start_oids_maybe orelse if (try rf.readHeadMaybe(repo_kind, repo_opts, state)) |head_oid| &.{head_oid} else &.{};
+            for (start_oids) |*start_oid| {
+                try iter.include(start_oid);
             }
+
+            return iter;
         }
 
         pub fn merge(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: mrg.MergeInput(repo_kind, repo_opts.hash)) !mrg.Merge(repo_kind, repo_opts) {

@@ -931,7 +931,11 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
     };
 }
 
-pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind), comptime load_kind: ObjectLoadKind) type {
+pub fn ObjectIterator(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    comptime load_kind: ObjectLoadKind,
+) type {
     return struct {
         allocator: std.mem.Allocator,
         core: *rp.Repo(repo_kind, repo_opts).Core,
@@ -948,10 +952,9 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Re
         pub fn init(
             allocator: std.mem.Allocator,
             state: rp.Repo(repo_kind, repo_opts).State(.read_only),
-            start_oids: []const [hash.hexLen(repo_opts.hash)]u8,
             options: Options,
         ) !ObjectIterator(repo_kind, repo_opts, load_kind) {
-            var self = ObjectIterator(repo_kind, repo_opts, load_kind){
+            return .{
                 .allocator = allocator,
                 .core = state.core,
                 .moment = state.extra.moment.*,
@@ -960,13 +963,6 @@ pub fn ObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Re
                 .object = undefined,
                 .options = options,
             };
-            errdefer self.deinit();
-
-            for (start_oids) |start_oid| {
-                try self.include(&start_oid);
-            }
-
-            return self;
         }
 
         pub fn deinit(self: *ObjectIterator(repo_kind, repo_opts, load_kind)) void {

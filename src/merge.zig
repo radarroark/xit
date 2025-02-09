@@ -545,8 +545,9 @@ fn writeBlobWithPatches(
     var patch_ids = std.ArrayList(hash.HashInt(repo_opts.hash)).init(allocator);
     defer patch_ids.deinit();
 
-    var iter = try obj.ObjectIterator(.xit, repo_opts, .full).init(allocator, state.readOnly(), &.{source_oid.*}, .{ .recursive = false });
+    var iter = try obj.ObjectIterator(.xit, repo_opts, .full).init(allocator, state.readOnly(), .{ .recursive = false });
     defer iter.deinit();
+    try iter.include(source_oid);
 
     const path_hash = hash.hashInt(repo_opts.hash, path);
 
