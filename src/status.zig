@@ -279,7 +279,7 @@ pub fn HeadTree(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts
             const object = try obj.Object(repo_kind, repo_opts, .full).init(self.arena.allocator(), state, oid);
 
             switch (object.content) {
-                .blob => {},
+                .blob, .commit, .tag => {},
                 .tree => |tree| {
                     for (tree.entries.keys(), tree.entries.values()) |name, tree_entry| {
                         const path = try fs.joinPath(self.arena.allocator(), &.{ prefix, name });
@@ -291,7 +291,6 @@ pub fn HeadTree(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts
                         }
                     }
                 },
-                .commit => {},
             }
         }
     };

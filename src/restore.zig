@@ -95,7 +95,7 @@ fn pathToTreeEntry(
     defer tree_object.deinit();
 
     switch (tree_object.content) {
-        .blob => return null,
+        .blob, .tag => return null,
         .tree => return pathToTreeEntry(repo_kind, repo_opts, state, allocator, tree_object, path_parts[1..]),
         .commit => return error.ObjectInvalid,
     }

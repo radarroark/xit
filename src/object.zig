@@ -550,7 +550,7 @@ pub fn TreeDiff(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts
             if (oid_maybe) |oid| {
                 const obj = try Object(repo_kind, repo_opts, .full).init(self.arena.allocator(), state, &oid);
                 return switch (obj.content) {
-                    .blob => std.StringArrayHashMap(TreeEntry(repo_opts.hash)).init(self.arena.allocator()),
+                    .blob, .tag => std.StringArrayHashMap(TreeEntry(repo_opts.hash)).init(self.arena.allocator()),
                     .tree => |tree| tree.entries,
                     .commit => |commit| self.loadTree(state, commit.tree),
                 };
@@ -565,6 +565,7 @@ pub const ObjectKind = enum {
     blob,
     tree,
     commit,
+    tag,
 
     pub fn init(kind_str: []const u8) !ObjectKind {
         return if (std.mem.eql(u8, "blob", kind_str))
@@ -573,6 +574,8 @@ pub const ObjectKind = enum {
             .tree
         else if (std.mem.eql(u8, "commit", kind_str))
             .commit
+        else if (std.mem.eql(u8, "tag", kind_str))
+            .tag
         else
             error.InvalidObjectKind;
     }
@@ -582,6 +585,7 @@ pub const ObjectKind = enum {
             .blob => "blob",
             .tree => "tree",
             .commit => "commit",
+            .tag => "tag",
         };
     }
 };
@@ -740,6 +744,7 @@ pub fn ObjectContent(comptime hash_kind: hash.HashKind) type {
             metadata: CommitMetadata(hash_kind),
             message_position: u64,
         },
+        tag,
     };
 }
 
@@ -920,6 +925,25 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                         },
                     }
                 },
+                .tag => switch (load_kind) {
+                    .raw => return .{
+                        .allocator = allocator,
+                        .arena = arena,
+                        .content = .tag,
+                        .oid = oid.*,
+                        .len = obj_rdr.header.size,
+                        .object_reader = obj_rdr,
+                    },
+                    // TODO: parse tag object
+                    .full => return .{
+                        .allocator = allocator,
+                        .arena = arena,
+                        .content = .tag,
+                        .oid = oid.*,
+                        .len = obj_rdr.header.size,
+                        .object_reader = obj_rdr,
+                    },
+                },
             }
         }
 
@@ -1005,7 +1029,7 @@ pub fn ObjectIterator(
 
         fn includeContent(self: *ObjectIterator(repo_kind, repo_opts, load_kind), content: ObjectContent(repo_opts.hash)) !void {
             switch (content) {
-                .blob => {},
+                .blob, .tag => {},
                 .tree => |tree| {
                     if (self.options.recursive) {
                         for (tree.entries.values()) |entry| {
@@ -1052,7 +1076,7 @@ pub fn ObjectIterator(
             var object = try Object(repo_kind, repo_opts, .full).init(self.allocator, state, oid);
             defer object.deinit();
             switch (object.content) {
-                .blob => {},
+                .blob, .tag => {},
                 .tree => |tree| {
                     if (self.options.recursive) {
                         for (tree.entries.values()) |entry| {

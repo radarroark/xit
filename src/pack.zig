@@ -422,7 +422,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                                         .commit => .commit,
                                         .tree => .tree,
                                         .blob => .blob,
-                                        .tag => return error.UnsupportedObjectKind,
+                                        .tag => .tag,
                                         else => unreachable,
                                     },
                                     .size = size,
@@ -1122,6 +1122,7 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     .blob => .blob,
                     .tree => .tree,
                     .commit => .commit,
+                    .tag => .tag,
                 },
                 .extra = first_size_parts.high_bits > 0,
             };
