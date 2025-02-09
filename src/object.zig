@@ -800,130 +800,126 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     .len = obj_rdr.header.size,
                     .object_reader = obj_rdr,
                 },
-                .tree => {
-                    switch (load_kind) {
-                        .raw => return .{
-                            .allocator = allocator,
-                            .arena = arena,
-                            .content = .tree,
-                            .oid = oid.*,
-                            .len = obj_rdr.header.size,
-                            .object_reader = obj_rdr,
-                        },
-                        .full => {
-                            var entries = std.StringArrayHashMap(TreeEntry(repo_opts.hash)).init(arena.allocator());
+                .tree => switch (load_kind) {
+                    .raw => return .{
+                        .allocator = allocator,
+                        .arena = arena,
+                        .content = .tree,
+                        .oid = oid.*,
+                        .len = obj_rdr.header.size,
+                        .object_reader = obj_rdr,
+                    },
+                    .full => {
+                        var entries = std.StringArrayHashMap(TreeEntry(repo_opts.hash)).init(arena.allocator());
 
-                            while (true) {
-                                const entry_mode_str = reader.readUntilDelimiterAlloc(arena.allocator(), ' ', repo_opts.max_read_size) catch |err| switch (err) {
-                                    error.EndOfStream => break,
-                                    else => |e| return e,
-                                };
-                                const entry_mode: fs.Mode = @bitCast(try std.fmt.parseInt(u32, entry_mode_str, 8));
-                                const entry_name = try reader.readUntilDelimiterAlloc(arena.allocator(), 0, repo_opts.max_read_size);
-                                var entry_oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-                                try reader.readNoEof(&entry_oid);
-                                try entries.put(entry_name, .{ .oid = entry_oid, .mode = entry_mode });
-                            }
-
-                            return .{
-                                .allocator = allocator,
-                                .arena = arena,
-                                .content = ObjectContent(repo_opts.hash){ .tree = .{ .entries = entries } },
-                                .oid = oid.*,
-                                .len = obj_rdr.header.size,
-                                .object_reader = obj_rdr,
-                            };
-                        },
-                    }
-                },
-                .commit => {
-                    switch (load_kind) {
-                        .raw => return .{
-                            .allocator = allocator,
-                            .arena = arena,
-                            .content = .commit,
-                            .oid = oid.*,
-                            .len = obj_rdr.header.size,
-                            .object_reader = obj_rdr,
-                        },
-                        .full => {
-                            var position: u64 = 0;
-
-                            // read the content kind
-                            const content_kind = try reader.readUntilDelimiterAlloc(allocator, ' ', repo_opts.max_read_size);
-                            defer allocator.free(content_kind);
-                            if (!std.mem.eql(u8, "tree", content_kind)) {
-                                return error.InvalidCommitContentKind;
-                            }
-                            position += content_kind.len + 1;
-
-                            // read the tree hash
-                            var tree_hash = [_]u8{0} ** (hash.hexLen(repo_opts.hash) + 1);
-                            const tree_hash_slice = try reader.readUntilDelimiter(&tree_hash, '\n');
-                            if (tree_hash_slice.len != hash.hexLen(repo_opts.hash)) {
-                                return error.InvalidCommitTreeHash;
-                            }
-                            position += tree_hash_slice.len + 1;
-
-                            // init the content
-                            var content = ObjectContent(repo_opts.hash){
-                                .commit = .{
-                                    .tree = tree_hash_slice[0..comptime hash.hexLen(repo_opts.hash)].*,
-                                    .parents = std.ArrayList([hash.hexLen(repo_opts.hash)]u8).init(arena.allocator()),
-                                    .metadata = .{},
-                                    .message_position = 0,
-                                },
-                            };
-
-                            // read the metadata
-                            while (true) {
-                                const line = try reader.readUntilDelimiterAlloc(arena.allocator(), '\n', repo_opts.max_read_size);
-                                position += line.len + 1;
-                                if (line.len == 0) {
-                                    break;
-                                }
-                                if (std.mem.indexOf(u8, line, " ")) |line_idx| {
-                                    if (line_idx == line.len) {
-                                        break;
-                                    }
-                                    const key = line[0..line_idx];
-                                    const value = line[line_idx + 1 ..];
-
-                                    if (std.mem.eql(u8, "parent", key)) {
-                                        if (value.len != hash.hexLen(repo_opts.hash)) {
-                                            return error.InvalidCommitParentHash;
-                                        }
-                                        try content.commit.parents.append(value[0..comptime hash.hexLen(repo_opts.hash)].*);
-                                    } else if (std.mem.eql(u8, "author", key)) {
-                                        content.commit.metadata.author = value;
-                                    } else if (std.mem.eql(u8, "committer", key)) {
-                                        content.commit.metadata.committer = value;
-                                    }
-                                }
-                            }
-
-                            content.commit.message_position = position;
-
-                            // read only the first line
-                            content.commit.metadata.message = reader.readUntilDelimiterOrEofAlloc(
-                                arena.allocator(),
-                                '\n',
-                                repo_opts.max_read_size,
-                            ) catch |err| switch (err) {
-                                error.StreamTooLong => null,
+                        while (true) {
+                            const entry_mode_str = reader.readUntilDelimiterAlloc(arena.allocator(), ' ', repo_opts.max_read_size) catch |err| switch (err) {
+                                error.EndOfStream => break,
                                 else => |e| return e,
                             };
+                            const entry_mode: fs.Mode = @bitCast(try std.fmt.parseInt(u32, entry_mode_str, 8));
+                            const entry_name = try reader.readUntilDelimiterAlloc(arena.allocator(), 0, repo_opts.max_read_size);
+                            var entry_oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
+                            try reader.readNoEof(&entry_oid);
+                            try entries.put(entry_name, .{ .oid = entry_oid, .mode = entry_mode });
+                        }
 
-                            return .{
-                                .allocator = allocator,
-                                .arena = arena,
-                                .content = content,
-                                .oid = oid.*,
-                                .len = obj_rdr.header.size,
-                                .object_reader = obj_rdr,
-                            };
-                        },
-                    }
+                        return .{
+                            .allocator = allocator,
+                            .arena = arena,
+                            .content = ObjectContent(repo_opts.hash){ .tree = .{ .entries = entries } },
+                            .oid = oid.*,
+                            .len = obj_rdr.header.size,
+                            .object_reader = obj_rdr,
+                        };
+                    },
+                },
+                .commit => switch (load_kind) {
+                    .raw => return .{
+                        .allocator = allocator,
+                        .arena = arena,
+                        .content = .commit,
+                        .oid = oid.*,
+                        .len = obj_rdr.header.size,
+                        .object_reader = obj_rdr,
+                    },
+                    .full => {
+                        var position: u64 = 0;
+
+                        // read the content kind
+                        const content_kind = try reader.readUntilDelimiterAlloc(allocator, ' ', repo_opts.max_read_size);
+                        defer allocator.free(content_kind);
+                        if (!std.mem.eql(u8, "tree", content_kind)) {
+                            return error.InvalidCommitContentKind;
+                        }
+                        position += content_kind.len + 1;
+
+                        // read the tree hash
+                        var tree_hash = [_]u8{0} ** (hash.hexLen(repo_opts.hash) + 1);
+                        const tree_hash_slice = try reader.readUntilDelimiter(&tree_hash, '\n');
+                        if (tree_hash_slice.len != hash.hexLen(repo_opts.hash)) {
+                            return error.InvalidCommitTreeHash;
+                        }
+                        position += tree_hash_slice.len + 1;
+
+                        // init the content
+                        var content = ObjectContent(repo_opts.hash){
+                            .commit = .{
+                                .tree = tree_hash_slice[0..comptime hash.hexLen(repo_opts.hash)].*,
+                                .parents = std.ArrayList([hash.hexLen(repo_opts.hash)]u8).init(arena.allocator()),
+                                .metadata = .{},
+                                .message_position = 0,
+                            },
+                        };
+
+                        // read the metadata
+                        while (true) {
+                            const line = try reader.readUntilDelimiterAlloc(arena.allocator(), '\n', repo_opts.max_read_size);
+                            position += line.len + 1;
+                            if (line.len == 0) {
+                                break;
+                            }
+                            if (std.mem.indexOf(u8, line, " ")) |line_idx| {
+                                if (line_idx == line.len) {
+                                    break;
+                                }
+                                const key = line[0..line_idx];
+                                const value = line[line_idx + 1 ..];
+
+                                if (std.mem.eql(u8, "parent", key)) {
+                                    if (value.len != hash.hexLen(repo_opts.hash)) {
+                                        return error.InvalidCommitParentHash;
+                                    }
+                                    try content.commit.parents.append(value[0..comptime hash.hexLen(repo_opts.hash)].*);
+                                } else if (std.mem.eql(u8, "author", key)) {
+                                    content.commit.metadata.author = value;
+                                } else if (std.mem.eql(u8, "committer", key)) {
+                                    content.commit.metadata.committer = value;
+                                }
+                            }
+                        }
+
+                        content.commit.message_position = position;
+
+                        // read only the first line
+                        content.commit.metadata.message = reader.readUntilDelimiterOrEofAlloc(
+                            arena.allocator(),
+                            '\n',
+                            repo_opts.max_read_size,
+                        ) catch |err| switch (err) {
+                            error.StreamTooLong => null,
+                            else => |e| return e,
+                        };
+
+                        return .{
+                            .allocator = allocator,
+                            .arena = arena,
+                            .content = content,
+                            .oid = oid.*,
+                            .len = obj_rdr.header.size,
+                            .object_reader = obj_rdr,
+                        };
+                    },
                 },
                 .tag => switch (load_kind) {
                     .raw => return .{
