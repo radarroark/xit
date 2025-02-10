@@ -13,6 +13,7 @@ const mrg = @import("./merge.zig");
 const cfg = @import("./config.zig");
 const net = @import("./net.zig");
 const chunk = @import("./chunk.zig");
+const tag = @import("./tag.zig");
 
 pub const RepoKind = enum {
     git,
@@ -680,43 +681,29 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
-        pub fn addTag(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: obj.AddTagInput) ![hash.hexLen(repo_opts.hash)]u8 {
-            if (!rf.validateName(input.name)) {
-                return error.InvalidTagName;
-            }
-            const ref_path = try std.fmt.allocPrint(allocator, "refs/tags/{s}", .{input.name});
-            defer allocator.free(ref_path);
-
+        pub fn addTag(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: tag.AddTagInput) ![hash.hexLen(repo_opts.hash)]u8 {
             switch (repo_kind) {
-                .git => {
-                    const target = try rf.readHead(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} });
-                    const tag_oid = try obj.writeTag(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, allocator, input, &target);
-                    try rf.write(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, ref_path, &tag_oid);
-                    return tag_oid;
-                },
+                .git => return try tag.add(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, allocator, input),
                 .xit => {
                     var result: [hash.hexLen(repo_opts.hash)]u8 = undefined;
 
                     const Ctx = struct {
                         core: *Repo(repo_kind, repo_opts).Core,
                         allocator: std.mem.Allocator,
-                        input: obj.AddTagInput,
-                        ref_path: []const u8,
+                        input: tag.AddTagInput,
                         result: *[hash.hexLen(repo_opts.hash)]u8,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            const target = try rf.readHead(repo_kind, repo_opts, state.readOnly());
-                            ctx.result.* = try obj.writeTag(repo_kind, repo_opts, state, ctx.allocator, ctx.input, &target);
-                            try rf.write(repo_kind, repo_opts, state, ctx.ref_path, ctx.result);
+                            ctx.result.* = try tag.add(repo_kind, repo_opts, state, ctx.allocator, ctx.input);
                         }
                     };
 
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
                     try history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
-                        Ctx{ .core = &self.core, .allocator = allocator, .ref_path = ref_path, .input = input, .result = &result },
+                        Ctx{ .core = &self.core, .allocator = allocator, .input = input, .result = &result },
                     );
 
                     return result;

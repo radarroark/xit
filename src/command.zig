@@ -11,6 +11,7 @@ const bch = @import("./branch.zig");
 const rf = @import("./ref.zig");
 const hash = @import("./hash.zig");
 const res = @import("./restore.zig");
+const tag = @import("./tag.zig");
 
 pub const CommandKind = enum {
     init,
@@ -190,7 +191,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
             path: []const u8,
         },
         commit: obj.CommitMetadata(hash_kind),
-        tag: obj.TagCommand,
+        tag: tag.TagCommand,
         status,
         diff: struct {
             diff_opts: df.BasicDiffOptions(hash_kind),
@@ -265,7 +266,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
 
                     const cmd_name = cmd_args.positional_args[0];
 
-                    var cmd: obj.TagCommand = undefined;
+                    var cmd: tag.TagCommand = undefined;
                     if (std.mem.eql(u8, "list", cmd_name)) {
                         cmd = .list;
                     } else if (std.mem.eql(u8, "add", cmd_name)) {

@@ -11,6 +11,7 @@ const rp = @import("./repo.zig");
 const pack = @import("./pack.zig");
 const chunk = @import("./chunk.zig");
 const cfg = @import("./config.zig");
+const tag = @import("./tag.zig");
 
 pub const Tree = struct {
     entries: std.StringArrayHashMap([]const u8),
@@ -416,12 +417,12 @@ pub fn writeCommit(
     const header = try std.fmt.bufPrint(&header_buffer, "commit {}\x00", .{commit_contents.len});
 
     // create commit
-    const commit = try std.fmt.allocPrint(allocator, "{s}{s}", .{ header, commit_contents });
-    defer allocator.free(commit);
+    const obj_content = try std.fmt.allocPrint(allocator, "{s}{s}", .{ header, commit_contents });
+    defer allocator.free(obj_content);
 
     // calc the hash of its contents
     var commit_hash_bytes_buffer = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-    try hash.hashBuffer(repo_opts.hash, commit, &commit_hash_bytes_buffer);
+    try hash.hashBuffer(repo_opts.hash, obj_content, &commit_hash_bytes_buffer);
     const commit_hash_hex = std.fmt.bytesToHex(commit_hash_bytes_buffer, .lower);
     const commit_hash = hash.bytesToInt(repo_opts.hash, &commit_hash_bytes_buffer);
 
@@ -439,7 +440,7 @@ pub fn writeCommit(
             // create lock file
             var lock = try fs.LockFile.init(commit_hash_prefix_dir, commit_hash_suffix ++ ".uncompressed");
             defer lock.deinit();
-            try lock.lock_file.writeAll(commit);
+            try lock.lock_file.writeAll(obj_content);
 
             // create compressed lock file
             var compressed_lock = try fs.LockFile.init(commit_hash_prefix_dir, commit_hash_suffix);
@@ -462,28 +463,12 @@ pub fn writeCommit(
     return std.fmt.bytesToHex(commit_hash_bytes_buffer, .lower);
 }
 
-pub const TagCommand = union(enum) {
-    list,
-    add: AddTagInput,
-    remove: RemoveTagInput,
-};
-
-pub const AddTagInput = struct {
-    name: []const u8,
-    tagger: ?[]const u8 = null,
-    message: ?[]const u8 = null,
-};
-
-pub const RemoveTagInput = struct {
-    name: []const u8,
-};
-
 pub fn writeTag(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
     allocator: std.mem.Allocator,
-    input: AddTagInput,
+    input: tag.AddTagInput,
     target_oid: *const [hash.hexLen(repo_opts.hash)]u8,
 ) ![hash.hexLen(repo_opts.hash)]u8 {
     const tag_contents = blk: {
@@ -527,12 +512,12 @@ pub fn writeTag(
     const header = try std.fmt.bufPrint(&header_buffer, "tag {}\x00", .{tag_contents.len});
 
     // create tag
-    const tag = try std.fmt.allocPrint(allocator, "{s}{s}", .{ header, tag_contents });
-    defer allocator.free(tag);
+    const obj_content = try std.fmt.allocPrint(allocator, "{s}{s}", .{ header, tag_contents });
+    defer allocator.free(obj_content);
 
     // calc the hash of its contents
     var tag_hash_bytes_buffer = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-    try hash.hashBuffer(repo_opts.hash, tag, &tag_hash_bytes_buffer);
+    try hash.hashBuffer(repo_opts.hash, obj_content, &tag_hash_bytes_buffer);
     const tag_hash_hex = std.fmt.bytesToHex(tag_hash_bytes_buffer, .lower);
     const tag_hash = hash.bytesToInt(repo_opts.hash, &tag_hash_bytes_buffer);
 
@@ -550,7 +535,7 @@ pub fn writeTag(
             // create lock file
             var lock = try fs.LockFile.init(tag_hash_prefix_dir, tag_hash_suffix ++ ".uncompressed");
             defer lock.deinit();
-            try lock.lock_file.writeAll(tag);
+            try lock.lock_file.writeAll(obj_content);
 
             // create compressed lock file
             var compressed_lock = try fs.LockFile.init(tag_hash_prefix_dir, tag_hash_suffix);
@@ -1196,25 +1181,25 @@ pub fn ObjectIterator(
         fn includeContent(self: *ObjectIterator(repo_kind, repo_opts, load_kind), content: ObjectContent(repo_opts.hash)) !void {
             switch (content) {
                 .blob => {},
-                .tree => |tree| {
+                .tree => |tree_content| {
                     if (self.options.recursive) {
-                        for (tree.entries.values()) |entry| {
+                        for (tree_content.entries.values()) |entry| {
                             const entry_oid = std.fmt.bytesToHex(entry.oid, .lower);
                             try self.include(&entry_oid);
                         }
                     }
                 },
-                .commit => |commit| {
-                    for (commit.parents.items) |*parent_oid| {
+                .commit => |commit_content| {
+                    for (commit_content.parents.items) |*parent_oid| {
                         try self.include(parent_oid);
                     }
                     if (self.options.recursive) {
-                        try self.include(&commit.tree);
+                        try self.include(&commit_content.tree);
                     }
                 },
-                .tag => |tag| {
+                .tag => |tag_content| {
                     if (self.options.recursive) {
-                        try self.include(&tag.target);
+                        try self.include(&tag_content.target);
                     }
                 },
             }
