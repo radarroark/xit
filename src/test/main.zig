@@ -649,11 +649,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     }
 
     // switch to first commit
-    {
-        const commit_arg = try std.fmt.allocPrint(allocator, ":{s}", .{commit1});
-        defer allocator.free(commit_arg);
-        try main.run(repo_kind, repo_opts, allocator, &.{ "switch", commit_arg }, repo_dir, .{});
-    }
+    try main.run(repo_kind, repo_opts, allocator, &.{ "switch", &commit1 }, repo_dir, .{});
 
     // the working tree was updated
     {

@@ -108,13 +108,8 @@ pub fn RefOrOid(comptime hash_kind: hash.HashKind) type {
         }
 
         pub fn initFromUser(content: []const u8) ?RefOrOid(hash_kind) {
-            if (content[0] == ':') {
-                const oid = content[1..];
-                if (isOid(hash_kind, oid)) {
-                    return .{ .oid = oid[0..comptime hash.hexLen(hash_kind)] };
-                } else {
-                    return null;
-                }
+            if (isOid(hash_kind, content)) {
+                return .{ .oid = content[0..comptime hash.hexLen(hash_kind)] };
             } else {
                 return .{ .ref = .{ .kind = .local, .name = content } };
             }

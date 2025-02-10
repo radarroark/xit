@@ -329,14 +329,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                     else blk: {
                         var source = std.ArrayList(rf.RefOrOid(hash_kind)).init(cmd_args.arena.allocator());
                         for (cmd_args.positional_args) |arg| {
-                            const ref_or_oid =
-                                // oids don't need to start with a `:` when cherry-picking
-                                // because there is no ambiguity...you don't cherry-pick refs (right?)
-                                if (.pick == merge_kind and !std.mem.startsWith(u8, arg, ":") and arg.len == hash.hexLen(hash_kind))
-                                rf.RefOrOid(hash_kind){ .oid = arg[0..comptime hash.hexLen(hash_kind)] }
-                            else
-                                rf.RefOrOid(hash_kind).initFromUser(arg) orelse return error.InvalidRefOrOid;
-                            try source.append(ref_or_oid);
+                            try source.append(rf.RefOrOid(hash_kind).initFromUser(arg) orelse return error.InvalidRefOrOid);
                         }
                         break :blk .{ .new = .{ .source = try source.toOwnedSlice() } };
                     };
