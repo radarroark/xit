@@ -994,11 +994,14 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
         object_index: usize,
         out_bytes: std.ArrayList(u8),
         out_index: usize,
+        hasher: hash.Hasher(repo_opts.hash),
         mode: union(enum) {
             header,
             object: struct {
                 stream: ?std.compress.flate.deflate.Compressor(.zlib, std.ArrayList(u8).Writer),
             },
+            footer,
+            finished,
         },
 
         pub fn init(allocator: std.mem.Allocator, obj_iter: *obj.ObjectIterator(repo_kind, repo_opts, .raw)) !PackObjectWriter(repo_kind, repo_opts) {
@@ -1008,6 +1011,7 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                 .object_index = 0,
                 .out_bytes = std.ArrayList(u8).init(allocator),
                 .out_index = 0,
+                .hasher = hash.Hasher(repo_opts.hash).init(),
                 .mode = .header,
             };
             errdefer self.deinit();
@@ -1039,7 +1043,7 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
 
         pub fn read(self: *PackObjectWriter(repo_kind, repo_opts), buffer: []u8) !usize {
             var size: usize = 0;
-            while (size < buffer.len and self.object_index < self.objects.items.len) {
+            while (size < buffer.len and .finished != self.mode) {
                 size += try self.readStep(buffer[size..]);
             }
             return size;
@@ -1050,6 +1054,7 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                 .header => {
                     const size = @min(self.out_bytes.items.len - self.out_index, buffer.len);
                     @memcpy(buffer[0..size], self.out_bytes.items[self.out_index .. self.out_index + size]);
+                    self.hasher.update(buffer[0..size]);
                     if (size < buffer.len) {
                         self.out_bytes.clearAndFree();
                         self.out_index = 0;
@@ -1067,6 +1072,7 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     if (self.out_index < self.out_bytes.items.len) {
                         const size = @min(self.out_bytes.items.len - self.out_index, buffer.len);
                         @memcpy(buffer[0..size], self.out_bytes.items[self.out_index .. self.out_index + size]);
+                        self.hasher.update(buffer[0..size]);
                         self.out_index += size;
                         return size;
                     } else {
@@ -1097,13 +1103,31 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
 
                         // there is nothing more to write, so move on to the next object
                         self.object_index += 1;
-                        self.mode = .header;
                         if (self.object_index < self.objects.items.len) {
+                            self.mode = .header;
                             try self.writeObjectHeader();
+                        } else {
+                            self.mode = .footer;
+                            var hash_buffer = [_]u8{0} ** hash.byteLen(repo_opts.hash);
+                            self.hasher.final(&hash_buffer);
+                            try self.out_bytes.appendSlice(&hash_buffer);
                         }
                         return 0;
                     }
                 },
+                .footer => {
+                    const size = @min(self.out_bytes.items.len - self.out_index, buffer.len);
+                    @memcpy(buffer[0..size], self.out_bytes.items[self.out_index .. self.out_index + size]);
+                    if (size < buffer.len) {
+                        self.out_bytes.clearAndFree();
+                        self.out_index = 0;
+                        self.mode = .finished;
+                    } else {
+                        self.out_index += size;
+                    }
+                    return size;
+                },
+                .finished => return 0,
             }
         }
 
