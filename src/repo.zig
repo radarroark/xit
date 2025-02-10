@@ -1428,6 +1428,44 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                 },
             }
         }
+
+        pub fn copyObjects(
+            self: *Repo(repo_kind, repo_opts),
+            comptime source_repo_kind: RepoKind,
+            comptime source_repo_opts: RepoOpts(source_repo_kind),
+            obj_iter: *obj.ObjectIterator(source_repo_kind, source_repo_opts, .raw),
+        ) !void {
+            switch (repo_kind) {
+                .git => {
+                    while (try obj_iter.next()) |object| {
+                        defer object.deinit();
+                        var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
+                        try obj.writeObject(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, &object.object_reader, &object.object_reader.reader, object.object_reader.header, &oid);
+                    }
+                },
+                .xit => {
+                    const Ctx = struct {
+                        core: *Repo(repo_kind, repo_opts).Core,
+
+                        pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
+                            var moment = try DB.HashMap(.read_write).init(cursor.*);
+                            const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
+                            while (try obj_iter.next()) |object| {
+                                defer object.deinit();
+                                var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
+                                try obj.writeObject(repo_kind, repo_opts, state, &object.object_reader, &object.object_reader.reader, object.object_reader.header, &oid);
+                            }
+                        }
+                    };
+
+                    const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
+                    try history.appendContext(
+                        .{ .slot = try history.getSlot(-1) },
+                        Ctx{ .core = &self.core },
+                    );
+                },
+            }
+        }
     };
 }
 
