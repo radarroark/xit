@@ -177,7 +177,9 @@ pub fn remove(
             // remove branch map
             const branches_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "branches"));
             const branches = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(branches_cursor);
-            _ = try branches.remove(name_hash);
+            if (!try branches.remove(name_hash)) {
+                return error.BranchNotFound;
+            }
         },
     }
 }
