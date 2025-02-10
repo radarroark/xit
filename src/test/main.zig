@@ -1408,22 +1408,24 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     }
 
     // tag
-    if (repo_kind == .git) {
+    {
         try main.run(repo_kind, repo_opts, allocator, &.{ "tag", "add", "ann", "-m", "this is an annotated tag" }, repo_dir, .{});
 
-        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
-        defer repo.deinit();
-        var moment = try repo.core.latestMoment();
-        const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
+        {
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
+            defer repo.deinit();
+            var moment = try repo.core.latestMoment();
+            const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
 
-        const tag_oid = (try rf.readRecur(repo_kind, repo_opts, state, .{ .ref = .{ .kind = .tag, .name = "ann" } })) orelse return error.TagNotFound;
-        var tag_object = try obj.Object(repo_kind, repo_opts, .full).init(allocator, state, &tag_oid);
-        defer tag_object.deinit();
+            const tag_oid = (try rf.readRecur(repo_kind, repo_opts, state, .{ .ref = .{ .kind = .tag, .name = "ann" } })) orelse return error.TagNotFound;
+            var tag_object = try obj.Object(repo_kind, repo_opts, .full).init(allocator, state, &tag_oid);
+            defer tag_object.deinit();
 
-        try tag_object.object_reader.seekTo(tag_object.content.tag.message_position);
-        const message = try tag_object.object_reader.reader.reader().readAllAlloc(allocator, repo_opts.max_read_size);
-        defer allocator.free(message);
-        try std.testing.expectEqualStrings("this is an annotated tag", message);
+            try tag_object.object_reader.seekTo(tag_object.content.tag.message_position);
+            const message = try tag_object.object_reader.reader.reader().readAllAlloc(allocator, repo_opts.max_read_size);
+            defer allocator.free(message);
+            try std.testing.expectEqualStrings("this is an annotated tag", message);
+        }
 
         try main.run(repo_kind, repo_opts, allocator, &.{ "tag", "list" }, repo_dir, .{});
 
