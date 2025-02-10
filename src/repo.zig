@@ -179,7 +179,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
                     // update HEAD
                     const state = State(.read_write){ .core = &self.core, .extra = .{} };
-                    try rf.replaceHead(repo_kind, repo_opts, state, .{ .ref = .{ .kind = .local, .name = "master" } });
+                    try rf.replaceHead(repo_kind, repo_opts, state, .{ .ref = .{ .kind = .head, .name = "master" } });
 
                     return self;
                 },
@@ -219,7 +219,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            try rf.replaceHead(repo_kind, repo_opts, state, .{ .ref = .{ .kind = .local, .name = "master" } });
+                            try rf.replaceHead(repo_kind, repo_opts, state, .{ .ref = .{ .kind = .head, .name = "master" } });
                         }
                     };
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
@@ -343,6 +343,11 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                 },
                 .commit => |commit_cmd| {
                     _ = try self.commit(allocator, commit_cmd);
+                },
+                .tag => |tag_cmd| switch (tag_cmd) {
+                    .list => return error.NotImplemented,
+                    .add => |add_tag| _ = try self.addTag(allocator, add_tag),
+                    .remove => return error.NotImplemented,
                 },
                 .status => {
                     var stat = try self.status(allocator);
@@ -668,6 +673,50 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     try history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
                         Ctx{ .core = &self.core, .allocator = allocator, .metadata = metadata, .result = &result },
+                    );
+
+                    return result;
+                },
+            }
+        }
+
+        pub fn addTag(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: obj.AddTagInput) ![hash.hexLen(repo_opts.hash)]u8 {
+            if (!rf.validateName(input.name)) {
+                return error.InvalidTagName;
+            }
+            const ref_path = try std.fmt.allocPrint(allocator, "refs/tags/{s}", .{input.name});
+            defer allocator.free(ref_path);
+
+            switch (repo_kind) {
+                .git => {
+                    const target = try rf.readHead(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} });
+                    const tag_oid = try obj.writeTag(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, allocator, input, &target);
+                    try rf.write(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, ref_path, &tag_oid);
+                    return tag_oid;
+                },
+                .xit => {
+                    var result: [hash.hexLen(repo_opts.hash)]u8 = undefined;
+
+                    const Ctx = struct {
+                        core: *Repo(repo_kind, repo_opts).Core,
+                        allocator: std.mem.Allocator,
+                        input: obj.AddTagInput,
+                        ref_path: []const u8,
+                        result: *[hash.hexLen(repo_opts.hash)]u8,
+
+                        pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
+                            var moment = try DB.HashMap(.read_write).init(cursor.*);
+                            const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
+                            const target = try rf.readHead(repo_kind, repo_opts, state.readOnly());
+                            ctx.result.* = try obj.writeTag(repo_kind, repo_opts, state, ctx.allocator, ctx.input, &target);
+                            try rf.write(repo_kind, repo_opts, state, ctx.ref_path, ctx.result);
+                        }
+                    };
+
+                    const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
+                    try history.appendContext(
+                        .{ .slot = try history.getSlot(-1) },
+                        Ctx{ .core = &self.core, .allocator = allocator, .ref_path = ref_path, .input = input, .result = &result },
                     );
 
                     return result;

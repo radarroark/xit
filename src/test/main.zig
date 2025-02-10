@@ -1078,7 +1078,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
         try std.testing.expectEqual(commit2, try rf.readHead(repo_kind, repo_opts, state));
-        try std.testing.expectEqual(commit2, try rf.readRecur(repo_kind, repo_opts, state, .{ .ref = .{ .kind = .local, .name = "stuff" } }));
+        try std.testing.expectEqual(commit2, try rf.readRecur(repo_kind, repo_opts, state, .{ .ref = .{ .kind = .head, .name = "stuff" } }));
     }
 
     // list all branches
@@ -1215,7 +1215,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-        try std.testing.expectEqual(commit3, try rf.readRecur(repo_kind, repo_opts, state, .{ .ref = .{ .kind = .local, .name = "master" } }));
+        try std.testing.expectEqual(commit3, try rf.readRecur(repo_kind, repo_opts, state, .{ .ref = .{ .kind = .head, .name = "master" } }));
     }
 
     // log
@@ -1407,35 +1407,17 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         try main.run(repo_kind, repo_opts, allocator, &.{ "remote", "list" }, repo_dir, .{});
     }
 
-    // tag objects can be loaded
+    // tag
     if (repo_kind == .git) {
-        var repo: ?*c.git_repository = null;
-        try std.testing.expectEqual(0, c.git_repository_open(&repo, repo_path));
-        defer c.git_repository_free(repo);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "tag", "add", "ann", "-m", "this is an annotated tag" }, repo_dir, .{});
 
-        var oid: c.git_oid = undefined;
-        try std.testing.expectEqual(0, c.git_oid_fromstr(&oid, commit1[0..]));
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
+        defer repo.deinit();
+        var moment = try repo.core.latestMoment();
+        const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
 
-        var commit_object: ?*c.git_object = null;
-        try std.testing.expectEqual(0, c.git_object_lookup(&commit_object, repo, &oid, c.GIT_OBJECT_COMMIT));
-        defer c.git_object_free(commit_object);
-
-        var sig: ?*c.git_signature = null;
-        try std.testing.expectEqual(0, c.git_signature_now(&sig, "radar", "radar@roark"));
-        defer c.git_signature_free(sig);
-
-        var tag_oid: c.git_oid = undefined;
-        try std.testing.expectEqual(0, c.git_tag_annotation_create(&tag_oid, repo, "ann", commit_object, sig, "this is an annotated tag"));
-
-        var oid_hex = [_]u8{0} ** (hash.hexLen(repo_opts.hash) + 1);
-        _ = c.git_oid_tostr(&oid_hex, oid_hex.len, &tag_oid);
-
-        var xit_repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
-        defer xit_repo.deinit();
-        var moment = try xit_repo.core.latestMoment();
-        const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &xit_repo.core, .extra = .{ .moment = &moment } };
-
-        var tag_object = try obj.Object(repo_kind, repo_opts, .full).init(allocator, state, oid_hex[0..comptime hash.hexLen(repo_opts.hash)]);
+        const tag_oid = (try rf.readRecur(repo_kind, repo_opts, state, .{ .ref = .{ .kind = .tag, .name = "ann" } })) orelse return error.TagNotFound;
+        var tag_object = try obj.Object(repo_kind, repo_opts, .full).init(allocator, state, &tag_oid);
         defer tag_object.deinit();
 
         try tag_object.object_reader.seekTo(tag_object.content.tag.message_position);

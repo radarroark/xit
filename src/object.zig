@@ -462,6 +462,111 @@ pub fn writeCommit(
     return std.fmt.bytesToHex(commit_hash_bytes_buffer, .lower);
 }
 
+pub const TagCommand = union(enum) {
+    list,
+    add: AddTagInput,
+    remove: RemoveTagInput,
+};
+
+pub const AddTagInput = struct {
+    name: []const u8,
+    tagger: ?[]const u8 = null,
+    message: ?[]const u8 = null,
+};
+
+pub const RemoveTagInput = struct {
+    name: []const u8,
+};
+
+pub fn writeTag(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+    allocator: std.mem.Allocator,
+    input: AddTagInput,
+    target_oid: *const [hash.hexLen(repo_opts.hash)]u8,
+) ![hash.hexLen(repo_opts.hash)]u8 {
+    const tag_contents = blk: {
+        var arena = std.heap.ArenaAllocator.init(allocator);
+        defer arena.deinit();
+
+        var config = try cfg.Config(repo_kind, repo_opts).init(state.readOnly(), arena.allocator());
+        defer config.deinit();
+
+        var metadata_lines = std.ArrayList([]const u8).init(arena.allocator());
+
+        const kind = kind_blk: {
+            var obj = try Object(repo_kind, repo_opts, .raw).init(allocator, state.readOnly(), target_oid);
+            defer obj.deinit();
+            break :kind_blk obj.content;
+        };
+
+        try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "object {s}", .{target_oid}));
+        try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "type {s}", .{kind.name()}));
+        try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "tag {s}", .{input.name}));
+
+        const ts = if (repo_opts.is_test) 0 else std.time.timestamp();
+
+        const tagger = input.tagger orelse auth_blk: {
+            if (repo_opts.is_test) break :auth_blk "radar <radar@roark>";
+            const user_section = config.sections.get("user") orelse return error.UserConfigNotFound;
+            const name = user_section.get("name") orelse return error.UserConfigNotFound;
+            const email = user_section.get("email") orelse return error.UserConfigNotFound;
+            break :auth_blk try std.fmt.allocPrint(arena.allocator(), "{s} <{s}>", .{ name, email });
+        };
+        try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "tagger {s} {} +0000", .{ tagger, ts }));
+
+        try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "\n{s}", .{input.message orelse ""}));
+
+        break :blk try std.mem.join(allocator, "\n", metadata_lines.items);
+    };
+    defer allocator.free(tag_contents);
+
+    // create tag header
+    var header_buffer = [_]u8{0} ** 32;
+    const header = try std.fmt.bufPrint(&header_buffer, "tag {}\x00", .{tag_contents.len});
+
+    // create tag
+    const tag = try std.fmt.allocPrint(allocator, "{s}{s}", .{ header, tag_contents });
+    defer allocator.free(tag);
+
+    // calc the hash of its contents
+    var tag_hash_bytes_buffer = [_]u8{0} ** hash.byteLen(repo_opts.hash);
+    try hash.hashBuffer(repo_opts.hash, tag, &tag_hash_bytes_buffer);
+    const tag_hash_hex = std.fmt.bytesToHex(tag_hash_bytes_buffer, .lower);
+    const tag_hash = hash.bytesToInt(repo_opts.hash, &tag_hash_bytes_buffer);
+
+    switch (repo_kind) {
+        .git => {
+            // open the objects dir
+            var objects_dir = try state.core.git_dir.openDir("objects", .{});
+            defer objects_dir.close();
+
+            // make the two char dir
+            var tag_hash_prefix_dir = try objects_dir.makeOpenPath(tag_hash_hex[0..2], .{});
+            defer tag_hash_prefix_dir.close();
+            const tag_hash_suffix = tag_hash_hex[2..];
+
+            // create lock file
+            var lock = try fs.LockFile.init(tag_hash_prefix_dir, tag_hash_suffix ++ ".uncompressed");
+            defer lock.deinit();
+            try lock.lock_file.writeAll(tag);
+
+            // create compressed lock file
+            var compressed_lock = try fs.LockFile.init(tag_hash_prefix_dir, tag_hash_suffix);
+            defer compressed_lock.deinit();
+            try compressZlib(repo_opts.read_size, lock.lock_file, compressed_lock.lock_file);
+            compressed_lock.success = true;
+        },
+        .xit => {
+            var stream = std.io.fixedBufferStream(tag_contents);
+            try chunk.writeChunks(repo_opts, state, stream.reader(), tag_hash, tag_contents.len, "tag");
+        },
+    }
+
+    return std.fmt.bytesToHex(tag_hash_bytes_buffer, .lower);
+}
+
 pub fn Change(comptime hash_kind: hash.HashKind) type {
     return struct {
         old: ?TreeEntry(hash_kind),

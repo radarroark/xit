@@ -43,7 +43,8 @@ pub fn validateName(name: []const u8) bool {
 
 pub const Ref = struct {
     kind: union(enum) {
-        local,
+        head,
+        tag,
         remote: []const u8,
     },
     name: []const u8,
@@ -58,7 +59,9 @@ pub const Ref = struct {
         const ref_name = ref_path[refs_str.len + 1 + ref_kind.len + 1 ..];
 
         if (std.mem.eql(u8, "heads", ref_kind)) {
-            return .{ .kind = .local, .name = ref_name };
+            return .{ .kind = .head, .name = ref_name };
+        } else if (std.mem.eql(u8, "tags", ref_kind)) {
+            return .{ .kind = .tag, .name = ref_name };
         } else if (std.mem.eql(u8, "remotes", ref_kind)) {
             const remote_name = split_iter.next() orelse return null;
             const remote_ref_name = ref_name[remote_name.len + 1 ..];
@@ -70,7 +73,8 @@ pub const Ref = struct {
 
     pub fn toPath(self: Ref, buffer: []u8) ![]const u8 {
         return switch (self.kind) {
-            .local => try std.fmt.bufPrint(buffer, "refs/heads/{s}", .{self.name}),
+            .head => try std.fmt.bufPrint(buffer, "refs/heads/{s}", .{self.name}),
+            .tag => try std.fmt.bufPrint(buffer, "refs/tags/{s}", .{self.name}),
             .remote => |remote| try std.fmt.bufPrint(buffer, "refs/remotes/{s}/{s}", .{ remote, self.name }),
         };
     }
@@ -111,7 +115,7 @@ pub fn RefOrOid(comptime hash_kind: hash.HashKind) type {
             if (isOid(hash_kind, content)) {
                 return .{ .oid = content[0..comptime hash.hexLen(hash_kind)] };
             } else {
-                return .{ .ref = .{ .kind = .local, .name = content } };
+                return .{ .ref = .{ .kind = .head, .name = content } };
             }
         }
     };
@@ -159,7 +163,7 @@ pub const RefList = struct {
                     while (try iter.next()) |*next_cursor| {
                         const kv_pair = try next_cursor.readKeyValuePair();
                         const name = try kv_pair.key_cursor.readBytesAlloc(ref_list.arena.allocator(), MAX_REF_CONTENT_SIZE);
-                        try ref_list.refs.put(name, .{ .kind = .local, .name = name });
+                        try ref_list.refs.put(name, .{ .kind = .head, .name = name });
                     }
                 }
             },
@@ -189,7 +193,7 @@ pub const RefList = struct {
             switch (entry.kind) {
                 .file => {
                     const name = try fs.joinPath(self.arena.allocator(), next_path.items);
-                    try self.refs.put(name, .{ .kind = .local, .name = name });
+                    try self.refs.put(name, .{ .kind = .head, .name = name });
                 },
                 .directory => {
                     var next_dir = try dir.openDir(entry.name, .{ .iterate = true });
@@ -286,9 +290,13 @@ pub fn read(
                 const refs_cursor = (try map.getCursor(hash.hashInt(repo_opts.hash, "refs"))) orelse return error.RefNotFound;
                 const refs = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_only).init(refs_cursor);
                 switch (ref.kind) {
-                    .local => {
+                    .head => {
                         const heads_cursor = (try refs.getCursor(hash.hashInt(repo_opts.hash, "heads"))) orelse return error.RefNotFound;
                         map = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_only).init(heads_cursor);
+                    },
+                    .tag => {
+                        const tags_cursor = (try refs.getCursor(hash.hashInt(repo_opts.hash, "tags"))) orelse return error.RefNotFound;
+                        map = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_only).init(tags_cursor);
                     },
                     .remote => |remote| {
                         const remotes_cursor = (try refs.getCursor(hash.hashInt(repo_opts.hash, "remotes"))) orelse return error.RefNotFound;
@@ -383,9 +391,13 @@ pub fn write(
                 const refs_cursor = try map.putCursor(hash.hashInt(repo_opts.hash, "refs"));
                 const refs = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(refs_cursor);
                 switch (ref.kind) {
-                    .local => {
+                    .head => {
                         const heads_cursor = try refs.putCursor(hash.hashInt(repo_opts.hash, "heads"));
                         map = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(heads_cursor);
+                    },
+                    .tag => {
+                        const tags_cursor = try refs.putCursor(hash.hashInt(repo_opts.hash, "tags"));
+                        map = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(tags_cursor);
                     },
                     .remote => |remote_name| {
                         const remotes_cursor = try refs.putCursor(hash.hashInt(repo_opts.hash, "remotes"));

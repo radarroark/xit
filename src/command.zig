@@ -19,6 +19,7 @@ pub const CommandKind = enum {
     rm,
     reset,
     commit,
+    tag,
     status,
     diff,
     branch,
@@ -110,6 +111,8 @@ pub const CommandArgs = struct {
                 .reset
             else if (std.mem.eql(u8, command_name, "commit"))
                 .commit
+            else if (std.mem.eql(u8, command_name, "tag"))
+                .tag
             else if (std.mem.eql(u8, command_name, "status"))
                 .status
             else if (std.mem.eql(u8, command_name, "diff"))
@@ -187,6 +190,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
             path: []const u8,
         },
         commit: obj.CommitMetadata(hash_kind),
+        tag: obj.TagCommand,
         status,
         diff: struct {
             diff_opts: df.BasicDiffOptions(hash_kind),
@@ -253,8 +257,38 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                 },
                 .commit => {
                     // if a message is included, it must have a non-null value
-                    const message = if (cmd_args.get("-m")) |msg| (msg orelse return error.CommitMessageNotFound) else "";
-                    return .{ .commit = .{ .message = message } };
+                    const message_maybe = if (cmd_args.get("-m")) |msg| (msg orelse return error.TagMessageNotFound) else null;
+                    return .{ .commit = .{ .message = message_maybe } };
+                },
+                .tag => {
+                    if (cmd_args.positional_args.len == 0) return null;
+
+                    const cmd_name = cmd_args.positional_args[0];
+
+                    var cmd: obj.TagCommand = undefined;
+                    if (std.mem.eql(u8, "list", cmd_name)) {
+                        cmd = .list;
+                    } else if (std.mem.eql(u8, "add", cmd_name)) {
+                        if (cmd_args.positional_args.len != 2) {
+                            return null;
+                        }
+                        // if a message is included, it must have a non-null value
+                        const message_maybe = if (cmd_args.get("-m")) |msg| (msg orelse return error.TagMessageNotFound) else null;
+                        cmd = .{ .add = .{
+                            .name = cmd_args.positional_args[1],
+                            .message = message_maybe,
+                        } };
+                    } else if (std.mem.eql(u8, "rm", cmd_name)) {
+                        if (cmd_args.positional_args.len != 2) {
+                            return null;
+                        }
+                        cmd = .{ .remove = .{ .name = cmd_args.positional_args[1] } };
+                    } else {
+                        try cmd_args.unused_args.put(cmd_name, {});
+                        return null;
+                    }
+
+                    return .{ .tag = cmd };
                 },
                 .status => return .status,
                 .diff => {
