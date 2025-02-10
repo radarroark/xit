@@ -306,13 +306,8 @@ fn sign(
     const sig_file_reader = sig_file.reader();
     var sig_lines = std.ArrayList([]const u8).init(arena.allocator());
     while (try sig_file_reader.readUntilDelimiterOrEofAlloc(arena.allocator(), '\n', repo_opts.max_read_size)) |line| {
-        const sig_line = if (sig_lines.items.len == 0)
-            try std.fmt.allocPrint(arena.allocator(), "gpgsig {s}", .{line})
-        else
-            try std.fmt.allocPrint(arena.allocator(), " {s}", .{line});
-        try sig_lines.append(sig_line);
+        try sig_lines.append(line);
     }
-
     return try sig_lines.toOwnedSlice();
 }
 
@@ -402,8 +397,19 @@ pub fn writeCommit(
         if (config.sections.get("user")) |user_section| {
             if (user_section.get("signingkey")) |signing_key| {
                 const sig_lines = try sign(repo_kind, repo_opts, state.readOnly(), allocator, &arena, metadata_lines.items, signing_key);
+
+                var header_lines = std.ArrayList([]const u8).init(allocator);
+                defer header_lines.deinit();
+                for (sig_lines, 0..) |line, i| {
+                    const sig_line = if (i == 0)
+                        try std.fmt.allocPrint(arena.allocator(), "gpgsig {s}", .{line})
+                    else
+                        try std.fmt.allocPrint(arena.allocator(), " {s}", .{line});
+                    try header_lines.append(sig_line);
+                }
+
                 const message = metadata_lines.pop(); // remove the message
-                try metadata_lines.appendSlice(sig_lines); // add the sig
+                try metadata_lines.appendSlice(header_lines.items); // add the sig
                 try metadata_lines.append(message); // add the message back
             }
         }
@@ -502,6 +508,14 @@ pub fn writeTag(
         try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "tagger {s} {} +0000", .{ tagger, ts }));
 
         try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "\n{s}", .{input.message orelse ""}));
+
+        // sign if key is in config
+        if (config.sections.get("user")) |user_section| {
+            if (user_section.get("signingkey")) |signing_key| {
+                const sig_lines = try sign(repo_kind, repo_opts, state.readOnly(), allocator, &arena, metadata_lines.items, signing_key);
+                try metadata_lines.appendSlice(sig_lines);
+            }
+        }
 
         break :blk try std.mem.join(allocator, "\n", metadata_lines.items);
     };
