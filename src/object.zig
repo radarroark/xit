@@ -1087,44 +1087,38 @@ pub fn ObjectIterator(
 
         fn includeContent(self: *ObjectIterator(repo_kind, repo_opts, load_kind), content: ObjectContent(repo_opts.hash)) !void {
             switch (content) {
-                .blob, .tag => {},
+                .blob => {},
                 .tree => |tree| {
                     if (self.options.recursive) {
                         for (tree.entries.values()) |entry| {
                             const entry_oid = std.fmt.bytesToHex(entry.oid, .lower);
-                            if (!self.oid_excludes.contains(entry_oid)) {
-                                var new_node = try self.allocator.create(std.DoublyLinkedList([hash.hexLen(repo_opts.hash)]u8).Node);
-                                errdefer self.allocator.destroy(new_node);
-                                new_node.data = entry_oid;
-                                self.oid_queue.append(new_node);
-                            }
+                            try self.include(&entry_oid);
                         }
                     }
                 },
                 .commit => |commit| {
-                    for (commit.parents.items) |parent_oid| {
-                        var new_node = try self.allocator.create(std.DoublyLinkedList([hash.hexLen(repo_opts.hash)]u8).Node);
-                        errdefer self.allocator.destroy(new_node);
-                        new_node.data = parent_oid;
-                        self.oid_queue.append(new_node);
+                    for (commit.parents.items) |*parent_oid| {
+                        try self.include(parent_oid);
                     }
                     if (self.options.recursive) {
-                        if (!self.oid_excludes.contains(commit.tree)) {
-                            var new_node = try self.allocator.create(std.DoublyLinkedList([hash.hexLen(repo_opts.hash)]u8).Node);
-                            errdefer self.allocator.destroy(new_node);
-                            new_node.data = commit.tree;
-                            self.oid_queue.append(new_node);
-                        }
+                        try self.include(&commit.tree);
+                    }
+                },
+                .tag => |tag| {
+                    if (self.options.recursive) {
+                        try self.include(&tag.target);
                     }
                 },
             }
         }
 
         pub fn include(self: *ObjectIterator(repo_kind, repo_opts, load_kind), oid: *const [hash.hexLen(repo_opts.hash)]u8) !void {
-            var node = try self.allocator.create(std.DoublyLinkedList([hash.hexLen(repo_opts.hash)]u8).Node);
-            errdefer self.allocator.destroy(node);
-            node.data = oid.*;
-            self.oid_queue.append(node);
+            if (!self.oid_excludes.contains(oid.*)) {
+                var node = try self.allocator.create(std.DoublyLinkedList([hash.hexLen(repo_opts.hash)]u8).Node);
+                errdefer self.allocator.destroy(node);
+                node.data = oid.*;
+                self.oid_queue.append(node);
+            }
         }
 
         pub fn exclude(self: *ObjectIterator(repo_kind, repo_opts, load_kind), oid: *const [hash.hexLen(repo_opts.hash)]u8) !void {
