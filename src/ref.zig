@@ -41,26 +41,14 @@ pub fn validateName(name: []const u8) bool {
     return true;
 }
 
-pub const RefKind = enum {
+pub const RefKind = union(enum) {
     head,
     tag,
-    remote,
-
-    pub fn name(self: RefKind) []const u8 {
-        return switch (self) {
-            .head => "heads",
-            .tag => "tags",
-            .remote => "remotes",
-        };
-    }
+    remote: []const u8,
 };
 
 pub const Ref = struct {
-    kind: union(RefKind) {
-        head,
-        tag,
-        remote: []const u8,
-    },
+    kind: RefKind,
     name: []const u8,
 
     pub fn initFromPath(ref_path: []const u8) ?Ref {
@@ -156,11 +144,17 @@ pub const RefList = struct {
         };
         errdefer ref_list.deinit();
 
+        const dir_name = switch (ref_kind) {
+            .head => "heads",
+            .tag => "tags",
+            .remote => return error.NotImplemented,
+        };
+
         switch (repo_kind) {
             .git => {
                 var refs_dir = try state.core.git_dir.openDir("refs", .{});
                 defer refs_dir.close();
-                var heads_dir = try refs_dir.openDir(ref_kind.name(), .{ .iterate = true });
+                var heads_dir = try refs_dir.openDir(dir_name, .{ .iterate = true });
                 defer heads_dir.close();
 
                 var path = std.ArrayList([]const u8).init(allocator);
@@ -170,7 +164,7 @@ pub const RefList = struct {
             .xit => {
                 if (try state.extra.moment.cursor.readPath(void, &.{
                     .{ .hash_map_get = .{ .value = hash.hashInt(repo_opts.hash, "refs") } },
-                    .{ .hash_map_get = .{ .value = hash.hashInt(repo_opts.hash, ref_kind.name()) } },
+                    .{ .hash_map_get = .{ .value = hash.hashInt(repo_opts.hash, dir_name) } },
                 })) |heads_cursor| {
                     var iter = try heads_cursor.iterator();
                     defer iter.deinit();
