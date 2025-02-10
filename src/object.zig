@@ -257,6 +257,64 @@ fn addIndexEntries(
     }
 }
 
+fn sign(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+    allocator: std.mem.Allocator,
+    arena: *std.heap.ArenaAllocator,
+    lines: []const []const u8,
+    signing_key: []const u8,
+) ![]const []const u8 {
+    const content = try std.mem.join(arena.allocator(), "\n", lines);
+    const dir = switch (repo_kind) {
+        .git => state.core.git_dir,
+        .xit => state.core.xit_dir,
+    };
+
+    // write the commit content to a file
+    const content_file_name = "xit_signing_buffer";
+    const content_file = try dir.createFile(content_file_name, .{ .truncate = true, .lock = .exclusive });
+    defer {
+        content_file.close();
+        dir.deleteFile(content_file_name) catch {};
+    }
+    try content_file.writeAll(content);
+
+    // sign the file
+    const content_file_path = try dir.realpathAlloc(arena.allocator(), content_file_name);
+    var process = std.process.Child.init(
+        &.{ "ssh-keygen", "-Y", "sign", "-n", "git", "-f", signing_key, content_file_path },
+        allocator,
+    );
+    process.stdin_behavior = .Inherit;
+    process.stdout_behavior = .Inherit;
+    process.stderr_behavior = .Inherit;
+    const term = try process.spawnAndWait();
+    if (0 != term.Exited) {
+        return error.CommitSigningFailed;
+    }
+
+    // read the sig
+    const sig_file_name = content_file_name ++ ".sig";
+    const sig_file = try dir.openFile(sig_file_name, .{ .mode = .read_only });
+    defer {
+        sig_file.close();
+        dir.deleteFile(sig_file_name) catch {};
+    }
+    const sig_file_reader = sig_file.reader();
+    var sig_lines = std.ArrayList([]const u8).init(arena.allocator());
+    while (try sig_file_reader.readUntilDelimiterOrEofAlloc(arena.allocator(), '\n', repo_opts.max_read_size)) |line| {
+        const sig_line = if (sig_lines.items.len == 0)
+            try std.fmt.allocPrint(arena.allocator(), "gpgsig {s}", .{line})
+        else
+            try std.fmt.allocPrint(arena.allocator(), " {s}", .{line});
+        try sig_lines.append(sig_line);
+    }
+
+    return try sig_lines.toOwnedSlice();
+}
+
 pub fn CommitMetadata(comptime hash_kind: hash.HashKind) type {
     return struct {
         author: ?[]const u8 = null,
@@ -267,102 +325,6 @@ pub fn CommitMetadata(comptime hash_kind: hash.HashKind) type {
     };
 }
 
-fn createCommitContents(
-    comptime repo_kind: rp.RepoKind,
-    comptime repo_opts: rp.RepoOpts(repo_kind),
-    state: rp.Repo(repo_kind, repo_opts).State(.read_only),
-    allocator: std.mem.Allocator,
-    tree_hash_hex: *const [hash.hexLen(repo_opts.hash)]u8,
-    metadata: CommitMetadata(repo_opts.hash),
-    parent_oids: []const [hash.hexLen(repo_opts.hash)]u8,
-) ![]const u8 {
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
-
-    var config = try cfg.Config(repo_kind, repo_opts).init(state, arena.allocator());
-    defer config.deinit();
-
-    var metadata_lines = std.ArrayList([]const u8).init(arena.allocator());
-
-    try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "tree {s}", .{tree_hash_hex.*}));
-    for (parent_oids) |parent_oid| {
-        try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "parent {s}", .{parent_oid}));
-    }
-
-    const ts = if (repo_opts.is_test) 0 else std.time.timestamp();
-
-    const author = metadata.author orelse blk: {
-        if (repo_opts.is_test) break :blk "radar <radar@roark>";
-        const user_section = config.sections.get("user") orelse return error.UserConfigNotFound;
-        const name = user_section.get("name") orelse return error.UserConfigNotFound;
-        const email = user_section.get("email") orelse return error.UserConfigNotFound;
-        break :blk try std.fmt.allocPrint(arena.allocator(), "{s} <{s}>", .{ name, email });
-    };
-    try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "author {s} {} +0000", .{ author, ts }));
-
-    const committer = metadata.committer orelse author;
-    try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "committer {s} {} +0000", .{ committer, ts }));
-
-    try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "\n{s}", .{metadata.message orelse ""}));
-
-    // sign commit if necessary
-    if (config.sections.get("user")) |user_section| {
-        if (user_section.get("signingkey")) |signing_key| {
-            const content = try std.mem.join(arena.allocator(), "\n", metadata_lines.items);
-            const dir = switch (repo_kind) {
-                .git => state.core.git_dir,
-                .xit => state.core.xit_dir,
-            };
-
-            // write the commit content to a file
-            const content_file_name = "xit_signing_buffer";
-            const content_file = try dir.createFile(content_file_name, .{ .truncate = true, .lock = .exclusive });
-            defer {
-                content_file.close();
-                dir.deleteFile(content_file_name) catch {};
-            }
-            try content_file.writeAll(content);
-
-            // sign the file
-            const content_file_path = try dir.realpathAlloc(arena.allocator(), content_file_name);
-            var process = std.process.Child.init(
-                &.{ "ssh-keygen", "-Y", "sign", "-n", "git", "-f", signing_key, content_file_path },
-                allocator,
-            );
-            process.stdin_behavior = .Inherit;
-            process.stdout_behavior = .Inherit;
-            process.stderr_behavior = .Inherit;
-            const term = try process.spawnAndWait();
-            if (0 != term.Exited) {
-                return error.CommitSigningFailed;
-            }
-
-            // read the sig
-            const sig_file_name = content_file_name ++ ".sig";
-            const sig_file = try dir.openFile(sig_file_name, .{ .mode = .read_only });
-            defer {
-                sig_file.close();
-                dir.deleteFile(sig_file_name) catch {};
-            }
-            const sig_file_reader = sig_file.reader();
-            var sig_lines = std.ArrayList([]const u8).init(arena.allocator());
-            while (try sig_file_reader.readUntilDelimiterOrEofAlloc(arena.allocator(), '\n', repo_opts.max_read_size)) |line| {
-                const sig_line = if (sig_lines.items.len == 0)
-                    try std.fmt.allocPrint(arena.allocator(), "gpgsig {s}", .{line})
-                else
-                    try std.fmt.allocPrint(arena.allocator(), " {s}", .{line});
-                try sig_lines.append(sig_line);
-            }
-
-            const message = metadata_lines.pop(); // remove the message
-            try metadata_lines.appendSlice(sig_lines.items); // add the sig
-            try metadata_lines.append(message); // add the message back
-        }
-    }
-
-    return try std.mem.join(allocator, "\n", metadata_lines.items);
-}
-
 pub fn writeCommit(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
@@ -370,7 +332,6 @@ pub fn writeCommit(
     allocator: std.mem.Allocator,
     metadata: CommitMetadata(repo_opts.hash),
 ) ![hash.hexLen(repo_opts.hash)]u8 {
-    var commit_hash_bytes_buffer = [_]u8{0} ** hash.byteLen(repo_opts.hash);
     const parent_oids = if (metadata.parent_oids) |oids| oids else blk: {
         const head_oid_maybe = try rf.readHeadMaybe(repo_kind, repo_opts, state.readOnly());
         break :blk if (head_oid_maybe) |head_oid| &.{head_oid} else &.{};
@@ -406,7 +367,48 @@ pub fn writeCommit(
     }
 
     // create commit contents
-    const commit_contents = try createCommitContents(repo_kind, repo_opts, state.readOnly(), allocator, &tree_hash_hex, metadata, parent_oids);
+    const commit_contents = blk: {
+        var arena = std.heap.ArenaAllocator.init(allocator);
+        defer arena.deinit();
+
+        var config = try cfg.Config(repo_kind, repo_opts).init(state.readOnly(), arena.allocator());
+        defer config.deinit();
+
+        var metadata_lines = std.ArrayList([]const u8).init(arena.allocator());
+
+        try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "tree {s}", .{tree_hash_hex}));
+        for (parent_oids) |parent_oid| {
+            try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "parent {s}", .{parent_oid}));
+        }
+
+        const ts = if (repo_opts.is_test) 0 else std.time.timestamp();
+
+        const author = metadata.author orelse auth_blk: {
+            if (repo_opts.is_test) break :auth_blk "radar <radar@roark>";
+            const user_section = config.sections.get("user") orelse return error.UserConfigNotFound;
+            const name = user_section.get("name") orelse return error.UserConfigNotFound;
+            const email = user_section.get("email") orelse return error.UserConfigNotFound;
+            break :auth_blk try std.fmt.allocPrint(arena.allocator(), "{s} <{s}>", .{ name, email });
+        };
+        try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "author {s} {} +0000", .{ author, ts }));
+
+        const committer = metadata.committer orelse author;
+        try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "committer {s} {} +0000", .{ committer, ts }));
+
+        try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "\n{s}", .{metadata.message orelse ""}));
+
+        // sign if key is in config
+        if (config.sections.get("user")) |user_section| {
+            if (user_section.get("signingkey")) |signing_key| {
+                const sig_lines = try sign(repo_kind, repo_opts, state.readOnly(), allocator, &arena, metadata_lines.items, signing_key);
+                const message = metadata_lines.pop(); // remove the message
+                try metadata_lines.appendSlice(sig_lines); // add the sig
+                try metadata_lines.append(message); // add the message back
+            }
+        }
+
+        break :blk try std.mem.join(allocator, "\n", metadata_lines.items);
+    };
     defer allocator.free(commit_contents);
 
     // create commit header
@@ -418,6 +420,7 @@ pub fn writeCommit(
     defer allocator.free(commit);
 
     // calc the hash of its contents
+    var commit_hash_bytes_buffer = [_]u8{0} ** hash.byteLen(repo_opts.hash);
     try hash.hashBuffer(repo_opts.hash, commit, &commit_hash_bytes_buffer);
     const commit_hash_hex = std.fmt.bytesToHex(commit_hash_bytes_buffer, .lower);
     const commit_hash = hash.bytesToInt(repo_opts.hash, &commit_hash_bytes_buffer);
