@@ -41,8 +41,22 @@ pub fn validateName(name: []const u8) bool {
     return true;
 }
 
+pub const RefKind = enum {
+    head,
+    tag,
+    remote,
+
+    pub fn name(self: RefKind) []const u8 {
+        return switch (self) {
+            .head => "heads",
+            .tag => "tags",
+            .remote => "remotes",
+        };
+    }
+};
+
 pub const Ref = struct {
-    kind: union(enum) {
+    kind: union(RefKind) {
         head,
         tag,
         remote: []const u8,
@@ -121,7 +135,6 @@ pub fn RefOrOid(comptime hash_kind: hash.HashKind) type {
     };
 }
 
-// TODO: this is currently hard-coded to only get local refs (from refs/heads)
 pub const RefList = struct {
     refs: std.StringArrayHashMap(Ref),
     arena: *std.heap.ArenaAllocator,
@@ -132,6 +145,7 @@ pub const RefList = struct {
         comptime repo_opts: rp.RepoOpts(repo_kind),
         state: rp.Repo(repo_kind, repo_opts).State(.read_only),
         allocator: std.mem.Allocator,
+        ref_kind: RefKind,
     ) !RefList {
         const arena = try allocator.create(std.heap.ArenaAllocator);
         arena.* = std.heap.ArenaAllocator.init(allocator);
@@ -146,7 +160,7 @@ pub const RefList = struct {
             .git => {
                 var refs_dir = try state.core.git_dir.openDir("refs", .{});
                 defer refs_dir.close();
-                var heads_dir = try refs_dir.openDir("heads", .{ .iterate = true });
+                var heads_dir = try refs_dir.openDir(ref_kind.name(), .{ .iterate = true });
                 defer heads_dir.close();
 
                 var path = std.ArrayList([]const u8).init(allocator);
@@ -156,7 +170,7 @@ pub const RefList = struct {
             .xit => {
                 if (try state.extra.moment.cursor.readPath(void, &.{
                     .{ .hash_map_get = .{ .value = hash.hashInt(repo_opts.hash, "refs") } },
-                    .{ .hash_map_get = .{ .value = hash.hashInt(repo_opts.hash, "heads") } },
+                    .{ .hash_map_get = .{ .value = hash.hashInt(repo_opts.hash, ref_kind.name()) } },
                 })) |heads_cursor| {
                     var iter = try heads_cursor.iterator();
                     defer iter.deinit();

@@ -346,9 +346,16 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     _ = try self.commit(allocator, commit_cmd);
                 },
                 .tag => |tag_cmd| switch (tag_cmd) {
-                    .list => return error.NotImplemented,
+                    .list => {
+                        var ref_list = try self.listTags(allocator);
+                        defer ref_list.deinit();
+
+                        for (ref_list.refs.values()) |ref| {
+                            try writers.out.print("{s}\n", .{ref.name});
+                        }
+                    },
                     .add => |add_tag| _ = try self.addTag(allocator, add_tag),
-                    .remove => return error.NotImplemented,
+                    .remove => |rm_tag| try self.removeTag(rm_tag),
                 },
                 .status => {
                     var stat = try self.status(allocator);
@@ -497,8 +504,8 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                                 try writers.out.print("{s} {s}\n", .{ prefix, ref.name });
                             }
                         },
-                        .add => try self.addBranch(branch_cmd.add),
-                        .remove => try self.removeBranch(branch_cmd.remove),
+                        .add => |add_branch| try self.addBranch(add_branch),
+                        .remove => |rm_branch| try self.removeBranch(rm_branch),
                     }
                 },
                 .switch_head => |switch_head_cmd| {
@@ -681,6 +688,12 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
+        pub fn listTags(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator) !rf.RefList {
+            var moment = try self.core.latestMoment();
+            const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
+            return try rf.RefList.init(repo_kind, repo_opts, state, allocator, .tag);
+        }
+
         pub fn addTag(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: tag.AddTagInput) ![hash.hexLen(repo_opts.hash)]u8 {
             switch (repo_kind) {
                 .git => return try tag.add(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, allocator, input),
@@ -707,6 +720,30 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     );
 
                     return result;
+                },
+            }
+        }
+
+        pub fn removeTag(self: *Repo(repo_kind, repo_opts), input: tag.RemoveTagInput) !void {
+            switch (repo_kind) {
+                .git => try tag.remove(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, input),
+                .xit => {
+                    const Ctx = struct {
+                        core: *Repo(repo_kind, repo_opts).Core,
+                        input: tag.RemoveTagInput,
+
+                        pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
+                            var moment = try DB.HashMap(.read_write).init(cursor.*);
+                            const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
+                            try tag.remove(repo_kind, repo_opts, state, ctx.input);
+                        }
+                    };
+
+                    const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
+                    try history.appendContext(
+                        .{ .slot = try history.getSlot(-1) },
+                        Ctx{ .core = &self.core, .input = input },
+                    );
                 },
             }
         }
@@ -989,7 +1026,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
         pub fn listBranches(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator) !rf.RefList {
             var moment = try self.core.latestMoment();
             const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
-            return try rf.RefList.init(repo_kind, repo_opts, state, allocator);
+            return try rf.RefList.init(repo_kind, repo_opts, state, allocator, .head);
         }
 
         pub fn addBranch(self: *Repo(repo_kind, repo_opts), input: bch.AddBranchInput) !void {

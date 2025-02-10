@@ -40,3 +40,56 @@ pub fn add(
 
     return tag_oid;
 }
+
+pub fn remove(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+    input: RemoveTagInput,
+) !void {
+    switch (repo_kind) {
+        .git => {
+            var refs_dir = try state.core.git_dir.openDir("refs", .{});
+            defer refs_dir.close();
+            var tags_dir = try refs_dir.makeOpenPath("tags", .{});
+            defer tags_dir.close();
+
+            // get absolute paths
+            var tags_dir_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
+            const tags_dir_path = try tags_dir.realpath(".", &tags_dir_buffer);
+            var ref_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
+            const ref_path = try tags_dir.realpath(input.name, &ref_buffer);
+
+            // delete file
+            try tags_dir.deleteFile(input.name);
+
+            // delete parent dirs
+            // this is only necessary because tags with a slash
+            // in their name are stored on disk as subdirectories
+            var parent_path_maybe = std.fs.path.dirname(ref_path);
+            while (parent_path_maybe) |parent_path| {
+                if (std.mem.eql(u8, tags_dir_path, parent_path)) {
+                    break;
+                }
+
+                std.fs.deleteDirAbsolute(parent_path) catch |err| switch (err) {
+                    error.DirNotEmpty => break,
+                    else => |e| return e,
+                };
+                parent_path_maybe = std.fs.path.dirname(parent_path);
+            }
+        },
+        .xit => {
+            const name_hash = hash.hashInt(repo_opts.hash, input.name);
+
+            // remove from refs/tags/{name}
+            const refs_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "refs"));
+            const refs = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(refs_cursor);
+            const tags_cursor = try refs.putCursor(hash.hashInt(repo_opts.hash, "tags"));
+            const tags = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(tags_cursor);
+            if (!try tags.remove(name_hash)) {
+                return error.TagNotFound;
+            }
+        },
+    }
+}

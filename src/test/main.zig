@@ -1424,6 +1424,10 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         const message = try tag_object.object_reader.reader.reader().readAllAlloc(allocator, repo_opts.max_read_size);
         defer allocator.free(message);
         try std.testing.expectEqualStrings("this is an annotated tag", message);
+
+        try main.run(repo_kind, repo_opts, allocator, &.{ "tag", "list" }, repo_dir, .{});
+
+        try main.run(repo_kind, repo_opts, allocator, &.{ "tag", "rm", "ann" }, repo_dir, .{});
     }
 
     return commit4;
