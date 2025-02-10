@@ -25,6 +25,11 @@ fn removeFile(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
     try repo.add(allocator, &.{path});
 }
 
+test "simple" {
+    try testSimple(.git, .{ .is_test = true });
+    try testSimple(.xit, .{ .is_test = true });
+}
+
 fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) !void {
     const allocator = std.testing.allocator;
     const temp_dir_name = "temp-test-repo-simple";
@@ -81,9 +86,9 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
     try std.testing.expectEqual(0, oid_set.count());
 }
 
-test "simple" {
-    try testSimple(.git, .{ .is_test = true });
-    try testSimple(.xit, .{ .is_test = true });
+test "merge" {
+    try testMerge(.git, .{ .is_test = true });
+    try testMerge(.xit, .{ .is_test = true });
 }
 
 fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) !void {
@@ -206,9 +211,12 @@ fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
     }
 }
 
-test "merge" {
-    try testMerge(.git, .{ .is_test = true });
-    try testMerge(.xit, .{ .is_test = true });
+test "merge conflict" {
+    // read and write objects in small increments to help uncover bugs
+    try testMergeConflict(.git, .{ .read_size = 1, .is_test = true });
+    try testMergeConflict(.xit, .{ .read_size = 1, .is_test = true, .extra = .{
+        .chunk_opts = .{ .min_size = 1, .avg_size = 2, .max_size = 4, .normalization = .level1 },
+    } });
 }
 
 fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) !void {
@@ -755,12 +763,9 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
     }
 }
 
-test "merge conflict" {
-    // read and write objects in small increments to help uncover bugs
-    try testMergeConflict(.git, .{ .read_size = 1, .is_test = true });
-    try testMergeConflict(.xit, .{ .read_size = 1, .is_test = true, .extra = .{
-        .chunk_opts = .{ .min_size = 1, .avg_size = 2, .max_size = 4, .normalization = .level1 },
-    } });
+test "merge conflict binary" {
+    try testMergeConflictBinary(.git, .{ .is_test = true });
+    try testMergeConflictBinary(.xit, .{ .is_test = true });
 }
 
 /// creates a merge conflict with binary files, asserting that
@@ -891,9 +896,9 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind, comptime repo_op
     }
 }
 
-test "merge conflict binary" {
-    try testMergeConflictBinary(.git, .{ .is_test = true });
-    try testMergeConflictBinary(.xit, .{ .is_test = true });
+test "merge conflict shuffle" {
+    try testMergeConflictShuffle(.git, .{ .is_test = true });
+    try testMergeConflictShuffle(.xit, .{ .is_test = true });
 }
 
 /// demonstrates an example of git shuffling lines unexpectedly
@@ -1189,9 +1194,9 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
     }
 }
 
-test "merge conflict shuffle" {
-    try testMergeConflictShuffle(.git, .{ .is_test = true });
-    try testMergeConflictShuffle(.xit, .{ .is_test = true });
+test "cherry-pick" {
+    try testCherryPick(.git, .{ .is_test = true });
+    try testCherryPick(.xit, .{ .is_test = true });
 }
 
 fn testCherryPick(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) !void {
@@ -1268,9 +1273,9 @@ fn testCherryPick(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOp
     }
 }
 
-test "cherry-pick" {
-    try testCherryPick(.git, .{ .is_test = true });
-    try testCherryPick(.xit, .{ .is_test = true });
+test "cherry-pick conflict" {
+    try testCherryPickConflict(.git, .{ .is_test = true });
+    try testCherryPickConflict(.xit, .{ .is_test = true });
 }
 
 fn testCherryPickConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) !void {
@@ -1418,9 +1423,9 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
     }
 }
 
-test "cherry-pick conflict" {
-    try testCherryPickConflict(.git, .{ .is_test = true });
-    try testCherryPickConflict(.xit, .{ .is_test = true });
+test "log" {
+    try testLog(.git, .{ .is_test = true });
+    try testLog(.xit, .{ .is_test = true });
 }
 
 fn testLog(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) !void {
@@ -1551,9 +1556,4 @@ fn testLog(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo
         }
         try std.testing.expectEqual(20, count);
     }
-}
-
-test "log" {
-    try testLog(.git, .{ .is_test = true });
-    try testLog(.xit, .{ .is_test = true });
 }
