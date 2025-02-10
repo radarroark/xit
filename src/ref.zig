@@ -159,7 +159,7 @@ pub const RefList = struct {
 
                 var path = std.ArrayList([]const u8).init(allocator);
                 defer path.deinit();
-                try ref_list.addRefs(repo_opts, state, heads_dir, &path);
+                try ref_list.addRefs(repo_opts, state, ref_kind, heads_dir, &path);
             },
             .xit => {
                 if (try state.extra.moment.cursor.readPath(void, &.{
@@ -171,7 +171,7 @@ pub const RefList = struct {
                     while (try iter.next()) |*next_cursor| {
                         const kv_pair = try next_cursor.readKeyValuePair();
                         const name = try kv_pair.key_cursor.readBytesAlloc(ref_list.arena.allocator(), MAX_REF_CONTENT_SIZE);
-                        try ref_list.refs.put(name, .{ .kind = .head, .name = name });
+                        try ref_list.refs.put(name, .{ .kind = ref_kind, .name = name });
                     }
                 }
             },
@@ -190,6 +190,7 @@ pub const RefList = struct {
         self: *RefList,
         comptime repo_opts: rp.RepoOpts(.git),
         state: rp.Repo(.git, repo_opts).State(.read_only),
+        ref_kind: RefKind,
         dir: std.fs.Dir,
         path: *std.ArrayList([]const u8),
     ) !void {
@@ -201,12 +202,12 @@ pub const RefList = struct {
             switch (entry.kind) {
                 .file => {
                     const name = try fs.joinPath(self.arena.allocator(), next_path.items);
-                    try self.refs.put(name, .{ .kind = .head, .name = name });
+                    try self.refs.put(name, .{ .kind = ref_kind, .name = name });
                 },
                 .directory => {
                     var next_dir = try dir.openDir(entry.name, .{ .iterate = true });
                     defer next_dir.close();
-                    try self.addRefs(repo_opts, state, next_dir, &next_path);
+                    try self.addRefs(repo_opts, state, ref_kind, next_dir, &next_path);
                 },
                 else => {},
             }
