@@ -94,7 +94,7 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
         defer obj_iter.deinit();
         try obj_iter.include(&commit_c);
 
-        var dest_repo = try rp.Repo(.git, .{}).init(allocator, .{ .cwd = temp_dir }, "dest_repo");
+        var dest_repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "dest_repo");
         defer dest_repo.deinit();
         try dest_repo.copyObjects(repo_kind, repo_opts, &obj_iter);
 
