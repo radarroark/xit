@@ -105,6 +105,45 @@ pub fn run(
     }
 }
 
+/// like `run` except it prints user-friendly error messages
+pub fn runPrint(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    allocator: std.mem.Allocator,
+    args: []const []const u8,
+    cwd: std.fs.Dir,
+    writers: rp.Writers,
+) !void {
+    run(repo_kind, repo_opts, allocator, args, cwd, writers) catch |err| switch (err) {
+        error.RepoNotFound => {
+            try writers.err.print(
+                \\repo not found, dummy...
+                \\either you're in the wrong place
+                \\or you need to make a new one like this:
+                \\
+                \\
+            , .{});
+            try cmd.printHelp(.init, writers.err);
+        },
+        error.RepoAlreadyExists => {
+            try writers.err.print(
+                \\repo already exists, dummy...
+                \\two repos in the same directory makes no sense.
+                \\think about it.
+                \\
+                \\
+            , .{});
+        },
+        error.CannotRemoveFileWithStagedAndUnstagedChanges, error.CannotRemoveFileWithStagedChanges, error.CannotRemoveFileWithUnstagedChanges => {
+            try writers.err.print(
+                \\cannot rm a file with uncommitted changes
+                \\
+            , .{});
+        },
+        else => |e| return e,
+    };
+}
+
 /// this is the main "main". it's even mainier than "run".
 /// this is the real deal. there is no main more main than this.
 /// at least, not that i know of. i guess internally zig probably
@@ -122,5 +161,5 @@ pub fn main() !void {
     }
 
     const writers = rp.Writers{ .out = std.io.getStdOut().writer().any(), .err = std.io.getStdErr().writer().any() };
-    try run(.xit, .{}, allocator, args.items, std.fs.cwd(), writers);
+    try runPrint(.xit, .{}, allocator, args.items, std.fs.cwd(), writers);
 }

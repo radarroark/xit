@@ -158,9 +158,12 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         try main.run(repo_kind, repo_opts, allocator, &.{ "add", "." }, repo_dir, .{});
 
         // make a commit
-        // setting the hash to `.none` causes it to autodetect the repo's hash.
-        // also, the cwd is docs_dir, to make sure we can run commands in any sub dir.
-        try main.run(repo_kind, repo_opts.withHash(.none), allocator, &.{ "commit", "-m", "first commit" }, docs_dir, .{});
+        // we're calling this one differently to test a few things:
+        // 1. setting the hash to `.none` causes it to autodetect the repo's hash.
+        // 2. the cwd is docs_dir, to make sure we can run commands in any sub dir.
+        // 3. we're using runPrint instead of run, which prints user-friendly errors
+        //    (no difference in the tests but I just want to make sure it works)
+        try main.runPrint(repo_kind, repo_opts.withHash(.none), allocator, &.{ "commit", "-m", "first commit" }, docs_dir, .{});
 
         switch (repo_kind) {
             .git => {

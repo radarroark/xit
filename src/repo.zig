@@ -397,7 +397,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                                 if (conflict.source) {
                                     try writers.out.print("DU {s}\n", .{path}); // deleted by us
                                 } else {
-                                    return error.NoCurrentOrSource;
+                                    return error.InvalidConflict;
                                 }
                             }
                         } else {
@@ -411,7 +411,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                                 if (conflict.source) {
                                     try writers.out.print("UA {s}\n", .{path}); // added by them
                                 } else {
-                                    return error.NoCurrentOrSource;
+                                    return error.InvalidConflict;
                                 }
                             }
                         }
