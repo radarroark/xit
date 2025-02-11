@@ -15,98 +15,6 @@ const rp = @import("./repo.zig");
 const ui = @import("./ui.zig");
 const hash = @import("./hash.zig");
 
-const USAGE =
-    \\
-    \\usage: xit <command> [<args>]
-    \\
-    \\init          Create an empty xit repository
-    \\              (in the current dir)
-    \\                  xit init
-    \\              (in a new dir)
-    \\                  xit init myproject
-    \\
-    \\add           Add file contents to the index
-    \\                  xit add myfile.txt
-    \\
-    \\unadd         Remove file contents from the index,
-    \\              but not from the working tree
-    \\                  xit unadd myfile.txt
-    \\
-    \\rm            Remove file contents from the index
-    \\              and from the working tree
-    \\                  xit rm myfile.txt
-    \\
-    \\reset         Add or remove file to/from the index
-    \\              to match what's in the latest commit
-    \\                  xit reset myfile.txt
-    \\
-    \\commit        Record changes to the repository
-    \\                  xit commit -m "my commit message"
-    \\
-    \\status        Show the working tree status
-    \\              (display in TUI)
-    \\                  xit status
-    \\              (display in CLI)
-    \\                  xit status --cli
-    \\
-    \\diff          Show changes between commits, commit and working tree, etc
-    \\              (display in TUI)
-    \\                  xit diff
-    \\              (display diff of workspace content in the CLI)
-    \\                  xit diff --cli
-    \\              (display diff of staged content in the CLI)
-    \\                  xit diff --staged
-    \\
-    \\branch        Add, remove, and list branches
-    \\              (add branch)
-    \\                  xit branch add mybranch
-    \\              (remove branch)
-    \\                  xit branch rm mybranch
-    \\              (list branches)
-    \\                  xit branch list
-    \\
-    \\switch        Switch working tree to a branch or commit id
-    \\              (switch to branch)
-    \\                  xit switch mybranch
-    \\              (switch to commit id)
-    \\                  xit switch :a1b2c3...
-    \\
-    \\restore       Restore working tree files
-    \\                  xit restore myfile.txt
-    \\
-    \\log           Show commit logs
-    \\              (display in TUI)
-    \\                  xit log
-    \\              (display in CLI)
-    \\                  xit log --cli
-    \\
-    \\merge         Join two or more development histories together
-    \\              (merge branch)
-    \\                  xit merge mybranch
-    \\              (merge commit id)
-    \\                  xit merge a1b2c3...
-    \\
-    \\cherry-pick   Apply the changes introduced by an existing commit
-    \\                  xit cherry-pick a1b2c3...
-    \\
-    \\config        Add, remove, and list config options
-    \\              (add config)
-    \\                  xit config add core.editor vim
-    \\              (remove config)
-    \\                  xit config rm core.editor
-    \\              (list configs)
-    \\                  xit config list
-    \\
-    \\remote        Add, remove, and list remotes
-    \\              (add remote)
-    \\                  xit remote add origin https://github.com/...
-    \\              (remove remote)
-    \\                  xit remote rm origin
-    \\              (list remotes)
-    \\                  xit remote list
-    \\
-;
-
 /// this is meant to be the main entry point if you wanted to use xit
 /// as a CLI tool. to use xit programmatically, build a Repo struct
 /// and call methods on it directly. to use xit subconsciously, just
@@ -125,20 +33,15 @@ pub fn run(
     switch (try cmd.CommandDispatch(repo_kind, repo_opts.hash).init(&cmd_args)) {
         .invalid => |invalid| switch (invalid) {
             .command => |command| {
-                try writers.err.print("\"{s}\" is not a valid command\n", .{command});
-                try writers.out.print(USAGE, .{});
+                try writers.err.print("\"{s}\" is not a valid command\n\n", .{command});
+                try cmd.printHelp(null, writers);
             },
             .argument => |argument| {
-                try writers.err.print("\"{s}\" is not a valid argument\n", .{argument.value});
-                try writers.out.print(USAGE, .{});
+                try writers.err.print("\"{s}\" is not a valid argument\n\n", .{argument.value});
+                try cmd.printHelp(argument.command, writers);
             },
         },
-        .help => |cmd_kind_maybe| if (cmd_kind_maybe) |cmd_kind| switch (cmd_kind) {
-            // TODO: print usage for each sub command
-            else => try writers.out.print(USAGE, .{}),
-        } else {
-            try writers.out.print(USAGE, .{});
-        },
+        .help => |cmd_kind_maybe| try cmd.printHelp(cmd_kind_maybe, writers),
         .tui => |cmd_kind_maybe| if (.none == repo_opts.hash) {
             // if no hash was specified, use AnyRepo to detect the hash being used
             var any_repo = try rp.AnyRepo(repo_kind, repo_opts).open(allocator, .{ .cwd = cwd });

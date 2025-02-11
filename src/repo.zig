@@ -539,6 +539,11 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     defer result.deinit();
                     try printMergeResult(&result, writers);
                 },
+                .cherry_pick => |cherry_pick_cmd| {
+                    var result = try self.merge(allocator, cherry_pick_cmd);
+                    defer result.deinit();
+                    try printMergeResult(&result, writers);
+                },
                 .config => |config_cmd| {
                     switch (config_cmd) {
                         .list => {

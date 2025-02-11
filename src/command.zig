@@ -28,11 +28,270 @@ pub const CommandKind = enum {
     restore,
     log,
     merge,
+    cherry_pick,
     config,
     remote,
     fetch,
     pull,
 };
+
+const Help = struct {
+    name: []const u8,
+    descrip: []const u8,
+    example: []const u8,
+};
+
+fn commandHelp(command_kind: CommandKind) Help {
+    return switch (command_kind) {
+        .init => .{
+            .name = "init",
+            .descrip =
+            \\Create an empty xit repository
+            ,
+            .example =
+            \\(in the current dir)
+            \\    xit init
+            \\(in a new dir)
+            \\    xit init myproject
+            ,
+        },
+        .add => .{
+            .name = "add",
+            .descrip =
+            \\Add file contents to the index
+            ,
+            .example =
+            \\xit add myfile.txt
+            ,
+        },
+        .unadd => .{
+            .name = "unadd",
+            .descrip =
+            \\Remove file contents from the index,
+            \\but not from the working tree
+            ,
+            .example =
+            \\xit unadd myfile.txt
+            ,
+        },
+        .rm => .{
+            .name = "rm",
+            .descrip =
+            \\Remove file contents from the index
+            \\and from the working tree
+            ,
+            .example =
+            \\xit rm myfile.txt
+            ,
+        },
+        .reset => .{
+            .name = "reset",
+            .descrip =
+            \\Add or remove file to/from the index
+            \\to match what's in the latest commit
+            ,
+            .example =
+            \\xit reset myfile.txt
+            ,
+        },
+        .commit => .{
+            .name = "commit",
+            .descrip =
+            \\Record changes to the repository
+            ,
+            .example =
+            \\xit commit -m "my commit message"
+            ,
+        },
+        .tag => .{
+            .name = "tag",
+            .descrip =
+            \\Add, remove, and list tags
+            ,
+            .example =
+            \\(add tag)
+            \\    xit tag add mytag
+            \\(remove tag)
+            \\    xit tag rm mytag
+            \\(list tag)
+            \\    xit tag list
+            ,
+        },
+        .status => .{
+            .name = "status",
+            .descrip =
+            \\Show the working tree status
+            ,
+            .example =
+            \\(display in TUI)
+            \\    xit status
+            \\(display in CLI)
+            \\    xit status --cli
+            ,
+        },
+        .diff => .{
+            .name = "diff",
+            .descrip =
+            \\Show changes between commits, commit and working tree, etc
+            ,
+            .example =
+            \\(display in TUI)
+            \\    xit diff
+            \\(display diff of workspace content in the CLI)
+            \\    xit diff --cli
+            \\(display diff of staged content in the CLI)
+            \\    xit diff --staged
+            ,
+        },
+        .branch => .{
+            .name = "branch",
+            .descrip =
+            \\Add, remove, and list branches
+            ,
+            .example =
+            \\(add branch)
+            \\    xit branch add mybranch
+            \\(remove branch)
+            \\    xit branch rm mybranch
+            \\(list branches)
+            \\    xit branch list
+            ,
+        },
+        .switch_head => .{
+            .name = "switch",
+            .descrip =
+            \\Switch working tree to a branch or commit id
+            ,
+            .example =
+            \\(switch to branch)
+            \\    xit switch mybranch
+            \\(switch to commit id)
+            \\    xit switch a1b2c3...
+            ,
+        },
+        .restore => .{
+            .name = "restore",
+            .descrip =
+            \\Restore working tree files
+            ,
+            .example =
+            \\xit restore myfile.txt
+            ,
+        },
+        .log => .{
+            .name = "log",
+            .descrip =
+            \\Show commit logs
+            ,
+            .example =
+            \\(display in TUI)
+            \\    xit log
+            \\(display in CLI)
+            \\    xit log --cli
+            ,
+        },
+        .merge => .{
+            .name = "merge",
+            .descrip =
+            \\Join two or more development histories together
+            ,
+            .example =
+            \\(merge branch)
+            \\    xit merge mybranch
+            \\(merge commit id)
+            \\    xit merge a1b2c3...
+            ,
+        },
+        .cherry_pick => .{
+            .name = "cherry-pick",
+            .descrip =
+            \\Apply the changes introduced by an existing commit
+            ,
+            .example =
+            \\xit cherry-pick a1b2c3...
+            ,
+        },
+        .config => .{
+            .name = "config",
+            .descrip =
+            \\Add, remove, and list config options
+            ,
+            .example =
+            \\(add config)
+            \\    xit config add core.editor vim
+            \\(remove config)
+            \\    xit config rm core.editor
+            \\(list configs)
+            \\    xit config list
+            ,
+        },
+        .remote => .{
+            .name = "remote",
+            .descrip =
+            \\Add, remove, and list remotes
+            ,
+            .example =
+            \\(add remote)
+            \\    xit remote add origin https://github.com/...
+            \\(remove remote)
+            \\    xit remote rm origin
+            \\(list remotes)
+            \\    xit remote list
+            ,
+        },
+        .fetch => .{
+            .name = "fetch",
+            .descrip =
+            \\Download objects and refs from another repo
+            ,
+            .example =
+            \\xit fetch
+            ,
+        },
+        .pull => .{
+            .name = "pull",
+            .descrip =
+            \\Fetch and merge from another repo
+            ,
+            .example =
+            \\xit pull
+            ,
+        },
+    };
+}
+
+pub fn printHelp(cmd_kind_maybe: ?CommandKind, writers: rp.Writers) !void {
+    const print_indent = 15;
+    if (cmd_kind_maybe) |cmd_kind| {
+        const help = commandHelp(cmd_kind);
+        try writers.out.print("{s}", .{help.name});
+        for (0..print_indent - help.name.len) |_| try writers.out.print(" ", .{});
+        var split_iter = std.mem.splitScalar(u8, help.descrip, '\n');
+        try writers.out.print("{s}\n", .{split_iter.first()});
+        while (split_iter.next()) |line| {
+            for (0..print_indent) |_| try writers.out.print(" ", .{});
+            try writers.out.print("{s}\n", .{line});
+        }
+        split_iter = std.mem.splitScalar(u8, help.example, '\n');
+        while (split_iter.next()) |line| {
+            for (0..print_indent) |_| try writers.out.print(" ", .{});
+            try writers.out.print("{s}\n", .{line});
+        }
+    } else {
+        try writers.err.print("help: xit <command> [<args>]\n\n", .{});
+        inline for (@typeInfo(CommandKind).Enum.fields) |field| {
+            const help = commandHelp(@enumFromInt(field.value));
+            try writers.out.print("{s}", .{help.name});
+            for (0..print_indent - help.name.len) |_| try writers.out.print(" ", .{});
+            var split_iter = std.mem.splitScalar(u8, help.descrip, '\n');
+            try writers.out.print("{s}\n", .{split_iter.first()});
+            while (split_iter.next()) |line| {
+                for (0..print_indent) |_| try writers.out.print(" ", .{});
+                try writers.out.print("{s}\n", .{line});
+            }
+        }
+    }
+}
 
 pub const CommandArgs = struct {
     allocator: std.mem.Allocator,
@@ -129,7 +388,7 @@ pub const CommandArgs = struct {
             else if (std.mem.eql(u8, command_name, "merge"))
                 .merge
             else if (std.mem.eql(u8, command_name, "cherry-pick"))
-                .merge
+                .cherry_pick
             else if (std.mem.eql(u8, command_name, "config"))
                 .config
             else if (std.mem.eql(u8, command_name, "remote"))
@@ -203,6 +462,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
         },
         log,
         merge: mrg.MergeInput(repo_kind, hash_kind),
+        cherry_pick: mrg.MergeInput(repo_kind, hash_kind),
         config: cfg.ConfigCommand,
         remote: cfg.ConfigCommand,
         fetch: struct {
@@ -350,13 +610,26 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                 .merge => {
                     if (cmd_args.positional_args.len == 0) return null;
 
-                    const command_name = cmd_args.command_name orelse return error.InvalidMergeKind;
-                    const merge_kind: mrg.MergeKind = if (std.mem.eql(u8, "merge", command_name))
-                        .full
-                    else if (std.mem.eql(u8, "cherry-pick", command_name))
-                        .pick
-                    else
-                        return error.InvalidMergeKind;
+                    const merge_action: mrg.MergeAction(repo_kind, hash_kind) =
+                        if (cmd_args.contains("--continue"))
+                        .cont
+                    else blk: {
+                        var source = std.ArrayList(rf.RefOrOid(hash_kind)).init(cmd_args.arena.allocator());
+                        for (cmd_args.positional_args) |arg| {
+                            try source.append(rf.RefOrOid(hash_kind).initFromUser(arg) orelse return error.InvalidRefOrOid);
+                        }
+                        break :blk .{ .new = .{ .source = try source.toOwnedSlice() } };
+                    };
+
+                    return .{
+                        .merge = .{
+                            .kind = .full,
+                            .action = merge_action,
+                        },
+                    };
+                },
+                .cherry_pick => {
+                    if (cmd_args.positional_args.len == 0) return null;
 
                     const merge_action: mrg.MergeAction(repo_kind, hash_kind) =
                         if (cmd_args.contains("--continue"))
@@ -371,7 +644,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
 
                     return .{
                         .merge = .{
-                            .kind = merge_kind,
+                            .kind = .pick,
                             .action = merge_action,
                         },
                     };
