@@ -46,7 +46,7 @@ fn commandHelp(command_kind: CommandKind) Help {
         .init => .{
             .name = "init",
             .descrip =
-            \\Create an empty xit repository
+            \\create an empty xit repository
             ,
             .example =
             \\(in the current dir)
@@ -58,7 +58,7 @@ fn commandHelp(command_kind: CommandKind) Help {
         .add => .{
             .name = "add",
             .descrip =
-            \\Add file contents to the index
+            \\add file contents to the index
             ,
             .example =
             \\xit add myfile.txt
@@ -67,7 +67,7 @@ fn commandHelp(command_kind: CommandKind) Help {
         .unadd => .{
             .name = "unadd",
             .descrip =
-            \\Remove file contents from the index,
+            \\remove file contents from the index,
             \\but not from the working tree
             ,
             .example =
@@ -77,7 +77,7 @@ fn commandHelp(command_kind: CommandKind) Help {
         .rm => .{
             .name = "rm",
             .descrip =
-            \\Remove file contents from the index
+            \\remove file contents from the index
             \\and from the working tree
             ,
             .example =
@@ -87,7 +87,7 @@ fn commandHelp(command_kind: CommandKind) Help {
         .reset => .{
             .name = "reset",
             .descrip =
-            \\Add or remove file to/from the index
+            \\add or remove file to/from the index
             \\to match what's in the latest commit
             ,
             .example =
@@ -97,7 +97,7 @@ fn commandHelp(command_kind: CommandKind) Help {
         .commit => .{
             .name = "commit",
             .descrip =
-            \\Record changes to the repository
+            \\record changes to the repository
             ,
             .example =
             \\xit commit -m "my commit message"
@@ -106,7 +106,7 @@ fn commandHelp(command_kind: CommandKind) Help {
         .tag => .{
             .name = "tag",
             .descrip =
-            \\Add, remove, and list tags
+            \\add, remove, and list tags
             ,
             .example =
             \\(add tag)
@@ -120,7 +120,7 @@ fn commandHelp(command_kind: CommandKind) Help {
         .status => .{
             .name = "status",
             .descrip =
-            \\Show the working tree status
+            \\show the working tree status
             ,
             .example =
             \\(display in TUI)
@@ -132,7 +132,7 @@ fn commandHelp(command_kind: CommandKind) Help {
         .diff => .{
             .name = "diff",
             .descrip =
-            \\Show changes between commits, commit and working tree, etc
+            \\show changes between commits, commit and working tree, etc
             ,
             .example =
             \\(display in TUI)
@@ -146,7 +146,7 @@ fn commandHelp(command_kind: CommandKind) Help {
         .branch => .{
             .name = "branch",
             .descrip =
-            \\Add, remove, and list branches
+            \\add, remove, and list branches
             ,
             .example =
             \\(add branch)
@@ -160,7 +160,7 @@ fn commandHelp(command_kind: CommandKind) Help {
         .switch_head => .{
             .name = "switch",
             .descrip =
-            \\Switch working tree to a branch or commit id
+            \\switch working tree to a branch or commit id
             ,
             .example =
             \\(switch to branch)
@@ -172,7 +172,7 @@ fn commandHelp(command_kind: CommandKind) Help {
         .restore => .{
             .name = "restore",
             .descrip =
-            \\Restore working tree files
+            \\restore working tree files
             ,
             .example =
             \\xit restore myfile.txt
@@ -181,7 +181,7 @@ fn commandHelp(command_kind: CommandKind) Help {
         .log => .{
             .name = "log",
             .descrip =
-            \\Show commit logs
+            \\show commit logs
             ,
             .example =
             \\(display in TUI)
@@ -193,7 +193,7 @@ fn commandHelp(command_kind: CommandKind) Help {
         .merge => .{
             .name = "merge",
             .descrip =
-            \\Join two or more development histories together
+            \\join two or more development histories together
             ,
             .example =
             \\(merge branch)
@@ -205,7 +205,7 @@ fn commandHelp(command_kind: CommandKind) Help {
         .cherry_pick => .{
             .name = "cherry-pick",
             .descrip =
-            \\Apply the changes introduced by an existing commit
+            \\apply the changes introduced by an existing commit
             ,
             .example =
             \\xit cherry-pick a1b2c3...
@@ -214,7 +214,7 @@ fn commandHelp(command_kind: CommandKind) Help {
         .config => .{
             .name = "config",
             .descrip =
-            \\Add, remove, and list config options
+            \\add, remove, and list config options
             ,
             .example =
             \\(add config)
@@ -228,7 +228,7 @@ fn commandHelp(command_kind: CommandKind) Help {
         .remote => .{
             .name = "remote",
             .descrip =
-            \\Add, remove, and list remotes
+            \\add, remove, and list remotes
             ,
             .example =
             \\(add remote)
@@ -242,7 +242,7 @@ fn commandHelp(command_kind: CommandKind) Help {
         .fetch => .{
             .name = "fetch",
             .descrip =
-            \\Download objects and refs from another repo
+            \\download objects and refs from another repo
             ,
             .example =
             \\xit fetch
@@ -251,7 +251,7 @@ fn commandHelp(command_kind: CommandKind) Help {
         .pull => .{
             .name = "pull",
             .descrip =
-            \\Fetch and merge from another repo
+            \\fetch and merge from another repo
             ,
             .example =
             \\xit pull
@@ -260,34 +260,38 @@ fn commandHelp(command_kind: CommandKind) Help {
     };
 }
 
-pub fn printHelp(cmd_kind_maybe: ?CommandKind, writers: rp.Writers) !void {
+pub fn printHelp(cmd_kind_maybe: ?CommandKind, writer: std.io.AnyWriter) !void {
     const print_indent = 15;
     if (cmd_kind_maybe) |cmd_kind| {
         const help = commandHelp(cmd_kind);
-        try writers.out.print("{s}", .{help.name});
-        for (0..print_indent - help.name.len) |_| try writers.out.print(" ", .{});
+        // name and description
+        try writer.print("{s}", .{help.name});
+        for (0..print_indent - help.name.len) |_| try writer.print(" ", .{});
         var split_iter = std.mem.splitScalar(u8, help.descrip, '\n');
-        try writers.out.print("{s}\n", .{split_iter.first()});
+        try writer.print("{s}\n", .{split_iter.first()});
         while (split_iter.next()) |line| {
-            for (0..print_indent) |_| try writers.out.print(" ", .{});
-            try writers.out.print("{s}\n", .{line});
+            for (0..print_indent) |_| try writer.print(" ", .{});
+            try writer.print("{s}\n", .{line});
         }
+        try writer.print("\n", .{});
+        // example
         split_iter = std.mem.splitScalar(u8, help.example, '\n');
         while (split_iter.next()) |line| {
-            for (0..print_indent) |_| try writers.out.print(" ", .{});
-            try writers.out.print("{s}\n", .{line});
+            for (0..print_indent) |_| try writer.print(" ", .{});
+            try writer.print("{s}\n", .{line});
         }
     } else {
-        try writers.err.print("help: xit <command> [<args>]\n\n", .{});
+        try writer.print("help: xit <command> [<args>]\n\n", .{});
         inline for (@typeInfo(CommandKind).Enum.fields) |field| {
             const help = commandHelp(@enumFromInt(field.value));
-            try writers.out.print("{s}", .{help.name});
-            for (0..print_indent - help.name.len) |_| try writers.out.print(" ", .{});
+            // name and description
+            try writer.print("{s}", .{help.name});
+            for (0..print_indent - help.name.len) |_| try writer.print(" ", .{});
             var split_iter = std.mem.splitScalar(u8, help.descrip, '\n');
-            try writers.out.print("{s}\n", .{split_iter.first()});
+            try writer.print("{s}\n", .{split_iter.first()});
             while (split_iter.next()) |line| {
-                for (0..print_indent) |_| try writers.out.print(" ", .{});
-                try writers.out.print("{s}\n", .{line});
+                for (0..print_indent) |_| try writer.print(" ", .{});
+                try writer.print("{s}\n", .{line});
             }
         }
     }

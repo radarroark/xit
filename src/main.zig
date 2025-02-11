@@ -34,14 +34,14 @@ pub fn run(
         .invalid => |invalid| switch (invalid) {
             .command => |command| {
                 try writers.err.print("\"{s}\" is not a valid command\n\n", .{command});
-                try cmd.printHelp(null, writers);
+                try cmd.printHelp(null, writers.err);
             },
             .argument => |argument| {
                 try writers.err.print("\"{s}\" is not a valid argument\n\n", .{argument.value});
-                try cmd.printHelp(argument.command, writers);
+                try cmd.printHelp(argument.command, writers.err);
             },
         },
-        .help => |cmd_kind_maybe| try cmd.printHelp(cmd_kind_maybe, writers),
+        .help => |cmd_kind_maybe| try cmd.printHelp(cmd_kind_maybe, writers.out),
         .tui => |cmd_kind_maybe| if (.none == repo_opts.hash) {
             // if no hash was specified, use AnyRepo to detect the hash being used
             var any_repo = try rp.AnyRepo(repo_kind, repo_opts).open(allocator, .{ .cwd = cwd });
