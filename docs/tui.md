@@ -1,24 +1,8 @@
-The Simplicity and Timelessness of TUIs (text user interfaces)
+It's amazing how underused TUIs are. For developer tools it seems like a no-brainer, but instead we see tools like Postman being written with Electron. Granted, I am sure a TUI would be a harder sell to VCs...
 
-* The lowest common denominator of all UIs is text. In a way, TUIs (and CLIs) are the only truly cross-platform UI. They can be rendered anywhere, including *inside* of other interfaces. They're nearly guaranteed to work on any hardware we invent in the future.
+It's especially baffling that both git and mercurial have built-in UIs, but they aren't TUIs. I mean, their users are already in the terminal! And yet [git gui](https://git-scm.com/docs/git-gui) launches a Tcl/Tk window, while [hg serve](https://wiki.mercurial-scm.org/hgserve) fires up a web app. Why, guys...why?!
 
-* Compared to GUIs, however, TUIs are much lower resolution. You are limited to monospaced unicode characters. This feels like a negative, but it isn't. TUIs force you to distill your interface down to its most basic elements. Anything nonessential must go.
-
-* TUIs are inoculated from the excesses of modern software design. You don't get to have drop shadows, transparency, or scrolljacking. You get a limited palette of characters and colors, leaving the raw design of your interface to stand or fall on its own.
-
-* Limitations are a powerful catalyst for creativity. Curious people see limitations as an invitation to overcome them. Give a curious child a TI-83 and he will give you Space Invaders. Give him Minecraft and he will give you Roman aqueducts.
-
-* Orson Welles put it succinctly: "The enemy of art is the absence of limitations." There is no better way to snuff creativity out of a man than to give him endless resources and no deadline. Often, your best work comes when you have the strictest constraints.
-
-* I hope you enjoyed today's locker room speech...*bows*.
-
-TUIs are incredibly underused
-
-* For developer tools it seems like a no-brainer, but instead we see tools like Postman being written with Electron. Granted, I am sure a TUI would be a harder sell to VCs...
-
-* It's especially baffling that both git and mercurial have built-in UIs, but they aren't TUIs. I mean, their users are already in the terminal! And yet [git gui](https://git-scm.com/docs/git-gui) launches a Tcl/Tk window, while [hg serve](https://wiki.mercurial-scm.org/hgserve) fires up a web app. Why, guys...why?!
-
-* All functionality in xit will exposed via the built-in TUI. It's not an afterthought; the TUI is meant to be the primary way you interact with it.
+All functionality in xit will exposed via the built-in TUI. It's not an afterthought; the TUI is meant to be the primary way you interact with it.
 
 Many TUIs are really terribly designed. I have a few opinions on how to do it right. Granted, I'm not that experienced with designing TUIs, but ignorance has never stopped me from having strong opinions in the past, so why would I let it stop me now.
 
@@ -130,5 +114,3 @@ Accessibility
 * Terminals have no such semantic information. To them, a given TUI is just rendering a grid of characters. There is no high-level concept of a button or a text field. To fix this, we need to build new standards. There is a lot we can learn from the web here.
 
 I tried to design my own TUI library, [xitui](https://github.com/radarroark/xitui), around these ideas. It has built-in support for responsive design, and a built-in focus system.
-
-TUIs are not a relic of the past. Every GUI framework you are using today will eventually become obsolete, while the simplicity and timelessness of TUIs will remain. [GUIs get remembered, but TUIs never die](https://www.youtube.com/shorts/U_pqRP-4hUc).
