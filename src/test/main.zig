@@ -855,23 +855,40 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         // add file
         try main.run(repo_kind, repo_opts, allocator, &.{ "add", "new-file.txt" }, repo_dir, .{});
 
-        // unadd file
-        try main.run(repo_kind, repo_opts, allocator, &.{ "unadd", "one/two/three.txt" }, repo_dir, .{});
+        // unadd the same file so it is untracked again
+        try main.run(repo_kind, repo_opts, allocator, &.{ "unadd", "new-file.txt" }, repo_dir, .{});
 
-        // reset will undo index changes
+        // add, unadd, and then untrack modified file
         {
-            try main.run(repo_kind, repo_opts, allocator, &.{ "reset", "new-file.txt" }, repo_dir, .{});
-            try main.run(repo_kind, repo_opts, allocator, &.{ "reset", "one/two/three.txt" }, repo_dir, .{});
+            try main.run(repo_kind, repo_opts, allocator, &.{ "add", "one/two/three.txt" }, repo_dir, .{});
 
-            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
-            defer repo.deinit();
-            var moment = try repo.core.latestMoment();
-            const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-            var index = try idx.Index(repo_kind, repo_opts).init(allocator, state);
-            defer index.deinit();
+            try main.run(repo_kind, repo_opts, allocator, &.{ "unadd", "one/two/three.txt" }, repo_dir, .{});
 
-            try std.testing.expect(!index.entries.contains("new-file.txt"));
-            try std.testing.expect(index.entries.contains("one/two/three.txt"));
+            // still tracked because unadd just resets it back to the state from HEAD
+            {
+                var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
+                defer repo.deinit();
+                var moment = try repo.core.latestMoment();
+                const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
+                var index = try idx.Index(repo_kind, repo_opts).init(allocator, state);
+                defer index.deinit();
+
+                try std.testing.expect(index.entries.contains("one/two/three.txt"));
+            }
+
+            try main.run(repo_kind, repo_opts, allocator, &.{ "untrack", "one/two/three.txt" }, repo_dir, .{});
+
+            // not tracked anymore
+            {
+                var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
+                defer repo.deinit();
+                var moment = try repo.core.latestMoment();
+                const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
+                var index = try idx.Index(repo_kind, repo_opts).init(allocator, state);
+                defer index.deinit();
+
+                try std.testing.expect(!index.entries.contains("one/two/three.txt"));
+            }
         }
 
         // stage the changes to the file

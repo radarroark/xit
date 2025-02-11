@@ -8,7 +8,7 @@ const fs = @import("./fs.zig");
 const rp = @import("./repo.zig");
 const st = @import("./status.zig");
 
-pub const IndexUnaddOptions = struct {
+pub const IndexUntrackOptions = struct {
     force: bool = false,
 };
 
@@ -335,34 +335,37 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
         }
 
         pub fn addConflictEntries(self: *Index(repo_kind, repo_opts), path: []const u8, tree_entries: [3]?obj.TreeEntry(repo_opts.hash)) !void {
-            // add the conflict entries
-            const owned_path = try self.arena.allocator().dupe(u8, path);
             for (tree_entries, 1..) |tree_entry_maybe, stage| {
                 if (tree_entry_maybe) |tree_entry| {
-                    const entry = Entry{
-                        .ctime_secs = 0,
-                        .ctime_nsecs = 0,
-                        .mtime_secs = 0,
-                        .mtime_nsecs = 0,
-                        .dev = 0,
-                        .ino = 0,
-                        .mode = tree_entry.mode,
-                        .uid = 0,
-                        .gid = 0,
-                        .file_size = 0,
-                        .oid = tree_entry.oid,
-                        .flags = .{
-                            .name_length = @intCast(owned_path.len),
-                            .stage = @intCast(stage),
-                            .extended = false,
-                            .assume_valid = false,
-                        },
-                        .extended_flags = null,
-                        .path = owned_path,
-                    };
-                    try self.addEntry(entry);
+                    try self.addTreeEntry(tree_entry, path, @intCast(stage));
                 }
             }
+        }
+
+        pub fn addTreeEntry(self: *Index(repo_kind, repo_opts), tree_entry: obj.TreeEntry(repo_opts.hash), path: []const u8, stage: u2) !void {
+            const owned_path = try self.arena.allocator().dupe(u8, path);
+            const entry = Entry{
+                .ctime_secs = 0,
+                .ctime_nsecs = 0,
+                .mtime_secs = 0,
+                .mtime_nsecs = 0,
+                .dev = 0,
+                .ino = 0,
+                .mode = tree_entry.mode,
+                .uid = 0,
+                .gid = 0,
+                .file_size = 0,
+                .oid = tree_entry.oid,
+                .flags = .{
+                    .name_length = @intCast(owned_path.len),
+                    .stage = @intCast(stage),
+                    .extended = false,
+                    .assume_valid = false,
+                },
+                .extended_flags = null,
+                .path = owned_path,
+            };
+            try self.addEntry(entry);
         }
 
         pub fn removePath(self: *Index(repo_kind, repo_opts), path: []const u8) void {
@@ -396,31 +399,9 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
         pub fn addOrRemovePath(
             self: *Index(repo_kind, repo_opts),
             state: rp.Repo(repo_kind, repo_opts).State(.read_write),
-            cwd: std.fs.Dir,
-            path: []const u8,
+            relative_path: []const u8,
             action: enum { add, rm },
         ) !void {
-            // get the absolute paths to the repo and the input
-            const repo_path = try state.core.repo_dir.realpathAlloc(self.allocator, ".");
-            defer self.allocator.free(repo_path);
-            const cwd_path = try cwd.realpathAlloc(self.allocator, ".");
-            defer self.allocator.free(cwd_path);
-            const input_path =
-                if (std.fs.path.isAbsolute(path))
-                try self.allocator.dupe(u8, path)
-            else
-                try std.fs.path.resolve(self.allocator, &.{ cwd_path, path });
-            defer self.allocator.free(input_path);
-
-            // make sure the input path is in the repo
-            if (!std.mem.startsWith(u8, input_path, repo_path)) {
-                return error.PathIsOutsideRepo;
-            }
-
-            // compute the path relative to the repo path
-            const relative_path = try std.fs.path.relative(self.allocator, repo_path, input_path);
-            defer self.allocator.free(relative_path);
-
             // normalize the relative path, replacing \ with /
             const normalized_path = if (relative_path.len == 0) "." else blk: {
                 var path_parts = std.ArrayList([]const u8).init(self.allocator);

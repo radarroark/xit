@@ -172,13 +172,13 @@ fn runCommand(
             try repo.add(allocator, add_cmd.paths);
         },
         .unadd => |unadd_cmd| {
-            try repo.unadd(allocator, unadd_cmd.paths, unadd_cmd.opts);
+            try repo.unadd(allocator, unadd_cmd.paths);
+        },
+        .untrack => |untrack_cmd| {
+            try repo.untrack(allocator, untrack_cmd.paths, untrack_cmd.opts);
         },
         .rm => |rm_cmd| {
             try repo.rm(allocator, rm_cmd.paths, rm_cmd.opts);
-        },
-        .reset => |reset_cmd| {
-            try repo.reset(allocator, reset_cmd.path);
         },
         .commit => |commit_cmd| {
             _ = try repo.commit(allocator, commit_cmd);

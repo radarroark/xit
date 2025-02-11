@@ -17,8 +17,8 @@ pub const CommandKind = enum {
     init,
     add,
     unadd,
+    untrack,
     rm,
-    reset,
     commit,
     tag,
     status,
@@ -67,31 +67,31 @@ fn commandHelp(command_kind: CommandKind) Help {
         .unadd => .{
             .name = "unadd",
             .descrip =
-            \\remove file contents from the index,
-            \\but not from the working tree
+            \\remove any changes to a file
+            \\that were added to the index
             ,
             .example =
             \\xit unadd myfile.txt
             ,
         },
+        .untrack => .{
+            .name = "untrack",
+            .descrip =
+            \\no longer track file in the index,
+            \\but leave it in the working tree
+            ,
+            .example =
+            \\xit untrack myfile.txt
+            ,
+        },
         .rm => .{
             .name = "rm",
             .descrip =
-            \\remove file contents from the index
-            \\and from the working tree
+            \\no longer track file in the index,
+            \\and remove it from the working tree
             ,
             .example =
             \\xit rm myfile.txt
-            ,
-        },
-        .reset => .{
-            .name = "reset",
-            .descrip =
-            \\add or remove file to/from the index
-            \\to match what's in the latest commit
-            ,
-            .example =
-            \\xit reset myfile.txt
             ,
         },
         .commit => .{
@@ -369,10 +369,10 @@ pub const CommandArgs = struct {
                 .add
             else if (std.mem.eql(u8, command_name, "unadd"))
                 .unadd
+            else if (std.mem.eql(u8, command_name, "untrack"))
+                .untrack
             else if (std.mem.eql(u8, command_name, "rm"))
                 .rm
-            else if (std.mem.eql(u8, command_name, "reset"))
-                .reset
             else if (std.mem.eql(u8, command_name, "commit"))
                 .commit
             else if (std.mem.eql(u8, command_name, "tag"))
@@ -444,14 +444,14 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
         },
         unadd: struct {
             paths: []const []const u8,
-            opts: idx.IndexUnaddOptions,
+        },
+        untrack: struct {
+            paths: []const []const u8,
+            opts: idx.IndexUntrackOptions,
         },
         rm: struct {
             paths: []const []const u8,
             opts: idx.IndexRemoveOptions,
-        },
-        reset: struct {
-            path: []const u8,
         },
         commit: obj.CommitMetadata(hash_kind),
         tag: tag.TagCommand,
@@ -499,6 +499,13 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
 
                     return .{ .unadd = .{
                         .paths = cmd_args.positional_args,
+                    } };
+                },
+                .untrack => {
+                    if (cmd_args.positional_args.len == 0) return null;
+
+                    return .{ .untrack = .{
+                        .paths = cmd_args.positional_args,
                         .opts = .{
                             .force = cmd_args.contains("-f"),
                         },
@@ -514,11 +521,6 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                             .remove_from_workspace = true,
                         },
                     } };
-                },
-                .reset => {
-                    if (cmd_args.positional_args.len != 1) return null;
-
-                    return .{ .reset = .{ .path = cmd_args.positional_args[0] } };
                 },
                 .commit => {
                     // if a message is included, it must have a non-null value

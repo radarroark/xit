@@ -343,13 +343,13 @@ pub fn migrate(
     }
 }
 
-pub fn restore(
+pub fn headTreeEntry(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_only),
     allocator: std.mem.Allocator,
     path: []const u8,
-) !void {
+) !?obj.TreeEntry(repo_opts.hash) {
     // get the current commit
     const current_oid = try rf.readHead(repo_kind, repo_opts, state);
     var commit_object = try obj.Object(repo_kind, repo_opts, .full).init(allocator, state, &current_oid);
@@ -370,8 +370,17 @@ pub fn restore(
         }
     }
     try path_parts.append(path[start..]);
-    const tree_entry = try pathToTreeEntry(repo_kind, repo_opts, state, allocator, tree_object, path_parts.items) orelse return error.ObjectNotFound;
+    return try pathToTreeEntry(repo_kind, repo_opts, state, allocator, tree_object, path_parts.items);
+}
 
+pub fn restore(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+    allocator: std.mem.Allocator,
+    path: []const u8,
+) !void {
+    const tree_entry = try headTreeEntry(repo_kind, repo_opts, state, allocator, path) orelse return error.ObjectNotFound;
     // restore file in the working tree
     try objectToFile(repo_kind, repo_opts, state, allocator, path, tree_entry);
 }

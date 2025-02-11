@@ -440,7 +440,9 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     defer index.deinit();
 
                     for (paths) |path| {
-                        try index.addOrRemovePath(.{ .core = &self.core, .extra = .{} }, self.init_opts.cwd, path, .add);
+                        const rel_path = try fs.relativePath(allocator, self.core.repo_dir, self.init_opts.cwd, path);
+                        defer allocator.free(rel_path);
+                        try index.addOrRemovePath(.{ .core = &self.core, .extra = .{} }, rel_path, .add);
                     }
 
                     try index.write(allocator, .{ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } });
@@ -462,7 +464,9 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             defer index.deinit();
 
                             for (ctx.paths) |path| {
-                                try index.addOrRemovePath(state, ctx.cwd, path, .add);
+                                const rel_path = try fs.relativePath(ctx.allocator, ctx.core.repo_dir, ctx.cwd, path);
+                                defer ctx.allocator.free(rel_path);
+                                try index.addOrRemovePath(state, rel_path, .add);
                             }
 
                             try index.write(ctx.allocator, state);
@@ -478,7 +482,71 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
-        pub fn unadd(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, paths: []const []const u8, opts: idx.IndexUnaddOptions) !void {
+        pub fn unadd(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, paths: []const []const u8) !void {
+            switch (repo_kind) {
+                .git => {
+                    var lock = try fs.LockFile.init(self.core.git_dir, "index");
+                    defer lock.deinit();
+
+                    var index = try idx.Index(repo_kind, repo_opts).init(allocator, .{ .core = &self.core, .extra = .{} });
+                    defer index.deinit();
+
+                    for (paths) |path| {
+                        const rel_path = try fs.relativePath(allocator, self.core.repo_dir, self.init_opts.cwd, path);
+                        defer allocator.free(rel_path);
+                        if (try res.headTreeEntry(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, allocator, rel_path)) |tree_entry| {
+                            // file is in HEAD, add the HEAD state to index
+                            try index.addTreeEntry(tree_entry, rel_path, 0);
+                        } else {
+                            // file is not in HEAD, so just remove it from the index
+                            try index.addOrRemovePath(.{ .core = &self.core, .extra = .{} }, rel_path, .rm);
+                        }
+                    }
+
+                    try index.write(allocator, .{ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } });
+
+                    lock.success = true;
+                },
+                .xit => {
+                    const Ctx = struct {
+                        core: *Repo(repo_kind, repo_opts).Core,
+                        allocator: std.mem.Allocator,
+                        cwd: std.fs.Dir,
+                        paths: []const []const u8,
+
+                        pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
+                            var moment = try DB.HashMap(.read_write).init(cursor.*);
+                            const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
+
+                            var index = try idx.Index(repo_kind, repo_opts).init(ctx.allocator, state.readOnly());
+                            defer index.deinit();
+
+                            for (ctx.paths) |path| {
+                                const rel_path = try fs.relativePath(ctx.allocator, ctx.core.repo_dir, ctx.cwd, path);
+                                defer ctx.allocator.free(rel_path);
+                                if (try res.headTreeEntry(repo_kind, repo_opts, state.readOnly(), ctx.allocator, rel_path)) |tree_entry| {
+                                    // file is in HEAD, add the HEAD state to index
+                                    try index.addTreeEntry(tree_entry, rel_path, 0);
+                                } else {
+                                    // file is not in HEAD, so just remove it from the index
+                                    try index.addOrRemovePath(state, rel_path, .rm);
+                                }
+                            }
+
+                            try index.write(ctx.allocator, state);
+                        }
+                    };
+
+                    const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
+                    try history.appendContext(
+                        .{ .slot = try history.getSlot(-1) },
+                        Ctx{ .core = &self.core, .allocator = allocator, .cwd = self.init_opts.cwd, .paths = paths },
+                    );
+                },
+            }
+        }
+
+        pub fn untrack(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, paths: []const []const u8, opts: idx.IndexUntrackOptions) !void {
             try self.rm(allocator, paths, .{
                 .force = opts.force,
                 .remove_from_workspace = false,
@@ -512,7 +580,9 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                                         return error.CannotRemoveFileWithUnstagedChanges;
                                     }
                                 }
-                                try index.addOrRemovePath(.{ .core = &self.core, .extra = .{} }, self.init_opts.cwd, path, .rm);
+                                const rel_path = try fs.relativePath(allocator, self.core.repo_dir, self.init_opts.cwd, path);
+                                defer allocator.free(rel_path);
+                                try index.addOrRemovePath(.{ .core = &self.core, .extra = .{} }, rel_path, .rm);
                             },
                             else => return error.UnexpectedPathType,
                         }
@@ -564,7 +634,9 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                                                 return error.CannotRemoveFileWithUnstagedChanges;
                                             }
                                         }
-                                        try index.addOrRemovePath(state, ctx.cwd, path, .rm);
+                                        const rel_path = try fs.relativePath(ctx.allocator, ctx.core.repo_dir, ctx.cwd, path);
+                                        defer ctx.allocator.free(rel_path);
+                                        try index.addOrRemovePath(state, rel_path, .rm);
                                     },
                                     else => return error.UnexpectedPathType,
                                 }
@@ -581,7 +653,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                                 }
                             }
 
-                            try index.write(ctx.allocator, .{ .core = ctx.core, .extra = .{ .moment = &moment } });
+                            try index.write(ctx.allocator, state);
                         }
                     };
 
@@ -591,17 +663,6 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         Ctx{ .core = &self.core, .allocator = allocator, .cwd = self.init_opts.cwd, .paths = paths, .opts = opts },
                     );
                 },
-            }
-        }
-
-        pub fn reset(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, path: []const u8) !void {
-            var stat = try self.status(allocator);
-            defer stat.deinit();
-
-            if (stat.index_added.contains(path) or stat.index_modified.contains(path)) {
-                try self.unadd(allocator, &.{path}, .{});
-            } else if (stat.index_deleted.contains(path)) {
-                try self.add(allocator, &.{path});
             }
         }
 
