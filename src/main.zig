@@ -14,6 +14,15 @@ const cmd = @import("./command.zig");
 const rp = @import("./repo.zig");
 const ui = @import("./ui.zig");
 const hash = @import("./hash.zig");
+const df = @import("./diff.zig");
+const st = @import("./status.zig");
+const mrg = @import("./merge.zig");
+const obj = @import("./object.zig");
+
+pub const Writers = struct {
+    out: std.io.AnyWriter = std.io.null_writer.any(),
+    err: std.io.AnyWriter = std.io.null_writer.any(),
+};
 
 /// this is meant to be the main entry point if you wanted to use xit
 /// as a CLI tool. to use xit programmatically, build a Repo struct
@@ -25,7 +34,7 @@ pub fn run(
     allocator: std.mem.Allocator,
     args: []const []const u8,
     cwd: std.fs.Dir,
-    writers: rp.Writers,
+    writers: Writers,
 ) !void {
     var cmd_args = try cmd.CommandArgs.init(allocator, args);
     defer cmd_args.deinit();
@@ -91,17 +100,17 @@ pub fn run(
                     .none => return error.HashKindNotFound,
                     .sha1 => |*repo| {
                         const cmd_maybe = try cmd.Command(repo_kind, .sha1).init(&cmd_args);
-                        try repo.runCommand(allocator, cmd_maybe orelse return error.InvalidCommand, writers);
+                        try runCommand(repo_kind, repo_opts.withHash(.sha1), repo, allocator, cmd_maybe orelse return error.InvalidCommand, writers);
                     },
                     .sha256 => |*repo| {
                         const cmd_maybe = try cmd.Command(repo_kind, .sha256).init(&cmd_args);
-                        try repo.runCommand(allocator, cmd_maybe orelse return error.InvalidCommand, writers);
+                        try runCommand(repo_kind, repo_opts.withHash(.sha256), repo, allocator, cmd_maybe orelse return error.InvalidCommand, writers);
                     },
                 }
             } else {
                 var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = cwd });
                 defer repo.deinit();
-                try repo.runCommand(allocator, cli_cmd, writers);
+                try runCommand(repo_kind, repo_opts, &repo, allocator, cli_cmd, writers);
             },
         },
     }
@@ -114,7 +123,7 @@ pub fn runPrint(
     allocator: std.mem.Allocator,
     args: []const []const u8,
     cwd: std.fs.Dir,
-    writers: rp.Writers,
+    writers: Writers,
 ) !void {
     run(repo_kind, repo_opts, allocator, args, cwd, writers) catch |err| switch (err) {
         error.RepoNotFound => {
@@ -146,6 +155,332 @@ pub fn runPrint(
         },
         else => |e| return e,
     };
+}
+
+/// executes a command on the given repo
+fn runCommand(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    repo: *rp.Repo(repo_kind, repo_opts),
+    allocator: std.mem.Allocator,
+    command: cmd.Command(repo_kind, repo_opts.hash),
+    writers: Writers,
+) !void {
+    switch (command) {
+        .init => {},
+        .add => |add_cmd| {
+            try repo.add(allocator, add_cmd.paths);
+        },
+        .unadd => |unadd_cmd| {
+            try repo.unadd(allocator, unadd_cmd.paths, unadd_cmd.opts);
+        },
+        .rm => |rm_cmd| {
+            try repo.rm(allocator, rm_cmd.paths, rm_cmd.opts);
+        },
+        .reset => |reset_cmd| {
+            try repo.reset(allocator, reset_cmd.path);
+        },
+        .commit => |commit_cmd| {
+            _ = try repo.commit(allocator, commit_cmd);
+        },
+        .tag => |tag_cmd| switch (tag_cmd) {
+            .list => {
+                var ref_list = try repo.listTags(allocator);
+                defer ref_list.deinit();
+
+                for (ref_list.refs.values()) |ref| {
+                    try writers.out.print("{s}\n", .{ref.name});
+                }
+            },
+            .add => |add_tag| _ = try repo.addTag(allocator, add_tag),
+            .remove => |rm_tag| try repo.removeTag(rm_tag),
+        },
+        .status => {
+            var stat = try repo.status(allocator);
+            defer stat.deinit();
+
+            for (stat.untracked.values()) |entry| {
+                try writers.out.print("?? {s}\n", .{entry.path});
+            }
+
+            for (stat.workspace_modified.values()) |entry| {
+                try writers.out.print(" M {s}\n", .{entry.path});
+            }
+
+            for (stat.workspace_deleted.keys()) |path| {
+                try writers.out.print(" D {s}\n", .{path});
+            }
+
+            for (stat.index_added.keys()) |path| {
+                try writers.out.print("A  {s}\n", .{path});
+            }
+
+            for (stat.index_modified.keys()) |path| {
+                try writers.out.print("M  {s}\n", .{path});
+            }
+
+            for (stat.index_deleted.keys()) |path| {
+                try writers.out.print("D  {s}\n", .{path});
+            }
+
+            for (stat.conflicts.keys(), stat.conflicts.values()) |path, conflict| {
+                if (conflict.base) {
+                    if (conflict.target) {
+                        if (conflict.source) {
+                            try writers.out.print("UU {s}\n", .{path}); // both modified
+                        } else {
+                            try writers.out.print("UD {s}\n", .{path}); // deleted by them
+                        }
+                    } else {
+                        if (conflict.source) {
+                            try writers.out.print("DU {s}\n", .{path}); // deleted by us
+                        } else {
+                            return error.InvalidConflict;
+                        }
+                    }
+                } else {
+                    if (conflict.target) {
+                        if (conflict.source) {
+                            try writers.out.print("AA {s}\n", .{path}); // both added
+                        } else {
+                            try writers.out.print("AU {s}\n", .{path}); // added by us
+                        }
+                    } else {
+                        if (conflict.source) {
+                            try writers.out.print("UA {s}\n", .{path}); // added by them
+                        } else {
+                            return error.InvalidConflict;
+                        }
+                    }
+                }
+            }
+        },
+        .diff => |diff_cmd| {
+            const DiffState = union(df.DiffKind) {
+                workspace: st.Status(repo_kind, repo_opts),
+                index: st.Status(repo_kind, repo_opts),
+                tree: obj.TreeDiff(repo_kind, repo_opts),
+
+                fn deinit(diff_state: *@This()) void {
+                    switch (diff_state.*) {
+                        .workspace => diff_state.workspace.deinit(),
+                        .index => diff_state.index.deinit(),
+                        .tree => diff_state.tree.deinit(),
+                    }
+                }
+            };
+            const diff_opts = diff_cmd.diff_opts;
+            var diff_state: DiffState = switch (diff_opts) {
+                .workspace => .{ .workspace = try repo.status(allocator) },
+                .index => .{ .index = try repo.status(allocator) },
+                .tree => |tree| .{ .tree = try repo.treeDiff(allocator, tree.old, tree.new) },
+            };
+            defer diff_state.deinit();
+            var diff_iter = try repo.filePairs(allocator, switch (diff_opts) {
+                .workspace => |workspace| .{
+                    .workspace = .{
+                        .conflict_diff_kind = workspace.conflict_diff_kind,
+                        .status = &diff_state.workspace,
+                    },
+                },
+                .index => .{
+                    .index = .{ .status = &diff_state.index },
+                },
+                .tree => .{
+                    .tree = .{ .tree_diff = &diff_state.tree },
+                },
+            });
+
+            while (try diff_iter.next()) |*line_iter_pair_ptr| {
+                var line_iter_pair = line_iter_pair_ptr.*;
+                defer line_iter_pair.deinit();
+                var hunk_iter = try df.HunkIterator(repo_kind, repo_opts).init(allocator, &line_iter_pair.a, &line_iter_pair.b);
+                defer hunk_iter.deinit();
+                for (hunk_iter.header_lines.items) |header_line| {
+                    try writers.out.print("{s}\n", .{header_line});
+                }
+                while (try hunk_iter.next()) |*hunk_ptr| {
+                    var hunk = hunk_ptr.*;
+                    defer hunk.deinit();
+                    const offsets = hunk.offsets();
+                    try writers.out.print("@@ -{},{} +{},{} @@\n", .{
+                        offsets.del_start,
+                        offsets.del_count,
+                        offsets.ins_start,
+                        offsets.ins_count,
+                    });
+                    for (hunk.edits.items) |edit| {
+                        const line = switch (edit) {
+                            .eql => |eql| try hunk_iter.line_iter_b.get(eql.new_line.num),
+                            .ins => |ins| try hunk_iter.line_iter_b.get(ins.new_line.num),
+                            .del => |del| try hunk_iter.line_iter_a.get(del.old_line.num),
+                        };
+                        defer hunk_iter.allocator.free(line);
+                        try writers.out.print("{s} {s}\n", .{
+                            switch (edit) {
+                                .eql => " ",
+                                .ins => "+",
+                                .del => "-",
+                            },
+                            line,
+                        });
+                    }
+                }
+            }
+        },
+        .branch => |branch_cmd| {
+            switch (branch_cmd) {
+                .list => {
+                    const current_branch = try repo.currentBranch(allocator);
+                    defer allocator.free(current_branch);
+
+                    var ref_list = try repo.listBranches(allocator);
+                    defer ref_list.deinit();
+
+                    for (ref_list.refs.values()) |ref| {
+                        const prefix = if (std.mem.eql(u8, current_branch, ref.name)) "*" else " ";
+                        try writers.out.print("{s} {s}\n", .{ prefix, ref.name });
+                    }
+                },
+                .add => |add_branch| try repo.addBranch(add_branch),
+                .remove => |rm_branch| try repo.removeBranch(rm_branch),
+            }
+        },
+        .switch_head => |switch_head_cmd| {
+            var result = try repo.switchHead(allocator, switch_head_cmd);
+            defer result.deinit();
+        },
+        .restore => |restore_cmd| {
+            try repo.restore(allocator, restore_cmd.path);
+        },
+        .log => {
+            var commit_iter = try repo.log(allocator, null);
+            defer commit_iter.deinit();
+            while (try commit_iter.next()) |commit_object| {
+                defer commit_object.deinit();
+                try writers.out.print("commit {s}\n", .{commit_object.oid});
+                if (commit_object.content.commit.metadata.author) |author| {
+                    try writers.out.print("Author {s}\n", .{author});
+                }
+                try writers.out.print("\n", .{});
+
+                try commit_object.object_reader.seekTo(commit_object.content.commit.message_position);
+                while (try commit_object.object_reader.reader.reader().readUntilDelimiterOrEofAlloc(allocator, '\n', repo_opts.max_read_size)) |line| {
+                    defer allocator.free(line);
+                    try writers.out.print("    {s}\n", .{line});
+                }
+                try writers.out.print("\n", .{});
+            }
+        },
+        .merge => |merge_cmd| {
+            var result = try repo.merge(allocator, merge_cmd);
+            defer result.deinit();
+            try printMergeResult(repo_kind, repo_opts, &result, writers);
+        },
+        .cherry_pick => |cherry_pick_cmd| {
+            var result = try repo.merge(allocator, cherry_pick_cmd);
+            defer result.deinit();
+            try printMergeResult(repo_kind, repo_opts, &result, writers);
+        },
+        .config => |config_cmd| {
+            switch (config_cmd) {
+                .list => {
+                    var conf = try repo.config(allocator);
+                    defer conf.deinit();
+
+                    for (conf.sections.keys(), conf.sections.values()) |section_name, variables| {
+                        for (variables.keys(), variables.values()) |name, value| {
+                            try writers.out.print("{s}.{s}={s}\n", .{ section_name, name, value });
+                        }
+                    }
+                },
+                .add => |config_add_cmd| try repo.addConfig(allocator, config_add_cmd),
+                .remove => |config_remove_cmd| try repo.removeConfig(allocator, config_remove_cmd),
+            }
+        },
+        .remote => |remote_cmd| {
+            switch (remote_cmd) {
+                .list => {
+                    var rem = try repo.remote(allocator);
+                    defer rem.deinit();
+
+                    for (rem.sections.keys(), rem.sections.values()) |section_name, variables| {
+                        for (variables.keys(), variables.values()) |name, value| {
+                            try writers.out.print("{s}.{s}={s}\n", .{ section_name, name, value });
+                        }
+                    }
+                },
+                .add => |remote_add_cmd| try repo.addRemote(allocator, remote_add_cmd),
+                .remove => |remote_remove_cmd| try repo.removeRemote(allocator, remote_remove_cmd),
+            }
+        },
+        .fetch => |fetch_cmd| {
+            _ = try repo.fetch(allocator, fetch_cmd.remote_name);
+        },
+        .pull => |pull_cmd| {
+            var result = try repo.pull(allocator, pull_cmd.remote_name, pull_cmd.remote_ref_name);
+            defer result.deinit();
+            try printMergeResult(repo_kind, repo_opts, &result.merge, writers);
+        },
+    }
+}
+
+fn printMergeResult(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    merge_result: *const mrg.Merge(repo_kind, repo_opts),
+    writers: Writers,
+) !void {
+    for (merge_result.auto_resolved_conflicts.keys()) |path| {
+        if (merge_result.changes.contains(path)) {
+            try writers.out.print("Auto-merging {s}\n", .{path});
+        }
+    }
+    switch (merge_result.result) {
+        .success => {},
+        .nothing => {
+            try writers.out.print("Already up to date.\n", .{});
+        },
+        .fast_forward => {
+            try writers.out.print("Fast-forward\n", .{});
+        },
+        .conflict => |result_conflict| {
+            for (result_conflict.conflicts.keys(), result_conflict.conflicts.values()) |path, conflict| {
+                if (conflict.renamed) |renamed| {
+                    const conflict_type = if (conflict.target != null)
+                        "file/directory"
+                    else
+                        "directory/file";
+                    const dir_branch_name = if (conflict.target != null)
+                        merge_result.source_name
+                    else
+                        merge_result.target_name;
+                    try writers.err.print("CONFLICT ({s}): There is a directory with name {s} in {s}. Adding {s} as {s}\n", .{ conflict_type, path, dir_branch_name, path, renamed.path });
+                } else {
+                    if (merge_result.changes.contains(path)) {
+                        try writers.out.print("Auto-merging {s}\n", .{path});
+                    }
+                    if (conflict.target != null and conflict.source != null) {
+                        const conflict_type = if (conflict.base != null)
+                            "content"
+                        else
+                            "add/add";
+                        try writers.err.print("CONFLICT ({s}): Merge conflict in {s}\n", .{ conflict_type, path });
+                    } else {
+                        const conflict_type = if (conflict.target != null)
+                            "modify/delete"
+                        else
+                            "delete/modify";
+                        const deleted_branch_name, const modified_branch_name = if (conflict.target != null)
+                            .{ merge_result.source_name, merge_result.target_name }
+                        else
+                            .{ merge_result.target_name, merge_result.source_name };
+                        try writers.err.print("CONFLICT ({s}): {s} deleted in {s} and modified in {s}\n", .{ conflict_type, path, deleted_branch_name, modified_branch_name });
+                    }
+                }
+            }
+        },
+    }
 }
 
 /// this is the main "main". it's even mainier than "run".
