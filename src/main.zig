@@ -35,10 +35,12 @@ pub fn run(
             .command => |command| {
                 try writers.err.print("\"{s}\" is not a valid command\n\n", .{command});
                 try cmd.printHelp(null, writers.err);
+                return error.PrintedError;
             },
             .argument => |argument| {
                 try writers.err.print("\"{s}\" is not a valid argument\n\n", .{argument.value});
                 try cmd.printHelp(argument.command, writers.err);
+                return error.PrintedError;
             },
         },
         .help => |cmd_kind_maybe| try cmd.printHelp(cmd_kind_maybe, writers.out),
@@ -124,6 +126,7 @@ pub fn runPrint(
                 \\
             , .{});
             try cmd.printHelp(.init, writers.err);
+            return error.PrintedError;
         },
         error.RepoAlreadyExists => {
             try writers.err.print(
@@ -131,14 +134,15 @@ pub fn runPrint(
                 \\two repos in the same directory makes no sense.
                 \\think about it.
                 \\
-                \\
             , .{});
+            return error.PrintedError;
         },
         error.CannotRemoveFileWithStagedAndUnstagedChanges, error.CannotRemoveFileWithStagedChanges, error.CannotRemoveFileWithUnstagedChanges => {
             try writers.err.print(
                 \\cannot rm a file with uncommitted changes
                 \\
             , .{});
+            return error.PrintedError;
         },
         else => |e| return e,
     };
@@ -148,7 +152,7 @@ pub fn runPrint(
 /// this is the real deal. there is no main more main than this.
 /// at least, not that i know of. i guess internally zig probably
 /// has an earlier entrypoint which is even mainier than this.
-pub fn main() !void {
+pub fn main() !u8 {
     const allocator = std.heap.page_allocator;
     var args = std.ArrayList([]const u8).init(allocator);
     defer args.deinit();
@@ -161,5 +165,10 @@ pub fn main() !void {
     }
 
     const writers = rp.Writers{ .out = std.io.getStdOut().writer().any(), .err = std.io.getStdErr().writer().any() };
-    try runPrint(.xit, .{}, allocator, args.items, std.fs.cwd(), writers);
+    runPrint(.xit, .{}, allocator, args.items, std.fs.cwd(), writers) catch |err| switch (err) {
+        error.PrintedError => return 1,
+        else => |e| return e,
+    };
+
+    return 0;
 }
