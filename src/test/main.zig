@@ -829,39 +829,36 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         // can't remove non-existent file
         try std.testing.expectEqual(error.RemoveIndexPathNotFound, main.run(repo_kind, repo_opts, allocator, &.{ "rm", "no-such-file" }, repo_dir, .{}));
 
-        // create a new file
-        var new_file_txt = try repo_dir.createFile("new-file.txt", .{});
-        defer {
-            new_file_txt.close();
-            repo_dir.deleteFile("new-file.txt") catch {};
-        }
-        try new_file_txt.writeAll("this is a new file");
-
-        // can't remove unindexed file
-        try std.testing.expectEqual(error.RemoveIndexPathNotFound, main.run(repo_kind, repo_opts, allocator, &.{ "rm", "new-file.txt" }, repo_dir, .{}));
-
-        // modify a file
         {
-            const three_txt = try repo_dir.openFile("one/two/three.txt", .{ .mode = .read_write });
-            defer three_txt.close();
-            try three_txt.seekTo(0);
-            try three_txt.writeAll("this is now modified");
-            try three_txt.setEndPos(try three_txt.getPos());
-        }
+            // modify a file
+            {
+                const three_txt = try repo_dir.openFile("one/two/three.txt", .{ .mode = .read_write });
+                defer three_txt.close();
+                try three_txt.seekTo(0);
+                try three_txt.writeAll("this is now modified");
+                try three_txt.setEndPos(try three_txt.getPos());
+            }
 
-        // can't remove a file with unstaged changes
-        try std.testing.expectEqual(error.CannotRemoveFileWithUnstagedChanges, main.run(repo_kind, repo_opts, allocator, &.{ "rm", "one/two/three.txt" }, repo_dir, .{}));
+            // can't remove a file with unstaged changes
+            try std.testing.expectEqual(error.CannotRemoveFileWithUnstagedChanges, main.run(repo_kind, repo_opts, allocator, &.{ "rm", "one/two/three.txt" }, repo_dir, .{}));
 
-        // add file
-        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "new-file.txt" }, repo_dir, .{});
-
-        // unadd the same file so it is untracked again
-        try main.run(repo_kind, repo_opts, allocator, &.{ "unadd", "new-file.txt" }, repo_dir, .{});
-
-        // add, unadd, and then untrack modified file
-        {
+            // stage the changes
             try main.run(repo_kind, repo_opts, allocator, &.{ "add", "one/two/three.txt" }, repo_dir, .{});
 
+            // modify it again
+            {
+                const three_txt = try repo_dir.openFile("one/two/three.txt", .{ .mode = .read_write });
+                defer three_txt.close();
+                try three_txt.seekTo(0);
+                try three_txt.writeAll("this is now modified again");
+                try three_txt.setEndPos(try three_txt.getPos());
+            }
+
+            // can't untrack a file with staged and unstaged changes
+            try std.testing.expectEqual(error.CannotRemoveFileWithStagedAndUnstagedChanges, main.run(repo_kind, repo_opts, allocator, &.{ "untrack", "one/two/three.txt" }, repo_dir, .{}));
+
+            // add, unadd, and then untrack modified file
+            try main.run(repo_kind, repo_opts, allocator, &.{ "add", "one/two/three.txt" }, repo_dir, .{});
             try main.run(repo_kind, repo_opts, allocator, &.{ "unadd", "one/two/three.txt" }, repo_dir, .{});
 
             // still tracked because unadd just resets it back to the state from HEAD
@@ -889,37 +886,56 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
                 try std.testing.expect(!index.entries.contains("one/two/three.txt"));
             }
-        }
 
-        // stage the changes to the file
-        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "one/two/three.txt" }, repo_dir, .{});
-
-        // can't remove a file with staged changes
-        try std.testing.expectEqual(error.CannotRemoveFileWithStagedChanges, main.run(repo_kind, repo_opts, allocator, &.{ "rm", "one/two/three.txt" }, repo_dir, .{}));
-
-        // remove file by force
-        try main.run(repo_kind, repo_opts, allocator, &.{ "rm", "one/two/three.txt", "-f" }, repo_dir, .{});
-
-        // restore file's original content
-        {
-            const three_txt = try repo_dir.createFile("one/two/three.txt", .{});
-            defer three_txt.close();
-            try three_txt.seekTo(0);
-            try three_txt.writeAll("one, two, three!");
-            try three_txt.setEndPos(try three_txt.getPos());
-
+            // stage the changes to the file
             try main.run(repo_kind, repo_opts, allocator, &.{ "add", "one/two/three.txt" }, repo_dir, .{});
+
+            // can't remove a file with staged changes
+            try std.testing.expectEqual(error.CannotRemoveFileWithStagedChanges, main.run(repo_kind, repo_opts, allocator, &.{ "rm", "one/two/three.txt" }, repo_dir, .{}));
+
+            // remove file by force
+            try main.run(repo_kind, repo_opts, allocator, &.{ "rm", "one/two/three.txt", "-f" }, repo_dir, .{});
+
+            // restore file's original content
+            {
+                const three_txt = try repo_dir.createFile("one/two/three.txt", .{});
+                defer three_txt.close();
+                try three_txt.seekTo(0);
+                try three_txt.writeAll("one, two, three!");
+                try three_txt.setEndPos(try three_txt.getPos());
+
+                try main.run(repo_kind, repo_opts, allocator, &.{ "add", "one/two/three.txt" }, repo_dir, .{});
+            }
+
+            // remove a file
+            {
+                try main.run(repo_kind, repo_opts, allocator, &.{ "rm", "one/two/three.txt" }, repo_dir, .{});
+
+                var file_or_err = repo_dir.openFile("one/two/three.txt", .{ .mode = .read_only });
+                if (file_or_err) |*file| {
+                    file.close();
+                    return error.UnexpectedFile;
+                } else |_| {}
+            }
         }
 
-        // remove a file
         {
-            try main.run(repo_kind, repo_opts, allocator, &.{ "rm", "one/two/three.txt" }, repo_dir, .{});
+            // create a new file
+            var new_file_txt = try repo_dir.createFile("new-file.txt", .{});
+            defer {
+                new_file_txt.close();
+                repo_dir.deleteFile("new-file.txt") catch {};
+            }
+            try new_file_txt.writeAll("this is a new file");
 
-            var file_or_err = repo_dir.openFile("one/two/three.txt", .{ .mode = .read_only });
-            if (file_or_err) |*file| {
-                file.close();
-                return error.UnexpectedFile;
-            } else |_| {}
+            // can't remove unindexed file
+            try std.testing.expectEqual(error.RemoveIndexPathNotFound, main.run(repo_kind, repo_opts, allocator, &.{ "rm", "new-file.txt" }, repo_dir, .{}));
+
+            // add file
+            try main.run(repo_kind, repo_opts, allocator, &.{ "add", "new-file.txt" }, repo_dir, .{});
+
+            // unadd the same file so it is untracked again
+            try main.run(repo_kind, repo_opts, allocator, &.{ "unadd", "new-file.txt" }, repo_dir, .{});
         }
     }
 

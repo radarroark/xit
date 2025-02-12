@@ -440,9 +440,11 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     defer index.deinit();
 
                     for (paths) |path| {
-                        const rel_path = try fs.relativePath(allocator, self.core.repo_dir, self.init_opts.cwd, path);
-                        defer allocator.free(rel_path);
-                        try index.addOrRemovePath(.{ .core = &self.core, .extra = .{} }, rel_path, .add);
+                        const relative_path = try fs.relativePath(allocator, self.core.repo_dir, self.init_opts.cwd, path);
+                        defer allocator.free(relative_path);
+                        const path_parts = try fs.splitPath(allocator, relative_path);
+                        defer allocator.free(path_parts);
+                        try index.addOrRemovePath(.{ .core = &self.core, .extra = .{} }, path_parts, .add);
                     }
 
                     try index.write(allocator, .{ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } });
@@ -464,9 +466,11 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             defer index.deinit();
 
                             for (ctx.paths) |path| {
-                                const rel_path = try fs.relativePath(ctx.allocator, ctx.core.repo_dir, ctx.cwd, path);
-                                defer ctx.allocator.free(rel_path);
-                                try index.addOrRemovePath(state, rel_path, .add);
+                                const relative_path = try fs.relativePath(ctx.allocator, ctx.core.repo_dir, ctx.cwd, path);
+                                defer ctx.allocator.free(relative_path);
+                                const path_parts = try fs.splitPath(ctx.allocator, relative_path);
+                                defer ctx.allocator.free(path_parts);
+                                try index.addOrRemovePath(state, path_parts, .add);
                             }
 
                             try index.write(ctx.allocator, state);
@@ -492,17 +496,20 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     defer index.deinit();
 
                     for (paths) |path| {
-                        const rel_path = try fs.relativePath(allocator, self.core.repo_dir, self.init_opts.cwd, path);
-                        defer allocator.free(rel_path);
-                        if (try res.headTreeEntry(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, allocator, rel_path)) |tree_entry| {
+                        const relative_path = try fs.relativePath(allocator, self.core.repo_dir, self.init_opts.cwd, path);
+                        defer allocator.free(relative_path);
+                        const path_parts = try fs.splitPath(allocator, relative_path);
+                        defer allocator.free(path_parts);
+
+                        if (try res.headTreeEntry(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, allocator, path_parts)) |tree_entry| {
                             // file is in HEAD, add the HEAD state to index
                             const oid_hex = std.fmt.bytesToHex(tree_entry.oid, .lower);
                             var object = try obj.Object(repo_kind, repo_opts, .raw).init(allocator, .{ .core = &self.core, .extra = .{} }, &oid_hex);
                             defer object.deinit();
-                            try index.addTreeEntry(tree_entry, rel_path, @intCast(object.len), 0);
+                            try index.addTreeEntry(tree_entry, path_parts, @intCast(object.len), 0);
                         } else {
                             // file is not in HEAD, so just remove it from the index
-                            try index.addOrRemovePath(.{ .core = &self.core, .extra = .{} }, rel_path, .rm);
+                            try index.addOrRemovePath(.{ .core = &self.core, .extra = .{} }, path_parts, .rm);
                         }
                     }
 
@@ -525,17 +532,20 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             defer index.deinit();
 
                             for (ctx.paths) |path| {
-                                const rel_path = try fs.relativePath(ctx.allocator, ctx.core.repo_dir, ctx.cwd, path);
-                                defer ctx.allocator.free(rel_path);
-                                if (try res.headTreeEntry(repo_kind, repo_opts, state.readOnly(), ctx.allocator, rel_path)) |tree_entry| {
+                                const relative_path = try fs.relativePath(ctx.allocator, ctx.core.repo_dir, ctx.cwd, path);
+                                defer ctx.allocator.free(relative_path);
+                                const path_parts = try fs.splitPath(ctx.allocator, relative_path);
+                                defer ctx.allocator.free(path_parts);
+
+                                if (try res.headTreeEntry(repo_kind, repo_opts, state.readOnly(), ctx.allocator, path_parts)) |tree_entry| {
                                     // file is in HEAD, add the HEAD state to index
                                     const oid_hex = std.fmt.bytesToHex(tree_entry.oid, .lower);
                                     var object = try obj.Object(repo_kind, repo_opts, .raw).init(ctx.allocator, state.readOnly(), &oid_hex);
                                     defer object.deinit();
-                                    try index.addTreeEntry(tree_entry, rel_path, @intCast(object.len), 0);
+                                    try index.addTreeEntry(tree_entry, path_parts, @intCast(object.len), 0);
                                 } else {
                                     // file is not in HEAD, so just remove it from the index
-                                    try index.addOrRemovePath(state, rel_path, .rm);
+                                    try index.addOrRemovePath(state, path_parts, .rm);
                                 }
                             }
 
@@ -573,14 +583,21 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     defer head_tree.deinit();
 
                     for (paths) |path| {
-                        const meta = fs.getMetadata(self.core.repo_dir, path) catch |err| switch (err) {
+                        const relative_path = try fs.relativePath(allocator, self.core.repo_dir, self.init_opts.cwd, path);
+                        defer allocator.free(relative_path);
+                        const path_parts = try fs.splitPath(allocator, relative_path);
+                        defer allocator.free(path_parts);
+                        const normalized_path = try fs.joinPath(allocator, path_parts);
+                        defer allocator.free(normalized_path);
+
+                        const meta = fs.getMetadata(self.core.repo_dir, normalized_path) catch |err| switch (err) {
                             error.FileNotFound => return error.RemoveIndexPathNotFound,
                             else => |e| return e,
                         };
                         switch (meta.kind()) {
                             .file => {
                                 if (!opts.force) {
-                                    const differs_from = try idx.indexDiffersFrom(repo_kind, repo_opts, &self.core, index, head_tree, path, meta);
+                                    const differs_from = try idx.indexDiffersFrom(repo_kind, repo_opts, &self.core, index, head_tree, normalized_path, meta);
                                     if (differs_from.head and differs_from.workspace) {
                                         return error.CannotRemoveFileWithStagedAndUnstagedChanges;
                                     } else if (differs_from.head and opts.remove_from_workspace) {
@@ -589,9 +606,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                                         return error.CannotRemoveFileWithUnstagedChanges;
                                     }
                                 }
-                                const rel_path = try fs.relativePath(allocator, self.core.repo_dir, self.init_opts.cwd, path);
-                                defer allocator.free(rel_path);
-                                try index.addOrRemovePath(.{ .core = &self.core, .extra = .{} }, rel_path, .rm);
+                                try index.addOrRemovePath(.{ .core = &self.core, .extra = .{} }, path_parts, .rm);
                             },
                             else => return error.UnexpectedPathType,
                         }
@@ -631,14 +646,21 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             defer head_tree.deinit();
 
                             for (ctx.paths) |path| {
-                                const meta = fs.getMetadata(ctx.core.repo_dir, path) catch |err| switch (err) {
+                                const relative_path = try fs.relativePath(ctx.allocator, ctx.core.repo_dir, ctx.cwd, path);
+                                defer ctx.allocator.free(relative_path);
+                                const path_parts = try fs.splitPath(ctx.allocator, relative_path);
+                                defer ctx.allocator.free(path_parts);
+                                const normalized_path = try fs.joinPath(ctx.allocator, path_parts);
+                                defer ctx.allocator.free(normalized_path);
+
+                                const meta = fs.getMetadata(ctx.core.repo_dir, normalized_path) catch |err| switch (err) {
                                     error.FileNotFound => return error.RemoveIndexPathNotFound,
                                     else => |e| return e,
                                 };
                                 switch (meta.kind()) {
                                     .file => {
                                         if (!ctx.opts.force) {
-                                            const differs_from = try idx.indexDiffersFrom(repo_kind, repo_opts, ctx.core, index, head_tree, path, meta);
+                                            const differs_from = try idx.indexDiffersFrom(repo_kind, repo_opts, ctx.core, index, head_tree, normalized_path, meta);
                                             if (differs_from.head and differs_from.workspace) {
                                                 return error.CannotRemoveFileWithStagedAndUnstagedChanges;
                                             } else if (differs_from.head and ctx.opts.remove_from_workspace) {
@@ -647,9 +669,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                                                 return error.CannotRemoveFileWithUnstagedChanges;
                                             }
                                         }
-                                        const rel_path = try fs.relativePath(ctx.allocator, ctx.core.repo_dir, ctx.cwd, path);
-                                        defer ctx.allocator.free(rel_path);
-                                        try index.addOrRemovePath(state, rel_path, .rm);
+                                        try index.addOrRemovePath(state, path_parts, .rm);
                                     },
                                     else => return error.UnexpectedPathType,
                                 }

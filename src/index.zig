@@ -341,9 +341,11 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
         }
 
         pub fn addConflictEntries(self: *Index(repo_kind, repo_opts), path: []const u8, tree_entries: [3]?obj.TreeEntry(repo_opts.hash)) !void {
+            const path_parts = try fs.splitPath(self.allocator, path);
+            defer self.allocator.free(path_parts);
             for (tree_entries, 1..) |tree_entry_maybe, stage| {
                 if (tree_entry_maybe) |tree_entry| {
-                    try self.addTreeEntry(tree_entry, path, 0, @intCast(stage));
+                    try self.addTreeEntry(tree_entry, path_parts, 0, @intCast(stage));
                 }
             }
         }
@@ -351,14 +353,11 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
         pub fn addTreeEntry(
             self: *Index(repo_kind, repo_opts),
             tree_entry: obj.TreeEntry(repo_opts.hash),
-            path: []const u8,
+            path_parts: []const []const u8,
             file_size: u64,
             stage: u2,
         ) !void {
-            const path_parts = try fs.splitPath(self.allocator, path);
-            defer self.allocator.free(path_parts);
-            // allocate using the arena so it has the same lifetime as the overall Index instance
-            const normalized_path = try fs.joinPath(self.arena.allocator(), path_parts);
+            const normalized_path = if (path_parts.len == 0) return error.InvalidPath else try fs.joinPath(self.arena.allocator(), path_parts);
             const entry = Entry{
                 .ctime_secs = 0,
                 .ctime_nsecs = 0,
@@ -417,16 +416,10 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
         pub fn addOrRemovePath(
             self: *Index(repo_kind, repo_opts),
             state: rp.Repo(repo_kind, repo_opts).State(.read_write),
-            relative_path: []const u8,
+            path_parts: []const []const u8,
             action: enum { add, rm },
         ) !void {
-            // normalize the relative path, replacing \ with /
-            const normalized_path = if (relative_path.len == 0) "." else blk: {
-                const path_parts = try fs.splitPath(self.allocator, relative_path);
-                defer self.allocator.free(path_parts);
-                // allocate using the arena so it has the same lifetime as the overall Index instance
-                break :blk try fs.joinPath(self.arena.allocator(), path_parts);
-            };
+            const normalized_path = if (path_parts.len == 0) "." else try fs.joinPath(self.arena.allocator(), path_parts);
 
             // if the path doesn't exist, remove it, regardless of what the `action` is
             if (state.core.repo_dir.openFile(normalized_path, .{ .mode = .read_only })) |file| {
@@ -651,6 +644,7 @@ pub fn indexDiffersFrom(
         .head = false,
         .workspace = false,
     };
+
     if (index.entries.get(path)) |*index_entries_for_path| {
         if (index_entries_for_path[0]) |index_entry| {
             if (head_tree.entries.get(path)) |head_entry| {

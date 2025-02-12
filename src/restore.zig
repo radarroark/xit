@@ -348,7 +348,7 @@ pub fn headTreeEntry(
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_only),
     allocator: std.mem.Allocator,
-    path: []const u8,
+    path_parts: []const []const u8,
 ) !?obj.TreeEntry(repo_opts.hash) {
     // get the current commit
     const current_oid = try rf.readHead(repo_kind, repo_opts, state);
@@ -360,8 +360,6 @@ pub fn headTreeEntry(
     defer tree_object.deinit();
 
     // get the entry for the given path
-    const path_parts = try fs.splitPath(allocator, path);
-    defer allocator.free(path_parts);
     return try pathToTreeEntry(repo_kind, repo_opts, state, allocator, tree_object, path_parts);
 }
 
@@ -372,7 +370,9 @@ pub fn restore(
     allocator: std.mem.Allocator,
     path: []const u8,
 ) !void {
-    const tree_entry = try headTreeEntry(repo_kind, repo_opts, state, allocator, path) orelse return error.ObjectNotFound;
+    const path_parts = try fs.splitPath(allocator, path);
+    defer allocator.free(path_parts);
+    const tree_entry = try headTreeEntry(repo_kind, repo_opts, state, allocator, path_parts) orelse return error.ObjectNotFound;
     // restore file in the working tree
     try objectToFile(repo_kind, repo_opts, state, allocator, path, tree_entry);
 }
