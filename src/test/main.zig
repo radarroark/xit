@@ -858,8 +858,8 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             try std.testing.expectEqual(error.CannotRemoveFileWithStagedAndUnstagedChanges, main.run(repo_kind, repo_opts, allocator, &.{ "untrack", "one/two/three.txt" }, repo_dir, .{}));
 
             // add, unadd, and then untrack modified file
-            try main.run(repo_kind, repo_opts, allocator, &.{ "add", "one/two/three.txt" }, repo_dir, .{});
-            try main.run(repo_kind, repo_opts, allocator, &.{ "unadd", "one/two/three.txt" }, repo_dir, .{});
+            try main.run(repo_kind, repo_opts, allocator, &.{ "add", "one" }, repo_dir, .{});
+            try main.run(repo_kind, repo_opts, allocator, &.{ "unadd", "one" }, repo_dir, .{});
 
             // still tracked because unadd just resets it back to the state from HEAD
             {
@@ -871,6 +871,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                 defer index.deinit();
 
                 try std.testing.expect(index.entries.contains("one/two/three.txt"));
+                try std.testing.expectEqual("one, two, three!".len, index.entries.get("one/two/three.txt").?[0].?.file_size);
             }
 
             try main.run(repo_kind, repo_opts, allocator, &.{ "untrack", "one/two/three.txt" }, repo_dir, .{});

@@ -344,19 +344,48 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
             const path_parts = try fs.splitPath(self.allocator, path);
             defer self.allocator.free(path_parts);
             for (tree_entries, 1..) |tree_entry_maybe, stage| {
-                if (tree_entry_maybe) |tree_entry| {
-                    try self.addTreeEntry(tree_entry, path_parts, 0, @intCast(stage));
+                if (tree_entry_maybe) |*tree_entry| {
+                    try self.addTreeEntryFile(tree_entry, path_parts, 0, @intCast(stage));
                 }
             }
         }
 
         pub fn addTreeEntry(
             self: *Index(repo_kind, repo_opts),
-            tree_entry: obj.TreeEntry(repo_opts.hash),
+            state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+            allocator: std.mem.Allocator,
+            tree_entry: *const obj.TreeEntry(repo_opts.hash),
+            path_parts: []const []const u8,
+        ) !void {
+            const oid_hex = std.fmt.bytesToHex(tree_entry.oid, .lower);
+            var object = try obj.Object(repo_kind, repo_opts, .full).init(allocator, state, &oid_hex);
+            defer object.deinit();
+
+            switch (object.content) {
+                .blob => try self.addTreeEntryFile(tree_entry, path_parts, object.len, 0),
+                .tree => |tree| {
+                    for (tree.entries.keys(), tree.entries.values()) |path_part, *child_tree_entry| {
+                        var child_path = std.ArrayList([]const u8).init(allocator);
+                        defer child_path.deinit();
+                        try child_path.appendSlice(path_parts);
+                        try child_path.append(path_part);
+                        try self.addTreeEntry(state, allocator, child_tree_entry, child_path.items);
+                    }
+                },
+                else => return error.InvalidObjectKind,
+            }
+        }
+
+        pub fn addTreeEntryFile(
+            self: *Index(repo_kind, repo_opts),
+            tree_entry: *const obj.TreeEntry(repo_opts.hash),
             path_parts: []const []const u8,
             file_size: u64,
             stage: u2,
         ) !void {
+            if (tree_entry.mode.object_type != .regular_file) {
+                return error.InvalidObjectKind;
+            }
             const normalized_path = if (path_parts.len == 0) return error.InvalidPath else try fs.joinPath(self.arena.allocator(), path_parts);
             const entry = Entry{
                 .ctime_secs = 0,
@@ -428,15 +457,14 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                 switch (err) {
                     error.IsDir => {}, // only happens on windows
                     error.FileNotFound => {
-                        if (self.entries.contains(normalized_path)) {
-                            self.removePath(normalized_path);
-                            return;
-                        } else {
+                        if (!self.entries.contains(normalized_path) and !self.dir_to_children.contains(normalized_path)) {
                             return switch (action) {
                                 .add => error.AddIndexPathNotFound,
                                 .rm => error.RemoveIndexPathNotFound,
                             };
                         }
+                        self.removePath(normalized_path);
+                        return;
                     },
                     else => |e| return e,
                 }
@@ -446,7 +474,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
             switch (action) {
                 .add => try self.addPath(state, normalized_path),
                 .rm => {
-                    if (!self.entries.contains(normalized_path)) {
+                    if (!self.entries.contains(normalized_path) and !self.dir_to_children.contains(normalized_path)) {
                         return error.RemoveIndexPathNotFound;
                     }
                     self.removePath(normalized_path);

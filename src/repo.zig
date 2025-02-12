@@ -501,15 +501,11 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         const path_parts = try fs.splitPath(allocator, relative_path);
                         defer allocator.free(path_parts);
 
-                        if (try res.headTreeEntry(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, allocator, path_parts)) |tree_entry| {
-                            // file is in HEAD, add the HEAD state to index
-                            const oid_hex = std.fmt.bytesToHex(tree_entry.oid, .lower);
-                            var object = try obj.Object(repo_kind, repo_opts, .raw).init(allocator, .{ .core = &self.core, .extra = .{} }, &oid_hex);
-                            defer object.deinit();
-                            try index.addTreeEntry(tree_entry, path_parts, @intCast(object.len), 0);
-                        } else {
-                            // file is not in HEAD, so just remove it from the index
-                            try index.addOrRemovePath(.{ .core = &self.core, .extra = .{} }, path_parts, .rm);
+                        try index.addOrRemovePath(.{ .core = &self.core, .extra = .{} }, path_parts, .rm);
+
+                        // iterate over the HEAD entries and add them to the index
+                        if (try res.headTreeEntry(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, allocator, path_parts)) |*tree_entry| {
+                            try index.addTreeEntry(.{ .core = &self.core, .extra = .{} }, allocator, tree_entry, path_parts);
                         }
                     }
 
@@ -537,15 +533,11 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                                 const path_parts = try fs.splitPath(ctx.allocator, relative_path);
                                 defer ctx.allocator.free(path_parts);
 
-                                if (try res.headTreeEntry(repo_kind, repo_opts, state.readOnly(), ctx.allocator, path_parts)) |tree_entry| {
-                                    // file is in HEAD, add the HEAD state to index
-                                    const oid_hex = std.fmt.bytesToHex(tree_entry.oid, .lower);
-                                    var object = try obj.Object(repo_kind, repo_opts, .raw).init(ctx.allocator, state.readOnly(), &oid_hex);
-                                    defer object.deinit();
-                                    try index.addTreeEntry(tree_entry, path_parts, @intCast(object.len), 0);
-                                } else {
-                                    // file is not in HEAD, so just remove it from the index
-                                    try index.addOrRemovePath(state, path_parts, .rm);
+                                try index.addOrRemovePath(state, path_parts, .rm);
+
+                                // iterate over the HEAD entries and add them to the index
+                                if (try res.headTreeEntry(repo_kind, repo_opts, state.readOnly(), ctx.allocator, path_parts)) |*tree_entry| {
+                                    try index.addTreeEntry(state.readOnly(), ctx.allocator, tree_entry, path_parts);
                                 }
                             }
 
