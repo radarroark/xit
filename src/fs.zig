@@ -192,3 +192,13 @@ pub fn relativePath(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, cwd: std
     // compute the path relative to the repo path
     return try std.fs.path.relative(allocator, repo_path, input_path);
 }
+
+pub fn splitPath(allocator: std.mem.Allocator, path: []const u8) ![]const []const u8 {
+    var path_parts = std.ArrayList([]const u8).init(allocator);
+    errdefer path_parts.deinit();
+    var path_iter = try std.fs.path.componentIterator(path);
+    while (path_iter.next()) |component| {
+        try path_parts.append(component.name);
+    }
+    return try path_parts.toOwnedSlice();
+}

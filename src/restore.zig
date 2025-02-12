@@ -360,17 +360,9 @@ pub fn headTreeEntry(
     defer tree_object.deinit();
 
     // get the entry for the given path
-    var path_parts = std.ArrayList([]const u8).init(allocator);
-    defer path_parts.deinit();
-    var start: usize = 0;
-    for (path, 0..) |ch, i| {
-        if (std.fs.path.isSep(ch) and i > start) {
-            try path_parts.append(path[start..i]);
-            start = i + 1;
-        }
-    }
-    try path_parts.append(path[start..]);
-    return try pathToTreeEntry(repo_kind, repo_opts, state, allocator, tree_object, path_parts.items);
+    const path_parts = try fs.splitPath(allocator, path);
+    defer allocator.free(path_parts);
+    return try pathToTreeEntry(repo_kind, repo_opts, state, allocator, tree_object, path_parts);
 }
 
 pub fn restore(

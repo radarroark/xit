@@ -593,6 +593,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             const meta = try fs.getMetadata(self.core.repo_dir, path);
                             switch (meta.kind()) {
                                 .file => try self.core.repo_dir.deleteFile(path),
+                                .directory => return error.CannotDeleteDir,
                                 else => return error.UnexpectedPathType,
                             }
                         }
