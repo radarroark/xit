@@ -496,7 +496,10 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         defer allocator.free(rel_path);
                         if (try res.headTreeEntry(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, allocator, rel_path)) |tree_entry| {
                             // file is in HEAD, add the HEAD state to index
-                            try index.addTreeEntry(tree_entry, rel_path, 0);
+                            const oid_hex = std.fmt.bytesToHex(tree_entry.oid, .lower);
+                            var object = try obj.Object(repo_kind, repo_opts, .raw).init(allocator, .{ .core = &self.core, .extra = .{} }, &oid_hex);
+                            defer object.deinit();
+                            try index.addTreeEntry(tree_entry, rel_path, @intCast(object.len), 0);
                         } else {
                             // file is not in HEAD, so just remove it from the index
                             try index.addOrRemovePath(.{ .core = &self.core, .extra = .{} }, rel_path, .rm);
@@ -526,7 +529,10 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                                 defer ctx.allocator.free(rel_path);
                                 if (try res.headTreeEntry(repo_kind, repo_opts, state.readOnly(), ctx.allocator, rel_path)) |tree_entry| {
                                     // file is in HEAD, add the HEAD state to index
-                                    try index.addTreeEntry(tree_entry, rel_path, 0);
+                                    const oid_hex = std.fmt.bytesToHex(tree_entry.oid, .lower);
+                                    var object = try obj.Object(repo_kind, repo_opts, .raw).init(ctx.allocator, state.readOnly(), &oid_hex);
+                                    defer object.deinit();
+                                    try index.addTreeEntry(tree_entry, rel_path, @intCast(object.len), 0);
                                 } else {
                                     // file is not in HEAD, so just remove it from the index
                                     try index.addOrRemovePath(state, rel_path, .rm);

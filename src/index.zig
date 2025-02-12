@@ -337,12 +337,18 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
         pub fn addConflictEntries(self: *Index(repo_kind, repo_opts), path: []const u8, tree_entries: [3]?obj.TreeEntry(repo_opts.hash)) !void {
             for (tree_entries, 1..) |tree_entry_maybe, stage| {
                 if (tree_entry_maybe) |tree_entry| {
-                    try self.addTreeEntry(tree_entry, path, @intCast(stage));
+                    try self.addTreeEntry(tree_entry, path, 0, @intCast(stage));
                 }
             }
         }
 
-        pub fn addTreeEntry(self: *Index(repo_kind, repo_opts), tree_entry: obj.TreeEntry(repo_opts.hash), path: []const u8, stage: u2) !void {
+        pub fn addTreeEntry(
+            self: *Index(repo_kind, repo_opts),
+            tree_entry: obj.TreeEntry(repo_opts.hash),
+            path: []const u8,
+            file_size: u32,
+            stage: u2,
+        ) !void {
             const path_parts = try fs.splitPath(self.allocator, path);
             defer self.allocator.free(path_parts);
             // allocate using the arena so it has the same lifetime as the overall Index instance
@@ -357,7 +363,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                 .mode = tree_entry.mode,
                 .uid = 0,
                 .gid = 0,
-                .file_size = 0,
+                .file_size = file_size,
                 .oid = tree_entry.oid,
                 .flags = .{
                     .name_length = @intCast(normalized_path.len),
