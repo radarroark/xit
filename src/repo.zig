@@ -567,7 +567,10 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     defer head_tree.deinit();
 
                     for (paths) |path| {
-                        const meta = try fs.getMetadata(self.core.repo_dir, path);
+                        const meta = fs.getMetadata(self.core.repo_dir, path) catch |err| switch (err) {
+                            error.FileNotFound => return error.RemoveIndexPathNotFound,
+                            else => |e| return e,
+                        };
                         switch (meta.kind()) {
                             .file => {
                                 if (!opts.force) {
@@ -622,7 +625,10 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             defer head_tree.deinit();
 
                             for (ctx.paths) |path| {
-                                const meta = try fs.getMetadata(ctx.core.repo_dir, path);
+                                const meta = fs.getMetadata(ctx.core.repo_dir, path) catch |err| switch (err) {
+                                    error.FileNotFound => return error.RemoveIndexPathNotFound,
+                                    else => |e| return e,
+                                };
                                 switch (meta.kind()) {
                                     .file => {
                                         if (!ctx.opts.force) {

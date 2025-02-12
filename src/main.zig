@@ -128,7 +128,7 @@ pub fn runPrint(
     run(repo_kind, repo_opts, allocator, args, cwd, writers) catch |err| switch (err) {
         error.RepoNotFound => {
             try writers.err.print(
-                \\repo not found, dummy...
+                \\repo not found, dummy.
                 \\either you're in the wrong place
                 \\or you need to make a new one like this:
                 \\
@@ -139,7 +139,7 @@ pub fn runPrint(
         },
         error.RepoAlreadyExists => {
             try writers.err.print(
-                \\repo already exists, dummy...
+                \\repo already exists, dummy.
                 \\two repos in the same directory makes no sense.
                 \\think about it.
                 \\
@@ -148,7 +148,30 @@ pub fn runPrint(
         },
         error.CannotRemoveFileWithStagedAndUnstagedChanges, error.CannotRemoveFileWithStagedChanges, error.CannotRemoveFileWithUnstagedChanges => {
             try writers.err.print(
-                \\cannot rm a file with uncommitted changes
+                \\cannot rm a file with uncommitted changes.
+                \\if you really want to do it, throw caution
+                \\into the wind by adding the -f flag.
+                \\
+            , .{});
+            return error.PrintedError;
+        },
+        error.EmptyCommit => {
+            try writers.err.print(
+                \\you haven't added anything to commit yet.
+                \\
+            , .{});
+            return error.PrintedError;
+        },
+        error.AddIndexPathNotFound => {
+            try writers.err.print(
+                \\a path you are adding does not exist.
+                \\
+            , .{});
+            return error.PrintedError;
+        },
+        error.RemoveIndexPathNotFound => {
+            try writers.err.print(
+                \\a path you are removing does not exist.
                 \\
             , .{});
             return error.PrintedError;

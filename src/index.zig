@@ -424,7 +424,10 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                             self.removePath(normalized_path);
                             return;
                         } else {
-                            return err;
+                            return switch (action) {
+                                .add => error.AddIndexPathNotFound,
+                                .rm => error.RemoveIndexPathNotFound,
+                            };
                         }
                     },
                     else => |e| return e,
@@ -436,7 +439,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                 .add => try self.addPath(state, normalized_path),
                 .rm => {
                     if (!self.entries.contains(normalized_path)) {
-                        return error.CannotRemoveUnindexedFile;
+                        return error.RemoveIndexPathNotFound;
                     }
                     self.removePath(normalized_path);
                 },

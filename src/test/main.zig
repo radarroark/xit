@@ -824,10 +824,10 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     // changing the index
     {
         // can't add a non-existent file
-        try std.testing.expectEqual(error.FileNotFound, main.run(repo_kind, repo_opts, allocator, &.{ "add", "no-such-file" }, repo_dir, .{}));
+        try std.testing.expectEqual(error.AddIndexPathNotFound, main.run(repo_kind, repo_opts, allocator, &.{ "add", "no-such-file" }, repo_dir, .{}));
 
         // can't remove non-existent file
-        try std.testing.expectEqual(error.FileNotFound, main.run(repo_kind, repo_opts, allocator, &.{ "rm", "no-such-file" }, repo_dir, .{}));
+        try std.testing.expectEqual(error.RemoveIndexPathNotFound, main.run(repo_kind, repo_opts, allocator, &.{ "rm", "no-such-file" }, repo_dir, .{}));
 
         // create a new file
         var new_file_txt = try repo_dir.createFile("new-file.txt", .{});
@@ -838,7 +838,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         try new_file_txt.writeAll("this is a new file");
 
         // can't remove unindexed file
-        try std.testing.expectEqual(error.CannotRemoveUnindexedFile, main.run(repo_kind, repo_opts, allocator, &.{ "rm", "new-file.txt" }, repo_dir, .{}));
+        try std.testing.expectEqual(error.RemoveIndexPathNotFound, main.run(repo_kind, repo_opts, allocator, &.{ "rm", "new-file.txt" }, repo_dir, .{}));
 
         // modify a file
         {
