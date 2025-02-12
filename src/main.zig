@@ -499,7 +499,7 @@ pub fn main() !u8 {
         try args.append(arg);
     }
 
-    const writers = rp.Writers{ .out = std.io.getStdOut().writer().any(), .err = std.io.getStdErr().writer().any() };
+    const writers = Writers{ .out = std.io.getStdOut().writer().any(), .err = std.io.getStdErr().writer().any() };
     runPrint(.xit, .{}, allocator, args.items, std.fs.cwd(), writers) catch |err| switch (err) {
         error.PrintedError => return 1,
         else => |e| return e,

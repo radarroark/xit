@@ -57,7 +57,7 @@ pub fn main() !void {
         try copyDir(src_git_dir, dest_git_dir);
     }
 
-    const writers = rp.Writers{ .out = std.io.getStdOut().writer().any(), .err = std.io.getStdErr().writer().any() };
+    const writers = xit.main.Writers{ .out = std.io.getStdOut().writer().any(), .err = std.io.getStdErr().writer().any() };
 
     {
         var git_repo = try rp.Repo(.git, .{}).open(allocator, .{ .cwd = temp_dir });
