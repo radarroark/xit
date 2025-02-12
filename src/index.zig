@@ -386,7 +386,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
             if (tree_entry.mode.object_type != .regular_file) {
                 return error.InvalidObjectKind;
             }
-            const normalized_path = if (path_parts.len == 0) return error.InvalidPath else try fs.joinPath(self.arena.allocator(), path_parts);
+            const path = if (path_parts.len == 0) return error.InvalidPath else try fs.joinPath(self.arena.allocator(), path_parts);
             const entry = Entry{
                 .ctime_secs = 0,
                 .ctime_nsecs = 0,
@@ -403,13 +403,13 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                 },
                 .oid = tree_entry.oid,
                 .flags = .{
-                    .name_length = @intCast(normalized_path.len),
+                    .name_length = @intCast(path.len),
                     .stage = stage,
                     .extended = false,
                     .assume_valid = false,
                 },
                 .extended_flags = null,
-                .path = normalized_path,
+                .path = path,
             };
             try self.addEntry(entry);
         }
@@ -448,22 +448,22 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
             path_parts: []const []const u8,
             action: enum { add, rm },
         ) !void {
-            const normalized_path = if (path_parts.len == 0) "." else try fs.joinPath(self.arena.allocator(), path_parts);
+            const path = if (path_parts.len == 0) "." else try fs.joinPath(self.arena.allocator(), path_parts);
 
             // if the path doesn't exist, remove it, regardless of what the `action` is
-            if (state.core.repo_dir.openFile(normalized_path, .{ .mode = .read_only })) |file| {
+            if (state.core.repo_dir.openFile(path, .{ .mode = .read_only })) |file| {
                 file.close();
             } else |err| {
                 switch (err) {
                     error.IsDir => {}, // only happens on windows
                     error.FileNotFound => {
-                        if (!self.entries.contains(normalized_path) and !self.dir_to_children.contains(normalized_path)) {
+                        if (!self.entries.contains(path) and !self.dir_to_children.contains(path)) {
                             return switch (action) {
                                 .add => error.AddIndexPathNotFound,
                                 .rm => error.RemoveIndexPathNotFound,
                             };
                         }
-                        self.removePath(normalized_path);
+                        self.removePath(path);
                         return;
                     },
                     else => |e| return e,
@@ -472,12 +472,12 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 
             // add or remove based on the `action`
             switch (action) {
-                .add => try self.addPath(state, normalized_path),
+                .add => try self.addPath(state, path),
                 .rm => {
-                    if (!self.entries.contains(normalized_path) and !self.dir_to_children.contains(normalized_path)) {
+                    if (!self.entries.contains(path) and !self.dir_to_children.contains(path)) {
                         return error.RemoveIndexPathNotFound;
                     }
-                    self.removePath(normalized_path);
+                    self.removePath(path);
                 },
             }
         }

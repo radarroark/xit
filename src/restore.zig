@@ -368,12 +368,11 @@ pub fn restore(
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_only),
     allocator: std.mem.Allocator,
-    path: []const u8,
+    path_parts: []const []const u8,
 ) !void {
-    const path_parts = try fs.splitPath(allocator, path);
-    defer allocator.free(path_parts);
     const tree_entry = try headTreeEntry(repo_kind, repo_opts, state, allocator, path_parts) orelse return error.ObjectNotFound;
-    // restore file in the working tree
+    const path = try fs.joinPath(allocator, path_parts);
+    defer allocator.free(path);
     try objectToFile(repo_kind, repo_opts, state, allocator, path, tree_entry);
 }
 

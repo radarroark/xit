@@ -440,9 +440,9 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     defer index.deinit();
 
                     for (paths) |path| {
-                        const relative_path = try fs.relativePath(allocator, self.core.repo_dir, self.init_opts.cwd, path);
-                        defer allocator.free(relative_path);
-                        const path_parts = try fs.splitPath(allocator, relative_path);
+                        const rel_path = try fs.relativePath(allocator, self.core.repo_dir, self.init_opts.cwd, path);
+                        defer allocator.free(rel_path);
+                        const path_parts = try fs.splitPath(allocator, rel_path);
                         defer allocator.free(path_parts);
                         try index.addOrRemovePath(.{ .core = &self.core, .extra = .{} }, path_parts, .add);
                     }
@@ -466,9 +466,9 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             defer index.deinit();
 
                             for (ctx.paths) |path| {
-                                const relative_path = try fs.relativePath(ctx.allocator, ctx.core.repo_dir, ctx.cwd, path);
-                                defer ctx.allocator.free(relative_path);
-                                const path_parts = try fs.splitPath(ctx.allocator, relative_path);
+                                const rel_path = try fs.relativePath(ctx.allocator, ctx.core.repo_dir, ctx.cwd, path);
+                                defer ctx.allocator.free(rel_path);
+                                const path_parts = try fs.splitPath(ctx.allocator, rel_path);
                                 defer ctx.allocator.free(path_parts);
                                 try index.addOrRemovePath(state, path_parts, .add);
                             }
@@ -496,9 +496,9 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     defer index.deinit();
 
                     for (paths) |path| {
-                        const relative_path = try fs.relativePath(allocator, self.core.repo_dir, self.init_opts.cwd, path);
-                        defer allocator.free(relative_path);
-                        const path_parts = try fs.splitPath(allocator, relative_path);
+                        const rel_path = try fs.relativePath(allocator, self.core.repo_dir, self.init_opts.cwd, path);
+                        defer allocator.free(rel_path);
+                        const path_parts = try fs.splitPath(allocator, rel_path);
                         defer allocator.free(path_parts);
 
                         try index.addOrRemovePath(.{ .core = &self.core, .extra = .{} }, path_parts, .rm);
@@ -528,9 +528,9 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             defer index.deinit();
 
                             for (ctx.paths) |path| {
-                                const relative_path = try fs.relativePath(ctx.allocator, ctx.core.repo_dir, ctx.cwd, path);
-                                defer ctx.allocator.free(relative_path);
-                                const path_parts = try fs.splitPath(ctx.allocator, relative_path);
+                                const rel_path = try fs.relativePath(ctx.allocator, ctx.core.repo_dir, ctx.cwd, path);
+                                defer ctx.allocator.free(rel_path);
+                                const path_parts = try fs.splitPath(ctx.allocator, rel_path);
                                 defer ctx.allocator.free(path_parts);
 
                                 try index.addOrRemovePath(state, path_parts, .rm);
@@ -575,9 +575,9 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     defer head_tree.deinit();
 
                     for (paths) |path| {
-                        const relative_path = try fs.relativePath(allocator, self.core.repo_dir, self.init_opts.cwd, path);
-                        defer allocator.free(relative_path);
-                        const path_parts = try fs.splitPath(allocator, relative_path);
+                        const rel_path = try fs.relativePath(allocator, self.core.repo_dir, self.init_opts.cwd, path);
+                        defer allocator.free(rel_path);
+                        const path_parts = try fs.splitPath(allocator, rel_path);
                         defer allocator.free(path_parts);
                         const normalized_path = try fs.joinPath(allocator, path_parts);
                         defer allocator.free(normalized_path);
@@ -638,9 +638,9 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             defer head_tree.deinit();
 
                             for (ctx.paths) |path| {
-                                const relative_path = try fs.relativePath(ctx.allocator, ctx.core.repo_dir, ctx.cwd, path);
-                                defer ctx.allocator.free(relative_path);
-                                const path_parts = try fs.splitPath(ctx.allocator, relative_path);
+                                const rel_path = try fs.relativePath(ctx.allocator, ctx.core.repo_dir, ctx.cwd, path);
+                                defer ctx.allocator.free(rel_path);
+                                const path_parts = try fs.splitPath(ctx.allocator, rel_path);
                                 defer ctx.allocator.free(path_parts);
                                 const normalized_path = try fs.joinPath(ctx.allocator, path_parts);
                                 defer ctx.allocator.free(normalized_path);
@@ -706,68 +706,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
         ) !df.LineIteratorPair(repo_kind, repo_opts) {
             var moment = try self.core.latestMoment();
             const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
-            switch (status_kind) {
-                .added => |added| {
-                    switch (added) {
-                        .created => {
-                            var a = try df.LineIterator(repo_kind, repo_opts).initFromNothing(allocator, path);
-                            errdefer a.deinit();
-                            const index_entries_for_path = stat.index.entries.get(path) orelse return error.EntryNotFound;
-                            var b = try df.LineIterator(repo_kind, repo_opts).initFromIndex(state, allocator, index_entries_for_path[0] orelse return error.NullEntry);
-                            errdefer b.deinit();
-                            return .{ .path = path, .a = a, .b = b };
-                        },
-                        .modified => {
-                            var a = try df.LineIterator(repo_kind, repo_opts).initFromHead(state, allocator, path, stat.head_tree.entries.get(path) orelse return error.EntryNotFound);
-                            errdefer a.deinit();
-                            const index_entries_for_path = stat.index.entries.get(path) orelse return error.EntryNotFound;
-                            var b = try df.LineIterator(repo_kind, repo_opts).initFromIndex(state, allocator, index_entries_for_path[0] orelse return error.NullEntry);
-                            errdefer b.deinit();
-                            return .{ .path = path, .a = a, .b = b };
-                        },
-                        .deleted => {
-                            var a = try df.LineIterator(repo_kind, repo_opts).initFromHead(state, allocator, path, stat.head_tree.entries.get(path) orelse return error.EntryNotFound);
-                            errdefer a.deinit();
-                            var b = try df.LineIterator(repo_kind, repo_opts).initFromNothing(allocator, path);
-                            errdefer b.deinit();
-                            return .{ .path = path, .a = a, .b = b };
-                        },
-                    }
-                },
-                .not_added => |not_added| {
-                    switch (not_added) {
-                        .modified => {
-                            const meta = try fs.getMetadata(self.core.repo_dir, path);
-                            const mode = fs.getMode(meta);
-
-                            const index_entries_for_path = stat.index.entries.get(path) orelse return error.EntryNotFound;
-                            var a = try df.LineIterator(repo_kind, repo_opts).initFromIndex(state, allocator, index_entries_for_path[0] orelse return error.NullEntry);
-                            errdefer a.deinit();
-                            var b = try df.LineIterator(repo_kind, repo_opts).initFromWorkspace(state, allocator, path, mode);
-                            errdefer b.deinit();
-                            return .{ .path = path, .a = a, .b = b };
-                        },
-                        .deleted => {
-                            const index_entries_for_path = stat.index.entries.get(path) orelse return error.EntryNotFound;
-                            var a = try df.LineIterator(repo_kind, repo_opts).initFromIndex(state, allocator, index_entries_for_path[0] orelse return error.NullEntry);
-                            errdefer a.deinit();
-                            var b = try df.LineIterator(repo_kind, repo_opts).initFromNothing(allocator, path);
-                            errdefer b.deinit();
-                            return .{ .path = path, .a = a, .b = b };
-                        },
-                    }
-                },
-                .not_tracked => {
-                    const meta = try fs.getMetadata(self.core.repo_dir, path);
-                    const mode = fs.getMode(meta);
-
-                    var a = try df.LineIterator(repo_kind, repo_opts).initFromNothing(allocator, path);
-                    errdefer a.deinit();
-                    var b = try df.LineIterator(repo_kind, repo_opts).initFromWorkspace(state, allocator, path, mode);
-                    errdefer b.deinit();
-                    return .{ .path = path, .a = a, .b = b };
-                },
-            }
+            return try df.LineIteratorPair(repo_kind, repo_opts).init(allocator, state, path, status_kind, stat);
         }
 
         pub fn filePairs(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, diff_opts: df.DiffOptions(repo_kind, repo_opts)) !df.FileIterator(repo_kind, repo_opts) {
@@ -878,7 +817,13 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
         pub fn restore(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, path: []const u8) !void {
             var moment = try self.core.latestMoment();
             const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
-            try res.restore(repo_kind, repo_opts, state, allocator, path);
+
+            const rel_path = try fs.relativePath(allocator, self.core.repo_dir, self.init_opts.cwd, path);
+            defer allocator.free(rel_path);
+            const path_parts = try fs.splitPath(allocator, rel_path);
+            defer allocator.free(path_parts);
+
+            try res.restore(repo_kind, repo_opts, state, allocator, path_parts);
         }
 
         pub fn log(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, start_oids_maybe: ?[]const [hash.hexLen(repo_opts.hash)]u8) !obj.ObjectIterator(repo_kind, repo_opts, .full) {

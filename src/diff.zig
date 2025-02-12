@@ -1261,6 +1261,77 @@ pub fn LineIteratorPair(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
         a: LineIterator(repo_kind, repo_opts),
         b: LineIterator(repo_kind, repo_opts),
 
+        pub fn init(
+            allocator: std.mem.Allocator,
+            state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+            path: []const u8,
+            status_kind: st.StatusKind,
+            stat: *st.Status(repo_kind, repo_opts),
+        ) !LineIteratorPair(repo_kind, repo_opts) {
+            switch (status_kind) {
+                .added => |added| {
+                    switch (added) {
+                        .created => {
+                            var a = try LineIterator(repo_kind, repo_opts).initFromNothing(allocator, path);
+                            errdefer a.deinit();
+                            const index_entries_for_path = stat.index.entries.get(path) orelse return error.EntryNotFound;
+                            var b = try LineIterator(repo_kind, repo_opts).initFromIndex(state, allocator, index_entries_for_path[0] orelse return error.NullEntry);
+                            errdefer b.deinit();
+                            return .{ .path = path, .a = a, .b = b };
+                        },
+                        .modified => {
+                            var a = try LineIterator(repo_kind, repo_opts).initFromHead(state, allocator, path, stat.head_tree.entries.get(path) orelse return error.EntryNotFound);
+                            errdefer a.deinit();
+                            const index_entries_for_path = stat.index.entries.get(path) orelse return error.EntryNotFound;
+                            var b = try LineIterator(repo_kind, repo_opts).initFromIndex(state, allocator, index_entries_for_path[0] orelse return error.NullEntry);
+                            errdefer b.deinit();
+                            return .{ .path = path, .a = a, .b = b };
+                        },
+                        .deleted => {
+                            var a = try LineIterator(repo_kind, repo_opts).initFromHead(state, allocator, path, stat.head_tree.entries.get(path) orelse return error.EntryNotFound);
+                            errdefer a.deinit();
+                            var b = try LineIterator(repo_kind, repo_opts).initFromNothing(allocator, path);
+                            errdefer b.deinit();
+                            return .{ .path = path, .a = a, .b = b };
+                        },
+                    }
+                },
+                .not_added => |not_added| {
+                    switch (not_added) {
+                        .modified => {
+                            const meta = try fs.getMetadata(state.core.repo_dir, path);
+                            const mode = fs.getMode(meta);
+
+                            const index_entries_for_path = stat.index.entries.get(path) orelse return error.EntryNotFound;
+                            var a = try LineIterator(repo_kind, repo_opts).initFromIndex(state, allocator, index_entries_for_path[0] orelse return error.NullEntry);
+                            errdefer a.deinit();
+                            var b = try LineIterator(repo_kind, repo_opts).initFromWorkspace(state, allocator, path, mode);
+                            errdefer b.deinit();
+                            return .{ .path = path, .a = a, .b = b };
+                        },
+                        .deleted => {
+                            const index_entries_for_path = stat.index.entries.get(path) orelse return error.EntryNotFound;
+                            var a = try LineIterator(repo_kind, repo_opts).initFromIndex(state, allocator, index_entries_for_path[0] orelse return error.NullEntry);
+                            errdefer a.deinit();
+                            var b = try LineIterator(repo_kind, repo_opts).initFromNothing(allocator, path);
+                            errdefer b.deinit();
+                            return .{ .path = path, .a = a, .b = b };
+                        },
+                    }
+                },
+                .not_tracked => {
+                    const meta = try fs.getMetadata(state.core.repo_dir, path);
+                    const mode = fs.getMode(meta);
+
+                    var a = try LineIterator(repo_kind, repo_opts).initFromNothing(allocator, path);
+                    errdefer a.deinit();
+                    var b = try LineIterator(repo_kind, repo_opts).initFromWorkspace(state, allocator, path, mode);
+                    errdefer b.deinit();
+                    return .{ .path = path, .a = a, .b = b };
+                },
+            }
+        }
+
         pub fn deinit(self: *LineIteratorPair(repo_kind, repo_opts)) void {
             self.a.deinit();
             self.b.deinit();
