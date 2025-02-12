@@ -53,7 +53,10 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
             mode: fs.Mode,
             uid: u32,
             gid: u32,
-            file_size: u32,
+            file_size: switch (repo_kind) {
+                .git => u32,
+                .xit => u64,
+            },
             oid: [hash.byteLen(repo_opts.hash)]u8,
             flags: Flags,
             extended_flags: ?ExtendedFlags,
@@ -162,7 +165,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                                     .mode = @bitCast(try reader.readInt(u32, .big)),
                                     .uid = try reader.readInt(u32, .big),
                                     .gid = try reader.readInt(u32, .big),
-                                    .file_size = try reader.readInt(u32, .big),
+                                    .file_size = try reader.readInt(u64, .big),
                                     .oid = try reader.readBytesNoEof(hash.byteLen(repo_opts.hash)),
                                     .flags = @bitCast(try reader.readInt(u16, .big)),
                                     .extended_flags = null, // TODO: read this if necessary
@@ -244,7 +247,10 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                         .mode = fs.getMode(meta),
                         .uid = stat.uid,
                         .gid = stat.gid,
-                        .file_size = @intCast(meta.size()),
+                        .file_size = switch (repo_kind) {
+                            .git => @truncate(meta.size()), // git docs say that the file size is truncated
+                            .xit => meta.size(),
+                        },
                         .oid = oid,
                         .flags = .{
                             .name_length = @intCast(path.len),
@@ -346,7 +352,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
             self: *Index(repo_kind, repo_opts),
             tree_entry: obj.TreeEntry(repo_opts.hash),
             path: []const u8,
-            file_size: u32,
+            file_size: u64,
             stage: u2,
         ) !void {
             const path_parts = try fs.splitPath(self.allocator, path);
@@ -363,7 +369,10 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                 .mode = tree_entry.mode,
                 .uid = 0,
                 .gid = 0,
-                .file_size = file_size,
+                .file_size = switch (repo_kind) {
+                    .git => @truncate(file_size), // git docs say that the file size is truncated
+                    .xit => file_size,
+                },
                 .oid = tree_entry.oid,
                 .flags = .{
                     .name_length = @intCast(normalized_path.len),
@@ -560,7 +569,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                                 try writer.writeInt(u32, @as(u32, @bitCast(entry.mode)), .big);
                                 try writer.writeInt(u32, entry.uid, .big);
                                 try writer.writeInt(u32, entry.gid, .big);
-                                try writer.writeInt(u32, entry.file_size, .big);
+                                try writer.writeInt(u64, entry.file_size, .big);
                                 try writer.writeAll(&entry.oid);
                                 try writer.writeInt(u16, @as(u16, @bitCast(entry.flags)), .big);
                             }
