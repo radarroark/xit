@@ -525,7 +525,10 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                 .commit => {
                     // if a message is included, it must have a non-null value
                     const message_maybe = if (cmd_args.get("-m")) |msg| (msg orelse return error.TagMessageNotFound) else null;
-                    return .{ .commit = .{ .message = message_maybe } };
+                    return .{ .commit = .{
+                        .message = message_maybe,
+                        .allow_empty = cmd_args.contains("--allow-empty"),
+                    } };
                 },
                 .tag => {
                     if (cmd_args.positional_args.len == 0) return null;

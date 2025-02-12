@@ -148,7 +148,7 @@ pub fn runPrint(
         },
         error.CannotRemoveFileWithStagedAndUnstagedChanges, error.CannotRemoveFileWithStagedChanges, error.CannotRemoveFileWithUnstagedChanges => {
             try writers.err.print(
-                \\cannot rm a file with uncommitted changes.
+                \\a file has uncommitted changes.
                 \\if you really want to do it, throw caution
                 \\into the wind by adding the -f flag.
                 \\
@@ -158,6 +158,8 @@ pub fn runPrint(
         error.EmptyCommit => {
             try writers.err.print(
                 \\you haven't added anything to commit yet.
+                \\if you really want to do it, throw caution
+                \\into the wind by adding the --allow-empty flag.
                 \\
             , .{});
             return error.PrintedError;
