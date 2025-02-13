@@ -107,7 +107,7 @@ pub fn main() !void {
 
             var switch_result = try git_repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .oid = &commit_object.oid }, .force = true });
             defer switch_result.deinit();
-            if (.success != switch_result) {
+            if (.success != switch_result.result) {
                 return error.CheckoutFailed;
             }
 

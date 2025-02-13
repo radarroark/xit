@@ -373,29 +373,32 @@ fn runCommand(
             }
         },
         .switch_head, .reset_head => |switch_head_cmd| {
-            var result = try repo.switchHead(allocator, switch_head_cmd);
-            defer result.deinit();
-            switch (result) {
+            var switch_result = try repo.switchHead(allocator, switch_head_cmd);
+            defer switch_result.deinit();
+            switch (switch_result.result) {
                 .success => {},
                 .conflict => |conflict| {
                     try writers.err.print(
-                        \\conflicts detected in the following file paths.
-                        \\if you really want to do continue, throw caution
-                        \\into the wind by adding the -f flag.
+                        \\conflicts detected in the following file paths:
                         \\
                     , .{});
                     for (conflict.stale_files.keys()) |path| {
-                        try writers.err.print("{s}\n", .{path});
+                        try writers.err.print("  {s}\n", .{path});
                     }
                     for (conflict.stale_dirs.keys()) |path| {
-                        try writers.err.print("{s}\n", .{path});
+                        try writers.err.print("  {s}\n", .{path});
                     }
                     for (conflict.untracked_overwritten.keys()) |path| {
-                        try writers.err.print("{s}\n", .{path});
+                        try writers.err.print("  {s}\n", .{path});
                     }
                     for (conflict.untracked_removed.keys()) |path| {
-                        try writers.err.print("{s}\n", .{path});
+                        try writers.err.print("  {s}\n", .{path});
                     }
+                    try writers.err.print(
+                        \\if you really want to continue, throw caution
+                        \\into the wind by adding the -f flag.
+                        \\
+                    , .{});
                     return error.PrintedError;
                 },
             }
@@ -527,6 +530,7 @@ fn printMergeResult(
                     }
                 }
             }
+            return error.PrintedError;
         },
     }
 }

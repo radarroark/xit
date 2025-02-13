@@ -563,10 +563,10 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             {
                 var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
-                var result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .oid = &commit1 } });
-                defer result.deinit();
-                try std.testing.expect(.conflict == result);
-                try std.testing.expectEqual(1, result.conflict.stale_files.count());
+                var switch_result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .oid = &commit1 } });
+                defer switch_result.deinit();
+                try std.testing.expect(.conflict == switch_result.result);
+                try std.testing.expectEqual(1, switch_result.result.conflict.stale_files.count());
             }
 
             // delete the file
@@ -588,9 +588,9 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             {
                 var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
-                var result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .oid = &commit1 } });
-                defer result.deinit();
-                try std.testing.expect(.conflict == result);
+                var switch_result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .oid = &commit1 } });
+                defer switch_result.deinit();
+                try std.testing.expect(.conflict == switch_result.result);
             }
 
             // delete the file
@@ -611,10 +611,10 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             {
                 var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
-                var result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .oid = &commit1 } });
-                defer result.deinit();
-                try std.testing.expect(.conflict == result);
-                try std.testing.expectEqual(1, result.conflict.stale_files.count());
+                var switch_result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .oid = &commit1 } });
+                defer switch_result.deinit();
+                try std.testing.expect(.conflict == switch_result.result);
+                try std.testing.expectEqual(1, switch_result.result.conflict.stale_files.count());
             }
 
             // change the file back
@@ -640,10 +640,10 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             {
                 var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
-                var result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .oid = &commit1 } });
-                defer result.deinit();
-                try std.testing.expect(.conflict == result);
-                try std.testing.expectEqual(1, result.conflict.stale_dirs.count());
+                var switch_result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .oid = &commit1 } });
+                defer switch_result.deinit();
+                try std.testing.expect(.conflict == switch_result.result);
+                try std.testing.expectEqual(1, switch_result.result.conflict.stale_dirs.count());
             }
 
             // delete the dir

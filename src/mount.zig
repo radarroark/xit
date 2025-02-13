@@ -592,7 +592,7 @@ pub fn migrate(
     allocator: std.mem.Allocator,
     tree_diff: tr.TreeDiff(repo_kind, repo_opts),
     index: *idx.Index(repo_kind, repo_opts),
-    result_maybe: ?*Switch(repo_kind, repo_opts),
+    switch_result_maybe: ?*Switch(repo_kind, repo_opts),
 ) !void {
     var add_files = std.StringArrayHashMap(tr.TreeEntry(repo_opts.hash)).init(allocator);
     defer add_files.deinit();
@@ -617,24 +617,24 @@ pub fn migrate(
             }
         }
         // check for conflicts
-        if (result_maybe) |result| {
+        if (switch_result_maybe) |switch_result| {
             const entry_maybe = if (index.entries.get(path)) |*entries_for_path| (entries_for_path[0] orelse return error.NullEntry) else null;
             if (compareTreeToIndex(repo_kind, repo_opts, change.old, entry_maybe) != .none and compareTreeToIndex(repo_kind, repo_opts, change.new, entry_maybe) != .none) {
-                result.setConflict(allocator);
-                try result.conflict.stale_files.put(path, {});
+                switch_result.setConflict();
+                try switch_result.result.conflict.stale_files.put(path, {});
             } else {
                 const meta = fs.getMetadata(state.core.repo_dir, path) catch |err| switch (err) {
                     error.FileNotFound, error.NotDir => {
                         // if the path doesn't exist in the mount,
                         // but one of its parents *does* exist and isn't tracked
                         if (untrackedParent(repo_kind, repo_opts, state.core.repo_dir, path, index)) |_| {
-                            result.setConflict(allocator);
+                            switch_result.setConflict();
                             if (entry_maybe) |_| {
-                                try result.conflict.stale_files.put(path, {});
+                                try switch_result.result.conflict.stale_files.put(path, {});
                             } else if (change.new) |_| {
-                                try result.conflict.untracked_overwritten.put(path, {});
+                                try switch_result.result.conflict.untracked_overwritten.put(path, {});
                             } else {
-                                try result.conflict.untracked_removed.put(path, {});
+                                try switch_result.result.conflict.untracked_removed.put(path, {});
                             }
                         }
                         continue;
@@ -647,24 +647,24 @@ pub fn migrate(
                         defer file.close();
                         // if the path is a file that differs from the index
                         if (try compareIndexToMount(repo_kind, repo_opts, entry_maybe, file) != .none) {
-                            result.setConflict(allocator);
+                            switch_result.setConflict();
                             if (entry_maybe) |_| {
-                                try result.conflict.stale_files.put(path, {});
+                                try switch_result.result.conflict.stale_files.put(path, {});
                             } else if (change.new) |_| {
-                                try result.conflict.untracked_overwritten.put(path, {});
+                                try switch_result.result.conflict.untracked_overwritten.put(path, {});
                             } else {
-                                try result.conflict.untracked_removed.put(path, {});
+                                try switch_result.result.conflict.untracked_removed.put(path, {});
                             }
                         }
                     },
                     .directory => {
                         // if the path is a dir with a descendent that isn't in the index
                         if (try untrackedFile(repo_kind, repo_opts, allocator, state.core.repo_dir, path, index)) {
-                            result.setConflict(allocator);
+                            switch_result.setConflict();
                             if (entry_maybe) |_| {
-                                try result.conflict.stale_files.put(path, {});
+                                try switch_result.result.conflict.stale_files.put(path, {});
                             } else {
-                                try result.conflict.stale_dirs.put(path, {});
+                                try switch_result.result.conflict.stale_dirs.put(path, {});
                             }
                         }
                     },
@@ -674,8 +674,8 @@ pub fn migrate(
         }
     }
 
-    if (result_maybe) |result| {
-        if (.conflict == result.*) {
+    if (switch_result_maybe) |switch_result| {
+        if (.conflict == switch_result.result) {
             return;
         }
     }
@@ -739,13 +739,17 @@ pub fn SwitchInput(comptime hash_kind: hash.HashKind) type {
 }
 
 pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
-    return union(enum) {
-        success,
-        conflict: struct {
-            stale_files: std.StringArrayHashMap(void),
-            stale_dirs: std.StringArrayHashMap(void),
-            untracked_overwritten: std.StringArrayHashMap(void),
-            untracked_removed: std.StringArrayHashMap(void),
+    return struct {
+        arena: *std.heap.ArenaAllocator,
+        allocator: std.mem.Allocator,
+        result: union(enum) {
+            success,
+            conflict: struct {
+                stale_files: std.StringArrayHashMap(void),
+                stale_dirs: std.StringArrayHashMap(void),
+                untracked_overwritten: std.StringArrayHashMap(void),
+                untracked_removed: std.StringArrayHashMap(void),
+            },
         },
 
         pub fn init(
@@ -757,13 +761,23 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             const current_oid_maybe = try rf.readHeadMaybe(repo_kind, repo_opts, state.readOnly());
             const target_oid = try rf.readRecur(repo_kind, repo_opts, state.readOnly(), input.ref_or_oid) orelse return error.InvalidTarget;
 
+            const arena = try allocator.create(std.heap.ArenaAllocator);
+            arena.* = std.heap.ArenaAllocator.init(allocator);
+            errdefer {
+                arena.deinit();
+                allocator.destroy(arena);
+            }
+
             // compare the commits
-            var tree_diff = tr.TreeDiff(repo_kind, repo_opts).init(allocator);
-            defer tree_diff.deinit();
+            var tree_diff = tr.TreeDiff(repo_kind, repo_opts).init(arena.allocator());
             try tree_diff.compare(state.readOnly(), current_oid_maybe, target_oid, null);
 
-            var result = Switch(repo_kind, repo_opts){ .success = {} };
-            errdefer result.deinit();
+            var switch_result = Switch(repo_kind, repo_opts){
+                .arena = arena,
+                .allocator = allocator,
+                .result = .{ .success = {} },
+            };
+            errdefer switch_result.deinit();
 
             switch (repo_kind) {
                 .git => {
@@ -776,11 +790,11 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     defer index.deinit();
 
                     // update the mount
-                    try migrate(repo_kind, repo_opts, state, allocator, tree_diff, &index, if (input.force) null else &result);
+                    try migrate(repo_kind, repo_opts, state, allocator, tree_diff, &index, if (input.force) null else &switch_result);
 
                     // return early if conflict
-                    if (.conflict == result) {
-                        return result;
+                    if (.conflict == switch_result.result) {
+                        return switch_result;
                     }
 
                     // update the index
@@ -801,11 +815,11 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     defer index.deinit();
 
                     // update the mount
-                    try migrate(repo_kind, repo_opts, state, allocator, tree_diff, &index, if (input.force) null else &result);
+                    try migrate(repo_kind, repo_opts, state, allocator, tree_diff, &index, if (input.force) null else &switch_result);
 
                     // return early if conflict
-                    if (.conflict == result) {
-                        return result;
+                    if (.conflict == switch_result.result) {
+                        return switch_result;
                     }
 
                     // update the index
@@ -819,29 +833,22 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                 },
             }
 
-            return result;
+            return switch_result;
         }
 
         pub fn deinit(self: *Switch(repo_kind, repo_opts)) void {
-            switch (self.*) {
-                .success => {},
-                .conflict => |*result_conflict| {
-                    result_conflict.stale_files.deinit();
-                    result_conflict.stale_dirs.deinit();
-                    result_conflict.untracked_overwritten.deinit();
-                    result_conflict.untracked_removed.deinit();
-                },
-            }
+            self.arena.deinit();
+            self.allocator.destroy(self.arena);
         }
 
-        pub fn setConflict(self: *Switch(repo_kind, repo_opts), allocator: std.mem.Allocator) void {
-            if (.conflict != self.*) {
-                self.* = .{
+        pub fn setConflict(self: *Switch(repo_kind, repo_opts)) void {
+            if (.conflict != self.result) {
+                self.result = .{
                     .conflict = .{
-                        .stale_files = std.StringArrayHashMap(void).init(allocator),
-                        .stale_dirs = std.StringArrayHashMap(void).init(allocator),
-                        .untracked_overwritten = std.StringArrayHashMap(void).init(allocator),
-                        .untracked_removed = std.StringArrayHashMap(void).init(allocator),
+                        .stale_files = std.StringArrayHashMap(void).init(self.arena.allocator()),
+                        .stale_dirs = std.StringArrayHashMap(void).init(self.arena.allocator()),
+                        .untracked_overwritten = std.StringArrayHashMap(void).init(self.arena.allocator()),
+                        .untracked_removed = std.StringArrayHashMap(void).init(self.arena.allocator()),
                     },
                 };
             }
