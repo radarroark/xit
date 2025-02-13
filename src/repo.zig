@@ -487,29 +487,26 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
         }
 
         pub fn unadd(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, paths: []const []const u8) !void {
+            var arena = std.heap.ArenaAllocator.init(allocator);
+            defer arena.deinit();
+
+            var normalized_paths = std.ArrayList([]const u8).init(arena.allocator());
+            for (paths) |path| {
+                const rel_path = try fs.relativePath(allocator, self.core.repo_dir, self.init_opts.cwd, path);
+                defer allocator.free(rel_path);
+                const path_parts = try fs.splitPath(allocator, rel_path);
+                defer allocator.free(path_parts);
+                const normalized_path = try fs.joinPath(arena.allocator(), path_parts);
+                try normalized_paths.append(normalized_path);
+            }
+
             switch (repo_kind) {
                 .git => {
                     var lock = try fs.LockFile.init(self.core.git_dir, "index");
                     defer lock.deinit();
 
-                    var index = try idx.Index(repo_kind, repo_opts).init(allocator, .{ .core = &self.core, .extra = .{} });
-                    defer index.deinit();
-
-                    for (paths) |path| {
-                        const rel_path = try fs.relativePath(allocator, self.core.repo_dir, self.init_opts.cwd, path);
-                        defer allocator.free(rel_path);
-                        const path_parts = try fs.splitPath(allocator, rel_path);
-                        defer allocator.free(path_parts);
-
-                        try index.addOrRemovePath(.{ .core = &self.core, .extra = .{} }, path_parts, .rm);
-
-                        // iterate over the HEAD entries and add them to the index
-                        if (try mnt.headTreeEntry(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, allocator, path_parts)) |*tree_entry| {
-                            try index.addTreeEntry(.{ .core = &self.core, .extra = .{} }, allocator, tree_entry, path_parts);
-                        }
-                    }
-
-                    try index.write(allocator, .{ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } });
+                    const state = State(.read_write){ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } };
+                    try mnt.unaddPaths(repo_kind, repo_opts, state, allocator, normalized_paths.items);
 
                     lock.success = true;
                 },
@@ -517,38 +514,20 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     const Ctx = struct {
                         core: *Repo(repo_kind, repo_opts).Core,
                         allocator: std.mem.Allocator,
-                        cwd: std.fs.Dir,
                         paths: []const []const u8,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
 
-                            var index = try idx.Index(repo_kind, repo_opts).init(ctx.allocator, state.readOnly());
-                            defer index.deinit();
-
-                            for (ctx.paths) |path| {
-                                const rel_path = try fs.relativePath(ctx.allocator, ctx.core.repo_dir, ctx.cwd, path);
-                                defer ctx.allocator.free(rel_path);
-                                const path_parts = try fs.splitPath(ctx.allocator, rel_path);
-                                defer ctx.allocator.free(path_parts);
-
-                                try index.addOrRemovePath(state, path_parts, .rm);
-
-                                // iterate over the HEAD entries and add them to the index
-                                if (try mnt.headTreeEntry(repo_kind, repo_opts, state.readOnly(), ctx.allocator, path_parts)) |*tree_entry| {
-                                    try index.addTreeEntry(state.readOnly(), ctx.allocator, tree_entry, path_parts);
-                                }
-                            }
-
-                            try index.write(ctx.allocator, state);
+                            try mnt.unaddPaths(repo_kind, repo_opts, state, ctx.allocator, ctx.paths);
                         }
                     };
 
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
                     try history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
-                        Ctx{ .core = &self.core, .allocator = allocator, .cwd = self.init_opts.cwd, .paths = paths },
+                        Ctx{ .core = &self.core, .allocator = allocator, .paths = normalized_paths.items },
                     );
                 },
             }

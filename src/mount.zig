@@ -290,6 +290,32 @@ pub fn indexDiffersFromMount(
     return false;
 }
 
+/// unadds the given paths from the index
+pub fn unaddPaths(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+    allocator: std.mem.Allocator,
+    paths: []const []const u8,
+) !void {
+    var index = try idx.Index(repo_kind, repo_opts).init(allocator, state.readOnly());
+    defer index.deinit();
+
+    for (paths) |path| {
+        const path_parts = try fs.splitPath(allocator, path);
+        defer allocator.free(path_parts);
+
+        try index.addOrRemovePath(state, path_parts, .rm);
+
+        // iterate over the HEAD entries and add them to the index
+        if (try headTreeEntry(repo_kind, repo_opts, state.readOnly(), allocator, path_parts)) |*tree_entry| {
+            try index.addTreeEntry(state.readOnly(), allocator, tree_entry, path_parts);
+        }
+    }
+
+    try index.write(allocator, state);
+}
+
 /// removes the given paths from the index and optionally from the mount
 pub fn removePaths(
     comptime repo_kind: rp.RepoKind,
@@ -689,7 +715,7 @@ pub fn migrate(
     }
 }
 
-pub fn headTreeEntry(
+fn headTreeEntry(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_only),
