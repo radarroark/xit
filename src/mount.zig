@@ -1,3 +1,17 @@
+//! functionality related to reading and updating the "mount",
+//! which is xit's term for what git calls the working tree,
+//! working copy, or workspace. I don't like those terms because:
+//!
+//! 1. "tree" is an overloaded term...it also refers to internal
+//!    tree objects.
+//! 2. "work" is too narrow. if you're using a VCS for source
+//!    code, then yes, you "work" in that directory. but people
+//!    are increasingly using VCSes for other things, like
+//!    deploying static files to a web server. in that case, you
+//!    aren't really working out of the directory, you just want
+//!    the VCS to mount files so they can be served.
+//! 3. those terms are too long and I'm friggin lazy.
+
 const std = @import("std");
 const builtin = @import("builtin");
 const hash = @import("./hash.zig");
@@ -276,6 +290,7 @@ pub fn indexDiffersFromMount(
     return false;
 }
 
+/// removes the given paths from the index and optionally from the mount
 pub fn removePaths(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),

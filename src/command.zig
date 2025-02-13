@@ -1,5 +1,3 @@
-//! the command parsed from CLI args.
-
 const std = @import("std");
 const rp = @import("./repo.zig");
 const df = @import("./diff.zig");

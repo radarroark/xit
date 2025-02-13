@@ -1,6 +1,3 @@
-//! tracks the files that are staged. the commit
-//! command will use this when creating the tree.
-
 const std = @import("std");
 const obj = @import("./object.zig");
 const hash = @import("./hash.zig");
