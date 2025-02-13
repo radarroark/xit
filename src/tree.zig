@@ -204,7 +204,8 @@ pub fn HeadTree(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts
         }
 
         fn read(self: *HeadTree(repo_kind, repo_opts), state: rp.Repo(repo_kind, repo_opts).State(.read_only), prefix: []const u8, oid: *const [hash.hexLen(repo_opts.hash)]u8) !void {
-            const object = try obj.Object(repo_kind, repo_opts, .full).init(self.arena.allocator(), state, oid);
+            var object = try obj.Object(repo_kind, repo_opts, .full).init(self.allocator, state, oid);
+            defer object.deinit();
 
             switch (object.content) {
                 .blob, .commit, .tag => {},
