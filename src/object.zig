@@ -96,12 +96,89 @@ pub fn writeObject(
     }
 }
 
+const Tree = struct {
+    entries: std.StringArrayHashMap([]const u8),
+    allocator: std.mem.Allocator,
+
+    fn init(allocator: std.mem.Allocator) Tree {
+        return .{
+            .entries = std.StringArrayHashMap([]const u8).init(allocator),
+            .allocator = allocator,
+        };
+    }
+
+    fn deinit(self: *Tree) void {
+        for (self.entries.values()) |entry| {
+            self.allocator.free(entry);
+        }
+        self.entries.deinit();
+    }
+
+    fn addBlobEntry(self: *Tree, mode: fs.Mode, name: []const u8, oid: []const u8) !void {
+        const entry = try std.fmt.allocPrint(self.allocator, "{s} {s}\x00{s}", .{ mode.toStr(), name, oid });
+        errdefer self.allocator.free(entry);
+        try self.entries.put(name, entry);
+    }
+
+    fn addTreeEntry(self: *Tree, name: []const u8, oid: []const u8) !void {
+        const entry = try std.fmt.allocPrint(self.allocator, "40000 {s}\x00{s}", .{ name, oid });
+        errdefer self.allocator.free(entry);
+        try self.entries.put(name, entry);
+    }
+
+    fn addIndexEntries(
+        self: *Tree,
+        comptime repo_kind: rp.RepoKind,
+        comptime repo_opts: rp.RepoOpts(repo_kind),
+        state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+        allocator: std.mem.Allocator,
+        index: *const idx.Index(repo_kind, repo_opts),
+        prefix: []const u8,
+        entries: [][]const u8,
+    ) !void {
+        for (entries) |name| {
+            const path = try fs.joinPath(allocator, &.{ prefix, name });
+            defer allocator.free(path);
+            if (index.entries.get(path)) |*entries_for_path| {
+                const entry = entries_for_path[0] orelse return error.NullEntry;
+                try self.addBlobEntry(entry.mode, name, &entry.oid);
+            } else if (index.dir_to_children.get(path)) |children| {
+                var subtree = Tree.init(allocator);
+                defer subtree.deinit();
+
+                var child_names = std.ArrayList([]const u8).init(allocator);
+                defer child_names.deinit();
+                for (children.keys()) |child| {
+                    try child_names.append(child);
+                }
+
+                try subtree.addIndexEntries(
+                    repo_kind,
+                    repo_opts,
+                    state,
+                    allocator,
+                    index,
+                    path,
+                    child_names.items,
+                );
+
+                var tree_hash_bytes_buffer = [_]u8{0} ** hash.byteLen(repo_opts.hash);
+                try writeTree(repo_kind, repo_opts, state, allocator, &subtree, &tree_hash_bytes_buffer);
+
+                try self.addTreeEntry(name, &tree_hash_bytes_buffer);
+            } else {
+                return error.ObjectEntryNotFound;
+            }
+        }
+    }
+};
+
 fn writeTree(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
     allocator: std.mem.Allocator,
-    tree: *tr.Tree,
+    tree: *Tree,
     hash_bytes_buffer: *[hash.byteLen(repo_opts.hash)]u8,
 ) !void {
     // sort the entries. this is needed for xit,
@@ -171,56 +248,6 @@ fn writeTree(
             var stream = std.io.fixedBufferStream(tree_contents);
             try chunk.writeChunks(repo_opts, state, stream.reader(), object_hash, tree_contents.len, "tree");
         },
-    }
-}
-
-// add each entry to the given tree.
-// if the entry is itself a tree, create a tree object
-// for it and add that as an entry to the original tree.
-fn addIndexEntries(
-    comptime repo_kind: rp.RepoKind,
-    comptime repo_opts: rp.RepoOpts(repo_kind),
-    state: rp.Repo(repo_kind, repo_opts).State(.read_write),
-    allocator: std.mem.Allocator,
-    tree: *tr.Tree,
-    index: *const idx.Index(repo_kind, repo_opts),
-    prefix: []const u8,
-    entries: [][]const u8,
-) !void {
-    for (entries) |name| {
-        const path = try fs.joinPath(allocator, &.{ prefix, name });
-        defer allocator.free(path);
-        if (index.entries.get(path)) |*entries_for_path| {
-            const entry = entries_for_path[0] orelse return error.NullEntry;
-            try tree.addBlobEntry(entry.mode, name, &entry.oid);
-        } else if (index.dir_to_children.get(path)) |children| {
-            var subtree = tr.Tree.init(allocator);
-            defer subtree.deinit();
-
-            var child_names = std.ArrayList([]const u8).init(allocator);
-            defer child_names.deinit();
-            for (children.keys()) |child| {
-                try child_names.append(child);
-            }
-
-            try addIndexEntries(
-                repo_kind,
-                repo_opts,
-                state,
-                allocator,
-                &subtree,
-                index,
-                path,
-                child_names.items,
-            );
-
-            var tree_hash_bytes_buffer = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-            try writeTree(repo_kind, repo_opts, state, allocator, &subtree, &tree_hash_bytes_buffer);
-
-            try tree.addTreeEntry(name, &tree_hash_bytes_buffer);
-        } else {
-            return error.ObjectEntryNotFound;
-        }
     }
 }
 
@@ -304,9 +331,9 @@ pub fn writeCommit(
     defer index.deinit();
 
     // create tree and add index entries
-    var tree = tr.Tree.init(allocator);
+    var tree = Tree.init(allocator);
     defer tree.deinit();
-    try addIndexEntries(repo_kind, repo_opts, state, allocator, &tree, &index, "", index.root_children.keys());
+    try tree.addIndexEntries(repo_kind, repo_opts, state, allocator, &index, "", index.root_children.keys());
 
     // write and hash tree
     var tree_hash_bytes_buffer = [_]u8{0} ** hash.byteLen(repo_opts.hash);
