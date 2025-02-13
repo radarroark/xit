@@ -554,14 +554,14 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
-        pub fn untrack(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, paths: []const []const u8, opts: idx.IndexUntrackOptions) !void {
+        pub fn untrack(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, paths: []const []const u8, opts: mnt.UntrackOptions) !void {
             try self.rm(allocator, paths, .{
                 .force = opts.force,
-                .remove_from_workspace = false,
+                .remove_from_mount = false,
             });
         }
 
-        pub fn rm(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, paths: []const []const u8, opts: idx.IndexRemoveOptions) !void {
+        pub fn rm(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, paths: []const []const u8, opts: mnt.RemoveOptions) !void {
             // TODO: add support for -r (removing dirs)
             switch (repo_kind) {
                 .git => {
@@ -589,12 +589,12 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         switch (meta.kind()) {
                             .file => {
                                 if (!opts.force) {
-                                    const differs_from = try idx.indexDiffersFrom(repo_kind, repo_opts, &self.core, index, head_tree, normalized_path, meta);
-                                    if (differs_from.head and differs_from.workspace) {
+                                    const differs_from = try mnt.indexDiffersFrom(repo_kind, repo_opts, &self.core, &index, &head_tree, normalized_path, meta);
+                                    if (differs_from.head and differs_from.mount) {
                                         return error.CannotRemoveFileWithStagedAndUnstagedChanges;
-                                    } else if (differs_from.head and opts.remove_from_workspace) {
+                                    } else if (differs_from.head and opts.remove_from_mount) {
                                         return error.CannotRemoveFileWithStagedChanges;
-                                    } else if (differs_from.workspace and opts.remove_from_workspace) {
+                                    } else if (differs_from.mount and opts.remove_from_mount) {
                                         return error.CannotRemoveFileWithUnstagedChanges;
                                     }
                                 }
@@ -604,7 +604,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         }
                     }
 
-                    if (opts.remove_from_workspace) {
+                    if (opts.remove_from_mount) {
                         for (paths) |path| {
                             const meta = try fs.getMetadata(self.core.repo_dir, path);
                             switch (meta.kind()) {
@@ -625,7 +625,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         allocator: std.mem.Allocator,
                         cwd: std.fs.Dir,
                         paths: []const []const u8,
-                        opts: idx.IndexRemoveOptions,
+                        opts: mnt.RemoveOptions,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
@@ -652,12 +652,12 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                                 switch (meta.kind()) {
                                     .file => {
                                         if (!ctx.opts.force) {
-                                            const differs_from = try idx.indexDiffersFrom(repo_kind, repo_opts, ctx.core, index, head_tree, normalized_path, meta);
-                                            if (differs_from.head and differs_from.workspace) {
+                                            const differs_from = try mnt.indexDiffersFrom(repo_kind, repo_opts, ctx.core, &index, &head_tree, normalized_path, meta);
+                                            if (differs_from.head and differs_from.mount) {
                                                 return error.CannotRemoveFileWithStagedAndUnstagedChanges;
-                                            } else if (differs_from.head and ctx.opts.remove_from_workspace) {
+                                            } else if (differs_from.head and ctx.opts.remove_from_mount) {
                                                 return error.CannotRemoveFileWithStagedChanges;
-                                            } else if (differs_from.workspace and ctx.opts.remove_from_workspace) {
+                                            } else if (differs_from.mount and ctx.opts.remove_from_mount) {
                                                 return error.CannotRemoveFileWithUnstagedChanges;
                                             }
                                         }
@@ -667,7 +667,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                                 }
                             }
 
-                            if (ctx.opts.remove_from_workspace) {
+                            if (ctx.opts.remove_from_mount) {
                                 for (ctx.paths) |path| {
                                     const meta = try fs.getMetadata(ctx.core.repo_dir, path);
                                     switch (meta.kind()) {

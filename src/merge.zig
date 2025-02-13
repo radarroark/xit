@@ -1256,7 +1256,7 @@ fn fileDirConflict(
                                 .tree_entry = new,
                             },
                         });
-                        // remove from the working tree
+                        // remove from the mount
                         try clean_diff.changes.put(parent_path, .{ .old = new, .new = null });
                     },
                     .source => {
@@ -1270,7 +1270,7 @@ fn fileDirConflict(
                                 .tree_entry = new,
                             },
                         });
-                        // prevent from being added to working tree
+                        // prevent from being added to mount
                         _ = clean_diff.changes.swapRemove(parent_path);
                     },
                 }
@@ -1335,7 +1335,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
             allocator: std.mem.Allocator,
             merge_input: MergeInput(repo_kind, repo_opts.hash),
         ) !Merge(repo_kind, repo_opts) {
-            // TODO: exit early if working tree is dirty
+            // TODO: exit early if mount is dirty
 
             const arena = try allocator.create(std.heap.ArenaAllocator);
             arena.* = std.heap.ArenaAllocator.init(allocator);
@@ -1409,7 +1409,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                         var index = try idx.Index(repo_kind, repo_opts).init(allocator, state.readOnly());
                         defer index.deinit();
 
-                        // update the working tree
+                        // update the mount
                         try mnt.migrate(repo_kind, repo_opts, state, allocator, clean_diff, &index, null);
 
                         return .{
@@ -1510,7 +1510,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                             var index = try idx.Index(repo_kind, repo_opts).init(allocator, state.readOnly());
                             defer index.deinit();
 
-                            // update the working tree
+                            // update the mount
                             try mnt.migrate(repo_kind, repo_opts, state, allocator, clean_diff, &index, null);
 
                             for (conflicts.keys(), conflicts.values()) |path, conflict| {
@@ -1555,7 +1555,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                             var index = try idx.Index(repo_kind, repo_opts).init(allocator, state.readOnly());
                             defer index.deinit();
 
-                            // update the working tree
+                            // update the mount
                             try mnt.migrate(repo_kind, repo_opts, state, allocator, clean_diff, &index, null);
 
                             for (conflicts.keys(), conflicts.values()) |path, conflict| {

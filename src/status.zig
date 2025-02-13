@@ -12,6 +12,7 @@ const obj = @import("./object.zig");
 const rf = @import("./ref.zig");
 const fs = @import("./fs.zig");
 const rp = @import("./repo.zig");
+const mnt = @import("./mount.zig");
 
 pub const IndexKind = enum {
     added,
@@ -41,8 +42,8 @@ pub const MergeConflictStatus = struct {
 pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return struct {
         untracked: std.StringArrayHashMap(Entry),
-        workspace_modified: std.StringArrayHashMap(Entry),
-        workspace_deleted: std.StringArrayHashMap(void),
+        mount_modified: std.StringArrayHashMap(Entry),
+        mount_deleted: std.StringArrayHashMap(void),
         index_added: std.StringArrayHashMap(void),
         index_modified: std.StringArrayHashMap(void),
         index_deleted: std.StringArrayHashMap(void),
@@ -61,11 +62,11 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             var untracked = std.StringArrayHashMap(Entry).init(allocator);
             errdefer untracked.deinit();
 
-            var workspace_modified = std.StringArrayHashMap(Entry).init(allocator);
-            errdefer workspace_modified.deinit();
+            var mount_modified = std.StringArrayHashMap(Entry).init(allocator);
+            errdefer mount_modified.deinit();
 
-            var workspace_deleted = std.StringArrayHashMap(void).init(allocator);
-            errdefer workspace_deleted.deinit();
+            var mount_deleted = std.StringArrayHashMap(void).init(allocator);
+            errdefer mount_deleted.deinit();
 
             var index_added = std.StringArrayHashMap(void).init(allocator);
             errdefer index_added.deinit();
@@ -92,7 +93,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             var index_bools = try allocator.alloc(bool, index.entries.count());
             defer allocator.free(index_bools);
 
-            _ = try addEntries(repo_kind, repo_opts, arena.allocator(), &untracked, &workspace_modified, index, &index_bools, state.core.repo_dir, ".");
+            _ = try addEntries(repo_kind, repo_opts, arena.allocator(), &untracked, &mount_modified, index, &index_bools, state.core.repo_dir, ".");
 
             var head_tree = try HeadTree(repo_kind, repo_opts).init(allocator, state);
             errdefer head_tree.deinit();
@@ -102,7 +103,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                 // if it is a non-conflict entry
                 if (index_entries_for_path[0]) |index_entry| {
                     if (!index_bools[i]) {
-                        try workspace_deleted.put(path, {});
+                        try mount_deleted.put(path, {});
                     }
                     if (head_tree.entries.get(index_entry.path)) |head_entry| {
                         if (!index_entry.mode.eql(head_entry.mode) or !std.mem.eql(u8, &index_entry.oid, &head_entry.oid)) {
@@ -130,8 +131,8 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
             return Status(repo_kind, repo_opts){
                 .untracked = untracked,
-                .workspace_modified = workspace_modified,
-                .workspace_deleted = workspace_deleted,
+                .mount_modified = mount_modified,
+                .mount_deleted = mount_deleted,
                 .index_added = index_added,
                 .index_modified = index_modified,
                 .index_deleted = index_deleted,
@@ -145,8 +146,8 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
         pub fn deinit(self: *Status(repo_kind, repo_opts)) void {
             self.untracked.deinit();
-            self.workspace_modified.deinit();
-            self.workspace_deleted.deinit();
+            self.mount_modified.deinit();
+            self.mount_deleted.deinit();
             self.index_added.deinit();
             self.index_modified.deinit();
             self.index_deleted.deinit();
@@ -180,7 +181,7 @@ fn addEntries(
                 index_bools.*[entry_index] = true;
                 const entries_for_path = index.entries.values()[entry_index];
                 if (entries_for_path[0]) |entry| {
-                    if (try idx.indexDiffersFromWorkspace(repo_kind, repo_opts, entry, file, meta)) {
+                    if (try mnt.indexDiffersFromMount(repo_kind, repo_opts, &entry, file, meta)) {
                         try modified.put(path, Status(repo_kind, repo_opts).Entry{ .path = path, .meta = meta });
                     }
                 }

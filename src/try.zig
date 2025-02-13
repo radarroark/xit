@@ -63,11 +63,11 @@ pub fn main() !void {
         var git_repo = try rp.Repo(.git, .{}).open(allocator, .{ .cwd = temp_dir });
         defer git_repo.deinit();
 
-        // restore all files in working tree
+        // restore all files in mount
         // (they are all missing because we only copied the .git dir)
         var status = try git_repo.status(allocator);
         defer status.deinit();
-        for (status.workspace_deleted.keys()) |path| {
+        for (status.mount_deleted.keys()) |path| {
             if (std.mem.startsWith(u8, path, "deps/")) continue;
             try writers.out.print("Restoring: {s}\n", .{path});
             git_repo.restore(allocator, path) catch |err| switch (err) {

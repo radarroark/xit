@@ -303,14 +303,14 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             try run_sh.setPermissions(std.fs.File.Permissions{ .inner = std.fs.File.PermissionsUnix{ .mode = 0o755 } });
         }
 
-        // workspace diff
+        // mount diff
         {
             var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
             defer repo.deinit();
             var status = try repo.status(allocator);
             defer status.deinit();
             var file_iter = try repo.filePairs(allocator, .{
-                .workspace = .{
+                .mount = .{
                     .conflict_diff_kind = .target,
                     .status = &status,
                 },
@@ -577,7 +577,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         }
 
         {
-            // make a new file (only in the working dir) that conflicts with the descendent of a file from commit1
+            // make a new file (only in the mount) that conflicts with the descendent of a file from commit1
             {
                 var docs = try repo_dir.createFile("docs", .{});
                 defer docs.close();
@@ -654,7 +654,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     // switch to first commit
     try main.run(repo_kind, repo_opts, allocator, &.{ "switch", &commit1 }, repo_dir, .{});
 
-    // the working tree was updated
+    // the mount was updated
     {
         const hello_txt = try repo_dir.openFile("hello.txt", .{ .mode = .read_only });
         defer hello_txt.close();
@@ -681,7 +681,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     // switch to master
     try main.run(repo_kind, repo_opts, allocator, &.{ "switch", "master" }, repo_dir, .{});
 
-    // the working tree was updated
+    // the mount was updated
     {
         const hello_txt = try repo_dir.openFile("hello.txt", .{ .mode = .read_only });
         defer hello_txt.close();
@@ -977,7 +977,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             try zig_dir.deleteFile("main.zig");
         }
 
-        // workspace changes
+        // mount changes
         {
             // get status
             var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
@@ -990,14 +990,14 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             try std.testing.expect(status.untracked.contains("a"));
             try std.testing.expect(status.untracked.contains("goodbye.txt"));
 
-            // check the workspace_modified entries
-            try std.testing.expectEqual(2, status.workspace_modified.count());
-            try std.testing.expect(status.workspace_modified.contains("hello.txt"));
-            try std.testing.expect(status.workspace_modified.contains("README"));
+            // check the mount_modified entries
+            try std.testing.expectEqual(2, status.mount_modified.count());
+            try std.testing.expect(status.mount_modified.contains("hello.txt"));
+            try std.testing.expect(status.mount_modified.contains("README"));
 
-            // check the workspace_deleted entries
-            try std.testing.expectEqual(1, status.workspace_deleted.count());
-            try std.testing.expect(status.workspace_deleted.contains("src/zig/main.zig"));
+            // check the mount_deleted entries
+            try std.testing.expectEqual(1, status.mount_deleted.count());
+            try std.testing.expect(status.mount_deleted.contains("src/zig/main.zig"));
         }
 
         // get status with libgit
@@ -1055,7 +1055,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             var status = try repo.status(allocator);
             defer status.deinit();
 
-            try std.testing.expectEqual(2, status.workspace_modified.count());
+            try std.testing.expectEqual(2, status.mount_modified.count());
             try std.testing.expectEqual(2, status.index_deleted.count());
         }
 
@@ -1079,7 +1079,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             var status = try repo.status(allocator);
             defer status.deinit();
 
-            try std.testing.expectEqual(0, status.workspace_modified.count());
+            try std.testing.expectEqual(0, status.mount_modified.count());
             try std.testing.expectEqual(0, status.index_deleted.count());
         }
     }

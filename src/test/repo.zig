@@ -355,7 +355,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         var status = try repo.status(allocator);
         defer status.deinit();
         var file_iter = try repo.filePairs(allocator, .{
-            .workspace = .{
+            .mount = .{
                 .conflict_diff_kind = .target,
                 .status = &status,
             },
@@ -458,7 +458,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         var status = try repo.status(allocator);
         defer status.deinit();
         var file_iter = try repo.filePairs(allocator, .{
-            .workspace = .{
+            .mount = .{
                 .conflict_diff_kind = .target,
                 .status = &status,
             },
@@ -520,7 +520,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         var status = try repo.status(allocator);
         defer status.deinit();
         var file_iter = try repo.filePairs(allocator, .{
-            .workspace = .{
+            .mount = .{
                 .conflict_diff_kind = .target,
                 .status = &status,
             },
@@ -595,7 +595,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         var status = try repo.status(allocator);
         defer status.deinit();
         var file_iter = try repo.filePairs(allocator, .{
-            .workspace = .{
+            .mount = .{
                 .conflict_diff_kind = .target,
                 .status = &status,
             },
@@ -668,7 +668,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         var status = try repo.status(allocator);
         defer status.deinit();
         var file_iter = try repo.filePairs(allocator, .{
-            .workspace = .{
+            .mount = .{
                 .conflict_diff_kind = .target,
                 .status = &status,
             },
@@ -751,7 +751,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         var status = try repo.status(allocator);
         defer status.deinit();
         var file_iter = try repo.filePairs(allocator, .{
-            .workspace = .{
+            .mount = .{
                 .conflict_diff_kind = .target,
                 .status = &status,
             },
@@ -900,7 +900,7 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind, comptime repo_op
         var status = try repo.status(allocator);
         defer status.deinit();
         var file_iter = try repo.filePairs(allocator, .{
-            .workspace = .{
+            .mount = .{
                 .conflict_diff_kind = .target,
                 .status = &status,
             },
@@ -1029,7 +1029,7 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
         var status = try repo.status(allocator);
         defer status.deinit();
         var file_iter = try repo.filePairs(allocator, .{
-            .workspace = .{
+            .mount = .{
                 .conflict_diff_kind = .target,
                 .status = &status,
             },
@@ -1402,7 +1402,7 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
     var status = try repo.status(allocator);
     defer status.deinit();
     var file_iter = try repo.filePairs(allocator, .{
-        .workspace = .{
+        .mount = .{
             .conflict_diff_kind = .target,
             .status = &status,
         },

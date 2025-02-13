@@ -78,7 +78,7 @@ fn commandHelp(command_kind: CommandKind) Help {
             .name = "untrack",
             .descrip =
             \\no longer track file in the index,
-            \\but leave it in the working tree
+            \\but leave it in the mount
             ,
             .example =
             \\xit untrack myfile.txt
@@ -88,7 +88,7 @@ fn commandHelp(command_kind: CommandKind) Help {
             .name = "rm",
             .descrip =
             \\no longer track file in the index,
-            \\and remove it from the working tree
+            \\and remove it from the mount
             ,
             .example =
             \\xit rm myfile.txt
@@ -120,7 +120,7 @@ fn commandHelp(command_kind: CommandKind) Help {
         .status => .{
             .name = "status",
             .descrip =
-            \\show the working tree status
+            \\show the status of uncommitted changes
             ,
             .example =
             \\(display in TUI)
@@ -132,12 +132,12 @@ fn commandHelp(command_kind: CommandKind) Help {
         .diff => .{
             .name = "diff",
             .descrip =
-            \\show changes between commits, commit and working tree, etc
+            \\show changes between commits, commit and mount, etc
             ,
             .example =
             \\(display in TUI)
             \\    xit diff
-            \\(display diff of workspace content in the CLI)
+            \\(display diff of mount content in the CLI)
             \\    xit diff --cli
             \\(display diff of staged content in the CLI)
             \\    xit diff --staged
@@ -160,7 +160,7 @@ fn commandHelp(command_kind: CommandKind) Help {
         .switch_head => .{
             .name = "switch",
             .descrip =
-            \\switch working tree to a branch or commit id
+            \\switch mount to a branch or commit id
             ,
             .example =
             \\(switch to branch)
@@ -172,7 +172,7 @@ fn commandHelp(command_kind: CommandKind) Help {
         .restore => .{
             .name = "restore",
             .descrip =
-            \\restore working tree files
+            \\restore files in the mount
             ,
             .example =
             \\xit restore myfile.txt
@@ -447,11 +447,11 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
         },
         untrack: struct {
             paths: []const []const u8,
-            opts: idx.IndexUntrackOptions,
+            opts: mnt.UntrackOptions,
         },
         rm: struct {
             paths: []const []const u8,
-            opts: idx.IndexRemoveOptions,
+            opts: mnt.RemoveOptions,
         },
         commit: obj.CommitMetadata(hash_kind),
         tag: tag.TagCommand,
@@ -518,7 +518,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                         .paths = cmd_args.positional_args,
                         .opts = .{
                             .force = cmd_args.contains("-f"),
-                            .remove_from_workspace = true,
+                            .remove_from_mount = true,
                         },
                     } };
                 },
@@ -566,13 +566,13 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                         .index
                     else
                         (if (cmd_args.contains("--base"))
-                            .{ .workspace = .{ .conflict_diff_kind = .base } }
+                            .{ .mount = .{ .conflict_diff_kind = .base } }
                         else if (cmd_args.contains("--ours"))
-                            .{ .workspace = .{ .conflict_diff_kind = .target } }
+                            .{ .mount = .{ .conflict_diff_kind = .target } }
                         else if (cmd_args.contains("--theirs"))
-                            .{ .workspace = .{ .conflict_diff_kind = .source } }
+                            .{ .mount = .{ .conflict_diff_kind = .source } }
                         else
-                            .{ .workspace = .{ .conflict_diff_kind = .target } });
+                            .{ .mount = .{ .conflict_diff_kind = .target } });
                     return .{ .diff = .{ .diff_opts = diff_opts } };
                 },
                 .branch => {

@@ -20,7 +20,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                 object_reader: obj.ObjectReader(repo_kind, repo_opts),
                 eof: bool,
             },
-            workspace: struct {
+            mount: struct {
                 file: std.fs.File,
                 eof: bool,
             },
@@ -74,7 +74,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                 .line_offsets = undefined,
                 .current_line = 0,
                 .source = .{
-                    .workspace = .{
+                    .mount = .{
                         .file = file,
                         .eof = false,
                     },
@@ -191,14 +191,14 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                     self.current_line += 1;
                     return line;
                 },
-                .workspace => |*workspace| {
-                    if (workspace.eof) {
+                .mount => |*mount| {
+                    if (mount.eof) {
                         return null;
                     }
                     var line_arr = std.ArrayList(u8).init(self.allocator);
                     errdefer line_arr.deinit();
-                    workspace.file.reader().streamUntilDelimiter(line_arr.writer(), '\n', repo_opts.max_line_size) catch |err| switch (err) {
-                        error.EndOfStream => workspace.eof = true,
+                    mount.file.reader().streamUntilDelimiter(line_arr.writer(), '\n', repo_opts.max_line_size) catch |err| switch (err) {
+                        error.EndOfStream => mount.eof = true,
                         else => |e| return e,
                     };
                     const line = try line_arr.toOwnedSlice();
@@ -233,9 +233,9 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                     object.eof = false;
                     try object.object_reader.reset();
                 },
-                .workspace => |*workspace| {
-                    workspace.eof = false;
-                    try workspace.file.seekTo(0);
+                .mount => |*mount| {
+                    mount.eof = false;
+                    try mount.file.seekTo(0);
                 },
                 .buffer => |*buffer| buffer.iter.reset(),
                 .nothing => {},
@@ -250,7 +250,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
         pub fn deinit(self: *LineIterator(repo_kind, repo_opts)) void {
             switch (self.source) {
                 .object => |*object| object.object_reader.deinit(),
-                .workspace => |*workspace| workspace.file.close(),
+                .mount => |*mount| mount.file.close(),
                 .buffer => {},
                 .nothing => {},
                 .binary => {},
@@ -272,9 +272,9 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                     object.eof = false;
                     try object.object_reader.seekTo(position);
                 },
-                .workspace => |*workspace| {
+                .mount => |*mount| {
                     try self.reset();
-                    try workspace.file.seekTo(position);
+                    try mount.file.seekTo(position);
                 },
                 .buffer => {
                     try self.reset();
@@ -325,7 +325,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
             if (is_binary) {
                 switch (self.source) {
                     .object => |*object| object.object_reader.deinit(),
-                    .workspace => |*workspace| workspace.file.close(),
+                    .mount => |*mount| mount.file.close(),
                     .buffer => {},
                     .nothing => {},
                     .binary => {},
@@ -1222,14 +1222,14 @@ pub const ConflictDiffKind = enum {
 };
 
 pub const DiffKind = enum {
-    workspace,
+    mount,
     index,
     tree,
 };
 
 pub fn BasicDiffOptions(comptime hash_kind: hash.HashKind) type {
     return union(DiffKind) {
-        workspace: struct {
+        mount: struct {
             conflict_diff_kind: ConflictDiffKind,
         },
         index,
@@ -1242,7 +1242,7 @@ pub fn BasicDiffOptions(comptime hash_kind: hash.HashKind) type {
 
 pub fn DiffOptions(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return union(DiffKind) {
-        workspace: struct {
+        mount: struct {
             conflict_diff_kind: ConflictDiffKind,
             status: *st.Status(repo_kind, repo_opts),
         },
@@ -1365,16 +1365,16 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
             const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = self.core, .extra = .{ .moment = &self.moment } };
             var next_index = self.next_index;
             switch (self.diff_opts) {
-                .workspace => |workspace| {
-                    if (next_index < workspace.status.conflicts.count()) {
-                        const path = workspace.status.conflicts.keys()[next_index];
+                .mount => |mount| {
+                    if (next_index < mount.status.conflicts.count()) {
+                        const path = mount.status.conflicts.keys()[next_index];
                         const meta = try fs.getMetadata(self.core.repo_dir, path);
-                        const stage: usize = switch (workspace.conflict_diff_kind) {
+                        const stage: usize = switch (mount.conflict_diff_kind) {
                             .base => 1,
                             .target => 2,
                             .source => 3,
                         };
-                        const index_entries_for_path = workspace.status.index.entries.get(path) orelse return error.EntryNotFound;
+                        const index_entries_for_path = mount.status.index.entries.get(path) orelse return error.EntryNotFound;
                         // if there is an entry for the stage we are diffing
                         if (index_entries_for_path[stage]) |index_entry| {
                             var a = try LineIterator(repo_kind, repo_opts).initFromIndex(state, self.allocator, index_entry);
@@ -1394,12 +1394,12 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                             return try self.next();
                         }
                     } else {
-                        next_index -= workspace.status.conflicts.count();
+                        next_index -= mount.status.conflicts.count();
                     }
 
-                    if (next_index < workspace.status.workspace_modified.count()) {
-                        const entry = workspace.status.workspace_modified.values()[next_index];
-                        const index_entries_for_path = workspace.status.index.entries.get(entry.path) orelse return error.EntryNotFound;
+                    if (next_index < mount.status.mount_modified.count()) {
+                        const entry = mount.status.mount_modified.values()[next_index];
+                        const index_entries_for_path = mount.status.index.entries.get(entry.path) orelse return error.EntryNotFound;
                         var a = try LineIterator(repo_kind, repo_opts).initFromIndex(state, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
                         errdefer a.deinit();
                         var b = try LineIterator(repo_kind, repo_opts).initFromWorkspace(state, self.allocator, entry.path, fs.getMode(entry.meta));
@@ -1407,12 +1407,12 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                         self.next_index += 1;
                         return .{ .path = entry.path, .a = a, .b = b };
                     } else {
-                        next_index -= workspace.status.workspace_modified.count();
+                        next_index -= mount.status.mount_modified.count();
                     }
 
-                    if (next_index < workspace.status.workspace_deleted.count()) {
-                        const path = workspace.status.workspace_deleted.keys()[next_index];
-                        const index_entries_for_path = workspace.status.index.entries.get(path) orelse return error.EntryNotFound;
+                    if (next_index < mount.status.mount_deleted.count()) {
+                        const path = mount.status.mount_deleted.keys()[next_index];
+                        const index_entries_for_path = mount.status.index.entries.get(path) orelse return error.EntryNotFound;
                         var a = try LineIterator(repo_kind, repo_opts).initFromIndex(state, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
                         errdefer a.deinit();
                         var b = try LineIterator(repo_kind, repo_opts).initFromNothing(self.allocator, path);

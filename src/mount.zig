@@ -6,6 +6,85 @@ const rf = @import("./ref.zig");
 const idx = @import("./index.zig");
 const fs = @import("./fs.zig");
 const rp = @import("./repo.zig");
+const st = @import("./status.zig");
+
+pub const UntrackOptions = struct {
+    force: bool = false,
+};
+
+pub const RemoveOptions = struct {
+    force: bool = false,
+    remove_from_mount: bool = true,
+};
+
+pub fn indexDiffersFromMount(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    entry: *const idx.Index(repo_kind, repo_opts).Entry,
+    file: std.fs.File,
+    meta: std.fs.File.Metadata,
+) !bool {
+    if (meta.size() != entry.file_size or !fs.getMode(meta).eql(entry.mode)) {
+        return true;
+    } else {
+        const times = fs.getTimes(meta);
+        if (times.ctime_secs != entry.ctime_secs or
+            times.ctime_nsecs != entry.ctime_nsecs or
+            times.mtime_secs != entry.mtime_secs or
+            times.mtime_nsecs != entry.mtime_nsecs)
+        {
+            // create blob header
+            const file_size = meta.size();
+            var header_buffer = [_]u8{0} ** 256; // should be plenty of space
+            const header = try std.fmt.bufPrint(&header_buffer, "blob {}\x00", .{file_size});
+
+            var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
+            try hash.hashReader(repo_opts.hash, repo_opts.read_size, file.reader(), header, &oid);
+            if (!std.mem.eql(u8, &entry.oid, &oid)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+pub const DiffersFrom = struct {
+    head: bool,
+    mount: bool,
+};
+
+pub fn indexDiffersFrom(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    core: *rp.Repo(repo_kind, repo_opts).Core,
+    index: *const idx.Index(repo_kind, repo_opts),
+    head_tree: *const st.HeadTree(repo_kind, repo_opts),
+    path: []const u8,
+    meta: std.fs.File.Metadata,
+) !DiffersFrom {
+    var ret = DiffersFrom{
+        .head = false,
+        .mount = false,
+    };
+
+    if (index.entries.get(path)) |*index_entries_for_path| {
+        if (index_entries_for_path[0]) |index_entry| {
+            if (head_tree.entries.get(path)) |head_entry| {
+                if (!index_entry.mode.eql(head_entry.mode) or !std.mem.eql(u8, &index_entry.oid, &head_entry.oid)) {
+                    ret.head = true;
+                }
+            }
+
+            const file = try core.repo_dir.openFile(path, .{ .mode = .read_only });
+            defer file.close();
+            if (try indexDiffersFromMount(repo_kind, repo_opts, &index_entry, file, meta)) {
+                ret.mount = true;
+            }
+        }
+    }
+
+    return ret;
+}
 
 pub fn objectToFile(
     comptime repo_kind: rp.RepoKind,
@@ -90,22 +169,22 @@ fn pathToTreeEntry(
     }
 }
 
-pub const TreeToWorkspaceChange = enum {
+pub const TreeToMountChange = enum {
     none,
     untracked,
     deleted,
     modified,
 };
 
-fn compareIndexToWorkspace(
+fn compareIndexToMount(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     entry_maybe: ?idx.Index(repo_kind, repo_opts).Entry,
     file_maybe: ?std.fs.File,
-) !TreeToWorkspaceChange {
+) !TreeToMountChange {
     if (entry_maybe) |entry| {
         if (file_maybe) |file| {
-            if (try idx.indexDiffersFromWorkspace(repo_kind, repo_opts, entry, file, try file.metadata())) {
+            if (try indexDiffersFromMount(repo_kind, repo_opts, &entry, file, try file.metadata())) {
                 return .modified;
             } else {
                 return .none;
@@ -243,7 +322,7 @@ pub fn migrate(
             } else {
                 const meta = fs.getMetadata(state.core.repo_dir, path) catch |err| switch (err) {
                     error.FileNotFound, error.NotDir => {
-                        // if the path doesn't exist in the workspace,
+                        // if the path doesn't exist in the mount,
                         // but one of its parents *does* exist and isn't tracked
                         if (untrackedParent(repo_kind, repo_opts, state.core.repo_dir, path, index.*)) |_| {
                             result.setConflict(allocator);
@@ -264,7 +343,7 @@ pub fn migrate(
                         const file = try state.core.repo_dir.openFile(path, .{ .mode = .read_only });
                         defer file.close();
                         // if the path is a file that differs from the index
-                        if (try compareIndexToWorkspace(repo_kind, repo_opts, entry_maybe, file) != .none) {
+                        if (try compareIndexToMount(repo_kind, repo_opts, entry_maybe, file) != .none) {
                             result.setConflict(allocator);
                             if (entry_maybe) |_| {
                                 try result.conflict.stale_files.put(path, {});
@@ -299,7 +378,7 @@ pub fn migrate(
     }
 
     for (remove_files.keys()) |path| {
-        // update working tree
+        // update mount
         state.core.repo_dir.deleteFile(path) catch |err| switch (err) {
             error.FileNotFound => {},
             else => |e| return e,
@@ -318,14 +397,14 @@ pub fn migrate(
     }
 
     for (add_files.keys(), add_files.values()) |path, tree_entry| {
-        // update working tree
+        // update mount
         try objectToFile(repo_kind, repo_opts, state.readOnly(), allocator, path, tree_entry);
         // update index
         try index.addPath(state, path);
     }
 
     for (edit_files.keys(), edit_files.values()) |path, tree_entry| {
-        // update working tree
+        // update mount
         try objectToFile(repo_kind, repo_opts, state.readOnly(), allocator, path, tree_entry);
         // update index
         try index.addPath(state, path);
@@ -415,7 +494,7 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     var index = try idx.Index(repo_kind, repo_opts).init(allocator, state.readOnly());
                     defer index.deinit();
 
-                    // update the working tree
+                    // update the mount
                     try migrate(repo_kind, repo_opts, state, allocator, tree_diff, &index, if (input.force) null else &result);
 
                     // return early if conflict
@@ -440,7 +519,7 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     var index = try idx.Index(repo_kind, repo_opts).init(allocator, state.readOnly());
                     defer index.deinit();
 
-                    // update the working tree
+                    // update the mount
                     try migrate(repo_kind, repo_opts, state, allocator, tree_diff, &index, if (input.force) null else &result);
 
                     // return early if conflict

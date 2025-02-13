@@ -228,11 +228,11 @@ fn runCommand(
                 try writers.out.print("?? {s}\n", .{entry.path});
             }
 
-            for (stat.workspace_modified.values()) |entry| {
+            for (stat.mount_modified.values()) |entry| {
                 try writers.out.print(" M {s}\n", .{entry.path});
             }
 
-            for (stat.workspace_deleted.keys()) |path| {
+            for (stat.mount_deleted.keys()) |path| {
                 try writers.out.print(" D {s}\n", .{path});
             }
 
@@ -282,13 +282,13 @@ fn runCommand(
         },
         .diff => |diff_cmd| {
             const DiffState = union(df.DiffKind) {
-                workspace: st.Status(repo_kind, repo_opts),
+                mount: st.Status(repo_kind, repo_opts),
                 index: st.Status(repo_kind, repo_opts),
                 tree: obj.TreeDiff(repo_kind, repo_opts),
 
                 fn deinit(diff_state: *@This()) void {
                     switch (diff_state.*) {
-                        .workspace => diff_state.workspace.deinit(),
+                        .mount => diff_state.mount.deinit(),
                         .index => diff_state.index.deinit(),
                         .tree => diff_state.tree.deinit(),
                     }
@@ -296,16 +296,16 @@ fn runCommand(
             };
             const diff_opts = diff_cmd.diff_opts;
             var diff_state: DiffState = switch (diff_opts) {
-                .workspace => .{ .workspace = try repo.status(allocator) },
+                .mount => .{ .mount = try repo.status(allocator) },
                 .index => .{ .index = try repo.status(allocator) },
                 .tree => |tree| .{ .tree = try repo.treeDiff(allocator, tree.old, tree.new) },
             };
             defer diff_state.deinit();
             var diff_iter = try repo.filePairs(allocator, switch (diff_opts) {
-                .workspace => |workspace| .{
-                    .workspace = .{
-                        .conflict_diff_kind = workspace.conflict_diff_kind,
-                        .status = &diff_state.workspace,
+                .mount => |mount| .{
+                    .mount = .{
+                        .conflict_diff_kind = mount.conflict_diff_kind,
+                        .status = &diff_state.mount,
                     },
                 },
                 .index => .{

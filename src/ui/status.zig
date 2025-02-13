@@ -228,7 +228,7 @@ pub fn StatusTabs(comptime Widget: type, comptime repo_kind: rp.RepoKind, compti
 
             const counts = [_]usize{
                 status.index_added.count() + status.index_modified.count() + status.index_deleted.count(),
-                status.workspace_modified.count() + status.workspace_deleted.count(),
+                status.mount_modified.count() + status.mount_deleted.count(),
                 status.untracked.count(),
             };
 
@@ -353,10 +353,10 @@ pub fn StatusContent(comptime Widget: type, comptime repo_kind: rp.RepoKind, com
                     }
                 },
                 .not_added => {
-                    for (status.workspace_modified.values()) |entry| {
+                    for (status.mount_modified.values()) |entry| {
                         try filtered_statuses.append(.{ .kind = .{ .not_added = .modified }, .path = entry.path });
                     }
-                    for (status.workspace_deleted.keys()) |path| {
+                    for (status.mount_deleted.keys()) |path| {
                         try filtered_statuses.append(.{ .kind = .{ .not_added = .deleted }, .path = path });
                     }
                 },

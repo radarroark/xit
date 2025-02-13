@@ -6,16 +6,6 @@ const obj = @import("./object.zig");
 const hash = @import("./hash.zig");
 const fs = @import("./fs.zig");
 const rp = @import("./repo.zig");
-const st = @import("./status.zig");
-
-pub const IndexUntrackOptions = struct {
-    force: bool = false,
-};
-
-pub const IndexRemoveOptions = struct {
-    force: bool = false,
-    remove_from_workspace: bool = true,
-};
 
 pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return struct {
@@ -621,73 +611,4 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
             }
         }
     };
-}
-
-pub fn indexDiffersFromWorkspace(
-    comptime repo_kind: rp.RepoKind,
-    comptime repo_opts: rp.RepoOpts(repo_kind),
-    entry: Index(repo_kind, repo_opts).Entry,
-    file: std.fs.File,
-    meta: std.fs.File.Metadata,
-) !bool {
-    if (meta.size() != entry.file_size or !fs.getMode(meta).eql(entry.mode)) {
-        return true;
-    } else {
-        const times = fs.getTimes(meta);
-        if (times.ctime_secs != entry.ctime_secs or
-            times.ctime_nsecs != entry.ctime_nsecs or
-            times.mtime_secs != entry.mtime_secs or
-            times.mtime_nsecs != entry.mtime_nsecs)
-        {
-            // create blob header
-            const file_size = meta.size();
-            var header_buffer = [_]u8{0} ** 256; // should be plenty of space
-            const header = try std.fmt.bufPrint(&header_buffer, "blob {}\x00", .{file_size});
-
-            var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-            try hash.hashReader(repo_opts.hash, repo_opts.read_size, file.reader(), header, &oid);
-            if (!std.mem.eql(u8, &entry.oid, &oid)) {
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
-pub const DiffersFrom = struct {
-    head: bool,
-    workspace: bool,
-};
-
-pub fn indexDiffersFrom(
-    comptime repo_kind: rp.RepoKind,
-    comptime repo_opts: rp.RepoOpts(repo_kind),
-    core: *rp.Repo(repo_kind, repo_opts).Core,
-    index: Index(repo_kind, repo_opts),
-    head_tree: st.HeadTree(repo_kind, repo_opts),
-    path: []const u8,
-    meta: std.fs.File.Metadata,
-) !DiffersFrom {
-    var ret = DiffersFrom{
-        .head = false,
-        .workspace = false,
-    };
-
-    if (index.entries.get(path)) |*index_entries_for_path| {
-        if (index_entries_for_path[0]) |index_entry| {
-            if (head_tree.entries.get(path)) |head_entry| {
-                if (!index_entry.mode.eql(head_entry.mode) or !std.mem.eql(u8, &index_entry.oid, &head_entry.oid)) {
-                    ret.head = true;
-                }
-            }
-
-            const file = try core.repo_dir.openFile(path, .{ .mode = .read_only });
-            defer file.close();
-            if (try indexDiffersFromWorkspace(repo_kind, repo_opts, index_entry, file, meta)) {
-                ret.workspace = true;
-            }
-        }
-    }
-
-    return ret;
 }
