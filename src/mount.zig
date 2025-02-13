@@ -48,12 +48,12 @@ pub fn indexDiffersFromMount(
     return false;
 }
 
-pub const DiffersFrom = struct {
+const DiffersFrom = struct {
     head: bool,
     mount: bool,
 };
 
-pub fn indexDiffersFrom(
+fn indexDiffersFrom(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     core: *rp.Repo(repo_kind, repo_opts).Core,
@@ -84,6 +84,60 @@ pub fn indexDiffersFrom(
     }
 
     return ret;
+}
+
+pub fn removePaths(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+    allocator: std.mem.Allocator,
+    paths: []const []const u8,
+    opts: RemoveOptions,
+) !void {
+    var index = try idx.Index(repo_kind, repo_opts).init(allocator, state.readOnly());
+    defer index.deinit();
+
+    var head_tree = try st.HeadTree(repo_kind, repo_opts).init(allocator, state.readOnly());
+    defer head_tree.deinit();
+
+    for (paths) |path| {
+        const meta = fs.getMetadata(state.core.repo_dir, path) catch |err| switch (err) {
+            error.FileNotFound => return error.RemoveIndexPathNotFound,
+            else => |e| return e,
+        };
+        switch (meta.kind()) {
+            .file => {
+                if (!opts.force) {
+                    const differs_from = try indexDiffersFrom(repo_kind, repo_opts, state.core, &index, &head_tree, path, meta);
+                    if (differs_from.head and differs_from.mount) {
+                        return error.CannotRemoveFileWithStagedAndUnstagedChanges;
+                    } else if (differs_from.head and opts.remove_from_mount) {
+                        return error.CannotRemoveFileWithStagedChanges;
+                    } else if (differs_from.mount and opts.remove_from_mount) {
+                        return error.CannotRemoveFileWithUnstagedChanges;
+                    }
+                }
+
+                const path_parts = try fs.splitPath(allocator, path);
+                defer allocator.free(path_parts);
+                try index.addOrRemovePath(state, path_parts, .rm);
+            },
+            else => return error.UnexpectedPathType,
+        }
+    }
+
+    if (opts.remove_from_mount) {
+        for (paths) |path| {
+            const meta = try fs.getMetadata(state.core.repo_dir, path);
+            switch (meta.kind()) {
+                .file => try state.core.repo_dir.deleteFile(path),
+                .directory => return error.CannotDeleteDir,
+                else => return error.UnexpectedPathType,
+            }
+        }
+    }
+
+    try index.write(allocator, state);
 }
 
 pub fn objectToFile(
