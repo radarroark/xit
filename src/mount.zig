@@ -308,7 +308,7 @@ pub fn unaddPaths(
         try index.addOrRemovePath(state, path_parts, .rm);
 
         // iterate over the HEAD entries and add them to the index
-        if (try headTreeEntry(repo_kind, repo_opts, state.readOnly(), allocator, path_parts)) |*tree_entry| {
+        if (try tr.headTreeEntry(repo_kind, repo_opts, state.readOnly(), allocator, path_parts)) |*tree_entry| {
             try index.addTreeEntry(state.readOnly(), allocator, tree_entry, path_parts);
         }
     }
@@ -444,32 +444,6 @@ pub fn objectToFile(
         },
         // TODO: handle symlinks
         else => return error.ObjectInvalid,
-    }
-}
-
-fn pathToTreeEntry(
-    comptime repo_kind: rp.RepoKind,
-    comptime repo_opts: rp.RepoOpts(repo_kind),
-    state: rp.Repo(repo_kind, repo_opts).State(.read_only),
-    allocator: std.mem.Allocator,
-    parent: obj.Object(repo_kind, repo_opts, .full),
-    path_parts: []const []const u8,
-) !?tr.TreeEntry(repo_opts.hash) {
-    const path_part = path_parts[0];
-    const tree_entry = parent.content.tree.entries.get(path_part) orelse return null;
-
-    if (path_parts.len == 1) {
-        return tree_entry;
-    }
-
-    const oid_hex = std.fmt.bytesToHex(tree_entry.oid, .lower);
-    var tree_object = try obj.Object(repo_kind, repo_opts, .full).init(allocator, state, &oid_hex);
-    defer tree_object.deinit();
-
-    switch (tree_object.content) {
-        .blob, .tag => return null,
-        .tree => return pathToTreeEntry(repo_kind, repo_opts, state, allocator, tree_object, path_parts[1..]),
-        .commit => return error.ObjectInvalid,
     }
 }
 
@@ -715,26 +689,6 @@ pub fn migrate(
     }
 }
 
-fn headTreeEntry(
-    comptime repo_kind: rp.RepoKind,
-    comptime repo_opts: rp.RepoOpts(repo_kind),
-    state: rp.Repo(repo_kind, repo_opts).State(.read_only),
-    allocator: std.mem.Allocator,
-    path_parts: []const []const u8,
-) !?tr.TreeEntry(repo_opts.hash) {
-    // get the current commit
-    const current_oid = try rf.readHead(repo_kind, repo_opts, state);
-    var commit_object = try obj.Object(repo_kind, repo_opts, .full).init(allocator, state, &current_oid);
-    defer commit_object.deinit();
-
-    // get the tree of the current commit
-    var tree_object = try obj.Object(repo_kind, repo_opts, .full).init(allocator, state, &commit_object.content.commit.tree);
-    defer tree_object.deinit();
-
-    // get the entry for the given path
-    return try pathToTreeEntry(repo_kind, repo_opts, state, allocator, tree_object, path_parts);
-}
-
 pub fn restore(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
@@ -742,7 +696,7 @@ pub fn restore(
     allocator: std.mem.Allocator,
     path_parts: []const []const u8,
 ) !void {
-    const tree_entry = try headTreeEntry(repo_kind, repo_opts, state, allocator, path_parts) orelse return error.ObjectNotFound;
+    const tree_entry = try tr.headTreeEntry(repo_kind, repo_opts, state, allocator, path_parts) orelse return error.ObjectNotFound;
     const path = try fs.joinPath(allocator, path_parts);
     defer allocator.free(path);
     try objectToFile(repo_kind, repo_opts, state, allocator, path, tree_entry);
