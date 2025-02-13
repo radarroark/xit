@@ -621,7 +621,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                     return .{ .switch_head = .{
                         .action = .replace,
                         .ref_or_oid = rf.RefOrOid(hash_kind).initFromUser(target) orelse return null,
-                        .force = cmd_args.map_args.contains("-f"),
+                        .force = cmd_args.contains("-f"),
                     } };
                 },
                 .reset_head => {
@@ -631,7 +631,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                     return .{ .reset_head = .{
                         .action = .update,
                         .ref_or_oid = rf.RefOrOid(hash_kind).initFromUser(target) orelse return null,
-                        .force = cmd_args.map_args.contains("-f"),
+                        .force = cmd_args.contains("-f"),
                     } };
                 },
                 .restore => {
