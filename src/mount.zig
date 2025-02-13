@@ -48,44 +48,6 @@ pub fn indexDiffersFromMount(
     return false;
 }
 
-const DiffersFrom = struct {
-    head: bool,
-    mount: bool,
-};
-
-fn indexDiffersFrom(
-    comptime repo_kind: rp.RepoKind,
-    comptime repo_opts: rp.RepoOpts(repo_kind),
-    core: *rp.Repo(repo_kind, repo_opts).Core,
-    index: *const idx.Index(repo_kind, repo_opts),
-    head_tree: *const st.HeadTree(repo_kind, repo_opts),
-    path: []const u8,
-    meta: std.fs.File.Metadata,
-) !DiffersFrom {
-    var ret = DiffersFrom{
-        .head = false,
-        .mount = false,
-    };
-
-    if (index.entries.get(path)) |*index_entries_for_path| {
-        if (index_entries_for_path[0]) |index_entry| {
-            if (head_tree.entries.get(path)) |head_entry| {
-                if (!index_entry.mode.eql(head_entry.mode) or !std.mem.eql(u8, &index_entry.oid, &head_entry.oid)) {
-                    ret.head = true;
-                }
-            }
-
-            const file = try core.repo_dir.openFile(path, .{ .mode = .read_only });
-            defer file.close();
-            if (try indexDiffersFromMount(repo_kind, repo_opts, &index_entry, file, meta)) {
-                ret.mount = true;
-            }
-        }
-    }
-
-    return ret;
-}
-
 pub fn removePaths(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
@@ -107,13 +69,32 @@ pub fn removePaths(
         };
         switch (meta.kind()) {
             .file => {
+                // if force isn't enabled, do a safety check
                 if (!opts.force) {
-                    const differs_from = try indexDiffersFrom(repo_kind, repo_opts, state.core, &index, &head_tree, path, meta);
-                    if (differs_from.head and differs_from.mount) {
+                    var differs_from_head = false;
+                    var differs_from_mount = false;
+
+                    if (index.entries.get(path)) |*index_entries_for_path| {
+                        if (index_entries_for_path[0]) |index_entry| {
+                            if (head_tree.entries.get(path)) |head_entry| {
+                                if (!index_entry.mode.eql(head_entry.mode) or !std.mem.eql(u8, &index_entry.oid, &head_entry.oid)) {
+                                    differs_from_head = true;
+                                }
+                            }
+
+                            const file = try state.core.repo_dir.openFile(path, .{ .mode = .read_only });
+                            defer file.close();
+                            if (try indexDiffersFromMount(repo_kind, repo_opts, &index_entry, file, meta)) {
+                                differs_from_mount = true;
+                            }
+                        }
+                    }
+
+                    if (differs_from_head and differs_from_mount) {
                         return error.CannotRemoveFileWithStagedAndUnstagedChanges;
-                    } else if (differs_from.head and opts.remove_from_mount) {
+                    } else if (differs_from_head and opts.remove_from_mount) {
                         return error.CannotRemoveFileWithStagedChanges;
-                    } else if (differs_from.mount and opts.remove_from_mount) {
+                    } else if (differs_from_mount and opts.remove_from_mount) {
                         return error.CannotRemoveFileWithUnstagedChanges;
                     }
                 }
