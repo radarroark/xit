@@ -315,7 +315,7 @@ pub fn addPaths(
     try index.write(allocator, state);
 }
 
-/// unadds the given paths from the index
+/// removes the given paths from the index
 pub fn unaddPaths(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
@@ -413,24 +413,6 @@ pub fn removePaths(
     }
 
     try index.write(allocator, state);
-}
-
-pub fn ResetInput(comptime hash_kind: hash.HashKind) type {
-    return struct {
-        head: rf.RefOrOid(hash_kind),
-    };
-}
-
-pub fn resetHead(
-    comptime repo_kind: rp.RepoKind,
-    comptime repo_opts: rp.RepoOpts(repo_kind),
-    state: rp.Repo(repo_kind, repo_opts).State(.read_write),
-    allocator: std.mem.Allocator,
-    input: ResetInput(repo_opts.hash),
-) !void {
-    const target_oid = try rf.readRecur(repo_kind, repo_opts, state.readOnly(), input.head) orelse return error.InvalidRef;
-    var switch_result = try Switch(repo_kind, repo_opts).init(state, allocator, .{ .head = .{ .update = &target_oid }, .force = true });
-    defer switch_result.deinit();
 }
 
 pub fn objectToFile(
@@ -747,10 +729,11 @@ pub fn restore(
 
 pub fn SwitchInput(comptime hash_kind: hash.HashKind) type {
     return struct {
-        head: union(enum) {
-            replace: rf.RefOrOid(hash_kind),
-            update: *const [hash.hexLen(hash_kind)]u8,
+        action: enum {
+            replace,
+            update,
         },
+        ref_or_oid: rf.RefOrOid(hash_kind),
         force: bool = false,
     };
 }
@@ -772,10 +755,7 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
         ) !Switch(repo_kind, repo_opts) {
             // get the current commit and target oid
             const current_oid_maybe = try rf.readHeadMaybe(repo_kind, repo_opts, state.readOnly());
-            const target_oid = switch (input.head) {
-                .replace => |ref_or_oid| (try rf.readRecur(repo_kind, repo_opts, state.readOnly(), ref_or_oid)) orelse return error.InvalidTarget,
-                .update => |oid| oid.*,
-            };
+            const target_oid = try rf.readRecur(repo_kind, repo_opts, state.readOnly(), input.ref_or_oid) orelse return error.InvalidTarget;
 
             // compare the commits
             var tree_diff = tr.TreeDiff(repo_kind, repo_opts).init(allocator);
@@ -807,9 +787,9 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     try index.write(allocator, .{ .core = state.core, .extra = .{ .lock_file_maybe = lock.lock_file } });
 
                     // update HEAD
-                    switch (input.head) {
-                        .replace => |ref_or_oid| try rf.replaceHead(repo_kind, repo_opts, state, ref_or_oid),
-                        .update => |oid| try rf.updateHead(repo_kind, repo_opts, state, oid),
+                    switch (input.action) {
+                        .replace => try rf.replaceHead(repo_kind, repo_opts, state, input.ref_or_oid),
+                        .update => try rf.updateHead(repo_kind, repo_opts, state, &target_oid),
                     }
 
                     // finish lock
@@ -832,9 +812,9 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     try index.write(allocator, state);
 
                     // update HEAD
-                    switch (input.head) {
-                        .replace => |ref_or_oid| try rf.replaceHead(repo_kind, repo_opts, state, ref_or_oid),
-                        .update => |oid| try rf.updateHead(repo_kind, repo_opts, state, oid),
+                    switch (input.action) {
+                        .replace => try rf.replaceHead(repo_kind, repo_opts, state, input.ref_or_oid),
+                        .update => try rf.updateHead(repo_kind, repo_opts, state, &target_oid),
                     }
                 },
             }

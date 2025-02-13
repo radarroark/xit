@@ -106,7 +106,10 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
         defer dest_commit_c.deinit();
     }
 
-    try repo.resetHead(allocator, .{ .head = .{ .oid = &commit_b } });
+    {
+        var result = try repo.switchHead(allocator, .{ .action = .update, .ref_or_oid = .{ .oid = &commit_b } });
+        defer result.deinit();
+    }
 
     {
         const readme = try repo.core.repo_dir.openFile("README.md", .{ .mode = .read_only });
@@ -116,7 +119,10 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
         try std.testing.expectEqualStrings("Goodbye, world!", readme_content);
     }
 
-    try repo.resetHead(allocator, .{ .head = .{ .oid = &commit_a } });
+    {
+        var result = try repo.switchHead(allocator, .{ .action = .update, .ref_or_oid = .{ .oid = &commit_a } });
+        defer result.deinit();
+    }
 
     {
         const readme = try repo.core.repo_dir.openFile("README.md", .{ .mode = .read_only });
@@ -126,7 +132,10 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
         try std.testing.expectEqualStrings("Hello, world!", readme_content);
     }
 
-    try repo.resetHead(allocator, .{ .head = .{ .oid = &commit_c } });
+    {
+        var result = try repo.switchHead(allocator, .{ .action = .update, .ref_or_oid = .{ .oid = &commit_c } });
+        defer result.deinit();
+    }
 
     if (repo.core.repo_dir.openFile("README.md", .{ .mode = .read_only })) |readme| {
         readme.close();
@@ -182,14 +191,14 @@ fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
     _ = try repo.commit(allocator, .{ .message = "b" });
     try repo.addBranch(.{ .name = "foo" });
     {
-        var result = try repo.switchHead(allocator, .{ .head = .{ .replace = .{ .ref = .{ .kind = .head, .name = "foo" } } } });
+        var result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .ref = .{ .kind = .head, .name = "foo" } } });
         defer result.deinit();
     }
     try addFile(repo_kind, repo_opts, &repo, allocator, "foo.md", "d");
     const commit_d = try repo.commit(allocator, .{ .message = "d" });
     try repo.addBranch(.{ .name = "bar" });
     {
-        var result = try repo.switchHead(allocator, .{ .head = .{ .replace = .{ .ref = .{ .kind = .head, .name = "bar" } } } });
+        var result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .ref = .{ .kind = .head, .name = "bar" } } });
         defer result.deinit();
     }
     try addFile(repo_kind, repo_opts, &repo, allocator, "bar.md", "g");
@@ -197,13 +206,13 @@ fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
     try addFile(repo_kind, repo_opts, &repo, allocator, "bar.md", "h");
     const commit_h = try repo.commit(allocator, .{ .message = "h" });
     {
-        var result = try repo.switchHead(allocator, .{ .head = .{ .replace = .{ .ref = .{ .kind = .head, .name = "master" } } } });
+        var result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .ref = .{ .kind = .head, .name = "master" } } });
         defer result.deinit();
     }
     try addFile(repo_kind, repo_opts, &repo, allocator, "master.md", "c");
     _ = try repo.commit(allocator, .{ .message = "c" });
     {
-        var result = try repo.switchHead(allocator, .{ .head = .{ .replace = .{ .ref = .{ .kind = .head, .name = "foo" } } } });
+        var result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .ref = .{ .kind = .head, .name = "foo" } } });
         defer result.deinit();
     }
     try addFile(repo_kind, repo_opts, &repo, allocator, "foo.md", "e");
@@ -211,7 +220,7 @@ fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
     try addFile(repo_kind, repo_opts, &repo, allocator, "foo.md", "f");
     _ = try repo.commit(allocator, .{ .message = "f" });
     {
-        var result = try repo.switchHead(allocator, .{ .head = .{ .replace = .{ .ref = .{ .kind = .head, .name = "master" } } } });
+        var result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .ref = .{ .kind = .head, .name = "master" } } });
         defer result.deinit();
     }
     const commit_j = blk: {
@@ -244,7 +253,7 @@ fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 
     // if we try merging master into foo, it fast forwards
     {
-        var switch_result = try repo.switchHead(allocator, .{ .head = .{ .replace = .{ .ref = .{ .kind = .head, .name = "foo" } } } });
+        var switch_result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .ref = .{ .kind = .head, .name = "foo" } } });
         defer switch_result.deinit();
         var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "master" } }} } } });
         defer merge.deinit();
@@ -345,7 +354,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         );
         _ = try repo.commit(allocator, .{ .message = "b" });
         {
-            var result = try repo.switchHead(allocator, .{ .head = .{ .replace = .{ .ref = .{ .kind = .head, .name = "foo" } } } });
+            var result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .ref = .{ .kind = .head, .name = "foo" } } });
             defer result.deinit();
         }
         try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt",
@@ -355,7 +364,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         );
         _ = try repo.commit(allocator, .{ .message = "c" });
         {
-            var result = try repo.switchHead(allocator, .{ .head = .{ .replace = .{ .ref = .{ .kind = .head, .name = "master" } } } });
+            var result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .ref = .{ .kind = .head, .name = "master" } } });
             defer result.deinit();
         }
         {
@@ -454,7 +463,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         );
         _ = try repo.commit(allocator, .{ .message = "b" });
         {
-            var result = try repo.switchHead(allocator, .{ .head = .{ .replace = .{ .ref = .{ .kind = .head, .name = "foo" } } } });
+            var result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .ref = .{ .kind = .head, .name = "foo" } } });
             defer result.deinit();
         }
         try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt",
@@ -464,7 +473,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         );
         _ = try repo.commit(allocator, .{ .message = "c" });
         {
-            var result = try repo.switchHead(allocator, .{ .head = .{ .replace = .{ .ref = .{ .kind = .head, .name = "master" } } } });
+            var result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .ref = .{ .kind = .head, .name = "master" } } });
             defer result.deinit();
         }
         {
@@ -533,13 +542,13 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt", "2");
         _ = try repo.commit(allocator, .{ .message = "b" });
         {
-            var result = try repo.switchHead(allocator, .{ .head = .{ .replace = .{ .ref = .{ .kind = .head, .name = "foo" } } } });
+            var result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .ref = .{ .kind = .head, .name = "foo" } } });
             defer result.deinit();
         }
         try removeFile(repo_kind, repo_opts, &repo, allocator, "f.txt");
         _ = try repo.commit(allocator, .{ .message = "c" });
         {
-            var result = try repo.switchHead(allocator, .{ .head = .{ .replace = .{ .ref = .{ .kind = .head, .name = "master" } } } });
+            var result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .ref = .{ .kind = .head, .name = "master" } } });
             defer result.deinit();
         }
         {
@@ -608,13 +617,13 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         try removeFile(repo_kind, repo_opts, &repo, allocator, "f.txt");
         _ = try repo.commit(allocator, .{ .message = "b" });
         {
-            var result = try repo.switchHead(allocator, .{ .head = .{ .replace = .{ .ref = .{ .kind = .head, .name = "foo" } } } });
+            var result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .ref = .{ .kind = .head, .name = "foo" } } });
             defer result.deinit();
         }
         try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt", "2");
         _ = try repo.commit(allocator, .{ .message = "c" });
         {
-            var result = try repo.switchHead(allocator, .{ .head = .{ .replace = .{ .ref = .{ .kind = .head, .name = "master" } } } });
+            var result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .ref = .{ .kind = .head, .name = "master" } } });
             defer result.deinit();
         }
         {
@@ -681,13 +690,13 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt", "hi");
         _ = try repo.commit(allocator, .{ .message = "b" });
         {
-            var result = try repo.switchHead(allocator, .{ .head = .{ .replace = .{ .ref = .{ .kind = .head, .name = "foo" } } } });
+            var result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .ref = .{ .kind = .head, .name = "foo" } } });
             defer result.deinit();
         }
         try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt/g.txt", "hi");
         _ = try repo.commit(allocator, .{ .message = "c" });
         {
-            var result = try repo.switchHead(allocator, .{ .head = .{ .replace = .{ .ref = .{ .kind = .head, .name = "master" } } } });
+            var result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .ref = .{ .kind = .head, .name = "master" } } });
             defer result.deinit();
         }
         {
@@ -760,13 +769,13 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt/g.txt", "hi");
         _ = try repo.commit(allocator, .{ .message = "b" });
         {
-            var result = try repo.switchHead(allocator, .{ .head = .{ .replace = .{ .ref = .{ .kind = .head, .name = "foo" } } } });
+            var result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .ref = .{ .kind = .head, .name = "foo" } } });
             defer result.deinit();
         }
         try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt", "hi");
         _ = try repo.commit(allocator, .{ .message = "c" });
         {
-            var result = try repo.switchHead(allocator, .{ .head = .{ .replace = .{ .ref = .{ .kind = .head, .name = "master" } } } });
+            var result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .ref = .{ .kind = .head, .name = "master" } } });
             defer result.deinit();
         }
         {
@@ -867,7 +876,7 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind, comptime repo_op
     try repo.addBranch(.{ .name = "foo" });
 
     {
-        var result = try repo.switchHead(allocator, .{ .head = .{ .replace = .{ .ref = .{ .kind = .head, .name = "foo" } } } });
+        var result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .ref = .{ .kind = .head, .name = "foo" } } });
         defer result.deinit();
     }
 
@@ -877,7 +886,7 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind, comptime repo_op
     _ = try repo.commit(allocator, .{ .message = "c" });
 
     {
-        var result = try repo.switchHead(allocator, .{ .head = .{ .replace = .{ .ref = .{ .kind = .head, .name = "master" } } } });
+        var result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .ref = .{ .kind = .head, .name = "master" } } });
         defer result.deinit();
     }
 
@@ -1008,7 +1017,7 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
         );
         _ = try repo.commit(allocator, .{ .message = "c" });
         {
-            var result = try repo.switchHead(allocator, .{ .head = .{ .replace = .{ .ref = .{ .kind = .head, .name = "foo" } } } });
+            var result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .ref = .{ .kind = .head, .name = "foo" } } });
             defer result.deinit();
         }
         try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt",
@@ -1018,7 +1027,7 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
         );
         _ = try repo.commit(allocator, .{ .message = "d" });
         {
-            var result = try repo.switchHead(allocator, .{ .head = .{ .replace = .{ .ref = .{ .kind = .head, .name = "master" } } } });
+            var result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .ref = .{ .kind = .head, .name = "master" } } });
             defer result.deinit();
         }
         {
@@ -1157,7 +1166,7 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
         );
         _ = try repo.commit(allocator, .{ .message = "c" });
         {
-            var result = try repo.switchHead(allocator, .{ .head = .{ .replace = .{ .ref = .{ .kind = .head, .name = "foo" } } } });
+            var result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .ref = .{ .kind = .head, .name = "foo" } } });
             defer result.deinit();
         }
         try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt",
@@ -1171,7 +1180,7 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
         );
         _ = try repo.commit(allocator, .{ .message = "d" });
         {
-            var result = try repo.switchHead(allocator, .{ .head = .{ .replace = .{ .ref = .{ .kind = .head, .name = "master" } } } });
+            var result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .ref = .{ .kind = .head, .name = "master" } } });
             defer result.deinit();
         }
         {
@@ -1287,7 +1296,7 @@ fn testCherryPick(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOp
     _ = try repo.commit(allocator, .{ .message = "b" });
     try repo.addBranch(.{ .name = "foo" });
     {
-        var result = try repo.switchHead(allocator, .{ .head = .{ .replace = .{ .ref = .{ .kind = .head, .name = "foo" } } } });
+        var result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .ref = .{ .kind = .head, .name = "foo" } } });
         defer result.deinit();
     }
     // commit c will be the parent of the cherry-picked commit,
@@ -1300,7 +1309,7 @@ fn testCherryPick(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOp
     try addFile(repo_kind, repo_opts, &repo, allocator, "readme.md", "e");
     _ = try repo.commit(allocator, .{ .message = "e" });
     {
-        var result = try repo.switchHead(allocator, .{ .head = .{ .replace = .{ .ref = .{ .kind = .head, .name = "master" } } } });
+        var result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .ref = .{ .kind = .head, .name = "master" } } });
         defer result.deinit();
     }
 
@@ -1394,7 +1403,7 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
     _ = try repo.commit(allocator, .{ .message = "b" });
     try repo.addBranch(.{ .name = "foo" });
     {
-        var result = try repo.switchHead(allocator, .{ .head = .{ .replace = .{ .ref = .{ .kind = .head, .name = "foo" } } } });
+        var result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .ref = .{ .kind = .head, .name = "foo" } } });
         defer result.deinit();
     }
     try addFile(repo_kind, repo_opts, &repo, allocator, "readme.md", "c");
@@ -1404,7 +1413,7 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
     try addFile(repo_kind, repo_opts, &repo, allocator, "readme.md", "e");
     _ = try repo.commit(allocator, .{ .message = "e" });
     {
-        var result = try repo.switchHead(allocator, .{ .head = .{ .replace = .{ .ref = .{ .kind = .head, .name = "master" } } } });
+        var result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .ref = .{ .kind = .head, .name = "master" } } });
         defer result.deinit();
     }
     {
@@ -1516,19 +1525,19 @@ fn testLog(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo
     const commit_b = try repo.commit(allocator, .{ .message = "b" });
     try repo.addBranch(.{ .name = "foo" });
     {
-        var result = try repo.switchHead(allocator, .{ .head = .{ .replace = .{ .ref = .{ .kind = .head, .name = "foo" } } } });
+        var result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .ref = .{ .kind = .head, .name = "foo" } } });
         defer result.deinit();
     }
     try addFile(repo_kind, repo_opts, &repo, allocator, "foo.md", "d");
     const commit_d = try repo.commit(allocator, .{ .message = "d" });
     {
-        var result = try repo.switchHead(allocator, .{ .head = .{ .replace = .{ .ref = .{ .kind = .head, .name = "master" } } } });
+        var result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .ref = .{ .kind = .head, .name = "master" } } });
         defer result.deinit();
     }
     try addFile(repo_kind, repo_opts, &repo, allocator, "master.md", "c");
     const commit_c = try repo.commit(allocator, .{ .message = "c" });
     {
-        var result = try repo.switchHead(allocator, .{ .head = .{ .replace = .{ .ref = .{ .kind = .head, .name = "foo" } } } });
+        var result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .ref = .{ .kind = .head, .name = "foo" } } });
         defer result.deinit();
     }
     try addFile(repo_kind, repo_opts, &repo, allocator, "foo.md", "e");
@@ -1536,7 +1545,7 @@ fn testLog(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo
     try addFile(repo_kind, repo_opts, &repo, allocator, "foo.md", "f");
     const commit_f = try repo.commit(allocator, .{ .message = "f" });
     {
-        var result = try repo.switchHead(allocator, .{ .head = .{ .replace = .{ .ref = .{ .kind = .head, .name = "master" } } } });
+        var result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .ref = .{ .kind = .head, .name = "master" } } });
         defer result.deinit();
     }
     const commit_g = blk: {

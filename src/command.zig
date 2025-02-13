@@ -22,8 +22,8 @@ pub const CommandKind = enum {
     status,
     diff,
     branch,
-    reset_head,
     switch_head,
+    reset_head,
     restore,
     log,
     merge,
@@ -156,30 +156,28 @@ fn commandHelp(command_kind: CommandKind) Help {
             \\    xit branch list
             ,
         },
-        .reset_head => .{
-            .name = "reset",
-            .descrip =
-            \\reset current HEAD to branch or commit id
-            \\
-            ,
-            .example =
-            \\(reset to branch)
-            \\    xit reset mybranch
-            \\(reset to oid)
-            \\    xit reset 1a2b3c...
-            \\
-            ,
-        },
         .switch_head => .{
             .name = "switch",
             .descrip =
-            \\switch mount to a branch or commit id
+            \\switch to a branch or commit id
             ,
             .example =
             \\(switch to branch)
             \\    xit switch mybranch
             \\(switch to commit id)
             \\    xit switch a1b2c3...
+            ,
+        },
+        .reset_head => .{
+            .name = "reset",
+            .descrip =
+            \\make the current branch point to a new commit id
+            ,
+            .example =
+            \\(reset current branch to match another branch)
+            \\    xit reset mybranch
+            \\(reset current branch to point to a new commit id)
+            \\    xit reset 1a2b3c...
             ,
         },
         .restore => .{
@@ -396,10 +394,10 @@ pub const CommandArgs = struct {
                 .diff
             else if (std.mem.eql(u8, command_name, "branch"))
                 .branch
-            else if (std.mem.eql(u8, command_name, "reset"))
-                .reset_head
             else if (std.mem.eql(u8, command_name, "switch"))
                 .switch_head
+            else if (std.mem.eql(u8, command_name, "reset"))
+                .reset_head
             else if (std.mem.eql(u8, command_name, "restore"))
                 .restore
             else if (std.mem.eql(u8, command_name, "log"))
@@ -475,8 +473,8 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
             diff_opts: df.BasicDiffOptions(hash_kind),
         },
         branch: bch.BranchCommand,
-        reset_head: mnt.ResetInput(hash_kind),
         switch_head: mnt.SwitchInput(hash_kind),
+        reset_head: mnt.SwitchInput(hash_kind),
         restore: struct {
             path: []const u8,
         },
@@ -616,17 +614,25 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
 
                     return .{ .branch = cmd };
                 },
-                .reset_head => {
-                    if (cmd_args.positional_args.len != 1) return null;
-                    const target = cmd_args.positional_args[0];
-
-                    return .{ .reset_head = .{ .head = rf.RefOrOid(hash_kind).initFromUser(target) orelse return null } };
-                },
                 .switch_head => {
                     if (cmd_args.positional_args.len != 1) return null;
                     const target = cmd_args.positional_args[0];
 
-                    return .{ .switch_head = .{ .head = .{ .replace = rf.RefOrOid(hash_kind).initFromUser(target) orelse return null } } };
+                    return .{ .switch_head = .{
+                        .action = .replace,
+                        .ref_or_oid = rf.RefOrOid(hash_kind).initFromUser(target) orelse return null,
+                        .force = cmd_args.map_args.contains("-f"),
+                    } };
+                },
+                .reset_head => {
+                    if (cmd_args.positional_args.len != 1) return null;
+                    const target = cmd_args.positional_args[0];
+
+                    return .{ .reset_head = .{
+                        .action = .update,
+                        .ref_or_oid = rf.RefOrOid(hash_kind).initFromUser(target) orelse return null,
+                        .force = cmd_args.map_args.contains("-f"),
+                    } };
                 },
                 .restore => {
                     if (cmd_args.positional_args.len != 1) return null;

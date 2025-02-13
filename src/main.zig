@@ -159,8 +159,8 @@ pub fn runPrint(
         error.EmptyCommit => {
             try writers.err.print(
                 \\you haven't added anything to commit yet.
-                \\if you really want to do it, throw caution
-                \\into the wind by adding the --allow-empty flag.
+                \\if you really want to commit anyway, add the
+                \\--allow-empty flag and no one will judge you.
                 \\
             , .{});
             return error.PrintedError;
@@ -372,10 +372,33 @@ fn runCommand(
                 .remove => |rm_branch| try repo.removeBranch(rm_branch),
             }
         },
-        .reset_head => |reset_head_cmd| try repo.resetHead(allocator, reset_head_cmd),
-        .switch_head => |switch_head_cmd| {
+        .switch_head, .reset_head => |switch_head_cmd| {
             var result = try repo.switchHead(allocator, switch_head_cmd);
             defer result.deinit();
+            switch (result) {
+                .success => {},
+                .conflict => |conflict| {
+                    try writers.err.print(
+                        \\conflicts detected in the following file paths.
+                        \\if you really want to do continue, throw caution
+                        \\into the wind by adding the -f flag.
+                        \\
+                    , .{});
+                    for (conflict.stale_files.keys()) |path| {
+                        try writers.err.print("{s}\n", .{path});
+                    }
+                    for (conflict.stale_dirs.keys()) |path| {
+                        try writers.err.print("{s}\n", .{path});
+                    }
+                    for (conflict.untracked_overwritten.keys()) |path| {
+                        try writers.err.print("{s}\n", .{path});
+                    }
+                    for (conflict.untracked_removed.keys()) |path| {
+                        try writers.err.print("{s}\n", .{path});
+                    }
+                    return error.PrintedError;
+                },
+            }
         },
         .restore => |restore_cmd| try repo.restore(allocator, restore_cmd.path),
         .log => {
