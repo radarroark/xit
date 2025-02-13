@@ -66,7 +66,11 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             meta: std.fs.File.Metadata,
         };
 
-        pub fn init(allocator: std.mem.Allocator, state: rp.Repo(repo_kind, repo_opts).State(.read_only)) !Status(repo_kind, repo_opts) {
+        pub fn init(
+            allocator: std.mem.Allocator,
+            state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+            oid_maybe: ?*const [hash.hexLen(repo_opts.hash)]u8,
+        ) !Status(repo_kind, repo_opts) {
             var untracked = std.StringArrayHashMap(Entry).init(allocator);
             errdefer untracked.deinit();
 
@@ -103,7 +107,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
             _ = try addEntries(arena.allocator(), &untracked, &mount_modified, &index, &index_bools, state.core.repo_dir, ".");
 
-            var head_tree = try tr.HeadTree(repo_kind, repo_opts).init(allocator, state);
+            var head_tree = try tr.HeadTree(repo_kind, repo_opts).init(allocator, state, oid_maybe);
             errdefer head_tree.deinit();
 
             // for each entry in the index
@@ -328,7 +332,7 @@ pub fn removePaths(
     var index = try idx.Index(repo_kind, repo_opts).init(allocator, state.readOnly());
     defer index.deinit();
 
-    var head_tree = try tr.HeadTree(repo_kind, repo_opts).init(allocator, state.readOnly());
+    var head_tree = try tr.HeadTree(repo_kind, repo_opts).init(allocator, state.readOnly(), null);
     defer head_tree.deinit();
 
     for (paths) |path| {
@@ -388,6 +392,24 @@ pub fn removePaths(
     }
 
     try index.write(allocator, state);
+}
+
+pub fn ResetInput(comptime hash_kind: hash.HashKind) type {
+    return struct {
+        head: rf.RefOrOid(hash_kind),
+    };
+}
+
+pub fn resetHead(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+    allocator: std.mem.Allocator,
+    input: ResetInput(repo_opts.hash),
+) !void {
+    const target_oid = try rf.readRecur(repo_kind, repo_opts, state.readOnly(), input.head) orelse return error.InvalidRef;
+    var switch_result = try Switch(repo_kind, repo_opts).init(state, allocator, .{ .head = .{ .update = &target_oid }, .force = true });
+    defer switch_result.deinit();
 }
 
 pub fn objectToFile(

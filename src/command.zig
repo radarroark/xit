@@ -22,6 +22,7 @@ pub const CommandKind = enum {
     status,
     diff,
     branch,
+    reset_head,
     switch_head,
     restore,
     log,
@@ -153,6 +154,20 @@ fn commandHelp(command_kind: CommandKind) Help {
             \\    xit branch rm mybranch
             \\(list branches)
             \\    xit branch list
+            ,
+        },
+        .reset_head => .{
+            .name = "reset",
+            .descrip =
+            \\reset current HEAD to branch or commit id
+            \\
+            ,
+            .example =
+            \\(reset to branch)
+            \\    xit reset mybranch
+            \\(reset to oid)
+            \\    xit reset 1a2b3c...
+            \\
             ,
         },
         .switch_head => .{
@@ -381,6 +396,8 @@ pub const CommandArgs = struct {
                 .diff
             else if (std.mem.eql(u8, command_name, "branch"))
                 .branch
+            else if (std.mem.eql(u8, command_name, "reset"))
+                .reset_head
             else if (std.mem.eql(u8, command_name, "switch"))
                 .switch_head
             else if (std.mem.eql(u8, command_name, "restore"))
@@ -458,6 +475,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
             diff_opts: df.BasicDiffOptions(hash_kind),
         },
         branch: bch.BranchCommand,
+        reset_head: mnt.ResetInput(hash_kind),
         switch_head: mnt.SwitchInput(hash_kind),
         restore: struct {
             path: []const u8,
@@ -597,6 +615,12 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                     }
 
                     return .{ .branch = cmd };
+                },
+                .reset_head => {
+                    if (cmd_args.positional_args.len != 1) return null;
+                    const target = cmd_args.positional_args[0];
+
+                    return .{ .reset_head = .{ .head = rf.RefOrOid(hash_kind).initFromUser(target) orelse return null } };
                 },
                 .switch_head => {
                     if (cmd_args.positional_args.len != 1) return null;

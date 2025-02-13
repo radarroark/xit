@@ -372,13 +372,12 @@ fn runCommand(
                 .remove => |rm_branch| try repo.removeBranch(rm_branch),
             }
         },
+        .reset_head => |reset_head_cmd| try repo.resetHead(allocator, reset_head_cmd),
         .switch_head => |switch_head_cmd| {
             var result = try repo.switchHead(allocator, switch_head_cmd);
             defer result.deinit();
         },
-        .restore => |restore_cmd| {
-            try repo.restore(allocator, restore_cmd.path);
-        },
+        .restore => |restore_cmd| try repo.restore(allocator, restore_cmd.path),
         .log => {
             var commit_iter = try repo.log(allocator, null);
             defer commit_iter.deinit();

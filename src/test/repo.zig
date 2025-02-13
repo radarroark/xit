@@ -77,13 +77,15 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
     try oid_set.put(&commit_c, {});
 
     // assert that all commits have been found in the log
-    var commit_iter = try repo.log(allocator, null);
-    defer commit_iter.deinit();
-    while (try commit_iter.next()) |commit_object| {
-        defer commit_object.deinit();
-        _ = oid_set.swapRemove(&commit_object.oid);
+    {
+        var commit_iter = try repo.log(allocator, null);
+        defer commit_iter.deinit();
+        while (try commit_iter.next()) |commit_object| {
+            defer commit_object.deinit();
+            _ = oid_set.swapRemove(&commit_object.oid);
+        }
+        try std.testing.expectEqual(0, oid_set.count());
     }
-    try std.testing.expectEqual(0, oid_set.count());
 
     // copy all objects to a new repo
     {
@@ -102,6 +104,36 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
         defer dest_obj_iter.deinit();
         const dest_commit_c = (try dest_obj_iter.next()) orelse return error.ExpectedObject;
         defer dest_commit_c.deinit();
+    }
+
+    try repo.resetHead(allocator, .{ .head = .{ .oid = &commit_b } });
+
+    {
+        const readme = try repo.core.repo_dir.openFile("README.md", .{ .mode = .read_only });
+        defer readme.close();
+        const readme_content = try readme.readToEndAlloc(allocator, 1024);
+        defer allocator.free(readme_content);
+        try std.testing.expectEqualStrings("Goodbye, world!", readme_content);
+    }
+
+    try repo.resetHead(allocator, .{ .head = .{ .oid = &commit_a } });
+
+    {
+        const readme = try repo.core.repo_dir.openFile("README.md", .{ .mode = .read_only });
+        defer readme.close();
+        const readme_content = try readme.readToEndAlloc(allocator, 1024);
+        defer allocator.free(readme_content);
+        try std.testing.expectEqualStrings("Hello, world!", readme_content);
+    }
+
+    try repo.resetHead(allocator, .{ .head = .{ .oid = &commit_c } });
+
+    if (repo.core.repo_dir.openFile("README.md", .{ .mode = .read_only })) |readme| {
+        readme.close();
+        return error.FileNotExpected;
+    } else |err| switch (err) {
+        error.FileNotFound => {},
+        else => |e| return e,
     }
 }
 

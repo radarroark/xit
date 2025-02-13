@@ -352,7 +352,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            var stat = try mnt.Status(repo_kind, repo_opts).init(ctx.allocator, state.readOnly());
+                            var stat = try mnt.Status(repo_kind, repo_opts).init(ctx.allocator, state.readOnly(), null);
                             defer stat.deinit();
                             ctx.result.* = try obj.writeCommit(repo_kind, repo_opts, state, ctx.allocator, ctx.metadata);
                             try patch.writeAndApplyPatches(repo_opts, state, ctx.allocator, &stat, ctx.result);
@@ -590,7 +590,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
         pub fn status(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator) !mnt.Status(repo_kind, repo_opts) {
             var moment = try self.core.latestMoment();
             const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
-            return try mnt.Status(repo_kind, repo_opts).init(allocator, state);
+            return try mnt.Status(repo_kind, repo_opts).init(allocator, state, null);
         }
 
         pub fn filePair(
@@ -675,6 +675,31 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     try history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
                         Ctx{ .core = &self.core, .input = input },
+                    );
+                },
+            }
+        }
+
+        pub fn resetHead(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: mnt.ResetInput(repo_opts.hash)) !void {
+            switch (repo_kind) {
+                .git => try mnt.resetHead(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, allocator, input),
+                .xit => {
+                    const Ctx = struct {
+                        core: *Repo(repo_kind, repo_opts).Core,
+                        allocator: std.mem.Allocator,
+                        input: mnt.ResetInput(repo_opts.hash),
+
+                        pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
+                            var moment = try DB.HashMap(.read_write).init(cursor.*);
+                            const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
+                            try mnt.resetHead(repo_kind, repo_opts, state, ctx.allocator, ctx.input);
+                        }
+                    };
+
+                    const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
+                    try history.appendContext(
+                        .{ .slot = try history.getSlot(-1) },
+                        Ctx{ .core = &self.core, .allocator = allocator, .input = input },
                     );
                 },
             }

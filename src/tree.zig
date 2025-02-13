@@ -174,7 +174,11 @@ pub fn HeadTree(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts
         arena: *std.heap.ArenaAllocator,
         allocator: std.mem.Allocator,
 
-        pub fn init(allocator: std.mem.Allocator, state: rp.Repo(repo_kind, repo_opts).State(.read_only)) !HeadTree(repo_kind, repo_opts) {
+        pub fn init(
+            allocator: std.mem.Allocator,
+            state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+            oid_maybe: ?*const [hash.hexLen(repo_opts.hash)]u8,
+        ) !HeadTree(repo_kind, repo_opts) {
             const arena = try allocator.create(std.heap.ArenaAllocator);
             arena.* = std.heap.ArenaAllocator.init(allocator);
             var tree = HeadTree(repo_kind, repo_opts){
@@ -184,12 +188,11 @@ pub fn HeadTree(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts
             };
             errdefer tree.deinit();
 
-            // if head points to a valid object, read it
-            if (try rf.readHeadMaybe(repo_kind, repo_opts, state)) |head_file_buffer| {
-                var commit_object = try obj.Object(repo_kind, repo_opts, .full).init(allocator, state, &head_file_buffer);
-                defer commit_object.deinit();
-                try tree.read(state, "", &commit_object.content.commit.tree);
-            }
+            const oid = oid_maybe orelse &(try rf.readHeadMaybe(repo_kind, repo_opts, state) orelse return tree);
+
+            var commit_object = try obj.Object(repo_kind, repo_opts, .full).init(allocator, state, oid);
+            defer commit_object.deinit();
+            try tree.read(state, "", &commit_object.content.commit.tree);
 
             return tree;
         }
