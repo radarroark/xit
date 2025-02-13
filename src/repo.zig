@@ -5,7 +5,7 @@ const cmd = @import("./command.zig");
 const idx = @import("./index.zig");
 const st = @import("./status.zig");
 const bch = @import("./branch.zig");
-const res = @import("./restore.zig");
+const mnt = @import("./mount.zig");
 const rf = @import("./ref.zig");
 const fs = @import("./fs.zig");
 const df = @import("./diff.zig");
@@ -504,7 +504,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         try index.addOrRemovePath(.{ .core = &self.core, .extra = .{} }, path_parts, .rm);
 
                         // iterate over the HEAD entries and add them to the index
-                        if (try res.headTreeEntry(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, allocator, path_parts)) |*tree_entry| {
+                        if (try mnt.headTreeEntry(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, allocator, path_parts)) |*tree_entry| {
                             try index.addTreeEntry(.{ .core = &self.core, .extra = .{} }, allocator, tree_entry, path_parts);
                         }
                     }
@@ -536,7 +536,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                                 try index.addOrRemovePath(state, path_parts, .rm);
 
                                 // iterate over the HEAD entries and add them to the index
-                                if (try res.headTreeEntry(repo_kind, repo_opts, state.readOnly(), ctx.allocator, path_parts)) |*tree_entry| {
+                                if (try mnt.headTreeEntry(repo_kind, repo_opts, state.readOnly(), ctx.allocator, path_parts)) |*tree_entry| {
                                     try index.addTreeEntry(state.readOnly(), ctx.allocator, tree_entry, path_parts);
                                 }
                             }
@@ -784,22 +784,22 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
-        pub fn switchHead(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: res.SwitchInput(repo_opts.hash)) !res.Switch(repo_kind, repo_opts) {
+        pub fn switchHead(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: mnt.SwitchInput(repo_opts.hash)) !mnt.Switch(repo_kind, repo_opts) {
             switch (repo_kind) {
-                .git => return try res.Switch(repo_kind, repo_opts).init(.{ .core = &self.core, .extra = .{} }, allocator, input),
+                .git => return try mnt.Switch(repo_kind, repo_opts).init(.{ .core = &self.core, .extra = .{} }, allocator, input),
                 .xit => {
-                    var result: res.Switch(repo_kind, repo_opts) = undefined;
+                    var result: mnt.Switch(repo_kind, repo_opts) = undefined;
 
                     const Ctx = struct {
                         core: *Repo(repo_kind, repo_opts).Core,
                         allocator: std.mem.Allocator,
-                        input: res.SwitchInput(repo_opts.hash),
-                        result: *res.Switch(repo_kind, repo_opts),
+                        input: mnt.SwitchInput(repo_opts.hash),
+                        result: *mnt.Switch(repo_kind, repo_opts),
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            ctx.result.* = try res.Switch(repo_kind, repo_opts).init(state, ctx.allocator, ctx.input);
+                            ctx.result.* = try mnt.Switch(repo_kind, repo_opts).init(state, ctx.allocator, ctx.input);
                         }
                     };
 
@@ -823,7 +823,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             const path_parts = try fs.splitPath(allocator, rel_path);
             defer allocator.free(path_parts);
 
-            try res.restore(repo_kind, repo_opts, state, allocator, path_parts);
+            try mnt.restore(repo_kind, repo_opts, state, allocator, path_parts);
         }
 
         pub fn log(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, start_oids_maybe: ?[]const [hash.hexLen(repo_opts.hash)]u8) !obj.ObjectIterator(repo_kind, repo_opts, .full) {

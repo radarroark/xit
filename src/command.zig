@@ -10,7 +10,7 @@ const cfg = @import("./config.zig");
 const bch = @import("./branch.zig");
 const rf = @import("./ref.zig");
 const hash = @import("./hash.zig");
-const res = @import("./restore.zig");
+const mnt = @import("./mount.zig");
 const tag = @import("./tag.zig");
 
 pub const CommandKind = enum {
@@ -460,7 +460,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
             diff_opts: df.BasicDiffOptions(hash_kind),
         },
         branch: bch.BranchCommand,
-        switch_head: res.SwitchInput(hash_kind),
+        switch_head: mnt.SwitchInput(hash_kind),
         restore: struct {
             path: []const u8,
         },
