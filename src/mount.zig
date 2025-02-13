@@ -8,13 +8,13 @@ const fs = @import("./fs.zig");
 const rp = @import("./repo.zig");
 const tr = @import("./tree.zig");
 
-pub const IndexKind = enum {
+pub const IndexStatusKind = enum {
     added,
     not_added,
     not_tracked,
 };
 
-pub const StatusKind = union(IndexKind) {
+pub const StatusKind = union(IndexStatusKind) {
     added: enum {
         created,
         modified,
