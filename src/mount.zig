@@ -87,7 +87,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             var index_bools = try allocator.alloc(bool, index.entries.count());
             defer allocator.free(index_bools);
 
-            _ = try addEntries(arena.allocator(), &untracked, &mount_modified, index, &index_bools, state.core.repo_dir, ".");
+            _ = try addEntries(arena.allocator(), &untracked, &mount_modified, &index, &index_bools, state.core.repo_dir, ".");
 
             var head_tree = try tr.HeadTree(repo_kind, repo_opts).init(allocator, state);
             errdefer head_tree.deinit();
@@ -156,7 +156,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             allocator: std.mem.Allocator,
             untracked: *std.StringArrayHashMap(Status(repo_kind, repo_opts).Entry),
             modified: *std.StringArrayHashMap(Status(repo_kind, repo_opts).Entry),
-            index: idx.Index(repo_kind, repo_opts),
+            index: *const idx.Index(repo_kind, repo_opts),
             index_bools: *[]bool,
             repo_dir: std.fs.Dir,
             path: []const u8,
@@ -499,7 +499,7 @@ fn untrackedParent(
     comptime repo_opts: rp.RepoOpts(repo_kind),
     repo_dir: std.fs.Dir,
     path: []const u8,
-    index: idx.Index(repo_kind, repo_opts),
+    index: *const idx.Index(repo_kind, repo_opts),
 ) ?[]const u8 {
     var parent = path;
     while (std.fs.path.dirname(parent)) |next_parent| {
@@ -521,7 +521,7 @@ fn untrackedFile(
     allocator: std.mem.Allocator,
     repo_dir: std.fs.Dir,
     path: []const u8,
-    index: idx.Index(repo_kind, repo_opts),
+    index: *const idx.Index(repo_kind, repo_opts),
 ) !bool {
     const meta = try fs.getMetadata(repo_dir, path);
     switch (meta.kind()) {
@@ -587,7 +587,7 @@ pub fn migrate(
                     error.FileNotFound, error.NotDir => {
                         // if the path doesn't exist in the mount,
                         // but one of its parents *does* exist and isn't tracked
-                        if (untrackedParent(repo_kind, repo_opts, state.core.repo_dir, path, index.*)) |_| {
+                        if (untrackedParent(repo_kind, repo_opts, state.core.repo_dir, path, index)) |_| {
                             result.setConflict(allocator);
                             if (entry_maybe) |_| {
                                 try result.conflict.stale_files.put(path, {});
@@ -619,7 +619,7 @@ pub fn migrate(
                     },
                     .directory => {
                         // if the path is a dir with a descendent that isn't in the index
-                        if (try untrackedFile(repo_kind, repo_opts, allocator, state.core.repo_dir, path, index.*)) {
+                        if (try untrackedFile(repo_kind, repo_opts, allocator, state.core.repo_dir, path, index)) {
                             result.setConflict(allocator);
                             if (entry_maybe) |_| {
                                 try result.conflict.stale_files.put(path, {});

@@ -183,7 +183,7 @@ fn addIndexEntries(
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
     allocator: std.mem.Allocator,
     tree: *tr.Tree,
-    index: idx.Index(repo_kind, repo_opts),
+    index: *const idx.Index(repo_kind, repo_opts),
     prefix: []const u8,
     entries: [][]const u8,
 ) !void {
@@ -306,7 +306,7 @@ pub fn writeCommit(
     // create tree and add index entries
     var tree = tr.Tree.init(allocator);
     defer tree.deinit();
-    try addIndexEntries(repo_kind, repo_opts, state, allocator, &tree, index, "", index.root_children.keys());
+    try addIndexEntries(repo_kind, repo_opts, state, allocator, &tree, &index, "", index.root_children.keys());
 
     // write and hash tree
     var tree_hash_bytes_buffer = [_]u8{0} ** hash.byteLen(repo_opts.hash);
