@@ -9,11 +9,11 @@ const ui_diff = @import("./diff.zig");
 const ui_root = @import("./root.zig");
 const rp = @import("../repo.zig");
 const hash = @import("../hash.zig");
-const st = @import("../status.zig");
+const mnt = @import("../mount.zig");
 const df = @import("../diff.zig");
 
 pub const StatusItem = struct {
-    kind: st.StatusKind,
+    kind: mnt.StatusKind,
     path: []const u8,
 };
 
@@ -213,9 +213,9 @@ pub fn StatusTabs(comptime Widget: type, comptime repo_kind: rp.RepoKind, compti
         arena: *std.heap.ArenaAllocator,
         allocator: std.mem.Allocator,
 
-        const tab_count = @typeInfo(st.IndexKind).Enum.fields.len;
+        const tab_count = @typeInfo(mnt.IndexKind).Enum.fields.len;
 
-        pub fn init(allocator: std.mem.Allocator, status: *st.Status(repo_kind, repo_opts)) !StatusTabs(Widget, repo_kind, repo_opts) {
+        pub fn init(allocator: std.mem.Allocator, status: *mnt.Status(repo_kind, repo_opts)) !StatusTabs(Widget, repo_kind, repo_opts) {
             var box = try wgt.Box(Widget).init(allocator, null, .horiz);
             errdefer box.deinit();
 
@@ -232,10 +232,10 @@ pub fn StatusTabs(comptime Widget: type, comptime repo_kind: rp.RepoKind, compti
                 status.untracked.count(),
             };
 
-            var selected_maybe: ?st.IndexKind = null;
+            var selected_maybe: ?mnt.IndexKind = null;
 
-            inline for (@typeInfo(st.IndexKind).Enum.fields, 0..) |field, i| {
-                const index_kind: st.IndexKind = @enumFromInt(field.value);
+            inline for (@typeInfo(mnt.IndexKind).Enum.fields, 0..) |field, i| {
+                const index_kind: mnt.IndexKind = @enumFromInt(field.value);
                 if (selected_maybe == null and counts[i] > 0) {
                     selected_maybe = index_kind;
                 }
@@ -331,12 +331,12 @@ pub fn StatusContent(comptime Widget: type, comptime repo_kind: rp.RepoKind, com
         box: wgt.Box(Widget),
         filtered_statuses: std.ArrayList(StatusItem),
         repo: *rp.Repo(repo_kind, repo_opts),
-        status: *st.Status(repo_kind, repo_opts),
+        status: *mnt.Status(repo_kind, repo_opts),
         allocator: std.mem.Allocator,
 
         const FocusKind = enum { status_list, diff };
 
-        pub fn init(allocator: std.mem.Allocator, repo: *rp.Repo(repo_kind, repo_opts), status: *st.Status(repo_kind, repo_opts), selected: st.IndexKind) !StatusContent(Widget, repo_kind, repo_opts) {
+        pub fn init(allocator: std.mem.Allocator, repo: *rp.Repo(repo_kind, repo_opts), status: *mnt.Status(repo_kind, repo_opts), selected: mnt.IndexKind) !StatusContent(Widget, repo_kind, repo_opts) {
             var filtered_statuses = std.ArrayList(StatusItem).init(allocator);
             errdefer filtered_statuses.deinit();
 
@@ -526,7 +526,7 @@ pub fn StatusContent(comptime Widget: type, comptime repo_kind: rp.RepoKind, com
 pub fn Status(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return struct {
         box: wgt.Box(Widget),
-        status: *st.Status(repo_kind, repo_opts),
+        status: *mnt.Status(repo_kind, repo_opts),
         allocator: std.mem.Allocator,
 
         const FocusKind = enum { status_tabs, status_content };
@@ -536,7 +536,7 @@ pub fn Status(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime r
             errdefer status.deinit();
 
             // put Status object on the heap so the pointer is stable
-            const status_ptr = try allocator.create(st.Status(repo_kind, repo_opts));
+            const status_ptr = try allocator.create(mnt.Status(repo_kind, repo_opts));
             errdefer allocator.destroy(status_ptr);
             status_ptr.* = status;
 
@@ -556,8 +556,8 @@ pub fn Status(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime r
                         var stack = wgt.Stack(Widget).init(allocator);
                         errdefer stack.deinit();
 
-                        inline for (@typeInfo(st.IndexKind).Enum.fields) |index_kind_field| {
-                            const index_kind: st.IndexKind = @enumFromInt(index_kind_field.value);
+                        inline for (@typeInfo(mnt.IndexKind).Enum.fields) |index_kind_field| {
+                            const index_kind: mnt.IndexKind = @enumFromInt(index_kind_field.value);
                             var status_content = try StatusContent(Widget, repo_kind, repo_opts).init(allocator, repo, status_ptr, index_kind);
                             errdefer status_content.deinit();
                             try stack.children.put(status_content.getFocus().id, .{ .ui_status_content = status_content });

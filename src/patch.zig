@@ -1,7 +1,7 @@
 const std = @import("std");
 const rp = @import("./repo.zig");
 const hash = @import("./hash.zig");
-const st = @import("./status.zig");
+const mnt = @import("./mount.zig");
 const df = @import("./diff.zig");
 const rf = @import("./ref.zig");
 
@@ -454,7 +454,7 @@ pub fn writeAndApplyPatches(
     comptime repo_opts: rp.RepoOpts(.xit),
     state: rp.Repo(.xit, repo_opts).State(.read_write),
     allocator: std.mem.Allocator,
-    status: *st.Status(.xit, repo_opts),
+    status: *mnt.Status(.xit, repo_opts),
     commit_oid: *const [hash.hexLen(repo_opts.hash)]u8,
 ) !void {
     // get current branch name

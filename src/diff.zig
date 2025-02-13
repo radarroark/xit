@@ -1,10 +1,11 @@
 const std = @import("std");
 const rp = @import("./repo.zig");
-const st = @import("./status.zig");
+const mnt = @import("./mount.zig");
 const hash = @import("./hash.zig");
 const fs = @import("./fs.zig");
 const idx = @import("./index.zig");
 const obj = @import("./object.zig");
+const tr = @import("./tree.zig");
 
 pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return struct {
@@ -99,7 +100,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
             return iter;
         }
 
-        pub fn initFromHead(state: rp.Repo(repo_kind, repo_opts).State(.read_only), allocator: std.mem.Allocator, path: []const u8, entry: obj.TreeEntry(repo_opts.hash)) !LineIterator(repo_kind, repo_opts) {
+        pub fn initFromHead(state: rp.Repo(repo_kind, repo_opts).State(.read_only), allocator: std.mem.Allocator, path: []const u8, entry: tr.TreeEntry(repo_opts.hash)) !LineIterator(repo_kind, repo_opts) {
             const oid_hex = std.fmt.bytesToHex(&entry.oid, .lower);
             var object_reader = try obj.ObjectReader(repo_kind, repo_opts).init(allocator, state, &oid_hex);
             errdefer object_reader.deinit();
@@ -1244,13 +1245,13 @@ pub fn DiffOptions(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoO
     return union(DiffKind) {
         mount: struct {
             conflict_diff_kind: ConflictDiffKind,
-            status: *st.Status(repo_kind, repo_opts),
+            status: *mnt.Status(repo_kind, repo_opts),
         },
         index: struct {
-            status: *st.Status(repo_kind, repo_opts),
+            status: *mnt.Status(repo_kind, repo_opts),
         },
         tree: struct {
-            tree_diff: *obj.TreeDiff(repo_kind, repo_opts),
+            tree_diff: *tr.TreeDiff(repo_kind, repo_opts),
         },
     };
 }
@@ -1265,8 +1266,8 @@ pub fn LineIteratorPair(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             allocator: std.mem.Allocator,
             state: rp.Repo(repo_kind, repo_opts).State(.read_only),
             path: []const u8,
-            status_kind: st.StatusKind,
-            stat: *st.Status(repo_kind, repo_opts),
+            status_kind: mnt.StatusKind,
+            stat: *mnt.Status(repo_kind, repo_opts),
         ) !LineIteratorPair(repo_kind, repo_opts) {
             switch (status_kind) {
                 .added => |added| {

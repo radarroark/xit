@@ -6,6 +6,7 @@ const obj = @import("./object.zig");
 const hash = @import("./hash.zig");
 const fs = @import("./fs.zig");
 const rp = @import("./repo.zig");
+const tr = @import("./tree.zig");
 
 pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return struct {
@@ -330,7 +331,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
             try self.root_children.put(child, {});
         }
 
-        pub fn addConflictEntries(self: *Index(repo_kind, repo_opts), path: []const u8, tree_entries: [3]?obj.TreeEntry(repo_opts.hash)) !void {
+        pub fn addConflictEntries(self: *Index(repo_kind, repo_opts), path: []const u8, tree_entries: [3]?tr.TreeEntry(repo_opts.hash)) !void {
             const path_parts = try fs.splitPath(self.allocator, path);
             defer self.allocator.free(path_parts);
             for (tree_entries, 1..) |tree_entry_maybe, stage| {
@@ -344,7 +345,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
             self: *Index(repo_kind, repo_opts),
             state: rp.Repo(repo_kind, repo_opts).State(.read_only),
             allocator: std.mem.Allocator,
-            tree_entry: *const obj.TreeEntry(repo_opts.hash),
+            tree_entry: *const tr.TreeEntry(repo_opts.hash),
             path_parts: []const []const u8,
         ) !void {
             const oid_hex = std.fmt.bytesToHex(tree_entry.oid, .lower);
@@ -368,7 +369,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 
         pub fn addTreeEntryFile(
             self: *Index(repo_kind, repo_opts),
-            tree_entry: *const obj.TreeEntry(repo_opts.hash),
+            tree_entry: *const tr.TreeEntry(repo_opts.hash),
             path_parts: []const []const u8,
             file_size: u64,
             stage: u2,

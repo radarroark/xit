@@ -10,6 +10,7 @@ const rp = @import("../repo.zig");
 const hash = @import("../hash.zig");
 const df = @import("../diff.zig");
 const obj = @import("../object.zig");
+const tr = @import("../tree.zig");
 
 pub fn LogCommitList(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return struct {
@@ -335,7 +336,7 @@ pub fn Log(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime repo
                 var diff = &self.box.children.values()[1].widget.ui_diff;
                 try diff.clearDiffs();
 
-                const tree_diff = try diff.iter_arena.allocator().create(obj.TreeDiff(repo_kind, repo_opts));
+                const tree_diff = try diff.iter_arena.allocator().create(tr.TreeDiff(repo_kind, repo_opts));
                 tree_diff.* = try self.repo.treeDiff(diff.iter_arena.allocator(), parent_oid_maybe, commit_oid);
 
                 diff.file_iter = try self.repo.filePairs(diff.iter_arena.allocator(), .{ .tree = .{ .tree_diff = tree_diff } });

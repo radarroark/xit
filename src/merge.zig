@@ -7,6 +7,7 @@ const mnt = @import("./mount.zig");
 const fs = @import("./fs.zig");
 const rp = @import("./repo.zig");
 const df = @import("./diff.zig");
+const tr = @import("./tree.zig");
 
 fn getDescendent(
     comptime repo_kind: rp.RepoKind,
@@ -193,15 +194,15 @@ pub fn commonAncestor(
 pub fn RenamedEntry(comptime hash_kind: hash.HashKind) type {
     return struct {
         path: []const u8,
-        tree_entry: obj.TreeEntry(hash_kind),
+        tree_entry: tr.TreeEntry(hash_kind),
     };
 }
 
 pub fn MergeConflict(comptime hash_kind: hash.HashKind) type {
     return struct {
-        base: ?obj.TreeEntry(hash_kind),
-        target: ?obj.TreeEntry(hash_kind),
-        source: ?obj.TreeEntry(hash_kind),
+        base: ?tr.TreeEntry(hash_kind),
+        target: ?tr.TreeEntry(hash_kind),
+        source: ?tr.TreeEntry(hash_kind),
         renamed: ?RenamedEntry(hash_kind),
     };
 }
@@ -1103,7 +1104,7 @@ fn writeBlobWithPatches(
 
 pub fn SamePathConflictResult(comptime hash_kind: hash.HashKind) type {
     return struct {
-        change: ?obj.Change(hash_kind),
+        change: ?tr.Change(hash_kind),
         conflict: ?MergeConflict(hash_kind),
     };
 }
@@ -1118,8 +1119,8 @@ fn samePathConflict(
     source_oid: *const [hash.hexLen(repo_opts.hash)]u8,
     target_name: []const u8,
     source_name: []const u8,
-    target_change_maybe: ?obj.Change(repo_opts.hash),
-    source_change: obj.Change(repo_opts.hash),
+    target_change_maybe: ?tr.Change(repo_opts.hash),
+    source_change: tr.Change(repo_opts.hash),
     path: []const u8,
     merge_algo: MergeAlgorithm,
 ) !SamePathConflictResult(repo_opts.hash) {
@@ -1233,11 +1234,11 @@ fn fileDirConflict(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     path: []const u8,
-    diff: *obj.TreeDiff(repo_kind, repo_opts),
+    diff: *tr.TreeDiff(repo_kind, repo_opts),
     diff_kind: enum { target, source },
     branch_name: []const u8,
     conflicts: *std.StringArrayHashMap(MergeConflict(repo_opts.hash)),
-    clean_diff: *obj.TreeDiff(repo_kind, repo_opts),
+    clean_diff: *tr.TreeDiff(repo_kind, repo_opts),
 ) !void {
     var parent_path_maybe = std.fs.path.dirname(path);
     while (parent_path_maybe) |parent_path| {
@@ -1314,7 +1315,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
     return struct {
         arena: *std.heap.ArenaAllocator,
         allocator: std.mem.Allocator,
-        changes: std.StringArrayHashMap(obj.Change(repo_opts.hash)),
+        changes: std.StringArrayHashMap(tr.Change(repo_opts.hash)),
         auto_resolved_conflicts: std.StringArrayHashMap(void),
         base_oid: [hash.hexLen(repo_opts.hash)]u8,
         target_name: []const u8,
@@ -1350,7 +1351,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 
             // init the diff that we will use for the migration and the conflicts maps.
             // they're using the arena because they'll be included in the result.
-            var clean_diff = obj.TreeDiff(repo_kind, repo_opts).init(arena.allocator());
+            var clean_diff = tr.TreeDiff(repo_kind, repo_opts).init(arena.allocator());
             var auto_resolved_conflicts = std.StringArrayHashMap(void).init(arena.allocator());
             var conflicts = std.StringArrayHashMap(MergeConflict(repo_opts.hash)).init(arena.allocator());
 
@@ -1454,11 +1455,11 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     }
 
                     // diff the base ancestor with the target oid
-                    var target_diff = obj.TreeDiff(repo_kind, repo_opts).init(arena.allocator());
+                    var target_diff = tr.TreeDiff(repo_kind, repo_opts).init(arena.allocator());
                     try target_diff.compare(state.readOnly(), base_oid, target_oid, null);
 
                     // diff the base ancestor with the source oid
-                    var source_diff = obj.TreeDiff(repo_kind, repo_opts).init(arena.allocator());
+                    var source_diff = tr.TreeDiff(repo_kind, repo_opts).init(arena.allocator());
                     try source_diff.compare(state.readOnly(), base_oid, source_oid, null);
 
                     // look for same path conflicts while populating the clean diff

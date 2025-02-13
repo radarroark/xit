@@ -3,7 +3,6 @@ const hash = @import("./hash.zig");
 const obj = @import("./object.zig");
 const cmd = @import("./command.zig");
 const idx = @import("./index.zig");
-const st = @import("./status.zig");
 const bch = @import("./branch.zig");
 const mnt = @import("./mount.zig");
 const rf = @import("./ref.zig");
@@ -14,6 +13,7 @@ const cfg = @import("./config.zig");
 const net = @import("./net.zig");
 const chunk = @import("./chunk.zig");
 const tag = @import("./tag.zig");
+const tr = @import("./tree.zig");
 
 pub const RepoKind = enum {
     git,
@@ -352,7 +352,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            var stat = try st.Status(repo_kind, repo_opts).init(ctx.allocator, state.readOnly());
+                            var stat = try mnt.Status(repo_kind, repo_opts).init(ctx.allocator, state.readOnly());
                             defer stat.deinit();
                             ctx.result.* = try obj.writeCommit(repo_kind, repo_opts, state, ctx.allocator, ctx.metadata);
                             try patch.writeAndApplyPatches(repo_opts, state, ctx.allocator, &stat, ctx.result);
@@ -608,18 +608,18 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
-        pub fn status(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator) !st.Status(repo_kind, repo_opts) {
+        pub fn status(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator) !mnt.Status(repo_kind, repo_opts) {
             var moment = try self.core.latestMoment();
             const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
-            return try st.Status(repo_kind, repo_opts).init(allocator, state);
+            return try mnt.Status(repo_kind, repo_opts).init(allocator, state);
         }
 
         pub fn filePair(
             self: *Repo(repo_kind, repo_opts),
             allocator: std.mem.Allocator,
             path: []const u8,
-            status_kind: st.StatusKind,
-            stat: *st.Status(repo_kind, repo_opts),
+            status_kind: mnt.StatusKind,
+            stat: *mnt.Status(repo_kind, repo_opts),
         ) !df.LineIteratorPair(repo_kind, repo_opts) {
             var moment = try self.core.latestMoment();
             const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
@@ -632,10 +632,10 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             return try df.FileIterator(repo_kind, repo_opts).init(allocator, state, diff_opts);
         }
 
-        pub fn treeDiff(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, old_oid_maybe: ?[hash.hexLen(repo_opts.hash)]u8, new_oid_maybe: ?[hash.hexLen(repo_opts.hash)]u8) !obj.TreeDiff(repo_kind, repo_opts) {
+        pub fn treeDiff(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, old_oid_maybe: ?[hash.hexLen(repo_opts.hash)]u8, new_oid_maybe: ?[hash.hexLen(repo_opts.hash)]u8) !tr.TreeDiff(repo_kind, repo_opts) {
             var moment = try self.core.latestMoment();
             const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
-            var tree_diff = obj.TreeDiff(repo_kind, repo_opts).init(allocator);
+            var tree_diff = tr.TreeDiff(repo_kind, repo_opts).init(allocator);
             errdefer tree_diff.deinit();
             try tree_diff.compare(state, old_oid_maybe, new_oid_maybe, null);
             return tree_diff;

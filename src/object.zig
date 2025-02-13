@@ -1,7 +1,3 @@
-//! an object is a file or dir stored in the repo.
-//! at least, that's how i think of it. it's a
-//! pretty generic name. may as well call it thing.
-
 const std = @import("std");
 const hash = @import("./hash.zig");
 const idx = @import("./index.zig");
@@ -12,37 +8,7 @@ const pack = @import("./pack.zig");
 const chunk = @import("./chunk.zig");
 const cfg = @import("./config.zig");
 const tag = @import("./tag.zig");
-
-pub const Tree = struct {
-    entries: std.StringArrayHashMap([]const u8),
-    allocator: std.mem.Allocator,
-
-    pub fn init(allocator: std.mem.Allocator) Tree {
-        return .{
-            .entries = std.StringArrayHashMap([]const u8).init(allocator),
-            .allocator = allocator,
-        };
-    }
-
-    pub fn deinit(self: *Tree) void {
-        for (self.entries.values()) |entry| {
-            self.allocator.free(entry);
-        }
-        self.entries.deinit();
-    }
-
-    pub fn addBlobEntry(self: *Tree, mode: fs.Mode, name: []const u8, oid: []const u8) !void {
-        const entry = try std.fmt.allocPrint(self.allocator, "{s} {s}\x00{s}", .{ mode.toStr(), name, oid });
-        errdefer self.allocator.free(entry);
-        try self.entries.put(name, entry);
-    }
-
-    pub fn addTreeEntry(self: *Tree, name: []const u8, oid: []const u8) !void {
-        const entry = try std.fmt.allocPrint(self.allocator, "40000 {s}\x00{s}", .{ name, oid });
-        errdefer self.allocator.free(entry);
-        try self.entries.put(name, entry);
-    }
-};
+const tr = @import("./tree.zig");
 
 fn compressZlib(comptime read_size: usize, in: std.fs.File, out: std.fs.File) !void {
     // init stream from input file
@@ -135,7 +101,7 @@ fn writeTree(
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
     allocator: std.mem.Allocator,
-    tree: *Tree,
+    tree: *tr.Tree,
     hash_bytes_buffer: *[hash.byteLen(repo_opts.hash)]u8,
 ) !void {
     // sort the entries. this is needed for xit,
@@ -216,7 +182,7 @@ fn addIndexEntries(
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
     allocator: std.mem.Allocator,
-    tree: *Tree,
+    tree: *tr.Tree,
     index: idx.Index(repo_kind, repo_opts),
     prefix: []const u8,
     entries: [][]const u8,
@@ -228,7 +194,7 @@ fn addIndexEntries(
             const entry = entries_for_path[0] orelse return error.NullEntry;
             try tree.addBlobEntry(entry.mode, name, &entry.oid);
         } else if (index.dir_to_children.get(path)) |children| {
-            var subtree = Tree.init(allocator);
+            var subtree = tr.Tree.init(allocator);
             defer subtree.deinit();
 
             var child_names = std.ArrayList([]const u8).init(allocator);
@@ -338,7 +304,7 @@ pub fn writeCommit(
     defer index.deinit();
 
     // create tree and add index entries
-    var tree = Tree.init(allocator);
+    var tree = tr.Tree.init(allocator);
     defer tree.deinit();
     try addIndexEntries(repo_kind, repo_opts, state, allocator, &tree, index, "", index.root_children.keys());
 
@@ -566,108 +532,6 @@ pub fn writeTag(
     return std.fmt.bytesToHex(tag_hash_bytes_buffer, .lower);
 }
 
-pub fn Change(comptime hash_kind: hash.HashKind) type {
-    return struct {
-        old: ?TreeEntry(hash_kind),
-        new: ?TreeEntry(hash_kind),
-    };
-}
-
-pub fn TreeDiff(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
-    return struct {
-        changes: std.StringArrayHashMap(Change(repo_opts.hash)),
-        arena: std.heap.ArenaAllocator,
-
-        pub fn init(allocator: std.mem.Allocator) TreeDiff(repo_kind, repo_opts) {
-            return .{
-                .changes = std.StringArrayHashMap(Change(repo_opts.hash)).init(allocator),
-                .arena = std.heap.ArenaAllocator.init(allocator),
-            };
-        }
-
-        pub fn deinit(self: *TreeDiff(repo_kind, repo_opts)) void {
-            self.changes.deinit();
-            self.arena.deinit();
-        }
-
-        pub fn compare(
-            self: *TreeDiff(repo_kind, repo_opts),
-            state: rp.Repo(repo_kind, repo_opts).State(.read_only),
-            old_oid_maybe: ?[hash.hexLen(repo_opts.hash)]u8,
-            new_oid_maybe: ?[hash.hexLen(repo_opts.hash)]u8,
-            path_list_maybe: ?std.ArrayList([]const u8),
-        ) !void {
-            if (old_oid_maybe == null and new_oid_maybe == null) {
-                return;
-            }
-            const old_entries = try self.loadTree(state, old_oid_maybe);
-            const new_entries = try self.loadTree(state, new_oid_maybe);
-            // deletions and edits
-            {
-                var iter = old_entries.iterator();
-                while (iter.next()) |old_entry| {
-                    const old_key = old_entry.key_ptr.*;
-                    const old_value = old_entry.value_ptr.*;
-                    var path_list = if (path_list_maybe) |path_list| try path_list.clone() else std.ArrayList([]const u8).init(self.arena.allocator());
-                    try path_list.append(old_key);
-                    const path = try fs.joinPath(self.arena.allocator(), path_list.items);
-                    if (new_entries.get(old_key)) |new_value| {
-                        if (!old_value.eql(new_value)) {
-                            const old_value_tree = old_value.isTree();
-                            const new_value_tree = new_value.isTree();
-                            try self.compare(state, if (old_value_tree) std.fmt.bytesToHex(&old_value.oid, .lower) else null, if (new_value_tree) std.fmt.bytesToHex(&new_value.oid, .lower) else null, path_list);
-                            if (!old_value_tree or !new_value_tree) {
-                                try self.changes.put(path, Change(repo_opts.hash){ .old = if (old_value_tree) null else old_value, .new = if (new_value_tree) null else new_value });
-                            }
-                        }
-                    } else {
-                        if (old_value.isTree()) {
-                            try self.compare(state, std.fmt.bytesToHex(&old_value.oid, .lower), null, path_list);
-                        } else {
-                            try self.changes.put(path, Change(repo_opts.hash){ .old = old_value, .new = null });
-                        }
-                    }
-                }
-            }
-            // additions
-            {
-                var iter = new_entries.iterator();
-                while (iter.next()) |new_entry| {
-                    const new_key = new_entry.key_ptr.*;
-                    const new_value = new_entry.value_ptr.*;
-                    var path_list = if (path_list_maybe) |path_list| try path_list.clone() else std.ArrayList([]const u8).init(self.arena.allocator());
-                    try path_list.append(new_key);
-                    const path = try fs.joinPath(self.arena.allocator(), path_list.items);
-                    if (old_entries.get(new_key)) |_| {
-                        continue;
-                    } else if (new_value.isTree()) {
-                        try self.compare(state, null, std.fmt.bytesToHex(&new_value.oid, .lower), path_list);
-                    } else {
-                        try self.changes.put(path, Change(repo_opts.hash){ .old = null, .new = new_value });
-                    }
-                }
-            }
-        }
-
-        fn loadTree(
-            self: *TreeDiff(repo_kind, repo_opts),
-            state: rp.Repo(repo_kind, repo_opts).State(.read_only),
-            oid_maybe: ?[hash.hexLen(repo_opts.hash)]u8,
-        ) !std.StringArrayHashMap(TreeEntry(repo_opts.hash)) {
-            if (oid_maybe) |oid| {
-                const obj = try Object(repo_kind, repo_opts, .full).init(self.arena.allocator(), state, &oid);
-                return switch (obj.content) {
-                    .blob, .tag => std.StringArrayHashMap(TreeEntry(repo_opts.hash)).init(self.arena.allocator()),
-                    .tree => |tree| tree.entries,
-                    .commit => |commit| self.loadTree(state, commit.tree),
-                };
-            } else {
-                return std.StringArrayHashMap(TreeEntry(repo_opts.hash)).init(self.arena.allocator());
-            }
-        }
-    };
-}
-
 pub const ObjectKind = enum {
     blob,
     tree,
@@ -696,21 +560,6 @@ pub const ObjectKind = enum {
         };
     }
 };
-
-pub fn TreeEntry(comptime hash_kind: hash.HashKind) type {
-    return struct {
-        oid: [hash.byteLen(hash_kind)]u8,
-        mode: fs.Mode,
-
-        pub fn eql(self: TreeEntry(hash_kind), other: TreeEntry(hash_kind)) bool {
-            return std.mem.eql(u8, &self.oid, &other.oid) and self.mode.eql(other.mode);
-        }
-
-        pub fn isTree(self: TreeEntry(hash_kind)) bool {
-            return self.mode.object_type == .tree;
-        }
-    };
-}
 
 pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return struct {
@@ -843,7 +692,7 @@ pub fn ObjectContent(comptime hash_kind: hash.HashKind) type {
     return union(ObjectKind) {
         blob,
         tree: struct {
-            entries: std.StringArrayHashMap(TreeEntry(hash_kind)),
+            entries: std.StringArrayHashMap(tr.TreeEntry(hash_kind)),
         },
         commit: struct {
             tree: [hash.hexLen(hash_kind)]u8,
@@ -924,7 +773,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                         .object_reader = obj_rdr,
                     },
                     .full => {
-                        var entries = std.StringArrayHashMap(TreeEntry(repo_opts.hash)).init(arena.allocator());
+                        var entries = std.StringArrayHashMap(tr.TreeEntry(repo_opts.hash)).init(arena.allocator());
 
                         while (true) {
                             const entry_mode_str = reader.readUntilDelimiterAlloc(arena.allocator(), ' ', repo_opts.max_read_size) catch |err| switch (err) {

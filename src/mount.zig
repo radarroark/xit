@@ -6,7 +6,235 @@ const rf = @import("./ref.zig");
 const idx = @import("./index.zig");
 const fs = @import("./fs.zig");
 const rp = @import("./repo.zig");
-const st = @import("./status.zig");
+const tr = @import("./tree.zig");
+
+pub const IndexKind = enum {
+    added,
+    not_added,
+    not_tracked,
+};
+
+pub const StatusKind = union(IndexKind) {
+    added: enum {
+        created,
+        modified,
+        deleted,
+    },
+    not_added: enum {
+        modified,
+        deleted,
+    },
+    not_tracked,
+};
+
+pub const MergeConflictStatus = struct {
+    base: bool,
+    target: bool,
+    source: bool,
+};
+
+pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
+    return struct {
+        untracked: std.StringArrayHashMap(Entry),
+        mount_modified: std.StringArrayHashMap(Entry),
+        mount_deleted: std.StringArrayHashMap(void),
+        index_added: std.StringArrayHashMap(void),
+        index_modified: std.StringArrayHashMap(void),
+        index_deleted: std.StringArrayHashMap(void),
+        conflicts: std.StringArrayHashMap(MergeConflictStatus),
+        index: idx.Index(repo_kind, repo_opts),
+        head_tree: tr.HeadTree(repo_kind, repo_opts),
+        arena: *std.heap.ArenaAllocator,
+        allocator: std.mem.Allocator,
+
+        pub const Entry = struct {
+            path: []const u8,
+            meta: std.fs.File.Metadata,
+        };
+
+        pub fn init(allocator: std.mem.Allocator, state: rp.Repo(repo_kind, repo_opts).State(.read_only)) !Status(repo_kind, repo_opts) {
+            var untracked = std.StringArrayHashMap(Entry).init(allocator);
+            errdefer untracked.deinit();
+
+            var mount_modified = std.StringArrayHashMap(Entry).init(allocator);
+            errdefer mount_modified.deinit();
+
+            var mount_deleted = std.StringArrayHashMap(void).init(allocator);
+            errdefer mount_deleted.deinit();
+
+            var index_added = std.StringArrayHashMap(void).init(allocator);
+            errdefer index_added.deinit();
+
+            var index_modified = std.StringArrayHashMap(void).init(allocator);
+            errdefer index_modified.deinit();
+
+            var index_deleted = std.StringArrayHashMap(void).init(allocator);
+            errdefer index_deleted.deinit();
+
+            var conflicts = std.StringArrayHashMap(MergeConflictStatus).init(allocator);
+            errdefer conflicts.deinit();
+
+            const arena = try allocator.create(std.heap.ArenaAllocator);
+            arena.* = std.heap.ArenaAllocator.init(allocator);
+            errdefer {
+                arena.deinit();
+                allocator.destroy(arena);
+            }
+
+            var index = try idx.Index(repo_kind, repo_opts).init(allocator, state);
+            errdefer index.deinit();
+
+            var index_bools = try allocator.alloc(bool, index.entries.count());
+            defer allocator.free(index_bools);
+
+            _ = try addEntries(arena.allocator(), &untracked, &mount_modified, index, &index_bools, state.core.repo_dir, ".");
+
+            var head_tree = try tr.HeadTree(repo_kind, repo_opts).init(allocator, state);
+            errdefer head_tree.deinit();
+
+            // for each entry in the index
+            for (index.entries.keys(), index.entries.values(), 0..) |path, *index_entries_for_path, i| {
+                // if it is a non-conflict entry
+                if (index_entries_for_path[0]) |index_entry| {
+                    if (!index_bools[i]) {
+                        try mount_deleted.put(path, {});
+                    }
+                    if (head_tree.entries.get(index_entry.path)) |head_entry| {
+                        if (!index_entry.mode.eql(head_entry.mode) or !std.mem.eql(u8, &index_entry.oid, &head_entry.oid)) {
+                            try index_modified.put(index_entry.path, {});
+                        }
+                    } else {
+                        try index_added.put(index_entry.path, {});
+                    }
+                }
+                // add to conflicts
+                else {
+                    try conflicts.put(path, .{
+                        .base = index_entries_for_path[1] != null,
+                        .target = index_entries_for_path[2] != null,
+                        .source = index_entries_for_path[3] != null,
+                    });
+                }
+            }
+
+            for (head_tree.entries.keys()) |path| {
+                if (!index.entries.contains(path)) {
+                    try index_deleted.put(path, {});
+                }
+            }
+
+            return Status(repo_kind, repo_opts){
+                .untracked = untracked,
+                .mount_modified = mount_modified,
+                .mount_deleted = mount_deleted,
+                .index_added = index_added,
+                .index_modified = index_modified,
+                .index_deleted = index_deleted,
+                .conflicts = conflicts,
+                .index = index,
+                .head_tree = head_tree,
+                .arena = arena,
+                .allocator = allocator,
+            };
+        }
+
+        pub fn deinit(self: *Status(repo_kind, repo_opts)) void {
+            self.untracked.deinit();
+            self.mount_modified.deinit();
+            self.mount_deleted.deinit();
+            self.index_added.deinit();
+            self.index_modified.deinit();
+            self.index_deleted.deinit();
+            self.conflicts.deinit();
+            self.index.deinit();
+            self.head_tree.deinit();
+            self.arena.deinit();
+            self.allocator.destroy(self.arena);
+        }
+
+        fn addEntries(
+            allocator: std.mem.Allocator,
+            untracked: *std.StringArrayHashMap(Status(repo_kind, repo_opts).Entry),
+            modified: *std.StringArrayHashMap(Status(repo_kind, repo_opts).Entry),
+            index: idx.Index(repo_kind, repo_opts),
+            index_bools: *[]bool,
+            repo_dir: std.fs.Dir,
+            path: []const u8,
+        ) !bool {
+            const meta = try fs.getMetadata(repo_dir, path);
+            switch (meta.kind()) {
+                .file => {
+                    const file = try repo_dir.openFile(path, .{ .mode = .read_only });
+                    defer file.close();
+
+                    if (index.entries.getIndex(path)) |entry_index| {
+                        index_bools.*[entry_index] = true;
+                        const entries_for_path = index.entries.values()[entry_index];
+                        if (entries_for_path[0]) |entry| {
+                            if (try indexDiffersFromMount(repo_kind, repo_opts, &entry, file, meta)) {
+                                try modified.put(path, Status(repo_kind, repo_opts).Entry{ .path = path, .meta = meta });
+                            }
+                        }
+                    } else {
+                        try untracked.put(path, Status(repo_kind, repo_opts).Entry{ .path = path, .meta = meta });
+                    }
+                    return true;
+                },
+                .directory => {
+                    const is_untracked = !(std.mem.eql(u8, path, ".") or index.dir_to_paths.contains(path) or index.entries.contains(path));
+
+                    var dir = try repo_dir.openDir(path, .{ .iterate = true });
+                    defer dir.close();
+                    var iter = dir.iterate();
+
+                    var child_untracked = std.ArrayList(Status(repo_kind, repo_opts).Entry).init(allocator);
+                    defer child_untracked.deinit();
+                    var contains_file = false;
+
+                    while (try iter.next()) |entry| {
+                        // ignore internal dir
+                        const file_name = switch (repo_kind) {
+                            .git => ".git",
+                            .xit => ".xit",
+                        };
+                        if (std.mem.eql(u8, file_name, entry.name)) {
+                            continue;
+                        }
+
+                        const subpath = if (std.mem.eql(u8, path, "."))
+                            try allocator.dupe(u8, entry.name)
+                        else
+                            try fs.joinPath(allocator, &.{ path, entry.name });
+
+                        var grandchild_untracked = std.StringArrayHashMap(Status(repo_kind, repo_opts).Entry).init(allocator);
+                        defer grandchild_untracked.deinit();
+
+                        const is_file = try addEntries(allocator, &grandchild_untracked, modified, index, index_bools, repo_dir, subpath);
+                        contains_file = contains_file or is_file;
+                        if (is_file and is_untracked) break; // no need to continue because child_untracked will be discarded anyway
+
+                        try child_untracked.appendSlice(grandchild_untracked.values());
+                    }
+
+                    // add the dir if it isn't tracked and contains a file
+                    if (is_untracked) {
+                        if (contains_file) {
+                            try untracked.put(path, Status(repo_kind, repo_opts).Entry{ .path = path, .meta = meta });
+                        }
+                    }
+                    // add its children
+                    else {
+                        for (child_untracked.items) |entry| {
+                            try untracked.put(entry.path, entry);
+                        }
+                    }
+                },
+                else => {},
+            }
+            return false;
+        }
+    };
+}
 
 pub const UntrackOptions = struct {
     force: bool = false,
@@ -59,7 +287,7 @@ pub fn removePaths(
     var index = try idx.Index(repo_kind, repo_opts).init(allocator, state.readOnly());
     defer index.deinit();
 
-    var head_tree = try st.HeadTree(repo_kind, repo_opts).init(allocator, state.readOnly());
+    var head_tree = try tr.HeadTree(repo_kind, repo_opts).init(allocator, state.readOnly());
     defer head_tree.deinit();
 
     for (paths) |path| {
@@ -127,7 +355,7 @@ pub fn objectToFile(
     state: rp.Repo(repo_kind, repo_opts).State(.read_only),
     allocator: std.mem.Allocator,
     path: []const u8,
-    tree_entry: obj.TreeEntry(repo_opts.hash),
+    tree_entry: tr.TreeEntry(repo_opts.hash),
 ) !void {
     const oid_hex = std.fmt.bytesToHex(tree_entry.oid, .lower);
 
@@ -185,7 +413,7 @@ fn pathToTreeEntry(
     allocator: std.mem.Allocator,
     parent: obj.Object(repo_kind, repo_opts, .full),
     path_parts: []const []const u8,
-) !?obj.TreeEntry(repo_opts.hash) {
+) !?tr.TreeEntry(repo_opts.hash) {
     const path_part = path_parts[0];
     const tree_entry = parent.content.tree.entries.get(path_part) orelse return null;
 
@@ -242,7 +470,7 @@ pub const TreeToIndexChange = enum {
 fn compareTreeToIndex(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
-    item_maybe: ?obj.TreeEntry(repo_opts.hash),
+    item_maybe: ?tr.TreeEntry(repo_opts.hash),
     entry_maybe: ?idx.Index(repo_kind, repo_opts).Entry,
 ) TreeToIndexChange {
     if (item_maybe) |item| {
@@ -322,13 +550,13 @@ pub fn migrate(
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
     allocator: std.mem.Allocator,
-    tree_diff: obj.TreeDiff(repo_kind, repo_opts),
+    tree_diff: tr.TreeDiff(repo_kind, repo_opts),
     index: *idx.Index(repo_kind, repo_opts),
     result_maybe: ?*Switch(repo_kind, repo_opts),
 ) !void {
-    var add_files = std.StringArrayHashMap(obj.TreeEntry(repo_opts.hash)).init(allocator);
+    var add_files = std.StringArrayHashMap(tr.TreeEntry(repo_opts.hash)).init(allocator);
     defer add_files.deinit();
-    var edit_files = std.StringArrayHashMap(obj.TreeEntry(repo_opts.hash)).init(allocator);
+    var edit_files = std.StringArrayHashMap(tr.TreeEntry(repo_opts.hash)).init(allocator);
     defer edit_files.deinit();
     var remove_files = std.StringArrayHashMap(void).init(allocator);
     defer remove_files.deinit();
@@ -452,7 +680,7 @@ pub fn headTreeEntry(
     state: rp.Repo(repo_kind, repo_opts).State(.read_only),
     allocator: std.mem.Allocator,
     path_parts: []const []const u8,
-) !?obj.TreeEntry(repo_opts.hash) {
+) !?tr.TreeEntry(repo_opts.hash) {
     // get the current commit
     const current_oid = try rf.readHead(repo_kind, repo_opts, state);
     var commit_object = try obj.Object(repo_kind, repo_opts, .full).init(allocator, state, &current_oid);
@@ -512,7 +740,7 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             };
 
             // compare the commits
-            var tree_diff = obj.TreeDiff(repo_kind, repo_opts).init(allocator);
+            var tree_diff = tr.TreeDiff(repo_kind, repo_opts).init(allocator);
             defer tree_diff.deinit();
             try tree_diff.compare(state.readOnly(), current_oid_maybe, target_oid, null);
 

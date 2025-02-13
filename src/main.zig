@@ -15,9 +15,10 @@ const rp = @import("./repo.zig");
 const ui = @import("./ui.zig");
 const hash = @import("./hash.zig");
 const df = @import("./diff.zig");
-const st = @import("./status.zig");
+const mnt = @import("./mount.zig");
 const mrg = @import("./merge.zig");
 const obj = @import("./object.zig");
+const tr = @import("./tree.zig");
 
 pub const Writers = struct {
     out: std.io.AnyWriter = std.io.null_writer.any(),
@@ -282,9 +283,9 @@ fn runCommand(
         },
         .diff => |diff_cmd| {
             const DiffState = union(df.DiffKind) {
-                mount: st.Status(repo_kind, repo_opts),
-                index: st.Status(repo_kind, repo_opts),
-                tree: obj.TreeDiff(repo_kind, repo_opts),
+                mount: mnt.Status(repo_kind, repo_opts),
+                index: mnt.Status(repo_kind, repo_opts),
+                tree: tr.TreeDiff(repo_kind, repo_opts),
 
                 fn deinit(diff_state: *@This()) void {
                     switch (diff_state.*) {
