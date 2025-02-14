@@ -22,8 +22,8 @@ pub const CommandKind = enum {
     status,
     diff,
     branch,
-    switch_head,
-    reset_head,
+    switch_mount,
+    reset_mount,
     restore,
     log,
     merge,
@@ -45,19 +45,19 @@ fn commandHelp(command_kind: CommandKind) Help {
         .init => .{
             .name = "init",
             .descrip =
-            \\create an empty xit repository
+            \\create an empty xit repository.
             ,
             .example =
-            \\(in the current dir)
+            \\in the current dir:
             \\    xit init
-            \\(in a new dir)
+            \\in a new dir:
             \\    xit init myproject
             ,
         },
         .add => .{
             .name = "add",
             .descrip =
-            \\add file contents to the index
+            \\add file contents to the index.
             ,
             .example =
             \\xit add myfile.txt
@@ -66,8 +66,7 @@ fn commandHelp(command_kind: CommandKind) Help {
         .unadd => .{
             .name = "unadd",
             .descrip =
-            \\remove any changes to a file
-            \\that were added to the index
+            \\remove any changes to a file that were added to the index.
             ,
             .example =
             \\xit unadd myfile.txt
@@ -76,8 +75,7 @@ fn commandHelp(command_kind: CommandKind) Help {
         .untrack => .{
             .name = "untrack",
             .descrip =
-            \\no longer track file in the index,
-            \\but leave it in the mount
+            \\no longer track file in the index, but leave it in the mount (working tree).
             ,
             .example =
             \\xit untrack myfile.txt
@@ -86,8 +84,7 @@ fn commandHelp(command_kind: CommandKind) Help {
         .rm => .{
             .name = "rm",
             .descrip =
-            \\no longer track file in the index,
-            \\and remove it from the mount
+            \\no longer track file in the index *and* remove it from the mount (working tree).
             ,
             .example =
             \\xit rm myfile.txt
@@ -96,7 +93,7 @@ fn commandHelp(command_kind: CommandKind) Help {
         .commit => .{
             .name = "commit",
             .descrip =
-            \\record changes to the repository
+            \\create a new commit.
             ,
             .example =
             \\xit commit -m "my commit message"
@@ -105,85 +102,87 @@ fn commandHelp(command_kind: CommandKind) Help {
         .tag => .{
             .name = "tag",
             .descrip =
-            \\add, remove, and list tags
+            \\add, remove, and list tags.
             ,
             .example =
-            \\(add tag)
+            \\add tag:
             \\    xit tag add mytag
-            \\(remove tag)
+            \\remove tag:
             \\    xit tag rm mytag
-            \\(list tag)
+            \\list tag:
             \\    xit tag list
             ,
         },
         .status => .{
             .name = "status",
             .descrip =
-            \\show the status of uncommitted changes
+            \\show the status of uncommitted changes.
             ,
             .example =
-            \\(display in TUI)
+            \\display in TUI:
             \\    xit status
-            \\(display in CLI)
+            \\display in CLI:
             \\    xit status --cli
             ,
         },
         .diff => .{
             .name = "diff",
             .descrip =
-            \\show changes between commits, commit and mount, etc
+            \\show changes between commits, commit and mount (working tree), etc.
             ,
             .example =
-            \\(display in TUI)
+            \\display in TUI:
             \\    xit diff
-            \\(display diff of mount content in the CLI)
+            \\display diff of changes in the mount (working tree) in the CLI:
             \\    xit diff --cli
-            \\(display diff of staged content in the CLI)
-            \\    xit diff --staged
+            \\display diff of changes in the index in the CLI:
+            \\    xit diff --index
             ,
         },
         .branch => .{
             .name = "branch",
             .descrip =
-            \\add, remove, and list branches
+            \\add, remove, and list branches.
             ,
             .example =
-            \\(add branch)
+            \\add branch:
             \\    xit branch add mybranch
-            \\(remove branch)
+            \\remove branch:
             \\    xit branch rm mybranch
-            \\(list branches)
+            \\list branches:
             \\    xit branch list
             ,
         },
-        .switch_head => .{
+        .switch_mount => .{
             .name = "switch",
             .descrip =
-            \\switch to a branch or commit id
+            \\switch to a branch or commit id.
+            \\updates both the index and the mount (working tree).
             ,
             .example =
-            \\(switch to branch)
+            \\switch to branch:
             \\    xit switch mybranch
-            \\(switch to commit id)
+            \\switch to commit id:
             \\    xit switch a1b2c3...
             ,
         },
-        .reset_head => .{
+        .reset_mount => .{
             .name = "reset",
             .descrip =
-            \\make the current branch point to a new commit id
+            \\make the current branch point to a new commit id.
+            \\updates both the index and the mount (working tree).
             ,
             .example =
-            \\(reset current branch to match another branch)
+            \\reset current branch to match another branch:
             \\    xit reset mybranch
-            \\(reset current branch to point to a new commit id)
+            \\reset current branch to point to a new commit id:
             \\    xit reset 1a2b3c...
             ,
         },
         .restore => .{
             .name = "restore",
             .descrip =
-            \\restore files in the mount
+            \\restore files in the mount (working tree).
             ,
             .example =
             \\xit restore myfile.txt
@@ -192,31 +191,31 @@ fn commandHelp(command_kind: CommandKind) Help {
         .log => .{
             .name = "log",
             .descrip =
-            \\show commit logs
+            \\show commit logs.
             ,
             .example =
-            \\(display in TUI)
+            \\display in TUI:
             \\    xit log
-            \\(display in CLI)
+            \\display in CLI:
             \\    xit log --cli
             ,
         },
         .merge => .{
             .name = "merge",
             .descrip =
-            \\join two or more development histories together
+            \\join two or more development histories together.
             ,
             .example =
-            \\(merge branch)
+            \\merge branch:
             \\    xit merge mybranch
-            \\(merge commit id)
+            \\merge commit id:
             \\    xit merge a1b2c3...
             ,
         },
         .cherry_pick => .{
             .name = "cherry-pick",
             .descrip =
-            \\apply the changes introduced by an existing commit
+            \\apply the changes introduced by an existing commit.
             ,
             .example =
             \\xit cherry-pick a1b2c3...
@@ -225,35 +224,35 @@ fn commandHelp(command_kind: CommandKind) Help {
         .config => .{
             .name = "config",
             .descrip =
-            \\add, remove, and list config options
+            \\add, remove, and list config options.
             ,
             .example =
-            \\(add config)
+            \\add config:
             \\    xit config add core.editor vim
-            \\(remove config)
+            \\remove config:
             \\    xit config rm core.editor
-            \\(list configs)
+            \\list configs:
             \\    xit config list
             ,
         },
         .remote => .{
             .name = "remote",
             .descrip =
-            \\add, remove, and list remotes
+            \\add, remove, and list remotes.
             ,
             .example =
-            \\(add remote)
+            \\add remote:
             \\    xit remote add origin https://github.com/...
-            \\(remove remote)
+            \\remove remote:
             \\    xit remote rm origin
-            \\(list remotes)
+            \\list remotes:
             \\    xit remote list
             ,
         },
         .fetch => .{
             .name = "fetch",
             .descrip =
-            \\download objects and refs from another repo
+            \\download objects and refs from another repo.
             ,
             .example =
             \\xit fetch
@@ -262,7 +261,7 @@ fn commandHelp(command_kind: CommandKind) Help {
         .pull => .{
             .name = "pull",
             .descrip =
-            \\fetch and merge from another repo
+            \\fetch and merge from another repo.
             ,
             .example =
             \\xit pull
@@ -395,9 +394,9 @@ pub const CommandArgs = struct {
             else if (std.mem.eql(u8, command_name, "branch"))
                 .branch
             else if (std.mem.eql(u8, command_name, "switch"))
-                .switch_head
+                .switch_mount
             else if (std.mem.eql(u8, command_name, "reset"))
-                .reset_head
+                .reset_mount
             else if (std.mem.eql(u8, command_name, "restore"))
                 .restore
             else if (std.mem.eql(u8, command_name, "log"))
@@ -473,8 +472,8 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
             diff_opts: df.BasicDiffOptions(hash_kind),
         },
         branch: bch.BranchCommand,
-        switch_head: mnt.SwitchInput(hash_kind),
-        reset_head: mnt.SwitchInput(hash_kind),
+        switch_mount: mnt.SwitchInput(hash_kind),
+        reset_mount: mnt.SwitchInput(hash_kind),
         restore: struct {
             path: []const u8,
         },
@@ -576,7 +575,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                 },
                 .status => return .status,
                 .diff => {
-                    const diff_opts: df.BasicDiffOptions(hash_kind) = if (cmd_args.contains("--staged"))
+                    const diff_opts: df.BasicDiffOptions(hash_kind) = if (cmd_args.contains("--index"))
                         .index
                     else
                         (if (cmd_args.contains("--base"))
@@ -614,21 +613,21 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
 
                     return .{ .branch = cmd };
                 },
-                .switch_head => {
+                .switch_mount => {
                     if (cmd_args.positional_args.len != 1) return null;
                     const target = cmd_args.positional_args[0];
 
-                    return .{ .switch_head = .{
+                    return .{ .switch_mount = .{
                         .action = .replace,
                         .ref_or_oid = rf.RefOrOid(hash_kind).initFromUser(target) orelse return null,
                         .force = cmd_args.contains("-f"),
                     } };
                 },
-                .reset_head => {
+                .reset_mount => {
                     if (cmd_args.positional_args.len != 1) return null;
                     const target = cmd_args.positional_args[0];
 
-                    return .{ .reset_head = .{
+                    return .{ .reset_mount = .{
                         .action = .update,
                         .ref_or_oid = rf.RefOrOid(hash_kind).initFromUser(target) orelse return null,
                         .force = cmd_args.contains("-f"),

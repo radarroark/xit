@@ -372,8 +372,8 @@ fn runCommand(
                 .remove => |rm_branch| try repo.removeBranch(rm_branch),
             }
         },
-        .switch_head, .reset_head => |switch_head_cmd| {
-            var switch_result = try repo.switchHead(allocator, switch_head_cmd);
+        .switch_mount, .reset_mount => |switch_mount_cmd| {
+            var switch_result = try repo.switchMount(allocator, switch_mount_cmd);
             defer switch_result.deinit();
             switch (switch_result.result) {
                 .success => {},

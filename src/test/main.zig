@@ -563,7 +563,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             {
                 var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
-                var switch_result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .oid = &commit1 } });
+                var switch_result = try repo.switchMount(allocator, .{ .action = .replace, .ref_or_oid = .{ .oid = &commit1 } });
                 defer switch_result.deinit();
                 try std.testing.expect(.conflict == switch_result.result);
                 try std.testing.expectEqual(1, switch_result.result.conflict.stale_files.count());
@@ -588,7 +588,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             {
                 var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
-                var switch_result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .oid = &commit1 } });
+                var switch_result = try repo.switchMount(allocator, .{ .action = .replace, .ref_or_oid = .{ .oid = &commit1 } });
                 defer switch_result.deinit();
                 try std.testing.expect(.conflict == switch_result.result);
             }
@@ -611,7 +611,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             {
                 var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
-                var switch_result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .oid = &commit1 } });
+                var switch_result = try repo.switchMount(allocator, .{ .action = .replace, .ref_or_oid = .{ .oid = &commit1 } });
                 defer switch_result.deinit();
                 try std.testing.expect(.conflict == switch_result.result);
                 try std.testing.expectEqual(1, switch_result.result.conflict.stale_files.count());
@@ -640,7 +640,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             {
                 var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
                 defer repo.deinit();
-                var switch_result = try repo.switchHead(allocator, .{ .action = .replace, .ref_or_oid = .{ .oid = &commit1 } });
+                var switch_result = try repo.switchMount(allocator, .{ .action = .replace, .ref_or_oid = .{ .oid = &commit1 } });
                 defer switch_result.deinit();
                 try std.testing.expect(.conflict == switch_result.result);
                 try std.testing.expectEqual(1, switch_result.result.conflict.stale_dirs.count());

@@ -670,7 +670,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
-        pub fn switchHead(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: mnt.SwitchInput(repo_opts.hash)) !mnt.Switch(repo_kind, repo_opts) {
+        pub fn switchMount(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: mnt.SwitchInput(repo_opts.hash)) !mnt.Switch(repo_kind, repo_opts) {
             switch (repo_kind) {
                 .git => return try mnt.Switch(repo_kind, repo_opts).init(.{ .core = &self.core, .extra = .{} }, allocator, input),
                 .xit => {
