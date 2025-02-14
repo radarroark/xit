@@ -727,13 +727,20 @@ pub fn restore(
     try objectToFile(repo_kind, repo_opts, state, allocator, path, tree_entry);
 }
 
+pub fn ResetInput(comptime hash_kind: hash.HashKind) type {
+    return struct {
+        target: rf.RefOrOid(hash_kind),
+        force: bool = false,
+    };
+}
+
 pub fn SwitchInput(comptime hash_kind: hash.HashKind) type {
     return struct {
-        action: enum {
-            replace,
-            update,
-        },
-        ref_or_oid: rf.RefOrOid(hash_kind),
+        kind: enum {
+            @"switch",
+            reset,
+        } = .@"switch",
+        target: rf.RefOrOid(hash_kind),
         force: bool = false,
     };
 }
@@ -759,7 +766,7 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
         ) !Switch(repo_kind, repo_opts) {
             // get the current commit and target oid
             const current_oid_maybe = try rf.readHeadMaybe(repo_kind, repo_opts, state.readOnly());
-            const target_oid = try rf.readRecur(repo_kind, repo_opts, state.readOnly(), input.ref_or_oid) orelse return error.InvalidTarget;
+            const target_oid = try rf.readRecur(repo_kind, repo_opts, state.readOnly(), input.target) orelse return error.InvalidTarget;
 
             const arena = try allocator.create(std.heap.ArenaAllocator);
             arena.* = std.heap.ArenaAllocator.init(allocator);
@@ -801,9 +808,9 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     try index.write(allocator, .{ .core = state.core, .extra = .{ .lock_file_maybe = lock.lock_file } });
 
                     // update HEAD
-                    switch (input.action) {
-                        .replace => try rf.replaceHead(repo_kind, repo_opts, state, input.ref_or_oid),
-                        .update => try rf.updateHead(repo_kind, repo_opts, state, &target_oid),
+                    switch (input.kind) {
+                        .@"switch" => try rf.replaceHead(repo_kind, repo_opts, state, input.target),
+                        .reset => try rf.updateHead(repo_kind, repo_opts, state, &target_oid),
                     }
 
                     // finish lock
@@ -826,9 +833,9 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     try index.write(allocator, state);
 
                     // update HEAD
-                    switch (input.action) {
-                        .replace => try rf.replaceHead(repo_kind, repo_opts, state, input.ref_or_oid),
-                        .update => try rf.updateHead(repo_kind, repo_opts, state, &target_oid),
+                    switch (input.kind) {
+                        .@"switch" => try rf.replaceHead(repo_kind, repo_opts, state, input.target),
+                        .reset => try rf.updateHead(repo_kind, repo_opts, state, &target_oid),
                     }
                 },
             }

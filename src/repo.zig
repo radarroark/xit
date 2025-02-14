@@ -700,6 +700,14 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
+        pub fn resetMount(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: mnt.ResetInput(repo_opts.hash)) !mnt.Switch(repo_kind, repo_opts) {
+            return try self.switchMount(allocator, .{
+                .kind = .reset,
+                .target = input.target,
+                .force = input.force,
+            });
+        }
+
         pub fn restore(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, path: []const u8) !void {
             var moment = try self.core.latestMoment();
             const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };

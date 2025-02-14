@@ -629,8 +629,8 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                     const target = cmd_args.positional_args[0];
 
                     return .{ .switch_mount = .{
-                        .action = .replace,
-                        .ref_or_oid = rf.RefOrOid(hash_kind).initFromUser(target) orelse return null,
+                        .kind = .@"switch",
+                        .target = rf.RefOrOid(hash_kind).initFromUser(target) orelse return null,
                         .force = cmd_args.contains("-f"),
                     } };
                 },
@@ -639,8 +639,8 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                     const target = cmd_args.positional_args[0];
 
                     return .{ .reset_mount = .{
-                        .action = .update,
-                        .ref_or_oid = rf.RefOrOid(hash_kind).initFromUser(target) orelse return null,
+                        .kind = .reset,
+                        .target = rf.RefOrOid(hash_kind).initFromUser(target) orelse return null,
                         .force = cmd_args.contains("-f"),
                     } };
                 },
