@@ -318,7 +318,11 @@ pub fn read(
                 ref_name = ref.name;
             }
 
-            const ref_cursor = (try map.getCursor(hash.hashInt(repo_opts.hash, ref_name))) orelse return error.RefNotFound;
+            // if the ref's key hasn't been set, it doesn't exist
+            _ = (try map.getKeyCursor(hash.hashInt(repo_opts.hash, ref_name))) orelse return error.RefNotFound;
+
+            // if the ref's content hasn't been set, it's an empty ref so just return null
+            const ref_cursor = (try map.getCursor(hash.hashInt(repo_opts.hash, ref_name))) orelse return null;
             const ref_content = try ref_cursor.readBytes(buffer);
             return RefOrOid(repo_opts.hash).initFromDb(ref_content);
         },

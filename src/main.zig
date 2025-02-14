@@ -414,7 +414,13 @@ fn runCommand(
                 },
             }
         },
-        .reset_head => |reset_head_cmd| try repo.resetHead(reset_head_cmd),
+        .reset_head => |reset_head_cmd| {
+            if (!try repo.checkExists(allocator, reset_head_cmd)) {
+                try writers.err.print("ref or oid does not exist", .{});
+                return error.PrintedError;
+            }
+            try repo.resetHead(reset_head_cmd);
+        },
         .restore => |restore_cmd| try repo.restore(allocator, restore_cmd.path),
         .log => {
             var commit_iter = try repo.log(allocator, null);

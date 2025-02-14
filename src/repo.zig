@@ -144,6 +144,8 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             var repo_dir = try opts.cwd.makeOpenPath(sub_path, .{});
             errdefer repo_dir.close();
 
+            const default_branch_name = "master";
+
             switch (repo_kind) {
                 .git => {
                     // return if dir already exists
@@ -173,7 +175,9 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         .init_opts = opts,
                     };
 
-                    try self.resetHead(.{ .ref = .{ .kind = .head, .name = "master" } });
+                    // create default branch
+                    try self.addBranch(.{ .name = default_branch_name });
+                    try self.resetHead(.{ .ref = .{ .kind = .head, .name = default_branch_name } });
 
                     return self;
                 },
@@ -206,7 +210,9 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         .init_opts = opts,
                     };
 
-                    try self.resetHead(.{ .ref = .{ .kind = .head, .name = "master" } });
+                    // create default branch
+                    try self.addBranch(.{ .name = default_branch_name });
+                    try self.resetHead(.{ .ref = .{ .kind = .head, .name = default_branch_name } });
 
                     return self;
                 },
@@ -720,6 +726,33 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     );
                 },
             }
+        }
+
+        pub fn checkExists(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, target: rf.RefOrOid(repo_opts.hash)) !bool {
+            var moment = try self.core.latestMoment();
+            const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
+
+            switch (target) {
+                .ref => |ref| {
+                    var ref_path_buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
+                    const ref_path = try ref.toPath(&ref_path_buffer);
+
+                    var read_buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
+                    _ = rf.read(repo_kind, repo_opts, state, ref_path, &read_buffer) catch |err| switch (err) {
+                        error.RefNotFound => return false,
+                        else => |e| return e,
+                    };
+                },
+                .oid => |oid| {
+                    var object = obj.Object(repo_kind, repo_opts, .raw).init(allocator, state, oid) catch |err| switch (err) {
+                        error.ObjectNotFound => return false,
+                        else => |e| return e,
+                    };
+                    defer object.deinit();
+                },
+            }
+
+            return true;
         }
 
         pub fn restore(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, path: []const u8) !void {

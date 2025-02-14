@@ -58,15 +58,16 @@ pub fn add(
             var lock = try fs.LockFile.init(if (subdir_maybe) |subdir| subdir else heads_dir, leaf_name);
             defer lock.deinit();
 
-            // get HEAD contents
-            const head_file_buffer = try rf.readHeadRecur(repo_kind, repo_opts, state.readOnly());
-
-            // write to lock file
-            try lock.lock_file.writeAll(&head_file_buffer);
-            try lock.lock_file.writeAll("\n");
-
-            // finish lock
-            lock.success = true;
+            // get HEAD contents and write to lock file
+            const oid_maybe = rf.readHeadRecurMaybe(repo_kind, repo_opts, state.readOnly()) catch |err| switch (err) {
+                error.RefNotFound => null,
+                else => |e| return e,
+            };
+            if (oid_maybe) |oid| {
+                try lock.lock_file.writeAll(&oid);
+                try lock.lock_file.writeAll("\n");
+                lock.success = true;
+            }
         },
         .xit => {
             const name_hash = hash.hashInt(repo_opts.hash, name);
@@ -77,20 +78,25 @@ pub fn add(
             var ref_name_cursor = try ref_name_set.putKeyCursor(name_hash);
             try ref_name_cursor.writeIfEmpty(.{ .bytes = name });
 
-            // store ref content
-            const head_file_buffer = try rf.readHeadRecur(repo_kind, repo_opts, state.readOnly());
-            const ref_content_set_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "ref-content-set"));
-            const ref_content_set = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(ref_content_set_cursor);
-            var ref_content_cursor = try ref_content_set.putKeyCursor(hash.hashInt(repo_opts.hash, &head_file_buffer));
-            try ref_content_cursor.writeIfEmpty(.{ .bytes = &head_file_buffer });
-
-            // add ref name and content to refs/heads/{refname}
+            // add ref name to refs/heads/{refname}
             const refs_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "refs"));
             const refs = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(refs_cursor);
             const heads_cursor = try refs.putCursor(hash.hashInt(repo_opts.hash, "heads"));
             const heads = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(heads_cursor);
             try heads.putKey(name_hash, .{ .slot = ref_name_cursor.slot() });
-            try heads.put(name_hash, .{ .slot = ref_content_cursor.slot() });
+
+            // store ref content
+            const oid_maybe = rf.readHeadRecurMaybe(repo_kind, repo_opts, state.readOnly()) catch |err| switch (err) {
+                error.RefNotFound => null,
+                else => |e| return e,
+            };
+            if (oid_maybe) |oid| {
+                const ref_content_set_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "ref-content-set"));
+                const ref_content_set = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(ref_content_set_cursor);
+                var ref_content_cursor = try ref_content_set.putKeyCursor(hash.hashInt(repo_opts.hash, &oid));
+                try ref_content_cursor.writeIfEmpty(.{ .bytes = &oid });
+                try heads.put(name_hash, .{ .slot = ref_content_cursor.slot() });
+            }
         },
     }
 }
