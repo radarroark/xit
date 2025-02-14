@@ -477,3 +477,21 @@ pub fn updateHead(
 ) !void {
     try writeRecur(repo_kind, repo_opts, state, "HEAD", oid);
 }
+
+pub fn exists(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+    ref: Ref,
+) !bool {
+    var ref_path_buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
+    const ref_path = try ref.toPath(&ref_path_buffer);
+
+    var read_buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
+    _ = read(repo_kind, repo_opts, state, ref_path, &read_buffer) catch |err| switch (err) {
+        error.RefNotFound => return false,
+        else => |e| return e,
+    };
+
+    return true;
+}

@@ -33,6 +33,10 @@ pub fn add(
         return error.InvalidBranchName;
     }
 
+    if (try rf.exists(repo_kind, repo_opts, state.readOnly(), .{ .kind = .head, .name = input.name })) {
+        return error.BranchAlreadyExists;
+    }
+
     switch (repo_kind) {
         .git => {
             var refs_dir = try state.core.git_dir.openDir("refs", .{});

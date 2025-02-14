@@ -716,6 +716,19 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
+
+                            // make sure the ref exists.
+                            // for now we're only doing this check in xit mode, because
+                            // in git mode the ref created by `Repo.init` for the
+                            // default branch doesn't exist until the first commit is made.
+                            // in xit mode, it'll exist right away.
+                            switch (ctx.target) {
+                                .ref => |ref| if (!try rf.exists(repo_kind, repo_opts, state.readOnly(), ref)) {
+                                    return error.RefNotFound;
+                                },
+                                .oid => {},
+                            }
+
                             try rf.replaceHead(repo_kind, repo_opts, state, ctx.target);
                         }
                     };
@@ -726,33 +739,6 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     );
                 },
             }
-        }
-
-        pub fn checkExists(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, target: rf.RefOrOid(repo_opts.hash)) !bool {
-            var moment = try self.core.latestMoment();
-            const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
-
-            switch (target) {
-                .ref => |ref| {
-                    var ref_path_buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
-                    const ref_path = try ref.toPath(&ref_path_buffer);
-
-                    var read_buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
-                    _ = rf.read(repo_kind, repo_opts, state, ref_path, &read_buffer) catch |err| switch (err) {
-                        error.RefNotFound => return false,
-                        else => |e| return e,
-                    };
-                },
-                .oid => |oid| {
-                    var object = obj.Object(repo_kind, repo_opts, .raw).init(allocator, state, oid) catch |err| switch (err) {
-                        error.ObjectNotFound => return false,
-                        else => |e| return e,
-                    };
-                    defer object.deinit();
-                },
-            }
-
-            return true;
         }
 
         pub fn restore(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, path: []const u8) !void {

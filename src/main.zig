@@ -167,17 +167,19 @@ pub fn runPrint(
             return error.PrintedError;
         },
         error.AddIndexPathNotFound => {
-            try writers.err.print(
-                \\a path you are adding does not exist.
-                \\
-            , .{});
+            try writers.err.print("a path you are adding does not exist\n", .{});
             return error.PrintedError;
         },
         error.RemoveIndexPathNotFound => {
-            try writers.err.print(
-                \\a path you are removing does not exist.
-                \\
-            , .{});
+            try writers.err.print("a path you are removing does not exist\n", .{});
+            return error.PrintedError;
+        },
+        error.RefNotFound => {
+            try writers.err.print("ref does not exist\n", .{});
+            return error.PrintedError;
+        },
+        error.BranchAlreadyExists => {
+            try writers.err.print("branch already exists\n", .{});
             return error.PrintedError;
         },
         else => |e| return e,
@@ -414,13 +416,7 @@ fn runCommand(
                 },
             }
         },
-        .reset_head => |reset_head_cmd| {
-            if (!try repo.checkExists(allocator, reset_head_cmd)) {
-                try writers.err.print("ref or oid does not exist", .{});
-                return error.PrintedError;
-            }
-            try repo.resetHead(reset_head_cmd);
-        },
+        .reset_head => |reset_head_cmd| try repo.resetHead(reset_head_cmd),
         .restore => |restore_cmd| try repo.restore(allocator, restore_cmd.path),
         .log => {
             var commit_iter = try repo.log(allocator, null);
