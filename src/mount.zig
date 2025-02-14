@@ -786,7 +786,7 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
             // compare the commits
             var tree_diff = tr.TreeDiff(repo_kind, repo_opts).init(arena.allocator());
-            try tree_diff.compare(state.readOnly(), current_oid_maybe, target_oid, null);
+            try tree_diff.compare(state.readOnly(), if (current_oid_maybe) |current_oid| &current_oid else null, &target_oid, null);
 
             var switch_result = Switch(repo_kind, repo_opts){
                 .arena = arena,

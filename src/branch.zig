@@ -91,19 +91,6 @@ pub fn add(
             const heads = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(heads_cursor);
             try heads.putKey(name_hash, .{ .slot = ref_name_cursor.slot() });
             try heads.put(name_hash, .{ .slot = ref_content_cursor.slot() });
-
-            // get current branch name
-            var current_branch_name_buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
-            const current_branch_name = try rf.readHeadName(repo_kind, repo_opts, state.readOnly(), &current_branch_name_buffer);
-
-            // if there is a branch map for the current branch,
-            // make one for the new branch with the same value
-            const branches_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "branches"));
-            const branches = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(branches_cursor);
-            try branches.putKey(name_hash, .{ .slot = ref_name_cursor.slot() });
-            if (try branches.getCursor(hash.hashInt(repo_opts.hash, current_branch_name))) |*current_branch_cursor| {
-                try branches.put(name_hash, .{ .slot = current_branch_cursor.slot() });
-            }
         },
     }
 }
@@ -173,13 +160,6 @@ pub fn remove(
             const heads_cursor = try refs.putCursor(hash.hashInt(repo_opts.hash, "heads"));
             const heads = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(heads_cursor);
             _ = try heads.remove(name_hash);
-
-            // remove branch map
-            const branches_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "branches"));
-            const branches = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(branches_cursor);
-            if (!try branches.remove(name_hash)) {
-                return error.BranchNotFound;
-            }
         },
     }
 }

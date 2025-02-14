@@ -36,19 +36,23 @@ fn getDescendent(
 
     {
         const object = try obj.Object(repo_kind, repo_opts, .full).init(arena.allocator(), state, oid1);
-        for (object.content.commit.parents.items) |parent_oid| {
-            var node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
-            node.data = .{ .oid = parent_oid, .kind = .one };
-            queue.append(node);
+        if (object.content.commit.metadata.parent_oids) |parent_oids| {
+            for (parent_oids) |parent_oid| {
+                var node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
+                node.data = .{ .oid = parent_oid, .kind = .one };
+                queue.append(node);
+            }
         }
     }
 
     {
         const object = try obj.Object(repo_kind, repo_opts, .full).init(arena.allocator(), state, oid2);
-        for (object.content.commit.parents.items) |parent_oid| {
-            var node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
-            node.data = .{ .oid = parent_oid, .kind = .two };
-            queue.append(node);
+        if (object.content.commit.metadata.parent_oids) |parent_oids| {
+            for (parent_oids) |parent_oid| {
+                var node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
+                node.data = .{ .oid = parent_oid, .kind = .two };
+                queue.append(node);
+            }
         }
     }
 
@@ -73,10 +77,12 @@ fn getDescendent(
         // TODO: instead of appending to the end, append it in descending order of timestamp
         // so we prioritize more recent commits and avoid wasteful traversal deep in the history.
         const object = try obj.Object(repo_kind, repo_opts, .full).init(arena.allocator(), state, &node.data.oid);
-        for (object.content.commit.parents.items) |parent_oid| {
-            var new_node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
-            new_node.data = .{ .oid = parent_oid, .kind = node.data.kind };
-            queue.append(new_node);
+        if (object.content.commit.metadata.parent_oids) |parent_oids| {
+            for (parent_oids) |parent_oid| {
+                var new_node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
+                new_node.data = .{ .oid = parent_oid, .kind = node.data.kind };
+                queue.append(new_node);
+            }
         }
     }
 
@@ -155,11 +161,13 @@ pub fn commonAncestor(
         // TODO: instead of appending to the end, append it in descending order of timestamp
         // so we prioritize more recent commits and avoid wasteful traversal deep in the history.
         const object = try obj.Object(repo_kind, repo_opts, .full).init(arena.allocator(), state, &node.data.oid);
-        for (object.content.commit.parents.items) |parent_oid| {
-            const is_stale = is_base_ancestor or stale_oids.contains(&parent_oid);
-            var new_node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
-            new_node.data = .{ .oid = parent_oid, .kind = if (is_stale) .stale else node.data.kind };
-            queue.append(new_node);
+        if (object.content.commit.metadata.parent_oids) |parent_oids| {
+            for (parent_oids) |parent_oid| {
+                const is_stale = is_base_ancestor or stale_oids.contains(&parent_oid);
+                var new_node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
+                new_node.data = .{ .oid = parent_oid, .kind = if (is_stale) .stale else node.data.kind };
+                queue.append(new_node);
+            }
         }
 
         // stop if queue only has stale nodes
@@ -541,27 +549,43 @@ fn writeBlobWithPatches(
 ) ![hash.byteLen(repo_opts.hash)]u8 {
     if (repo_kind != .xit) return error.PatchBasedMergeRequiresXitBackend;
 
-    const commit_id_to_path_to_patch_id_cursor_maybe = try state.extra.moment.getCursor(hash.hashInt(repo_opts.hash, "commit-id->path->patch-id"));
+    //get commit-id->snapshot
+    const commit_id_to_snapshot_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "commit-id->snapshot"));
+    const commit_id_to_snapshot = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(commit_id_to_snapshot_cursor);
+
+    // get base snapshot
+    const base_snapshot_cursor = (try commit_id_to_snapshot.getCursor(try hash.hexToInt(repo_opts.hash, base_oid))) orelse return error.KeyNotFound;
+    const base_snapshot = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(base_snapshot_cursor);
+
+    // get target snapshot
+    const target_snapshot_cursor = (try commit_id_to_snapshot.getCursor(try hash.hexToInt(repo_opts.hash, target_oid))) orelse return error.KeyNotFound;
+    const target_snapshot = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(target_snapshot_cursor);
+
+    // get source snapshot
+    const source_snapshot_cursor = (try commit_id_to_snapshot.getCursor(try hash.hexToInt(repo_opts.hash, source_oid))) orelse return error.KeyNotFound;
+    const source_snapshot = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(source_snapshot_cursor);
 
     var patch_ids = std.ArrayList(hash.HashInt(repo_opts.hash)).init(allocator);
     defer patch_ids.deinit();
 
-    var iter = try obj.ObjectIterator(.xit, repo_opts, .full).init(allocator, state.readOnly(), .{ .recursive = false });
-    defer iter.deinit();
-    try iter.include(source_oid);
-
     const path_hash = hash.hashInt(repo_opts.hash, path);
 
-    while (try iter.next()) |object| {
-        defer object.deinit();
+    // get all the patch ids from source
+    {
+        var iter = try obj.ObjectIterator(.xit, repo_opts, .full).init(allocator, state.readOnly(), .{ .recursive = false });
+        defer iter.deinit();
+        try iter.include(source_oid);
 
-        if (std.mem.eql(u8, base_oid, &object.oid)) {
-            break;
-        }
+        const source_path_to_patch_id_cursor_maybe = try source_snapshot.getCursor(hash.hashInt(repo_opts.hash, "path->patch-id"));
 
-        if (commit_id_to_path_to_patch_id_cursor_maybe) |commit_id_to_path_to_patch_id_cursor| {
-            const commit_id_to_path_to_patch_id = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(commit_id_to_path_to_patch_id_cursor);
-            if (try commit_id_to_path_to_patch_id.getCursor(try hash.hexToInt(repo_opts.hash, &object.oid))) |path_to_patch_id_cursor| {
+        while (try iter.next()) |object| {
+            defer object.deinit();
+
+            if (std.mem.eql(u8, base_oid, &object.oid)) {
+                break;
+            }
+
+            if (source_path_to_patch_id_cursor_maybe) |path_to_patch_id_cursor| {
                 const path_to_patch_id = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(path_to_patch_id_cursor);
                 if (try path_to_patch_id.getCursor(path_hash)) |patch_id_cursor| {
                     var patch_id_buffer = [_]u8{0} ** hash.byteLen(repo_opts.hash);
@@ -580,45 +604,36 @@ fn writeBlobWithPatches(
         return source_file_oid.*;
     }
 
-    // get branch map
-    const branch_name_hash = hash.hashInt(repo_opts.hash, target_name);
-    const branches_cursor = (try state.extra.moment.getCursor(hash.hashInt(repo_opts.hash, "branches"))) orelse return error.KeyNotFound;
-    const branches = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(branches_cursor);
-    const branch_cursor = (try branches.getCursor(branch_name_hash)) orelse return error.KeyNotFound;
-
-    // put branch in temp location
+    // put target snapshot in temp location
     const merge_in_progress_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "merge-in-progress"));
     const merge_in_progress = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(merge_in_progress_cursor);
-    var merge_branch_cursor = try merge_in_progress.putCursor(hash.hashInt(repo_opts.hash, "branch"));
-    try merge_branch_cursor.writeIfEmpty(.{ .slot = branch_cursor.slot() });
-    const merge_branch = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(merge_branch_cursor);
+    var merge_snapshot_cursor = try merge_in_progress.putCursor(hash.hashInt(repo_opts.hash, "snapshot"));
+    try merge_snapshot_cursor.writeIfEmpty(.{ .slot = target_snapshot_cursor.slot() });
+    const merge_snapshot = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(merge_snapshot_cursor);
 
     const patch = @import("./patch.zig");
 
     for (0..patch_ids.items.len) |i| {
         const patch_id = patch_ids.items[patch_ids.items.len - i - 1];
-        try patch.applyPatch(repo_opts, state.readOnly().extra.moment, &merge_branch, allocator, path_hash, patch_id);
+        try patch.applyPatch(repo_opts, state.readOnly().extra.moment, &merge_snapshot, allocator, path_hash, patch_id);
     }
 
-    const merge_path_to_live_parent_to_children_cursor = (try merge_branch.getCursor(hash.hashInt(repo_opts.hash, "path->live-parent->children"))) orelse return error.KeyNotFound;
+    const merge_path_to_live_parent_to_children_cursor = (try merge_snapshot.getCursor(hash.hashInt(repo_opts.hash, "path->live-parent->children"))) orelse return error.KeyNotFound;
     const merge_path_to_live_parent_to_children = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(merge_path_to_live_parent_to_children_cursor);
     const merge_live_parent_to_children_cursor = (try merge_path_to_live_parent_to_children.getCursor(path_hash)) orelse return error.KeyNotFound;
     const merge_live_parent_to_children = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(merge_live_parent_to_children_cursor);
 
-    const commit_id_to_path_to_live_parent_to_children_cursor = (try state.extra.moment.getCursor(hash.hashInt(repo_opts.hash, "commit-id->path->live-parent->children"))) orelse return error.KeyNotFound;
-    const commit_id_to_path_to_live_parent_to_children = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(commit_id_to_path_to_live_parent_to_children_cursor);
-
-    const base_path_to_live_parent_to_children_cursor = (try commit_id_to_path_to_live_parent_to_children.getCursor(try hash.hexToInt(repo_opts.hash, base_oid))) orelse return error.KeyNotFound;
+    const base_path_to_live_parent_to_children_cursor = (try base_snapshot.getCursor(hash.hashInt(repo_opts.hash, "path->live-parent->children"))) orelse return error.KeyNotFound;
     const base_path_to_live_parent_to_children = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(base_path_to_live_parent_to_children_cursor);
     const base_live_parent_to_children_cursor = (try base_path_to_live_parent_to_children.getCursor(path_hash)) orelse return error.KeyNotFound;
     const base_live_parent_to_children = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(base_live_parent_to_children_cursor);
 
-    const target_path_to_live_parent_to_children_cursor = (try commit_id_to_path_to_live_parent_to_children.getCursor(try hash.hexToInt(repo_opts.hash, target_oid))) orelse return error.KeyNotFound;
+    const target_path_to_live_parent_to_children_cursor = (try target_snapshot.getCursor(hash.hashInt(repo_opts.hash, "path->live-parent->children"))) orelse return error.KeyNotFound;
     const target_path_to_live_parent_to_children = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(target_path_to_live_parent_to_children_cursor);
     const target_live_parent_to_children_cursor = (try target_path_to_live_parent_to_children.getCursor(path_hash)) orelse return error.KeyNotFound;
     const target_live_parent_to_children = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(target_live_parent_to_children_cursor);
 
-    const source_path_to_live_parent_to_children_cursor = (try commit_id_to_path_to_live_parent_to_children.getCursor(try hash.hexToInt(repo_opts.hash, source_oid))) orelse return error.KeyNotFound;
+    const source_path_to_live_parent_to_children_cursor = (try source_snapshot.getCursor(hash.hashInt(repo_opts.hash, "path->live-parent->children"))) orelse return error.KeyNotFound;
     const source_path_to_live_parent_to_children = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(source_path_to_live_parent_to_children_cursor);
     const source_live_parent_to_children_cursor = (try source_path_to_live_parent_to_children.getCursor(path_hash)) orelse return error.KeyNotFound;
     const source_live_parent_to_children = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(source_live_parent_to_children_cursor);
@@ -1404,7 +1419,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                         try rf.writeRecur(repo_kind, repo_opts, state, "HEAD", &source_oid);
 
                         // make a TreeDiff that adds all files from source
-                        try clean_diff.compare(state.readOnly(), null, source_oid, null);
+                        try clean_diff.compare(state.readOnly(), null, &source_oid, null);
 
                         // read index
                         var index = try idx.Index(repo_kind, repo_opts).init(allocator, state.readOnly());
@@ -1432,9 +1447,9 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                         .pick => {
                             var object = try obj.Object(repo_kind, repo_opts, .full).init(allocator, state.readOnly(), &source_oid);
                             defer object.deinit();
-                            const parent_oid = if (object.content.commit.parents.items.len == 1) object.content.commit.parents.items[0] else return error.CommitMustHaveOneParent;
+                            const parent_oid = object.content.commit.metadata.firstParent() orelse return error.CommitMustHaveOneParent;
                             switch (object.content) {
-                                .commit => base_oid = parent_oid,
+                                .commit => base_oid = parent_oid.*,
                                 else => return error.CommitObjectNotFound,
                             }
                         },
@@ -1456,11 +1471,11 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 
                     // diff the base ancestor with the target oid
                     var target_diff = tr.TreeDiff(repo_kind, repo_opts).init(arena.allocator());
-                    try target_diff.compare(state.readOnly(), base_oid, target_oid, null);
+                    try target_diff.compare(state.readOnly(), &base_oid, &target_oid, null);
 
                     // diff the base ancestor with the source oid
                     var source_diff = tr.TreeDiff(repo_kind, repo_opts).init(arena.allocator());
-                    try source_diff.compare(state.readOnly(), base_oid, source_oid, null);
+                    try source_diff.compare(state.readOnly(), &base_oid, &source_oid, null);
 
                     // look for same path conflicts while populating the clean diff
                     for (source_diff.changes.keys(), source_diff.changes.values()) |path, source_change| {
@@ -1724,9 +1739,9 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                         .pick => {
                             var object = try obj.Object(repo_kind, repo_opts, .full).init(allocator, state.readOnly(), &source_oid);
                             defer object.deinit();
-                            const parent_oid = if (object.content.commit.parents.items.len == 1) object.content.commit.parents.items[0] else return error.CommitMustHaveOneParent;
+                            const parent_oid = object.content.commit.metadata.firstParent() orelse return error.CommitMustHaveOneParent;
                             switch (object.content) {
-                                .commit => base_oid = parent_oid,
+                                .commit => base_oid = parent_oid.*,
                                 else => return error.CommitObjectNotFound,
                             }
                         },

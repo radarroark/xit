@@ -326,12 +326,8 @@ pub fn Log(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime repo
             if (commit_list.getSelectedIndex()) |commit_index| {
                 const commit_object = commit_list.commits.items[commit_index];
 
-                const commit_oid = commit_object.oid;
-
-                const parent_oid_maybe = if (commit_object.content.commit.parents.items.len == 1)
-                    commit_object.content.commit.parents.items[0]
-                else
-                    null;
+                const commit_oid = &commit_object.oid;
+                const parent_oid_maybe = commit_object.content.commit.metadata.firstParent();
 
                 var diff = &self.box.children.values()[1].widget.ui_diff;
                 try diff.clearDiffs();

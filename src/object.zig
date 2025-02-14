@@ -311,6 +311,15 @@ pub fn CommitMetadata(comptime hash_kind: hash.HashKind) type {
         message: ?[]const u8 = null,
         parent_oids: ?[]const [hash.hexLen(hash_kind)]u8 = null,
         allow_empty: bool = false,
+
+        pub fn firstParent(self: CommitMetadata(hash_kind)) ?*const [hash.hexLen(hash_kind)]u8 {
+            if (self.parent_oids) |parent_oids| {
+                if (parent_oids.len > 0) {
+                    return &parent_oids[0];
+                }
+            }
+            return null;
+        }
     };
 }
 
@@ -723,7 +732,6 @@ pub fn ObjectContent(comptime hash_kind: hash.HashKind) type {
         },
         commit: struct {
             tree: [hash.hexLen(hash_kind)]u8,
-            parents: std.ArrayList([hash.hexLen(hash_kind)]u8),
             metadata: CommitMetadata(hash_kind),
             message_position: u64,
         },
@@ -852,15 +860,8 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                         }
                         position += tree_hash_slice.len + 1;
 
-                        // init the content
-                        var content = ObjectContent(repo_opts.hash){
-                            .commit = .{
-                                .tree = tree_hash_slice[0..comptime hash.hexLen(repo_opts.hash)].*,
-                                .parents = std.ArrayList([hash.hexLen(repo_opts.hash)]u8).init(arena.allocator()),
-                                .metadata = .{},
-                                .message_position = 0,
-                            },
-                        };
+                        var parent_oids = std.ArrayList([hash.hexLen(repo_opts.hash)]u8).init(arena.allocator());
+                        var metadata = CommitMetadata(repo_opts.hash){};
 
                         // read the metadata
                         while (true) {
@@ -880,19 +881,19 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                                     if (value.len != hash.hexLen(repo_opts.hash)) {
                                         return error.InvalidObject;
                                     }
-                                    try content.commit.parents.append(value[0..comptime hash.hexLen(repo_opts.hash)].*);
+                                    try parent_oids.append(value[0..comptime hash.hexLen(repo_opts.hash)].*);
                                 } else if (std.mem.eql(u8, "author", key)) {
-                                    content.commit.metadata.author = value;
+                                    metadata.author = value;
                                 } else if (std.mem.eql(u8, "committer", key)) {
-                                    content.commit.metadata.committer = value;
+                                    metadata.committer = value;
                                 }
                             }
                         }
 
-                        content.commit.message_position = position;
+                        metadata.parent_oids = parent_oids.items;
 
                         // read only the first line
-                        content.commit.metadata.message = reader.readUntilDelimiterOrEofAlloc(
+                        metadata.message = reader.readUntilDelimiterOrEofAlloc(
                             arena.allocator(),
                             '\n',
                             repo_opts.max_read_size,
@@ -904,7 +905,13 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                         return .{
                             .allocator = allocator,
                             .arena = arena,
-                            .content = content,
+                            .content = .{
+                                .commit = .{
+                                    .tree = tree_hash_slice[0..comptime hash.hexLen(repo_opts.hash)].*,
+                                    .metadata = metadata,
+                                    .message_position = position,
+                                },
+                            },
                             .oid = oid.*,
                             .len = obj_rdr.header.size,
                             .object_reader = obj_rdr,
@@ -922,18 +929,6 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     },
                     .full => {
                         var position: u64 = 0;
-
-                        // init the content
-                        var content = ObjectContent(repo_opts.hash){
-                            .tag = .{
-                                .target = undefined,
-                                .kind = undefined,
-                                .name = undefined,
-                                .tagger = undefined,
-                                .message = null,
-                                .message_position = 0,
-                            },
-                        };
 
                         // read the fields
                         var fields = std.StringArrayHashMap([]const u8).init(allocator);
@@ -954,16 +949,21 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                             }
                         }
 
+                        // init the content
                         const target = fields.get("object") orelse return error.InvalidObject;
                         if (target.len != hash.hexLen(repo_opts.hash)) {
                             return error.InvalidObject;
                         }
-                        content.tag.target = target[0..comptime hash.hexLen(repo_opts.hash)].*;
-                        content.tag.kind = try ObjectKind.init(fields.get("type") orelse return error.InvalidObject);
-                        content.tag.name = fields.get("tag") orelse return error.InvalidObject;
-                        content.tag.tagger = fields.get("tagger") orelse return error.InvalidObject;
-
-                        content.tag.message_position = position;
+                        var content = ObjectContent(repo_opts.hash){
+                            .tag = .{
+                                .target = target[0..comptime hash.hexLen(repo_opts.hash)].*,
+                                .kind = try ObjectKind.init(fields.get("type") orelse return error.InvalidObject),
+                                .name = fields.get("tag") orelse return error.InvalidObject,
+                                .tagger = fields.get("tagger") orelse return error.InvalidObject,
+                                .message = null,
+                                .message_position = position,
+                            },
+                        };
 
                         // read only the first line
                         content.tag.message = reader.readUntilDelimiterOrEofAlloc(
@@ -1080,8 +1080,10 @@ pub fn ObjectIterator(
                     }
                 },
                 .commit => |commit_content| {
-                    for (commit_content.parents.items) |*parent_oid| {
-                        try self.include(parent_oid);
+                    if (commit_content.metadata.parent_oids) |parent_oids| {
+                        for (parent_oids) |*parent_oid| {
+                            try self.include(parent_oid);
+                        }
                     }
                     if (self.options.recursive) {
                         try self.include(&commit_content.tree);
@@ -1120,8 +1122,10 @@ pub fn ObjectIterator(
                     }
                 },
                 .commit => |commit| {
-                    for (commit.parents.items) |parent_oid| {
-                        try self.oid_excludes.put(parent_oid, {});
+                    if (commit.metadata.parent_oids) |parent_oids| {
+                        for (parent_oids) |parent_oid| {
+                            try self.oid_excludes.put(parent_oid, {});
+                        }
                     }
                     if (self.options.recursive) {
                         try self.exclude(&commit.tree);

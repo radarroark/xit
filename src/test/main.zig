@@ -501,7 +501,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     {
         var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
         defer repo.deinit();
-        var tree_diff = try repo.treeDiff(allocator, commit1, commit2);
+        var tree_diff = try repo.treeDiff(allocator, &commit1, &commit2);
         defer tree_diff.deinit();
         var file_iter = try repo.filePairs(allocator, .{
             .tree = .{ .tree_diff = &tree_diff },

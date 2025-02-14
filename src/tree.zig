@@ -47,8 +47,8 @@ pub fn TreeDiff(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts
         pub fn compare(
             self: *TreeDiff(repo_kind, repo_opts),
             state: rp.Repo(repo_kind, repo_opts).State(.read_only),
-            old_oid_maybe: ?[hash.hexLen(repo_opts.hash)]u8,
-            new_oid_maybe: ?[hash.hexLen(repo_opts.hash)]u8,
+            old_oid_maybe: ?*const [hash.hexLen(repo_opts.hash)]u8,
+            new_oid_maybe: ?*const [hash.hexLen(repo_opts.hash)]u8,
             path_list_maybe: ?std.ArrayList([]const u8),
         ) !void {
             if (old_oid_maybe == null and new_oid_maybe == null) {
@@ -69,14 +69,14 @@ pub fn TreeDiff(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts
                         if (!old_value.eql(new_value)) {
                             const old_value_tree = old_value.isTree();
                             const new_value_tree = new_value.isTree();
-                            try self.compare(state, if (old_value_tree) std.fmt.bytesToHex(&old_value.oid, .lower) else null, if (new_value_tree) std.fmt.bytesToHex(&new_value.oid, .lower) else null, path_list);
+                            try self.compare(state, if (old_value_tree) &std.fmt.bytesToHex(&old_value.oid, .lower) else null, if (new_value_tree) &std.fmt.bytesToHex(&new_value.oid, .lower) else null, path_list);
                             if (!old_value_tree or !new_value_tree) {
                                 try self.changes.put(path, Change(repo_opts.hash){ .old = if (old_value_tree) null else old_value, .new = if (new_value_tree) null else new_value });
                             }
                         }
                     } else {
                         if (old_value.isTree()) {
-                            try self.compare(state, std.fmt.bytesToHex(&old_value.oid, .lower), null, path_list);
+                            try self.compare(state, &std.fmt.bytesToHex(&old_value.oid, .lower), null, path_list);
                         } else {
                             try self.changes.put(path, Change(repo_opts.hash){ .old = old_value, .new = null });
                         }
@@ -95,7 +95,7 @@ pub fn TreeDiff(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts
                     if (old_entries.get(new_key)) |_| {
                         continue;
                     } else if (new_value.isTree()) {
-                        try self.compare(state, null, std.fmt.bytesToHex(&new_value.oid, .lower), path_list);
+                        try self.compare(state, null, &std.fmt.bytesToHex(&new_value.oid, .lower), path_list);
                     } else {
                         try self.changes.put(path, Change(repo_opts.hash){ .old = null, .new = new_value });
                     }
@@ -106,14 +106,14 @@ pub fn TreeDiff(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts
         fn loadTree(
             self: *TreeDiff(repo_kind, repo_opts),
             state: rp.Repo(repo_kind, repo_opts).State(.read_only),
-            oid_maybe: ?[hash.hexLen(repo_opts.hash)]u8,
+            oid_maybe: ?*const [hash.hexLen(repo_opts.hash)]u8,
         ) !std.StringArrayHashMap(TreeEntry(repo_opts.hash)) {
             if (oid_maybe) |oid| {
-                const object = try obj.Object(repo_kind, repo_opts, .full).init(self.arena.allocator(), state, &oid);
+                const object = try obj.Object(repo_kind, repo_opts, .full).init(self.arena.allocator(), state, oid);
                 return switch (object.content) {
                     .blob, .tag => std.StringArrayHashMap(TreeEntry(repo_opts.hash)).init(self.arena.allocator()),
                     .tree => |tree| tree.entries,
-                    .commit => |commit| self.loadTree(state, commit.tree),
+                    .commit => |commit| self.loadTree(state, &commit.tree),
                 };
             } else {
                 return std.StringArrayHashMap(TreeEntry(repo_opts.hash)).init(self.arena.allocator());

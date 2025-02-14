@@ -4,6 +4,7 @@ const hash = @import("./hash.zig");
 const mnt = @import("./mount.zig");
 const df = @import("./diff.zig");
 const rf = @import("./ref.zig");
+const obj = @import("./object.zig");
 
 pub fn NodeId(comptime hash_kind: hash.HashKind) type {
     return packed struct {
@@ -26,7 +27,7 @@ const ChangeKind = enum(u8) {
 fn createPatchEntries(
     comptime repo_opts: rp.RepoOpts(.xit),
     moment: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write),
-    branch: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write),
+    snapshot: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write),
     arena: *std.heap.ArenaAllocator,
     myers_diff_iter: *df.MyersDiffIterator(.xit, repo_opts),
     path_hash: hash.HashInt(repo_opts.hash),
@@ -40,7 +41,7 @@ fn createPatchEntries(
     const path_slot = try path_set.getSlot(path_hash);
 
     // init node list
-    const path_to_node_id_list_cursor = try branch.putCursor(hash.hashInt(repo_opts.hash, "path->node-id-list"));
+    const path_to_node_id_list_cursor = try snapshot.putCursor(hash.hashInt(repo_opts.hash, "path->node-id-list"));
     const path_to_node_id_list = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(path_to_node_id_list_cursor);
     try path_to_node_id_list.putKey(path_hash, .{ .slot = path_slot });
     const node_id_list_cursor_maybe = try path_to_node_id_list.getCursor(path_hash);
@@ -138,7 +139,7 @@ fn createPatchEntries(
 fn patchHash(
     comptime repo_opts: rp.RepoOpts(.xit),
     moment: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write),
-    branch: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write),
+    snapshot: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write),
     allocator: std.mem.Allocator,
     myers_diff_iter: *df.MyersDiffIterator(.xit, repo_opts),
     new_oid: *const [hash.byteLen(repo_opts.hash)]u8,
@@ -153,7 +154,7 @@ fn patchHash(
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    try createPatchEntries(repo_opts, moment, branch, &arena, myers_diff_iter, path_hash, 0, &patch_entries, &patch_offsets);
+    try createPatchEntries(repo_opts, moment, snapshot, &arena, myers_diff_iter, path_hash, 0, &patch_entries, &patch_offsets);
 
     var hasher = hash.Hasher(repo_opts.hash).init();
 
@@ -176,7 +177,7 @@ fn patchHash(
 fn writePatch(
     comptime repo_opts: rp.RepoOpts(.xit),
     moment: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write),
-    branch: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write),
+    snapshot: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write),
     allocator: std.mem.Allocator,
     line_iter_pair: *df.LineIteratorPair(.xit, repo_opts),
     path_hash: hash.HashInt(repo_opts.hash),
@@ -186,7 +187,7 @@ fn writePatch(
 
     const new_oid = &line_iter_pair.b.oid;
 
-    const patch_hash_bytes = try patchHash(repo_opts, moment, branch, allocator, &myers_diff_iter, new_oid, path_hash);
+    const patch_hash_bytes = try patchHash(repo_opts, moment, snapshot, allocator, &myers_diff_iter, new_oid, path_hash);
     const patch_hash = hash.bytesToInt(repo_opts.hash, &patch_hash_bytes);
 
     try myers_diff_iter.reset();
@@ -218,7 +219,7 @@ fn writePatch(
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    try createPatchEntries(repo_opts, moment, branch, &arena, &myers_diff_iter, path_hash, patch_hash, &patch_entries, &patch_offsets);
+    try createPatchEntries(repo_opts, moment, snapshot, &arena, &myers_diff_iter, path_hash, patch_hash, &patch_entries, &patch_offsets);
 
     var change_list_writer = try change_list_cursor.writer();
     for (patch_entries.items) |patch_entry| {
@@ -239,19 +240,19 @@ fn writePatch(
 pub fn applyPatch(
     comptime repo_opts: rp.RepoOpts(.xit),
     moment: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_only),
-    branch: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write),
+    snapshot: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write),
     allocator: std.mem.Allocator,
     path_hash: hash.HashInt(repo_opts.hash),
     patch_hash: hash.HashInt(repo_opts.hash),
 ) !void {
     // exit early if patch has already been applied
-    if (try branch.cursor.readPath(void, &.{
+    if (try snapshot.cursor.readPath(void, &.{
         .{ .hash_map_get = .{ .value = hash.hashInt(repo_opts.hash, "patch-id-set") } },
         .{ .hash_map_get = .{ .value = patch_hash } },
     })) |_| {
         return;
     } else {
-        const patch_id_set_cursor = try branch.putCursor(hash.hashInt(repo_opts.hash, "patch-id-set"));
+        const patch_id_set_cursor = try snapshot.putCursor(hash.hashInt(repo_opts.hash, "patch-id-set"));
         const patch_id_set = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(patch_id_set_cursor);
         try patch_id_set.putKey(patch_hash, .{ .slot = .{ .tag = .none } });
     }
@@ -267,14 +268,14 @@ pub fn applyPatch(
     const path_slot = try path_set.getSlot(path_hash);
 
     // init live-parent->children node map
-    const path_to_live_parent_to_children_cursor = try branch.putCursor(hash.hashInt(repo_opts.hash, "path->live-parent->children"));
+    const path_to_live_parent_to_children_cursor = try snapshot.putCursor(hash.hashInt(repo_opts.hash, "path->live-parent->children"));
     const path_to_live_parent_to_children = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(path_to_live_parent_to_children_cursor);
     try path_to_live_parent_to_children.putKey(path_hash, .{ .slot = path_slot });
     const live_parent_to_children_cursor = try path_to_live_parent_to_children.putCursor(path_hash);
     const live_parent_to_children = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(live_parent_to_children_cursor);
 
     // init child->parent node map
-    const path_to_child_to_parent_cursor = try branch.putCursor(hash.hashInt(repo_opts.hash, "path->child->parent"));
+    const path_to_child_to_parent_cursor = try snapshot.putCursor(hash.hashInt(repo_opts.hash, "path->child->parent"));
     const path_to_child_to_parent = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(path_to_child_to_parent_cursor);
     try path_to_child_to_parent.putKey(path_hash, .{ .slot = path_slot });
     const child_to_parent_cursor = try path_to_child_to_parent.putCursor(path_hash);
@@ -379,8 +380,8 @@ pub fn applyPatch(
         }
     }
 
-    // init node list
-    const path_to_node_id_list_cursor = try branch.putCursor(hash.hashInt(repo_opts.hash, "path->node-id-list"));
+    // init node id list
+    const path_to_node_id_list_cursor = try snapshot.putCursor(hash.hashInt(repo_opts.hash, "path->node-id-list"));
     const path_to_node_id_list = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(path_to_node_id_list_cursor);
     try path_to_node_id_list.putKey(path_hash, .{ .slot = path_slot });
     var node_id_list_cursor = try path_to_node_id_list.putCursor(path_hash);
@@ -429,22 +430,22 @@ pub fn applyPatch(
     try node_id_list_writer.finish();
 }
 
-fn removePatch(comptime repo_opts: rp.RepoOpts(.xit), branch: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write), path: []const u8) !void {
+fn removePatch(comptime repo_opts: rp.RepoOpts(.xit), snapshot: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write), path: []const u8) !void {
     const path_hash = hash.hashInt(repo_opts.hash, path);
 
-    if (try branch.cursor.readPath(void, &.{
+    if (try snapshot.cursor.readPath(void, &.{
         .{ .hash_map_get = .{ .value = hash.hashInt(repo_opts.hash, "path->node-id-list") } },
         .{ .hash_map_get = .{ .key = path_hash } },
     })) |_| {
-        const path_to_live_parent_to_children_cursor = try branch.putCursor(hash.hashInt(repo_opts.hash, "path->live-parent->children"));
+        const path_to_live_parent_to_children_cursor = try snapshot.putCursor(hash.hashInt(repo_opts.hash, "path->live-parent->children"));
         const path_to_live_parent_to_children = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(path_to_live_parent_to_children_cursor);
         _ = try path_to_live_parent_to_children.remove(path_hash);
 
-        const path_to_child_to_parent_cursor = try branch.putCursor(hash.hashInt(repo_opts.hash, "path->child->parent"));
+        const path_to_child_to_parent_cursor = try snapshot.putCursor(hash.hashInt(repo_opts.hash, "path->child->parent"));
         const path_to_child_to_parent = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(path_to_child_to_parent_cursor);
         _ = try path_to_child_to_parent.remove(path_hash);
 
-        const path_to_node_id_list_cursor = try branch.putCursor(hash.hashInt(repo_opts.hash, "path->node-id-list"));
+        const path_to_node_id_list_cursor = try snapshot.putCursor(hash.hashInt(repo_opts.hash, "path->node-id-list"));
         const path_to_node_id_list = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(path_to_node_id_list_cursor);
         _ = try path_to_node_id_list.remove(path_hash);
     }
@@ -457,24 +458,24 @@ pub fn writeAndApplyPatches(
     status: *mnt.Status(.xit, repo_opts),
     commit_oid: *const [hash.hexLen(repo_opts.hash)]u8,
 ) !void {
-    // get current branch name
-    var current_branch_name_buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
-    const current_branch_name = try rf.readHeadName(.xit, repo_opts, state.readOnly(), &current_branch_name_buffer);
+    // init snapshot
+    const commit_id_to_snapshot_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "commit-id->snapshot"));
+    const commit_id_to_snapshot = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(commit_id_to_snapshot_cursor);
+    var snapshot_cursor = try commit_id_to_snapshot.putCursor(try hash.hexToInt(repo_opts.hash, commit_oid));
 
-    const branch_name_hash = hash.hashInt(repo_opts.hash, current_branch_name);
+    // if there is a parent commit, set the initial value of the snapshot to the one from that commit
+    {
+        var commit_object = try obj.Object(.xit, repo_opts, .full).init(allocator, state.readOnly(), commit_oid);
+        defer commit_object.deinit();
 
-    // store branch name
-    const ref_name_set_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "ref-name-set"));
-    const ref_name_set = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(ref_name_set_cursor);
-    var branch_name_cursor = try ref_name_set.putKeyCursor(branch_name_hash);
-    try branch_name_cursor.writeIfEmpty(.{ .bytes = current_branch_name });
+        if (commit_object.content.commit.metadata.firstParent()) |commit_parent_oid| {
+            if (try commit_id_to_snapshot.getCursor(try hash.hexToInt(repo_opts.hash, commit_parent_oid))) |parent_snapshot_cursor| {
+                try snapshot_cursor.write(.{ .slot = parent_snapshot_cursor.slot() });
+            }
+        }
+    }
 
-    // init branch map
-    const branches_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "branches"));
-    const branches = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(branches_cursor);
-    try branches.putKey(branch_name_hash, .{ .slot = branch_name_cursor.slot() });
-    const branch_cursor = try branches.putCursor(branch_name_hash);
-    const branch = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(branch_cursor);
+    const snapshot = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(snapshot_cursor);
 
     // init file iterator for index diff
     var file_iter = try df.FileIterator(.xit, repo_opts).init(allocator, state.readOnly(), .{ .index = .{ .status = status } });
@@ -486,7 +487,7 @@ pub fn writeAndApplyPatches(
         if (line_iter_pair.a.source == .binary or line_iter_pair.b.source == .binary) {
             // the file is or was binary, so we can't create a patch for it.
             // remove existing patch data if there is any.
-            try removePatch(repo_opts, &branch, line_iter_pair.path);
+            try removePatch(repo_opts, &snapshot, line_iter_pair.path);
         } else {
             // store path
             const path_hash = hash.hashInt(repo_opts.hash, line_iter_pair.path);
@@ -496,30 +497,17 @@ pub fn writeAndApplyPatches(
             try path_cursor.writeIfEmpty(.{ .bytes = line_iter_pair.path });
 
             // create patch
-            const patch_hash_bytes = try writePatch(repo_opts, state.extra.moment, &branch, allocator, &line_iter_pair, path_hash);
+            const patch_hash_bytes = try writePatch(repo_opts, state.extra.moment, &snapshot, allocator, &line_iter_pair, path_hash);
             const patch_hash = hash.bytesToInt(repo_opts.hash, &patch_hash_bytes);
 
             // apply patch
-            try applyPatch(repo_opts, state.readOnly().extra.moment, &branch, allocator, path_hash, patch_hash);
+            try applyPatch(repo_opts, state.readOnly().extra.moment, &snapshot, allocator, path_hash, patch_hash);
 
             // associate patch hash with path/commit
-            const commit_id_to_path_to_patch_id_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "commit-id->path->patch-id"));
-            const commit_id_to_path_to_patch_id = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(commit_id_to_path_to_patch_id_cursor);
-            const path_to_patch_id_cursor = try commit_id_to_path_to_patch_id.putCursor(try hash.hexToInt(repo_opts.hash, commit_oid));
+            const path_to_patch_id_cursor = try snapshot.putCursor(hash.hashInt(repo_opts.hash, "path->patch-id"));
             const path_to_patch_id = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(path_to_patch_id_cursor);
             try path_to_patch_id.putKey(path_hash, .{ .slot = path_cursor.slot() });
             try path_to_patch_id.put(path_hash, .{ .bytes = &patch_hash_bytes });
         }
-    }
-
-    // associate the path->live-parent->children map with commit
-    const commit_id_to_path_to_live_parent_to_children_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "commit-id->path->live-parent->children"));
-    const commit_id_to_path_to_live_parent_to_children = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(commit_id_to_path_to_live_parent_to_children_cursor);
-    const commit_hash = try hash.hexToInt(repo_opts.hash, commit_oid);
-    if (try branch.getCursor(hash.hashInt(repo_opts.hash, "path->live-parent->children"))) |path_to_live_parent_to_children_cursor| {
-        try commit_id_to_path_to_live_parent_to_children.put(commit_hash, .{ .slot = path_to_live_parent_to_children_cursor.slot() });
-    } else {
-        const path_to_live_parent_to_children_cursor = try commit_id_to_path_to_live_parent_to_children.putCursor(commit_hash);
-        _ = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(path_to_live_parent_to_children_cursor);
     }
 }

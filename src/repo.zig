@@ -585,7 +585,12 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             return try df.FileIterator(repo_kind, repo_opts).init(allocator, state, diff_opts);
         }
 
-        pub fn treeDiff(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, old_oid_maybe: ?[hash.hexLen(repo_opts.hash)]u8, new_oid_maybe: ?[hash.hexLen(repo_opts.hash)]u8) !tr.TreeDiff(repo_kind, repo_opts) {
+        pub fn treeDiff(
+            self: *Repo(repo_kind, repo_opts),
+            allocator: std.mem.Allocator,
+            old_oid_maybe: ?*const [hash.hexLen(repo_opts.hash)]u8,
+            new_oid_maybe: ?*const [hash.hexLen(repo_opts.hash)]u8,
+        ) !tr.TreeDiff(repo_kind, repo_opts) {
             var moment = try self.core.latestMoment();
             const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
             var tree_diff = tr.TreeDiff(repo_kind, repo_opts).init(allocator);
@@ -747,6 +752,8 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             switch (repo_kind) {
                 .git => return try mrg.Merge(repo_kind, repo_opts).init(.{ .core = &self.core, .extra = .{} }, allocator, input),
                 .xit => {
+                    const patch = @import("./patch.zig");
+
                     var merge_result: mrg.Merge(repo_kind, repo_opts) = undefined;
 
                     const Ctx = struct {
@@ -758,10 +765,19 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
+
+                            var stat = try mnt.Status(repo_kind, repo_opts).init(ctx.allocator, state.readOnly(), null);
+                            defer stat.deinit();
+
                             ctx.merge_result.* = try mrg.Merge(repo_kind, repo_opts).init(state, ctx.allocator, ctx.input);
-                            // no need to make a new transaction if nothing was done
-                            if (.nothing == ctx.merge_result.result) {
-                                return error.CancelTransaction;
+
+                            switch (ctx.merge_result.result) {
+                                .success => |success| {
+                                    try patch.writeAndApplyPatches(repo_opts, state, ctx.allocator, &stat, &success.oid);
+                                },
+                                // no need to make a new transaction if nothing was done
+                                .nothing => return error.CancelTransaction,
+                                .fast_forward, .conflict => {},
                             }
                         }
                     };
