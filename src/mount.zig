@@ -57,7 +57,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
         index_deleted: std.StringArrayHashMap(void),
         conflicts: std.StringArrayHashMap(MergeConflictStatus),
         index: idx.Index(repo_kind, repo_opts),
-        head_tree: tr.HeadTree(repo_kind, repo_opts),
+        head_tree: tr.Tree(repo_kind, repo_opts),
         arena: *std.heap.ArenaAllocator,
         allocator: std.mem.Allocator,
 
@@ -107,7 +107,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
             _ = try addEntries(arena.allocator(), &untracked, &mount_modified, &index, &index_bools, state.core.repo_dir, ".");
 
-            var head_tree = try tr.HeadTree(repo_kind, repo_opts).init(allocator, state, oid_maybe);
+            var head_tree = try tr.Tree(repo_kind, repo_opts).init(allocator, state, oid_maybe);
             errdefer head_tree.deinit();
 
             // for each entry in the index
@@ -353,7 +353,7 @@ pub fn removePaths(
     var index = try idx.Index(repo_kind, repo_opts).init(allocator, state.readOnly());
     defer index.deinit();
 
-    var head_tree = try tr.HeadTree(repo_kind, repo_opts).init(allocator, state.readOnly(), null);
+    var head_tree = try tr.Tree(repo_kind, repo_opts).init(allocator, state.readOnly(), null);
     defer head_tree.deinit();
 
     for (paths) |path| {

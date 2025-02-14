@@ -168,7 +168,7 @@ pub fn headTreeEntry(
     return try pathToTreeEntry(repo_kind, repo_opts, state, allocator, tree_object, path_parts);
 }
 
-pub fn HeadTree(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
+pub fn Tree(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return struct {
         entries: std.StringArrayHashMap(TreeEntry(repo_opts.hash)),
         arena: *std.heap.ArenaAllocator,
@@ -178,10 +178,10 @@ pub fn HeadTree(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts
             allocator: std.mem.Allocator,
             state: rp.Repo(repo_kind, repo_opts).State(.read_only),
             oid_maybe: ?*const [hash.hexLen(repo_opts.hash)]u8,
-        ) !HeadTree(repo_kind, repo_opts) {
+        ) !Tree(repo_kind, repo_opts) {
             const arena = try allocator.create(std.heap.ArenaAllocator);
             arena.* = std.heap.ArenaAllocator.init(allocator);
-            var tree = HeadTree(repo_kind, repo_opts){
+            var tree = Tree(repo_kind, repo_opts){
                 .entries = std.StringArrayHashMap(TreeEntry(repo_opts.hash)).init(allocator),
                 .arena = arena,
                 .allocator = allocator,
@@ -197,13 +197,13 @@ pub fn HeadTree(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts
             return tree;
         }
 
-        pub fn deinit(self: *HeadTree(repo_kind, repo_opts)) void {
+        pub fn deinit(self: *Tree(repo_kind, repo_opts)) void {
             self.entries.deinit();
             self.arena.deinit();
             self.allocator.destroy(self.arena);
         }
 
-        fn read(self: *HeadTree(repo_kind, repo_opts), state: rp.Repo(repo_kind, repo_opts).State(.read_only), prefix: []const u8, oid: *const [hash.hexLen(repo_opts.hash)]u8) !void {
+        fn read(self: *Tree(repo_kind, repo_opts), state: rp.Repo(repo_kind, repo_opts).State(.read_only), prefix: []const u8, oid: *const [hash.hexLen(repo_opts.hash)]u8) !void {
             var object = try obj.Object(repo_kind, repo_opts, .full).init(self.allocator, state, oid);
             defer object.deinit();
 
