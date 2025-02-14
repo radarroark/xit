@@ -599,10 +599,10 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             return tree_diff;
         }
 
-        pub fn head(self: *Repo(repo_kind, repo_opts), buffer: []u8) !?rf.RefOrOid(repo_opts.hash) {
+        pub fn head(self: *Repo(repo_kind, repo_opts), buffer: []u8) !rf.RefOrOid(repo_opts.hash) {
             var moment = try self.core.latestMoment();
             const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
-            return try rf.readHead(repo_kind, repo_opts, state, buffer);
+            return try rf.readHead(repo_kind, repo_opts, state, buffer) orelse return error.HeadNotFound;
         }
 
         pub fn listBranches(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator) !rf.RefList {

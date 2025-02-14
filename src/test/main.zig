@@ -1133,7 +1133,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         defer repo.deinit();
         var current_branch_buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
         const head = try repo.head(&current_branch_buffer);
-        try std.testing.expectEqualStrings("stuff", head.?.ref.name);
+        try std.testing.expectEqualStrings("stuff", head.ref.name);
     }
 
     // get the current branch with libgit

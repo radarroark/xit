@@ -360,13 +360,10 @@ fn runCommand(
             switch (branch_cmd) {
                 .list => {
                     var head_buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
-                    const current_branch_name = if (try repo.head(&head_buffer)) |ref_or_oid|
-                        switch (ref_or_oid) {
-                            .ref => |ref| ref.name,
-                            .oid => "",
-                        }
-                    else
-                        "";
+                    const current_branch_name = switch (try repo.head(&head_buffer)) {
+                        .ref => |ref| ref.name,
+                        .oid => "",
+                    };
 
                     var ref_list = try repo.listBranches(allocator);
                     defer ref_list.deinit();
