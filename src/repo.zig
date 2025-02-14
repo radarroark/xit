@@ -524,13 +524,13 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
         }
 
         pub fn untrack(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, paths: []const []const u8, opts: mnt.UntrackOptions) !void {
-            try self.rm(allocator, paths, .{
+            try self.remove(allocator, paths, .{
                 .force = opts.force,
                 .remove_from_mount = false,
             });
         }
 
-        pub fn rm(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, paths: []const []const u8, opts: mnt.RemoveOptions) !void {
+        pub fn remove(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, paths: []const []const u8, opts: mnt.RemoveOptions) !void {
             var arena = std.heap.ArenaAllocator.init(allocator);
             defer arena.deinit();
 

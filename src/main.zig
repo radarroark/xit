@@ -204,7 +204,7 @@ fn runCommand(
             try repo.untrack(allocator, untrack_cmd.paths, untrack_cmd.opts);
         },
         .rm => |rm_cmd| {
-            try repo.rm(allocator, rm_cmd.paths, rm_cmd.opts);
+            try repo.remove(allocator, rm_cmd.paths, rm_cmd.opts);
         },
         .commit => |commit_cmd| {
             _ = try repo.commit(allocator, commit_cmd);
