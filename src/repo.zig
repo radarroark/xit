@@ -599,10 +599,10 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             return tree_diff;
         }
 
-        pub fn currentBranch(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator) ![]const u8 {
+        pub fn head(self: *Repo(repo_kind, repo_opts), buffer: []u8) !?rf.RefOrOid(repo_opts.hash) {
             var moment = try self.core.latestMoment();
             const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
-            return try rf.readHeadNameAlloc(repo_kind, repo_opts, state, allocator);
+            return try rf.readHead(repo_kind, repo_opts, state, buffer);
         }
 
         pub fn listBranches(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator) !rf.RefList {
@@ -740,7 +740,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             var iter = try obj.ObjectIterator(repo_kind, repo_opts, .full).init(allocator, state, .{ .recursive = false });
             errdefer iter.deinit();
 
-            const start_oids = start_oids_maybe orelse if (try rf.readHeadMaybe(repo_kind, repo_opts, state)) |head_oid| &.{head_oid} else &.{};
+            const start_oids = start_oids_maybe orelse if (try rf.readHeadRecurMaybe(repo_kind, repo_opts, state)) |head_oid| &.{head_oid} else &.{};
             for (start_oids) |*start_oid| {
                 try iter.include(start_oid);
             }

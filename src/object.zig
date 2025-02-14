@@ -331,7 +331,7 @@ pub fn writeCommit(
     metadata: CommitMetadata(repo_opts.hash),
 ) ![hash.hexLen(repo_opts.hash)]u8 {
     const parent_oids = if (metadata.parent_oids) |oids| oids else blk: {
-        const head_oid_maybe = try rf.readHeadMaybe(repo_kind, repo_opts, state.readOnly());
+        const head_oid_maybe = try rf.readHeadRecurMaybe(repo_kind, repo_opts, state.readOnly());
         break :blk if (head_oid_maybe) |head_oid| &.{head_oid} else &.{};
     };
 

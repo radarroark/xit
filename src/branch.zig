@@ -59,7 +59,7 @@ pub fn add(
             defer lock.deinit();
 
             // get HEAD contents
-            const head_file_buffer = try rf.readHead(repo_kind, repo_opts, state.readOnly());
+            const head_file_buffer = try rf.readHeadRecur(repo_kind, repo_opts, state.readOnly());
 
             // write to lock file
             try lock.lock_file.writeAll(&head_file_buffer);
@@ -78,7 +78,7 @@ pub fn add(
             try ref_name_cursor.writeIfEmpty(.{ .bytes = name });
 
             // store ref content
-            const head_file_buffer = try rf.readHead(repo_kind, repo_opts, state.readOnly());
+            const head_file_buffer = try rf.readHeadRecur(repo_kind, repo_opts, state.readOnly());
             const ref_content_set_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "ref-content-set"));
             const ref_content_set = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(ref_content_set_cursor);
             var ref_content_cursor = try ref_content_set.putKeyCursor(hash.hashInt(repo_opts.hash, &head_file_buffer));
@@ -101,6 +101,17 @@ pub fn remove(
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
     input: RemoveBranchInput,
 ) !void {
+    // don't allow current branch to be deleted
+    var current_branch_buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
+    if (try rf.readHead(repo_kind, repo_opts, state.readOnly(), &current_branch_buffer)) |current_branch| {
+        switch (current_branch) {
+            .ref => |ref| if (std.mem.eql(u8, input.name, ref.name)) {
+                return error.CannotDeleteCurrentBranch;
+            },
+            .oid => {},
+        }
+    }
+
     switch (repo_kind) {
         .git => {
             var refs_dir = try state.core.git_dir.openDir("refs", .{});
@@ -117,13 +128,6 @@ pub fn remove(
             // create lock file for HEAD
             var head_lock = try fs.LockFile.init(state.core.git_dir, "HEAD");
             defer head_lock.deinit();
-
-            // don't allow current branch to be deleted
-            var current_branch_name_buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
-            const current_branch_name = try rf.readHeadName(repo_kind, repo_opts, state.readOnly(), &current_branch_name_buffer);
-            if (std.mem.eql(u8, current_branch_name, input.name)) {
-                return error.CannotDeleteCurrentBranch;
-            }
 
             // delete file
             try heads_dir.deleteFile(input.name);
@@ -145,13 +149,6 @@ pub fn remove(
             }
         },
         .xit => {
-            // don't allow current branch to be deleted
-            var current_branch_name_buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
-            const current_branch_name = try rf.readHeadName(repo_kind, repo_opts, state.readOnly(), &current_branch_name_buffer);
-            if (std.mem.eql(u8, current_branch_name, input.name)) {
-                return error.CannotDeleteCurrentBranch;
-            }
-
             const name_hash = hash.hashInt(repo_opts.hash, input.name);
 
             // remove from refs/heads/{name}

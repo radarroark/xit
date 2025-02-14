@@ -34,7 +34,7 @@ pub fn add(
     const ref_path = try std.fmt.allocPrint(allocator, "refs/tags/{s}", .{input.name});
     defer allocator.free(ref_path);
 
-    const target = try rf.readHead(repo_kind, repo_opts, state.readOnly());
+    const target = try rf.readHeadRecur(repo_kind, repo_opts, state.readOnly());
     const tag_oid = try obj.writeTag(repo_kind, repo_opts, state, allocator, input, &target);
     try rf.write(repo_kind, repo_opts, state, ref_path, &tag_oid);
 

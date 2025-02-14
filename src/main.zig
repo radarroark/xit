@@ -19,6 +19,7 @@ const mnt = @import("./mount.zig");
 const mrg = @import("./merge.zig");
 const obj = @import("./object.zig");
 const tr = @import("./tree.zig");
+const rf = @import("./ref.zig");
 
 pub const Writers = struct {
     out: std.io.AnyWriter = std.io.null_writer.any(),
@@ -358,14 +359,20 @@ fn runCommand(
         .branch => |branch_cmd| {
             switch (branch_cmd) {
                 .list => {
-                    const current_branch = try repo.currentBranch(allocator);
-                    defer allocator.free(current_branch);
+                    var head_buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
+                    const current_branch_name = if (try repo.head(&head_buffer)) |ref_or_oid|
+                        switch (ref_or_oid) {
+                            .ref => |ref| ref.name,
+                            .oid => "",
+                        }
+                    else
+                        "";
 
                     var ref_list = try repo.listBranches(allocator);
                     defer ref_list.deinit();
 
                     for (ref_list.refs.values()) |ref| {
-                        const prefix = if (std.mem.eql(u8, current_branch, ref.name)) "*" else " ";
+                        const prefix = if (std.mem.eql(u8, current_branch_name, ref.name)) "*" else " ";
                         try writers.out.print("{s} {s}\n", .{ prefix, ref.name });
                     }
                 },

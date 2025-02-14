@@ -1361,8 +1361,13 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
             }
 
             // get the current branch name and oid
-            const target_name = try rf.readHeadNameAlloc(repo_kind, repo_opts, state.readOnly(), arena.allocator());
-            const target_oid_maybe = try rf.readHeadMaybe(repo_kind, repo_opts, state.readOnly());
+            const target_buffer = try arena.allocator().alloc(u8, rf.MAX_REF_CONTENT_SIZE);
+            const target_ref_or_oid = try rf.readHead(repo_kind, repo_opts, state.readOnly(), target_buffer) orelse return error.TargetNotFound;
+            const target_name = switch (target_ref_or_oid) {
+                .ref => |ref| ref.name,
+                .oid => |oid| oid,
+            };
+            const target_oid_maybe = try rf.readRecur(repo_kind, repo_opts, state.readOnly(), target_ref_or_oid);
 
             // init the diff that we will use for the migration and the conflicts maps.
             // they're using the arena because they'll be included in the result.

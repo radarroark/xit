@@ -212,7 +212,7 @@ test "pack" {
         var r = try rp.Repo(.git, repo_opts).open(allocator, .{ .cwd = repo_dir });
         defer r.deinit();
 
-        const head_oid = try rf.readHead(.git, repo_opts, .{ .core = &r.core, .extra = .{} });
+        const head_oid = try rf.readHeadRecur(.git, repo_opts, .{ .core = &r.core, .extra = .{} });
 
         var obj_iter = try obj.ObjectIterator(.git, repo_opts, .raw).init(allocator, .{ .core = &r.core, .extra = .{} }, .{ .recursive = true });
         defer obj_iter.deinit();

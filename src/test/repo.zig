@@ -259,7 +259,7 @@ fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
         defer merge.deinit();
         try std.testing.expect(.fast_forward == merge.result);
 
-        const head_oid = try rf.readHead(repo_kind, repo_opts, state);
+        const head_oid = try rf.readHeadRecur(repo_kind, repo_opts, state);
         try std.testing.expectEqual(commit_k, head_oid);
 
         // make sure file from commit k exists

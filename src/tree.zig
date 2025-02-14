@@ -156,7 +156,7 @@ pub fn headTreeEntry(
     path_parts: []const []const u8,
 ) !?TreeEntry(repo_opts.hash) {
     // get the current commit
-    const current_oid = try rf.readHead(repo_kind, repo_opts, state);
+    const current_oid = try rf.readHeadRecur(repo_kind, repo_opts, state);
     var commit_object = try obj.Object(repo_kind, repo_opts, .full).init(allocator, state, &current_oid);
     defer commit_object.deinit();
 
@@ -188,7 +188,7 @@ pub fn Tree(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             };
             errdefer tree.deinit();
 
-            const oid = oid_maybe orelse &(try rf.readHeadMaybe(repo_kind, repo_opts, state) orelse return tree);
+            const oid = oid_maybe orelse &(try rf.readHeadRecurMaybe(repo_kind, repo_opts, state) orelse return tree);
 
             var commit_object = try obj.Object(repo_kind, repo_opts, .full).init(allocator, state, oid);
             defer commit_object.deinit();

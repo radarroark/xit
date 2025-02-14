@@ -227,12 +227,12 @@ pub fn readRecur(
             const ref_path = try ref.toPath(&ref_path_buffer);
 
             var read_buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
-            const content = read(repo_kind, repo_opts, state, ref_path, &read_buffer) catch |err| switch (err) {
+            const ref_or_oid_maybe = read(repo_kind, repo_opts, state, ref_path, &read_buffer) catch |err| switch (err) {
                 error.RefNotFound => return null,
                 else => |e| return e,
             };
 
-            if (RefOrOid(repo_opts.hash).initFromDb(content)) |next_input| {
+            if (ref_or_oid_maybe) |next_input| {
                 return try readRecur(repo_kind, repo_opts, state, next_input);
             } else {
                 return null;
@@ -248,14 +248,15 @@ pub fn read(
     state: rp.Repo(repo_kind, repo_opts).State(.read_only),
     ref_path: []const u8,
     buffer: []u8,
-) ![]u8 {
+) !?RefOrOid(repo_opts.hash) {
     switch (repo_kind) {
         .git => {
             // look for loose ref
             if (state.core.git_dir.openFile(ref_path, .{ .mode = .read_only })) |ref_file| {
                 defer ref_file.close();
                 const size = try ref_file.reader().readAll(buffer);
-                return std.mem.sliceTo(buffer[0..size], '\n');
+                const ref_content = std.mem.sliceTo(buffer[0..size], '\n');
+                return RefOrOid(repo_opts.hash).initFromDb(ref_content);
             } else |err| switch (err) {
                 error.FileNotFound => {},
                 else => |e| return e,
@@ -280,8 +281,8 @@ pub fn read(
                     const path = split_iter.next() orelse continue;
 
                     if (isOid(repo_opts.hash, oid_hex) and std.mem.eql(u8, ref_path, path)) {
-                        @memcpy(buffer[0..oid_hex.len], oid_hex);
-                        return buffer[0..oid_hex.len];
+                        @memcpy(buffer[0..comptime hash.hexLen(repo_opts.hash)], oid_hex);
+                        return .{ .oid = buffer[0..comptime hash.hexLen(repo_opts.hash)] };
                     }
                 }
             } else |err| switch (err) {
@@ -318,22 +319,34 @@ pub fn read(
             }
 
             const ref_cursor = (try map.getCursor(hash.hashInt(repo_opts.hash, ref_name))) orelse return error.RefNotFound;
-            return try ref_cursor.readBytes(buffer);
+            const ref_content = try ref_cursor.readBytes(buffer);
+            return RefOrOid(repo_opts.hash).initFromDb(ref_content);
         },
     }
 }
 
-pub fn readHeadMaybe(
+pub fn readHeadRecurMaybe(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_only),
 ) !?[hash.hexLen(repo_opts.hash)]u8 {
     var buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
-    const content = try read(repo_kind, repo_opts, state, "HEAD", &buffer);
-    if (RefOrOid(repo_opts.hash).initFromDb(content)) |input| {
-        return try readRecur(repo_kind, repo_opts, state, input);
+    if (try read(repo_kind, repo_opts, state, "HEAD", &buffer)) |ref_or_oid| {
+        return try readRecur(repo_kind, repo_opts, state, ref_or_oid);
     } else {
         return null;
+    }
+}
+
+pub fn readHeadRecur(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+) ![hash.hexLen(repo_opts.hash)]u8 {
+    if (try readHeadRecurMaybe(repo_kind, repo_opts, state)) |buffer| {
+        return buffer;
+    } else {
+        return error.RefInvalidHash;
     }
 }
 
@@ -341,37 +354,9 @@ pub fn readHead(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_only),
-) ![hash.hexLen(repo_opts.hash)]u8 {
-    if (try readHeadMaybe(repo_kind, repo_opts, state)) |buffer| {
-        return buffer;
-    } else {
-        return error.RefInvalidHash;
-    }
-}
-
-pub fn readHeadName(
-    comptime repo_kind: rp.RepoKind,
-    comptime repo_opts: rp.RepoOpts(repo_kind),
-    state: rp.Repo(repo_kind, repo_opts).State(.read_only),
     buffer: []u8,
-) ![]u8 {
-    const content = try read(repo_kind, repo_opts, state, "HEAD", buffer);
-    const ref_heads_start_str = "ref: refs/heads/";
-    if (std.mem.startsWith(u8, content, ref_heads_start_str) and content.len > ref_heads_start_str.len) {
-        return content[ref_heads_start_str.len..];
-    } else {
-        return content;
-    }
-}
-
-pub fn readHeadNameAlloc(
-    comptime repo_kind: rp.RepoKind,
-    comptime repo_opts: rp.RepoOpts(repo_kind),
-    state: rp.Repo(repo_kind, repo_opts).State(.read_only),
-    allocator: std.mem.Allocator,
-) ![]u8 {
-    var buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
-    return try allocator.dupe(u8, try readHeadName(repo_kind, repo_opts, state, &buffer));
+) !?RefOrOid(repo_opts.hash) {
+    return try read(repo_kind, repo_opts, state, "HEAD", buffer);
 }
 
 pub fn write(
@@ -441,14 +426,14 @@ pub fn writeRecur(
     oid_hex: *const [hash.hexLen(repo_opts.hash)]u8,
 ) !void {
     var buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
-    const existing_content = read(repo_kind, repo_opts, state.readOnly(), ref_path, &buffer) catch |err| switch (err) {
+    const ref_or_oid_maybe = read(repo_kind, repo_opts, state.readOnly(), ref_path, &buffer) catch |err| switch (err) {
         error.RefNotFound => {
             try write(repo_kind, repo_opts, state, ref_path, oid_hex);
             return;
         },
         else => |e| return e,
     };
-    if (RefOrOid(repo_opts.hash).initFromDb(existing_content)) |input| {
+    if (ref_or_oid_maybe) |input| {
         switch (input) {
             .ref => |ref| {
                 var ref_path_buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
