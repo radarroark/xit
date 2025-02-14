@@ -281,7 +281,7 @@ fn runCommand(
                 }
             }
         },
-        .diff => |diff_cmd| {
+        .diff_mount, .diff_added => |diff_cmd| {
             const DiffState = union(df.DiffKind) {
                 mount: mnt.Status(repo_kind, repo_opts),
                 index: mnt.Status(repo_kind, repo_opts),
@@ -295,14 +295,13 @@ fn runCommand(
                     }
                 }
             };
-            const diff_opts = diff_cmd.diff_opts;
-            var diff_state: DiffState = switch (diff_opts) {
+            var diff_state: DiffState = switch (diff_cmd) {
                 .mount => .{ .mount = try repo.status(allocator) },
                 .index => .{ .index = try repo.status(allocator) },
                 .tree => |tree| .{ .tree = try repo.treeDiff(allocator, tree.old, tree.new) },
             };
             defer diff_state.deinit();
-            var diff_iter = try repo.filePairs(allocator, switch (diff_opts) {
+            var diff_iter = try repo.filePairs(allocator, switch (diff_cmd) {
                 .mount => |mount| .{
                     .mount = .{
                         .conflict_diff_kind = mount.conflict_diff_kind,

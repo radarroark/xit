@@ -20,7 +20,8 @@ pub const CommandKind = enum {
     commit,
     tag,
     status,
-    diff,
+    diff_mount,
+    diff_added,
     branch,
     switch_mount,
     reset_mount,
@@ -125,18 +126,28 @@ fn commandHelp(command_kind: CommandKind) Help {
             \\    xit status --cli
             ,
         },
-        .diff => .{
+        .diff_mount => .{
             .name = "diff",
             .descrip =
-            \\show changes between commits, commit and mount (working tree), etc.
+            \\show changes between the last commit and the mount (working tree) that haven't been added to the index.
             ,
             .example =
             \\display in TUI:
             \\    xit diff
-            \\display diff of changes in the mount (working tree) in the CLI:
+            \\display in CLI:
             \\    xit diff --cli
-            \\display diff of changes in the index in the CLI:
-            \\    xit diff --index
+            ,
+        },
+        .diff_added => .{
+            .name = "diff-added",
+            .descrip =
+            \\show changes between the last commit and what has been added to the index.
+            ,
+            .example =
+            \\display in TUI:
+            \\    xit diff-added
+            \\display in CLI:
+            \\    xit diff-added --cli
             ,
         },
         .branch => .{
@@ -390,7 +401,9 @@ pub const CommandArgs = struct {
             else if (std.mem.eql(u8, command_name, "status"))
                 .status
             else if (std.mem.eql(u8, command_name, "diff"))
-                .diff
+                .diff_mount
+            else if (std.mem.eql(u8, command_name, "diff-added"))
+                .diff_added
             else if (std.mem.eql(u8, command_name, "branch"))
                 .branch
             else if (std.mem.eql(u8, command_name, "switch"))
@@ -468,9 +481,8 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
         commit: obj.CommitMetadata(hash_kind),
         tag: tag.TagCommand,
         status,
-        diff: struct {
-            diff_opts: df.BasicDiffOptions(hash_kind),
-        },
+        diff_mount: df.BasicDiffOptions(hash_kind),
+        diff_added: df.BasicDiffOptions(hash_kind),
         branch: bch.BranchCommand,
         switch_mount: mnt.SwitchInput(hash_kind),
         reset_mount: mnt.SwitchInput(hash_kind),
@@ -574,20 +586,19 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                     return .{ .tag = cmd };
                 },
                 .status => return .status,
-                .diff => {
-                    const diff_opts: df.BasicDiffOptions(hash_kind) = if (cmd_args.contains("--index"))
-                        .index
+                .diff_mount => {
+                    const conflict_diff_kind: df.ConflictDiffKind =
+                        if (cmd_args.contains("--base"))
+                        .base
+                    else if (cmd_args.contains("--target"))
+                        .target
+                    else if (cmd_args.contains("--source"))
+                        .source
                     else
-                        (if (cmd_args.contains("--base"))
-                            .{ .mount = .{ .conflict_diff_kind = .base } }
-                        else if (cmd_args.contains("--ours"))
-                            .{ .mount = .{ .conflict_diff_kind = .target } }
-                        else if (cmd_args.contains("--theirs"))
-                            .{ .mount = .{ .conflict_diff_kind = .source } }
-                        else
-                            .{ .mount = .{ .conflict_diff_kind = .target } });
-                    return .{ .diff = .{ .diff_opts = diff_opts } };
+                        .target;
+                    return .{ .diff_mount = .{ .mount = .{ .conflict_diff_kind = conflict_diff_kind } } };
                 },
+                .diff_added => return .{ .diff_added = .index },
                 .branch => {
                     if (cmd_args.positional_args.len == 0) return null;
 
@@ -810,7 +821,7 @@ pub fn CommandDispatch(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash
                 if (show_help) {
                     return .{ .help = command_kind };
                 } else if (cmd_args.positional_args.len == 0 and !force_cli and switch (command_kind) {
-                    .status, .diff, .log => true,
+                    .status, .diff_mount, .diff_added, .log => true,
                     else => false,
                 }) {
                     return .{ .tui = command_kind };
