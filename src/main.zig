@@ -223,6 +223,12 @@ fn runCommand(
             .remove => |rm_tag| try repo.removeTag(rm_tag),
         },
         .status => {
+            var head_buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
+            switch (try repo.head(&head_buffer)) {
+                .ref => |ref| try writers.out.print("on branch {s}\n\n", .{ref.name}),
+                .oid => |oid| try writers.out.print("HEAD detached at {s}\n\n", .{oid}),
+            }
+
             var stat = try repo.status(allocator);
             defer stat.deinit();
 
