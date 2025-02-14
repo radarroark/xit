@@ -316,7 +316,15 @@ fn commandHelp(command_kind: CommandKind) Help {
 }
 
 pub fn printHelp(cmd_kind_maybe: ?CommandKind, writer: std.io.AnyWriter) !void {
-    const print_indent = 15;
+    const print_indent = comptime blk: {
+        var indent = 0;
+        for (0..@typeInfo(CommandKind).Enum.fields.len) |i| {
+            indent = @max(commandHelp(@enumFromInt(i)).name.len, indent);
+        }
+        indent += 2;
+        break :blk indent;
+    };
+
     if (cmd_kind_maybe) |cmd_kind| {
         const help = commandHelp(cmd_kind);
         // name and description
