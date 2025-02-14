@@ -1411,7 +1411,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                         defer index.deinit();
 
                         // update the mount
-                        try mnt.migrate(repo_kind, repo_opts, state, allocator, clean_diff, &index, null);
+                        try mnt.migrate(repo_kind, repo_opts, state, allocator, clean_diff, &index, true, null);
 
                         return .{
                             .arena = arena,
@@ -1512,7 +1512,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                             defer index.deinit();
 
                             // update the mount
-                            try mnt.migrate(repo_kind, repo_opts, state, allocator, clean_diff, &index, null);
+                            try mnt.migrate(repo_kind, repo_opts, state, allocator, clean_diff, &index, true, null);
 
                             for (conflicts.keys(), conflicts.values()) |path, conflict| {
                                 // add conflict to index
@@ -1557,7 +1557,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                             defer index.deinit();
 
                             // update the mount
-                            try mnt.migrate(repo_kind, repo_opts, state, allocator, clean_diff, &index, null);
+                            try mnt.migrate(repo_kind, repo_opts, state, allocator, clean_diff, &index, true, null);
 
                             for (conflicts.keys(), conflicts.values()) |path, conflict| {
                                 // add conflict to index

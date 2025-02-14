@@ -592,6 +592,7 @@ pub fn migrate(
     allocator: std.mem.Allocator,
     tree_diff: tr.TreeDiff(repo_kind, repo_opts),
     index: *idx.Index(repo_kind, repo_opts),
+    update_mount: bool,
     switch_result_maybe: ?*Switch(repo_kind, repo_opts),
 ) !void {
     var add_files = std.StringArrayHashMap(tr.TreeEntry(repo_opts.hash)).init(allocator);
@@ -682,17 +683,19 @@ pub fn migrate(
 
     for (remove_files.keys()) |path| {
         // update mount
-        state.core.repo_dir.deleteFile(path) catch |err| switch (err) {
-            error.FileNotFound => {},
-            else => |e| return e,
-        };
-        var dir_path_maybe = std.fs.path.dirname(path);
-        while (dir_path_maybe) |dir_path| {
-            state.core.repo_dir.deleteDir(dir_path) catch |err| switch (err) {
-                error.DirNotEmpty, error.FileNotFound => break,
+        if (update_mount) {
+            state.core.repo_dir.deleteFile(path) catch |err| switch (err) {
+                error.FileNotFound => {},
                 else => |e| return e,
             };
-            dir_path_maybe = std.fs.path.dirname(dir_path);
+            var dir_path_maybe = std.fs.path.dirname(path);
+            while (dir_path_maybe) |dir_path| {
+                state.core.repo_dir.deleteDir(dir_path) catch |err| switch (err) {
+                    error.DirNotEmpty, error.FileNotFound => break,
+                    else => |e| return e,
+                };
+                dir_path_maybe = std.fs.path.dirname(dir_path);
+            }
         }
         // update index
         index.removePath(path);
@@ -701,14 +704,18 @@ pub fn migrate(
 
     for (add_files.keys(), add_files.values()) |path, tree_entry| {
         // update mount
-        try objectToFile(repo_kind, repo_opts, state.readOnly(), allocator, path, tree_entry);
+        if (update_mount) {
+            try objectToFile(repo_kind, repo_opts, state.readOnly(), allocator, path, tree_entry);
+        }
         // update index
         try index.addPath(state, path);
     }
 
     for (edit_files.keys(), edit_files.values()) |path, tree_entry| {
         // update mount
-        try objectToFile(repo_kind, repo_opts, state.readOnly(), allocator, path, tree_entry);
+        if (update_mount) {
+            try objectToFile(repo_kind, repo_opts, state.readOnly(), allocator, path, tree_entry);
+        }
         // update index
         try index.addPath(state, path);
     }
@@ -730,6 +737,7 @@ pub fn restore(
 pub fn ResetInput(comptime hash_kind: hash.HashKind) type {
     return struct {
         target: rf.RefOrOid(hash_kind),
+        update_mount: bool = true,
         force: bool = false,
     };
 }
@@ -741,6 +749,7 @@ pub fn SwitchInput(comptime hash_kind: hash.HashKind) type {
             reset,
         } = .@"switch",
         target: rf.RefOrOid(hash_kind),
+        update_mount: bool = true,
         force: bool = false,
     };
 }
@@ -797,7 +806,7 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     defer index.deinit();
 
                     // update the mount
-                    try migrate(repo_kind, repo_opts, state, allocator, tree_diff, &index, if (input.force) null else &switch_result);
+                    try migrate(repo_kind, repo_opts, state, allocator, tree_diff, &index, input.update_mount, if (input.force) null else &switch_result);
 
                     // return early if conflict
                     if (.conflict == switch_result.result) {
@@ -822,7 +831,7 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     defer index.deinit();
 
                     // update the mount
-                    try migrate(repo_kind, repo_opts, state, allocator, tree_diff, &index, if (input.force) null else &switch_result);
+                    try migrate(repo_kind, repo_opts, state, allocator, tree_diff, &index, input.update_mount, if (input.force) null else &switch_result);
 
                     // return early if conflict
                     if (.conflict == switch_result.result) {

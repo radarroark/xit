@@ -25,6 +25,8 @@ pub const CommandKind = enum {
     branch,
     switch_mount,
     reset_mount,
+    reset_added,
+    reset_head,
     restore,
     log,
     merge,
@@ -68,6 +70,7 @@ fn commandHelp(command_kind: CommandKind) Help {
             .name = "unadd",
             .descrip =
             \\remove any changes to a file that were added to the index.
+            \\similar to `git reset HEAD`.
             ,
             .example =
             \\xit unadd myfile.txt
@@ -77,6 +80,7 @@ fn commandHelp(command_kind: CommandKind) Help {
             .name = "untrack",
             .descrip =
             \\no longer track file in the index, but leave it in the mount (working tree).
+            \\similar to `git rm --cached`.
             ,
             .example =
             \\xit untrack myfile.txt
@@ -142,6 +146,7 @@ fn commandHelp(command_kind: CommandKind) Help {
             .name = "diff-added",
             .descrip =
             \\show changes between the last commit and what has been added to the index.
+            \\similar to `git diff --cached`.
             ,
             .example =
             \\display in TUI:
@@ -182,12 +187,41 @@ fn commandHelp(command_kind: CommandKind) Help {
             .descrip =
             \\make the current branch point to a new commit id.
             \\updates both the index and the mount (working tree).
+            \\similar to `git reset --hard`.
             ,
             .example =
             \\reset current branch to match another branch:
             \\    xit reset mybranch
             \\reset current branch to point to a new commit id:
             \\    xit reset 1a2b3c...
+            ,
+        },
+        .reset_added => .{
+            .name = "reset-added",
+            .descrip =
+            \\make the current branch point to a new commit id.
+            \\updates only the index, not the mount (working tree).
+            \\similar to `git reset --mixed`.
+            ,
+            .example =
+            \\reset current branch to match another branch:
+            \\    xit reset-added mybranch
+            \\reset current branch to point to a new commit id:
+            \\    xit reset-added 1a2b3c...
+            ,
+        },
+        .reset_head => .{
+            .name = "reset-head",
+            .descrip =
+            \\make the current branch point to a new commit id.
+            \\does not update the index or the mount (working tree).
+            \\similar to `git reset --soft`.
+            ,
+            .example =
+            \\reset current branch to match another branch:
+            \\    xit reset-head mybranch
+            \\reset current branch to point to a new commit id:
+            \\    xit reset-head 1a2b3c...
             ,
         },
         .restore => .{
@@ -410,6 +444,10 @@ pub const CommandArgs = struct {
                 .switch_mount
             else if (std.mem.eql(u8, command_name, "reset"))
                 .reset_mount
+            else if (std.mem.eql(u8, command_name, "reset-added"))
+                .reset_added
+            else if (std.mem.eql(u8, command_name, "reset-head"))
+                .reset_head
             else if (std.mem.eql(u8, command_name, "restore"))
                 .restore
             else if (std.mem.eql(u8, command_name, "log"))
@@ -486,6 +524,8 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
         branch: bch.BranchCommand,
         switch_mount: mnt.SwitchInput(hash_kind),
         reset_mount: mnt.SwitchInput(hash_kind),
+        reset_added: mnt.SwitchInput(hash_kind),
+        reset_head: rf.RefOrOid(hash_kind),
         restore: struct {
             path: []const u8,
         },
@@ -631,6 +671,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                     return .{ .switch_mount = .{
                         .kind = .@"switch",
                         .target = rf.RefOrOid(hash_kind).initFromUser(target) orelse return null,
+                        .update_mount = true,
                         .force = cmd_args.contains("-f"),
                     } };
                 },
@@ -641,8 +682,26 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                     return .{ .reset_mount = .{
                         .kind = .reset,
                         .target = rf.RefOrOid(hash_kind).initFromUser(target) orelse return null,
+                        .update_mount = true,
                         .force = cmd_args.contains("-f"),
                     } };
+                },
+                .reset_added => {
+                    if (cmd_args.positional_args.len != 1) return null;
+                    const target = cmd_args.positional_args[0];
+
+                    return .{ .reset_added = .{
+                        .kind = .reset,
+                        .target = rf.RefOrOid(hash_kind).initFromUser(target) orelse return null,
+                        .update_mount = false,
+                        .force = cmd_args.contains("-f"),
+                    } };
+                },
+                .reset_head => {
+                    if (cmd_args.positional_args.len != 1) return null;
+                    const target = cmd_args.positional_args[0];
+
+                    return .{ .reset_head = rf.RefOrOid(hash_kind).initFromUser(target) orelse return null };
                 },
                 .restore => {
                     if (cmd_args.positional_args.len != 1) return null;

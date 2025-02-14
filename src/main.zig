@@ -371,7 +371,7 @@ fn runCommand(
                 .remove => |rm_branch| try repo.removeBranch(rm_branch),
             }
         },
-        .switch_mount, .reset_mount => |switch_mount_cmd| {
+        .switch_mount, .reset_mount, .reset_added => |switch_mount_cmd| {
             var switch_result = try repo.switchMount(allocator, switch_mount_cmd);
             defer switch_result.deinit();
             switch (switch_result.result) {
@@ -402,6 +402,7 @@ fn runCommand(
                 },
             }
         },
+        .reset_head => |reset_head_cmd| try repo.resetHead(reset_head_cmd),
         .restore => |restore_cmd| try repo.restore(allocator, restore_cmd.path),
         .log => {
             var commit_iter = try repo.log(allocator, null);

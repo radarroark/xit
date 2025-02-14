@@ -173,9 +173,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         .init_opts = opts,
                     };
 
-                    // update HEAD
-                    const state = State(.read_write){ .core = &self.core, .extra = .{} };
-                    try rf.replaceHead(repo_kind, repo_opts, state, .{ .ref = .{ .kind = .head, .name = "master" } });
+                    try self.resetHead(.{ .ref = .{ .kind = .head, .name = "master" } });
 
                     return self;
                 },
@@ -208,21 +206,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         .init_opts = opts,
                     };
 
-                    // update HEAD
-                    const Ctx = struct {
-                        core: *Repo(repo_kind, repo_opts).Core,
-
-                        pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
-                            var moment = try DB.HashMap(.read_write).init(cursor.*);
-                            const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            try rf.replaceHead(repo_kind, repo_opts, state, .{ .ref = .{ .kind = .head, .name = "master" } });
-                        }
-                    };
-                    const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
-                    try history.appendContext(
-                        .{ .slot = try history.getSlot(-1) },
-                        Ctx{ .core = &self.core },
-                    );
+                    try self.resetHead(.{ .ref = .{ .kind = .head, .name = "master" } });
 
                     return self;
                 },
@@ -704,8 +688,33 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             return try self.switchMount(allocator, .{
                 .kind = .reset,
                 .target = input.target,
+                .update_mount = input.update_mount,
                 .force = input.force,
             });
+        }
+
+        pub fn resetHead(self: *Repo(repo_kind, repo_opts), target: rf.RefOrOid(repo_opts.hash)) !void {
+            switch (repo_kind) {
+                .git => try rf.replaceHead(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, target),
+                .xit => {
+                    // update HEAD
+                    const Ctx = struct {
+                        core: *Repo(repo_kind, repo_opts).Core,
+                        target: rf.RefOrOid(repo_opts.hash),
+
+                        pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
+                            var moment = try DB.HashMap(.read_write).init(cursor.*);
+                            const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
+                            try rf.replaceHead(repo_kind, repo_opts, state, ctx.target);
+                        }
+                    };
+                    const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
+                    try history.appendContext(
+                        .{ .slot = try history.getSlot(-1) },
+                        Ctx{ .core = &self.core, .target = target },
+                    );
+                },
+            }
         }
 
         pub fn restore(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, path: []const u8) !void {
