@@ -56,7 +56,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
         }
 
         pub fn initFromWorkspace(state: rp.Repo(repo_kind, repo_opts).State(.read_only), allocator: std.mem.Allocator, path: []const u8, mode: fs.Mode) !LineIterator(repo_kind, repo_opts) {
-            var file = try state.core.repo_dir.openFile(path, .{ .mode = .read_only });
+            var file = try state.core.work_dir.openFile(path, .{ .mode = .read_only });
             errdefer file.close();
 
             const file_size = (try file.metadata()).size();
@@ -1300,7 +1300,7 @@ pub fn LineIteratorPair(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                 .not_added => |not_added| {
                     switch (not_added) {
                         .modified => {
-                            const meta = try fs.getMetadata(state.core.repo_dir, path);
+                            const meta = try fs.getMetadata(state.core.work_dir, path);
                             const mode = fs.getMode(meta);
 
                             const index_entries_for_path = stat.index.entries.get(path) orelse return error.EntryNotFound;
@@ -1321,7 +1321,7 @@ pub fn LineIteratorPair(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     }
                 },
                 .not_tracked => {
-                    const meta = try fs.getMetadata(state.core.repo_dir, path);
+                    const meta = try fs.getMetadata(state.core.work_dir, path);
                     const mode = fs.getMode(meta);
 
                     var a = try LineIterator(repo_kind, repo_opts).initFromNothing(allocator, path);
@@ -1369,7 +1369,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                 .workdir => |workdir| {
                     if (next_index < workdir.status.conflicts.count()) {
                         const path = workdir.status.conflicts.keys()[next_index];
-                        const meta = try fs.getMetadata(self.core.repo_dir, path);
+                        const meta = try fs.getMetadata(self.core.work_dir, path);
                         const stage: usize = switch (workdir.conflict_diff_kind) {
                             .base => 1,
                             .target => 2,

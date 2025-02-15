@@ -207,11 +207,11 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
             // remove entries that are children of this path (file replaces directory)
             try self.removeChildren(path);
             // read the metadata
-            const meta = try fs.getMetadata(state.core.repo_dir, path);
+            const meta = try fs.getMetadata(state.core.work_dir, path);
             switch (meta.kind()) {
                 .file => {
                     // open file
-                    const file = try state.core.repo_dir.openFile(path, .{ .mode = .read_only });
+                    const file = try state.core.work_dir.openFile(path, .{ .mode = .read_only });
                     defer file.close();
 
                     // make reader
@@ -252,7 +252,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     try self.addEntry(entry);
                 },
                 .directory => {
-                    var dir = try state.core.repo_dir.openDir(path, .{ .iterate = true });
+                    var dir = try state.core.work_dir.openDir(path, .{ .iterate = true });
                     defer dir.close();
                     var iter = dir.iterate();
                     while (try iter.next()) |entry| {
@@ -439,7 +439,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
             const path = if (path_parts.len == 0) "." else try fs.joinPath(self.arena.allocator(), path_parts);
 
             // if the path doesn't exist, remove it, regardless of what the `action` is
-            if (state.core.repo_dir.openFile(path, .{ .mode = .read_only })) |file| {
+            if (state.core.work_dir.openFile(path, .{ .mode = .read_only })) |file| {
                 file.close();
             } else |err| {
                 switch (err) {

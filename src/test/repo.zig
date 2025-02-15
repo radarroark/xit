@@ -12,16 +12,16 @@ const df = xit.diff;
 
 fn addFile(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind), repo: *rp.Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, path: []const u8, content: []const u8) !void {
     if (std.fs.path.dirname(path)) |parent_path| {
-        try repo.core.repo_dir.makePath(parent_path);
+        try repo.core.work_dir.makePath(parent_path);
     }
-    const file = try repo.core.repo_dir.createFile(path, .{ .truncate = true });
+    const file = try repo.core.work_dir.createFile(path, .{ .truncate = true });
     defer file.close();
     try file.writeAll(content);
     try repo.add(allocator, &.{path});
 }
 
 fn removeFile(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind), repo: *rp.Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, path: []const u8) !void {
-    try repo.core.repo_dir.deleteFile(path);
+    try repo.core.work_dir.deleteFile(path);
     try repo.add(allocator, &.{path});
 }
 
@@ -50,10 +50,10 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
         defer repo.deinit();
     }
 
-    var repo_dir = try temp_dir.openDir("repo", .{});
-    defer repo_dir.close();
+    var work_dir = try temp_dir.openDir("repo", .{});
+    defer work_dir.close();
 
-    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
     defer repo.deinit();
 
     try addFile(repo_kind, repo_opts, &repo, allocator, "README.md", "Hello, world!");
@@ -112,7 +112,7 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
     }
 
     {
-        const readme = try repo.core.repo_dir.openFile("README.md", .{ .mode = .read_only });
+        const readme = try repo.core.work_dir.openFile("README.md", .{ .mode = .read_only });
         defer readme.close();
         const readme_content = try readme.readToEndAlloc(allocator, 1024);
         defer allocator.free(readme_content);
@@ -125,7 +125,7 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
     }
 
     {
-        const readme = try repo.core.repo_dir.openFile("README.md", .{ .mode = .read_only });
+        const readme = try repo.core.work_dir.openFile("README.md", .{ .mode = .read_only });
         defer readme.close();
         const readme_content = try readme.readToEndAlloc(allocator, 1024);
         defer allocator.free(readme_content);
@@ -137,7 +137,7 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
         defer result.deinit();
     }
 
-    if (repo.core.repo_dir.openFile("README.md", .{ .mode = .read_only })) |readme| {
+    if (repo.core.work_dir.openFile("README.md", .{ .mode = .read_only })) |readme| {
         readme.close();
         return error.FileNotExpected;
     } else |err| switch (err) {
@@ -171,10 +171,10 @@ fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
         defer repo.deinit();
     }
 
-    var repo_dir = try temp_dir.openDir("repo", .{});
-    defer repo_dir.close();
+    var work_dir = try temp_dir.openDir("repo", .{});
+    defer work_dir.close();
 
-    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
     defer repo.deinit();
 
     // A --- B --- C --------- J --- K [master]
@@ -263,7 +263,7 @@ fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
         try std.testing.expectEqual(commit_k, head_oid);
 
         // make sure file from commit k exists
-        var master_md = try repo.core.repo_dir.openFile("master.md", .{});
+        var master_md = try repo.core.work_dir.openFile("master.md", .{});
         defer master_md.close();
         const master_md_content = try master_md.readToEndAlloc(allocator, 1024);
         defer allocator.free(master_md_content);
@@ -329,10 +329,10 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             defer repo.deinit();
         }
 
-        var repo_dir = try temp_dir.openDir("same-file-conflict", .{});
-        defer repo_dir.close();
+        var work_dir = try temp_dir.openDir("same-file-conflict", .{});
+        defer work_dir.close();
 
-        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
         defer repo.deinit();
 
         // A --- B --- D [master]
@@ -373,7 +373,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             try std.testing.expect(.conflict == merge.result);
 
             // verify f.txt has conflict markers
-            const f_txt = try repo.core.repo_dir.openFile("f.txt", .{ .mode = .read_only });
+            const f_txt = try repo.core.work_dir.openFile("f.txt", .{ .mode = .read_only });
             defer f_txt.close();
             const f_txt_content = try f_txt.readToEndAlloc(allocator, 1024);
             defer allocator.free(f_txt_content);
@@ -438,10 +438,10 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             defer repo.deinit();
         }
 
-        var repo_dir = try temp_dir.openDir("same-file-conflict-autoresolved", .{});
-        defer repo_dir.close();
+        var work_dir = try temp_dir.openDir("same-file-conflict-autoresolved", .{});
+        defer work_dir.close();
 
-        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
         defer repo.deinit();
 
         // A --- B --- D [master]
@@ -482,7 +482,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             try std.testing.expect(.success == merge.result);
 
             // verify f.txt has been autoresolved
-            const f_txt = try repo.core.repo_dir.openFile("f.txt", .{ .mode = .read_only });
+            const f_txt = try repo.core.work_dir.openFile("f.txt", .{ .mode = .read_only });
             defer f_txt.close();
             const f_txt_content = try f_txt.readToEndAlloc(allocator, 1024);
             defer allocator.free(f_txt_content);
@@ -525,10 +525,10 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             defer repo.deinit();
         }
 
-        var repo_dir = try temp_dir.openDir("modify-delete-conflict", .{});
-        defer repo_dir.close();
+        var work_dir = try temp_dir.openDir("modify-delete-conflict", .{});
+        defer work_dir.close();
 
-        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
         defer repo.deinit();
 
         // A --- B --- D [master]
@@ -600,10 +600,10 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             defer repo.deinit();
         }
 
-        var repo_dir = try temp_dir.openDir("delete-modify-conflict", .{});
-        defer repo_dir.close();
+        var work_dir = try temp_dir.openDir("delete-modify-conflict", .{});
+        defer work_dir.close();
 
-        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
         defer repo.deinit();
 
         // A --- B --- D [master]
@@ -673,10 +673,10 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             defer repo.deinit();
         }
 
-        var repo_dir = try temp_dir.openDir("file-dir-conflict", .{});
-        defer repo_dir.close();
+        var work_dir = try temp_dir.openDir("file-dir-conflict", .{});
+        defer work_dir.close();
 
-        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
         defer repo.deinit();
 
         // A --- B --- D [master]
@@ -726,7 +726,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         try checkMergeAbort(&repo);
 
         // make sure renamed file exists
-        var renamed_file = try repo.core.repo_dir.openFile("f.txt~master", .{});
+        var renamed_file = try repo.core.work_dir.openFile("f.txt~master", .{});
         defer renamed_file.close();
 
         // resolve conflict
@@ -752,10 +752,10 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             defer repo.deinit();
         }
 
-        var repo_dir = try temp_dir.openDir("dir-file-conflict", .{});
-        defer repo_dir.close();
+        var work_dir = try temp_dir.openDir("dir-file-conflict", .{});
+        defer work_dir.close();
 
-        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
         defer repo.deinit();
 
         // A --- B --- D [master]
@@ -785,7 +785,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         }
 
         // make sure renamed file exists
-        var renamed_file = try repo.core.repo_dir.openFile("f.txt~foo", .{});
+        var renamed_file = try repo.core.work_dir.openFile("f.txt~foo", .{});
         defer renamed_file.close();
 
         // generate diff
@@ -850,10 +850,10 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind, comptime repo_op
         defer repo.deinit();
     }
 
-    var repo_dir = try temp_dir.openDir("repo", .{});
-    defer repo_dir.close();
+    var work_dir = try temp_dir.openDir("repo", .{});
+    defer work_dir.close();
 
-    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
     defer repo.deinit();
 
     // A --- B --------- D [master]
@@ -904,7 +904,7 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind, comptime repo_op
     // verify no lines are longer than one byte
     // so we know that conflict markers haven't been added
     {
-        const bin_file = try repo.core.repo_dir.openFile("bin", .{ .mode = .read_only });
+        const bin_file = try repo.core.work_dir.openFile("bin", .{ .mode = .read_only });
         defer bin_file.close();
         const bin_file_content = try bin_file.readToEndAlloc(allocator, 1024);
         defer allocator.free(bin_file_content);
@@ -932,7 +932,7 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind, comptime repo_op
     // replace bin with a text file containing a single line that
     // is too long, and assert that it is considered a binary file
     {
-        const file = try repo.core.repo_dir.createFile("bin", .{ .truncate = true });
+        const file = try repo.core.work_dir.createFile("bin", .{ .truncate = true });
         defer file.close();
         while (try file.getPos() < repo_opts.max_line_size) {
             try file.writeAll(&[_]u8{' '} ** 256);
@@ -985,10 +985,10 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
             defer repo.deinit();
         }
 
-        var repo_dir = try temp_dir.openDir("simple", .{});
-        defer repo_dir.close();
+        var work_dir = try temp_dir.openDir("simple", .{});
+        defer work_dir.close();
 
-        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
         defer repo.deinit();
 
         // A --- B --- C --- E [master]
@@ -1036,7 +1036,7 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
             try std.testing.expect(.success == merge.result);
 
             // verify f.txt has been autoresolved
-            const f_txt = try repo.core.repo_dir.openFile("f.txt", .{ .mode = .read_only });
+            const f_txt = try repo.core.work_dir.openFile("f.txt", .{ .mode = .read_only });
             defer f_txt.close();
             const f_txt_content = try f_txt.readToEndAlloc(allocator, 1024);
             defer allocator.free(f_txt_content);
@@ -1096,10 +1096,10 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
             defer repo.deinit();
         }
 
-        var repo_dir = try temp_dir.openDir("concrete", .{});
-        defer repo_dir.close();
+        var work_dir = try temp_dir.openDir("concrete", .{});
+        defer work_dir.close();
 
-        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
         defer repo.deinit();
 
         // A --- B --- C --- E [master]
@@ -1187,7 +1187,7 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
             var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } });
             defer merge.deinit();
 
-            const f_txt = try repo.core.repo_dir.openFile("f.txt", .{ .mode = .read_only });
+            const f_txt = try repo.core.work_dir.openFile("f.txt", .{ .mode = .read_only });
             defer f_txt.close();
             const f_txt_content = try f_txt.readToEndAlloc(allocator, 1024);
             defer allocator.free(f_txt_content);
@@ -1279,10 +1279,10 @@ fn testCherryPick(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOp
         defer repo.deinit();
     }
 
-    var repo_dir = try temp_dir.openDir("repo", .{});
-    defer repo_dir.close();
+    var work_dir = try temp_dir.openDir("repo", .{});
+    defer work_dir.close();
 
-    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
     defer repo.deinit();
 
     // A --- B ------------ D' [master]
@@ -1320,7 +1320,7 @@ fn testCherryPick(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOp
     }
 
     // make sure stuff.md does not exist
-    if (repo.core.repo_dir.openFile("stuff.md", .{})) |*file| {
+    if (repo.core.work_dir.openFile("stuff.md", .{})) |*file| {
         file.close();
         return error.UnexpectedFile;
     } else |_| {}
@@ -1390,10 +1390,10 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
         defer repo.deinit();
     }
 
-    var repo_dir = try temp_dir.openDir("repo", .{});
-    defer repo_dir.close();
+    var work_dir = try temp_dir.openDir("repo", .{});
+    defer work_dir.close();
 
-    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
     defer repo.deinit();
 
     // A --- B ------------ D' [master]
@@ -1426,7 +1426,7 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
         try std.testing.expect(.conflict == merge.result);
 
         // verify readme.md has conflict markers
-        const readme_md = try repo.core.repo_dir.openFile("readme.md", .{ .mode = .read_only });
+        const readme_md = try repo.core.work_dir.openFile("readme.md", .{ .mode = .read_only });
         defer readme_md.close();
         const readme_md_content = try readme_md.readToEndAlloc(allocator, 1024);
         defer allocator.free(readme_md_content);
@@ -1512,10 +1512,10 @@ fn testLog(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo
         defer repo.deinit();
     }
 
-    var repo_dir = try temp_dir.openDir("repo", .{});
-    defer repo_dir.close();
+    var work_dir = try temp_dir.openDir("repo", .{});
+    defer work_dir.close();
 
-    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = repo_dir });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
     defer repo.deinit();
 
     // A --- B --- C --------- G --- H [master]

@@ -31,12 +31,12 @@ test "pack" {
     defer temp_dir.close();
 
     // create the repo dir
-    var repo_dir = try temp_dir.makeOpenPath("repo", .{});
-    defer repo_dir.close();
+    var work_dir = try temp_dir.makeOpenPath("repo", .{});
+    defer work_dir.close();
 
     // get repo path for libgit
     var repo_path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
-    const repo_path: [*c]const u8 = @ptrCast(try repo_dir.realpath(".", &repo_path_buffer));
+    const repo_path: [*c]const u8 = @ptrCast(try work_dir.realpath(".", &repo_path_buffer));
 
     // init repo
     var repo: ?*c.git_repository = null;
@@ -44,19 +44,19 @@ test "pack" {
     defer c.git_repository_free(repo);
 
     // make sure the git dir was created
-    var git_dir = try repo_dir.openDir(".git", .{});
+    var git_dir = try work_dir.openDir(".git", .{});
     defer git_dir.close();
 
     // add and commit
     var commit_oid1: c.git_oid = undefined;
     {
         // make file
-        var hello_txt = try repo_dir.createFile("hello.txt", .{});
+        var hello_txt = try work_dir.createFile("hello.txt", .{});
         defer hello_txt.close();
         try hello_txt.writeAll("hello, world!");
 
         // make file
-        var readme = try repo_dir.createFile("README", .{});
+        var readme = try work_dir.createFile("README", .{});
         defer readme.close();
         try readme.writeAll("My cool project");
 
@@ -95,15 +95,15 @@ test "pack" {
     var commit_oid2: c.git_oid = undefined;
     {
         // make files
-        var license = try repo_dir.createFile("LICENSE", .{});
+        var license = try work_dir.createFile("LICENSE", .{});
         defer license.close();
         try license.writeAll("do whatever you want");
-        var change_log = try repo_dir.createFile("CHANGELOG", .{});
+        var change_log = try work_dir.createFile("CHANGELOG", .{});
         defer change_log.close();
         try change_log.writeAll("cha-cha-cha-changes");
 
         // change file
-        const hello_txt = try repo_dir.openFile("hello.txt", .{ .mode = .read_write });
+        const hello_txt = try work_dir.openFile("hello.txt", .{ .mode = .read_write });
         defer hello_txt.close();
         try hello_txt.writeAll("goodbye, world!");
         try hello_txt.setEndPos(try hello_txt.getPos());
@@ -163,7 +163,7 @@ test "pack" {
 
     // check that pack file exists
     {
-        var pack_dir = try repo_dir.openDir(".git/objects/pack", .{ .iterate = true });
+        var pack_dir = try work_dir.openDir(".git/objects/pack", .{ .iterate = true });
         defer pack_dir.close();
         var entries = std.ArrayList([]const u8).init(allocator);
         defer entries.deinit();
@@ -185,7 +185,7 @@ test "pack" {
         var path_buf = [_]u8{0} ** (hash.hexLen(repo_opts.hash) + 1);
         const path = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ commit_oid_hex[0..2], commit_oid_hex[2..] });
 
-        var objects_dir = try repo_dir.openDir(".git/objects", .{});
+        var objects_dir = try work_dir.openDir(".git/objects", .{});
         defer objects_dir.close();
 
         try objects_dir.deleteFile(path);
@@ -199,7 +199,7 @@ test "pack" {
         var commit_oid_hex = [_]u8{0} ** hash.hexLen(repo_opts.hash);
         try std.testing.expectEqual(0, c.git_oid_fmt(@ptrCast(&commit_oid_hex), commit_oid));
 
-        var r = try rp.Repo(.git, repo_opts).open(allocator, .{ .cwd = repo_dir });
+        var r = try rp.Repo(.git, repo_opts).open(allocator, .{ .cwd = work_dir });
         defer r.deinit();
 
         var commit_object = try obj.Object(.git, repo_opts, .full).init(allocator, .{ .core = &r.core, .extra = .{} }, &commit_oid_hex);
@@ -209,7 +209,7 @@ test "pack" {
 
     // write and read a pack object
     {
-        var r = try rp.Repo(.git, repo_opts).open(allocator, .{ .cwd = repo_dir });
+        var r = try rp.Repo(.git, repo_opts).open(allocator, .{ .cwd = work_dir });
         defer r.deinit();
 
         const head_oid = try rf.readHeadRecur(.git, repo_opts, .{ .core = &r.core, .extra = .{} });

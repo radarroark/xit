@@ -61,13 +61,13 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
         pub const Core = switch (repo_kind) {
             .git => struct {
-                repo_dir: std.fs.Dir,
+                work_dir: std.fs.Dir,
                 git_dir: std.fs.Dir,
 
                 pub fn latestMoment(_: *@This()) !void {}
             },
             .xit => struct {
-                repo_dir: std.fs.Dir,
+                work_dir: std.fs.Dir,
                 xit_dir: std.fs.Dir,
                 db_file: std.fs.File,
                 db: DB,
@@ -141,8 +141,8 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             // should just be the current working directory (cwd). if a path was
             // given, it should either append it to the cwd or, if it is absolute,
             // it should just use that path alone. IT'S MAGIC!
-            var repo_dir = try opts.cwd.makeOpenPath(sub_path, .{});
-            errdefer repo_dir.close();
+            var work_dir = try opts.cwd.makeOpenPath(sub_path, .{});
+            errdefer work_dir.close();
 
             const default_branch_name = "master";
 
@@ -150,7 +150,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                 .git => {
                     // return if dir already exists
                     {
-                        var git_dir_or_err = repo_dir.openDir(".git", .{});
+                        var git_dir_or_err = work_dir.openDir(".git", .{});
                         if (git_dir_or_err) |*git_dir| {
                             git_dir.close();
                             return error.RepoAlreadyExists;
@@ -158,7 +158,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     }
 
                     // make the .git dir
-                    var git_dir = try repo_dir.makeOpenPath(".git", .{});
+                    var git_dir = try work_dir.makeOpenPath(".git", .{});
                     errdefer git_dir.close();
 
                     // make a few dirs inside of .git
@@ -169,7 +169,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
                     var self = Repo(repo_kind, repo_opts){
                         .core = .{
-                            .repo_dir = repo_dir,
+                            .work_dir = work_dir,
                             .git_dir = git_dir,
                         },
                         .init_opts = opts,
@@ -184,7 +184,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                 .xit => {
                     // return if dir already exists
                     {
-                        var xit_dir_or_err = repo_dir.openDir(".xit", .{});
+                        var xit_dir_or_err = work_dir.openDir(".xit", .{});
                         if (xit_dir_or_err) |*xit_dir| {
                             xit_dir.close();
                             return error.RepoAlreadyExists;
@@ -192,7 +192,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     }
 
                     // make the .xit dir
-                    var xit_dir = try repo_dir.makeOpenPath(".xit", .{});
+                    var xit_dir = try work_dir.makeOpenPath(".xit", .{});
                     errdefer xit_dir.close();
 
                     // create the db file
@@ -202,7 +202,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     // make the db
                     var self = Repo(repo_kind, repo_opts){
                         .core = .{
-                            .repo_dir = repo_dir,
+                            .work_dir = work_dir,
                             .xit_dir = xit_dir,
                             .db_file = db_file,
                             .db = try DB.init(allocator, .{ .file = db_file, .hash_id = .{ .id = hash.hashId(repo_opts.hash) } }),
@@ -226,14 +226,14 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             // search all parent dirs for one containing the internal dir
             var dir_path_maybe: ?[]const u8 = cwd_path;
             while (dir_path_maybe) |dir_path| {
-                var repo_dir = try std.fs.openDirAbsolute(dir_path, .{});
-                defer repo_dir.close();
+                var work_dir = try std.fs.openDirAbsolute(dir_path, .{});
+                defer work_dir.close();
 
                 const internal_dir_name = switch (repo_kind) {
                     .git => ".git",
                     .xit => ".xit",
                 };
-                var internal_dir = repo_dir.openDir(internal_dir_name, .{}) catch |err| switch (err) {
+                var internal_dir = work_dir.openDir(internal_dir_name, .{}) catch |err| switch (err) {
                     error.FileNotFound => {
                         dir_path_maybe = std.fs.path.dirname(dir_path);
                         continue;
@@ -246,24 +246,24 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
 
             const dir_path = dir_path_maybe orelse return error.RepoNotFound;
-            var repo_dir = try std.fs.openDirAbsolute(dir_path, .{});
-            errdefer repo_dir.close();
+            var work_dir = try std.fs.openDirAbsolute(dir_path, .{});
+            errdefer work_dir.close();
 
             switch (repo_kind) {
                 .git => {
-                    var git_dir = try repo_dir.openDir(".git", .{});
+                    var git_dir = try work_dir.openDir(".git", .{});
                     errdefer git_dir.close();
 
                     return .{
                         .core = .{
-                            .repo_dir = repo_dir,
+                            .work_dir = work_dir,
                             .git_dir = git_dir,
                         },
                         .init_opts = opts,
                     };
                 },
                 .xit => {
-                    var xit_dir = try repo_dir.openDir(".xit", .{});
+                    var xit_dir = try work_dir.openDir(".xit", .{});
                     errdefer xit_dir.close();
 
                     var db_file = xit_dir.openFile("db", .{ .mode = .read_write, .lock = .exclusive }) catch |err| switch (err) {
@@ -274,7 +274,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
                     return .{
                         .core = .{
-                            .repo_dir = repo_dir,
+                            .work_dir = work_dir,
                             .xit_dir = xit_dir,
                             .db_file = db_file,
                             .db = switch (repo_opts.hash) {
@@ -297,12 +297,12 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             switch (repo_kind) {
                 .git => {
                     self.core.git_dir.close();
-                    self.core.repo_dir.close();
+                    self.core.work_dir.close();
                 },
                 .xit => {
                     self.core.xit_dir.close();
                     self.core.db_file.close();
-                    self.core.repo_dir.close();
+                    self.core.work_dir.close();
                 },
             }
         }
@@ -424,7 +424,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
             var normalized_paths = std.ArrayList([]const u8).init(arena.allocator());
             for (paths) |path| {
-                const rel_path = try fs.relativePath(allocator, self.core.repo_dir, self.init_opts.cwd, path);
+                const rel_path = try fs.relativePath(allocator, self.core.work_dir, self.init_opts.cwd, path);
                 defer allocator.free(rel_path);
                 const path_parts = try fs.splitPath(allocator, rel_path);
                 defer allocator.free(path_parts);
@@ -471,7 +471,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
             var normalized_paths = std.ArrayList([]const u8).init(arena.allocator());
             for (paths) |path| {
-                const rel_path = try fs.relativePath(allocator, self.core.repo_dir, self.init_opts.cwd, path);
+                const rel_path = try fs.relativePath(allocator, self.core.work_dir, self.init_opts.cwd, path);
                 defer allocator.free(rel_path);
                 const path_parts = try fs.splitPath(allocator, rel_path);
                 defer allocator.free(path_parts);
@@ -524,7 +524,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
             var normalized_paths = std.ArrayList([]const u8).init(arena.allocator());
             for (paths) |path| {
-                const rel_path = try fs.relativePath(allocator, self.core.repo_dir, self.init_opts.cwd, path);
+                const rel_path = try fs.relativePath(allocator, self.core.work_dir, self.init_opts.cwd, path);
                 defer allocator.free(rel_path);
                 const path_parts = try fs.splitPath(allocator, rel_path);
                 defer allocator.free(path_parts);
@@ -743,7 +743,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             var moment = try self.core.latestMoment();
             const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
 
-            const rel_path = try fs.relativePath(allocator, self.core.repo_dir, self.init_opts.cwd, path);
+            const rel_path = try fs.relativePath(allocator, self.core.work_dir, self.init_opts.cwd, path);
             defer allocator.free(rel_path);
             const path_parts = try fs.splitPath(allocator, rel_path);
             defer allocator.free(path_parts);

@@ -39,7 +39,7 @@ fn testPull(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     defer server_repo.deinit();
 
     // make a commit
-    const file = try server_repo.core.repo_dir.createFile("hello.txt", .{ .truncate = true });
+    const file = try server_repo.core.work_dir.createFile("hello.txt", .{ .truncate = true });
     defer file.close();
     try file.writeAll("hello, world!");
     try server_repo.add(allocator, &.{"server/hello.txt"});

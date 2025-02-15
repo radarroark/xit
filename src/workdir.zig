@@ -91,7 +91,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             var index_bools = try allocator.alloc(bool, index.entries.count());
             defer allocator.free(index_bools);
 
-            _ = try addEntries(arena.allocator(), &untracked, &workdir_modified, &index, &index_bools, state.core.repo_dir, ".");
+            _ = try addEntries(arena.allocator(), &untracked, &workdir_modified, &index, &index_bools, state.core.work_dir, ".");
 
             var head_tree = try tr.Tree(repo_kind, repo_opts).init(allocator, state, oid_maybe);
             errdefer head_tree.deinit();
@@ -162,13 +162,13 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             modified: *std.StringArrayHashMap(Status(repo_kind, repo_opts).Entry),
             index: *const idx.Index(repo_kind, repo_opts),
             index_bools: *[]bool,
-            repo_dir: std.fs.Dir,
+            work_dir: std.fs.Dir,
             path: []const u8,
         ) !bool {
-            const meta = try fs.getMetadata(repo_dir, path);
+            const meta = try fs.getMetadata(work_dir, path);
             switch (meta.kind()) {
                 .file => {
-                    const file = try repo_dir.openFile(path, .{ .mode = .read_only });
+                    const file = try work_dir.openFile(path, .{ .mode = .read_only });
                     defer file.close();
 
                     if (index.entries.getIndex(path)) |entry_index| {
@@ -187,7 +187,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                 .directory => {
                     const is_untracked = !(std.mem.eql(u8, path, ".") or index.dir_to_paths.contains(path) or index.entries.contains(path));
 
-                    var dir = try repo_dir.openDir(path, .{ .iterate = true });
+                    var dir = try work_dir.openDir(path, .{ .iterate = true });
                     defer dir.close();
                     var iter = dir.iterate();
 
@@ -213,7 +213,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                         var grandchild_untracked = std.StringArrayHashMap(Status(repo_kind, repo_opts).Entry).init(allocator);
                         defer grandchild_untracked.deinit();
 
-                        const is_file = try addEntries(allocator, &grandchild_untracked, modified, index, index_bools, repo_dir, subpath);
+                        const is_file = try addEntries(allocator, &grandchild_untracked, modified, index, index_bools, work_dir, subpath);
                         contains_file = contains_file or is_file;
                         if (is_file and is_untracked) break; // no need to continue because child_untracked will be discarded anyway
 
@@ -343,7 +343,7 @@ pub fn removePaths(
     defer head_tree.deinit();
 
     for (paths) |path| {
-        const meta = fs.getMetadata(state.core.repo_dir, path) catch |err| switch (err) {
+        const meta = fs.getMetadata(state.core.work_dir, path) catch |err| switch (err) {
             error.FileNotFound => return error.RemoveIndexPathNotFound,
             else => |e| return e,
         };
@@ -362,7 +362,7 @@ pub fn removePaths(
                                 }
                             }
 
-                            const file = try state.core.repo_dir.openFile(path, .{ .mode = .read_only });
+                            const file = try state.core.work_dir.openFile(path, .{ .mode = .read_only });
                             defer file.close();
                             if (try indexDiffersFromMount(repo_kind, repo_opts, &index_entry, file, meta)) {
                                 differs_from_workdir = true;
@@ -389,9 +389,9 @@ pub fn removePaths(
 
     if (opts.remove_from_workdir) {
         for (paths) |path| {
-            const meta = try fs.getMetadata(state.core.repo_dir, path);
+            const meta = try fs.getMetadata(state.core.work_dir, path);
             switch (meta.kind()) {
-                .file => try state.core.repo_dir.deleteFile(path),
+                .file => try state.core.work_dir.deleteFile(path),
                 .directory => return error.CannotDeleteDir,
                 else => return error.UnexpectedPathType,
             }
@@ -419,7 +419,7 @@ pub fn objectToFile(
 
             // create parent dir(s)
             if (std.fs.path.dirname(path)) |dir| {
-                try state.core.repo_dir.makePath(dir);
+                try state.core.work_dir.makePath(dir);
             }
 
             // open the out file
@@ -427,7 +427,7 @@ pub fn objectToFile(
                 .windows => .{},
                 else => .{ .mode = @as(u32, @bitCast(tree_entry.mode)) },
             };
-            const out_file = try state.core.repo_dir.createFile(path, out_flags);
+            const out_file = try state.core.work_dir.createFile(path, out_flags);
             defer out_file.close();
 
             // write the decompressed data to the output file
@@ -523,14 +523,14 @@ fn compareTreeToIndex(
 fn untrackedParent(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
-    repo_dir: std.fs.Dir,
+    work_dir: std.fs.Dir,
     path: []const u8,
     index: *const idx.Index(repo_kind, repo_opts),
 ) ?[]const u8 {
     var parent = path;
     while (std.fs.path.dirname(parent)) |next_parent| {
         parent = next_parent;
-        const meta = fs.getMetadata(repo_dir, next_parent) catch continue;
+        const meta = fs.getMetadata(work_dir, next_parent) catch continue;
         if (meta.kind() != .file) continue;
         if (!index.entries.contains(next_parent)) {
             return next_parent;
@@ -545,23 +545,23 @@ fn untrackedFile(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     allocator: std.mem.Allocator,
-    repo_dir: std.fs.Dir,
+    work_dir: std.fs.Dir,
     path: []const u8,
     index: *const idx.Index(repo_kind, repo_opts),
 ) !bool {
-    const meta = try fs.getMetadata(repo_dir, path);
+    const meta = try fs.getMetadata(work_dir, path);
     switch (meta.kind()) {
         .file => {
             return !index.entries.contains(path);
         },
         .directory => {
-            var dir = try repo_dir.openDir(path, .{ .iterate = true });
+            var dir = try work_dir.openDir(path, .{ .iterate = true });
             defer dir.close();
             var iter = dir.iterate();
             while (try iter.next()) |dir_entry| {
                 const subpath = try fs.joinPath(allocator, &.{ path, dir_entry.name });
                 defer allocator.free(subpath);
-                if (try untrackedFile(repo_kind, repo_opts, allocator, repo_dir, subpath, index)) {
+                if (try untrackedFile(repo_kind, repo_opts, allocator, work_dir, subpath, index)) {
                     return true;
                 }
             }
@@ -610,11 +610,11 @@ pub fn migrate(
                 switch_result.setConflict();
                 try switch_result.result.conflict.stale_files.put(path, {});
             } else {
-                const meta = fs.getMetadata(state.core.repo_dir, path) catch |err| switch (err) {
+                const meta = fs.getMetadata(state.core.work_dir, path) catch |err| switch (err) {
                     error.FileNotFound, error.NotDir => {
                         // if the path doesn't exist in the workdir,
                         // but one of its parents *does* exist and isn't tracked
-                        if (untrackedParent(repo_kind, repo_opts, state.core.repo_dir, path, index)) |_| {
+                        if (untrackedParent(repo_kind, repo_opts, state.core.work_dir, path, index)) |_| {
                             switch_result.setConflict();
                             if (entry_maybe) |_| {
                                 try switch_result.result.conflict.stale_files.put(path, {});
@@ -630,7 +630,7 @@ pub fn migrate(
                 };
                 switch (meta.kind()) {
                     .file => {
-                        const file = try state.core.repo_dir.openFile(path, .{ .mode = .read_only });
+                        const file = try state.core.work_dir.openFile(path, .{ .mode = .read_only });
                         defer file.close();
                         // if the path is a file that differs from the index
                         if (try compareIndexToMount(repo_kind, repo_opts, entry_maybe, file) != .none) {
@@ -646,7 +646,7 @@ pub fn migrate(
                     },
                     .directory => {
                         // if the path is a dir with a descendent that isn't in the index
-                        if (try untrackedFile(repo_kind, repo_opts, allocator, state.core.repo_dir, path, index)) {
+                        if (try untrackedFile(repo_kind, repo_opts, allocator, state.core.work_dir, path, index)) {
                             switch_result.setConflict();
                             if (entry_maybe) |_| {
                                 try switch_result.result.conflict.stale_files.put(path, {});
@@ -670,13 +670,13 @@ pub fn migrate(
     for (remove_files.keys()) |path| {
         // update workdir
         if (update_workdir) {
-            state.core.repo_dir.deleteFile(path) catch |err| switch (err) {
+            state.core.work_dir.deleteFile(path) catch |err| switch (err) {
                 error.FileNotFound => {},
                 else => |e| return e,
             };
             var dir_path_maybe = std.fs.path.dirname(path);
             while (dir_path_maybe) |dir_path| {
-                state.core.repo_dir.deleteDir(dir_path) catch |err| switch (err) {
+                state.core.work_dir.deleteDir(dir_path) catch |err| switch (err) {
                     error.DirNotEmpty, error.FileNotFound => break,
                     else => |e| return e,
                 };

@@ -171,9 +171,9 @@ pub fn joinPath(allocator: std.mem.Allocator, paths: []const []const u8) ![]u8 {
     return buf;
 }
 
-pub fn relativePath(allocator: std.mem.Allocator, repo_dir: std.fs.Dir, cwd: std.fs.Dir, path: []const u8) ![]const u8 {
+pub fn relativePath(allocator: std.mem.Allocator, work_dir: std.fs.Dir, cwd: std.fs.Dir, path: []const u8) ![]const u8 {
     // get the absolute paths to the repo and the input
-    const repo_path = try repo_dir.realpathAlloc(allocator, ".");
+    const repo_path = try work_dir.realpathAlloc(allocator, ".");
     defer allocator.free(repo_path);
     const cwd_path = try cwd.realpathAlloc(allocator, ".");
     defer allocator.free(cwd_path);
