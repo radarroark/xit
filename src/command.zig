@@ -373,6 +373,8 @@ pub const CommandArgs = struct {
     unused_args: std.StringArrayHashMap(void),
 
     const standalone_keys = std.StaticStringMap(void).initComptime(.{
+        .{"--help"},
+        .{"--cli"},
         .{"-f"},
         .{"-r"},
     });
