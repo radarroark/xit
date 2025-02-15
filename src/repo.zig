@@ -514,7 +514,8 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
         pub fn untrack(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, paths: []const []const u8, opts: work.UntrackOptions) !void {
             try self.remove(allocator, paths, .{
                 .force = opts.force,
-                .remove_from_work_dir = false,
+                .recursive = true,
+                .update_work_dir = false,
             });
         }
 

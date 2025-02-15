@@ -84,6 +84,7 @@ fn commandHelp(command_kind: CommandKind) Help {
             ,
             .example =
             \\xit untrack myfile.txt
+            \\xit untrack mydir
             ,
         },
         .rm => .{
@@ -93,6 +94,7 @@ fn commandHelp(command_kind: CommandKind) Help {
             ,
             .example =
             \\xit rm myfile.txt
+            \\xit rm -r mydir
             ,
         },
         .commit => .{
@@ -369,6 +371,11 @@ pub const CommandArgs = struct {
     map_args: std.StringArrayHashMap(?[]const u8),
     unused_args: std.StringArrayHashMap(void),
 
+    const standalone_keys = std.StaticStringMap(void).initComptime(.{
+        .{"-f"},
+        .{"-r"},
+    });
+
     pub fn init(allocator: std.mem.Allocator, args: []const []const u8) !CommandArgs {
         const arena = try allocator.create(std.heap.ArenaAllocator);
         arena.* = std.heap.ArenaAllocator.init(allocator);
@@ -393,8 +400,8 @@ pub const CommandArgs = struct {
                     const last_key = keys[keys.len - 1];
                     const last_val_maybe = map_args.get(last_key);
                     if (last_val_maybe) |last_val| {
-                        // if the last key doesn't have a value yet, add it
-                        if (last_val == null) {
+                        // if the last key doesn't have a value yet and isn't standalone, add it
+                        if (last_val == null and !standalone_keys.has(last_key)) {
                             try map_args.put(last_key, arg);
                         }
                         // otherwise, it's a positional arg
@@ -591,7 +598,8 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                         .paths = cmd_args.positional_args,
                         .opts = .{
                             .force = cmd_args.contains("-f"),
-                            .remove_from_work_dir = true,
+                            .recursive = cmd_args.contains("-r"),
+                            .update_work_dir = true,
                         },
                     } };
                 },

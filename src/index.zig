@@ -199,13 +199,13 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                 var parent_path_maybe = std.fs.path.dirname(path);
                 while (parent_path_maybe) |parent_path| {
                     if (self.entries.contains(parent_path)) {
-                        self.removePath(parent_path);
+                        try self.removePath(parent_path, null);
                     }
                     parent_path_maybe = std.fs.path.dirname(parent_path);
                 }
             }
             // remove entries that are children of this path (file replaces directory)
-            try self.removeChildren(path);
+            try self.removeChildren(path, null);
             // read the metadata
             const meta = try fs.getMetadata(state.core.work_dir, path);
             switch (meta.kind()) {
@@ -402,19 +402,45 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
             try self.addEntry(entry);
         }
 
-        pub fn removePath(self: *Index(repo_kind, repo_opts), path: []const u8) void {
-            _ = self.entries.orderedRemove(path);
-            var parent_path_maybe = std.fs.path.dirname(path);
-            while (parent_path_maybe) |parent_path| {
-                const child_paths_maybe = self.dir_to_paths.getEntry(parent_path);
-                if (child_paths_maybe) |child_paths| {
-                    _ = child_paths.value_ptr.*.orderedRemove(path);
+        pub fn removePath(
+            self: *Index(repo_kind, repo_opts),
+            path: []const u8,
+            removed_paths_maybe: ?*std.StringArrayHashMap(void),
+        ) !void {
+            const removed = self.entries.orderedRemove(path);
+
+            if (removed) {
+                if (removed_paths_maybe) |removed_paths| {
+                    try removed_paths.put(path, {});
                 }
+            }
+
+            // update dir_to_paths and dir_to_children
+            var parent_path_maybe = std.fs.path.dirname(path);
+            var basename = std.fs.path.basename(path);
+            while (parent_path_maybe) |parent_path| {
+                if (self.dir_to_paths.getEntry(parent_path)) |paths| {
+                    _ = paths.value_ptr.*.orderedRemove(path);
+
+                    // if there are no other children, remove the entry from
+                    // dir_to_children as well
+                    if (paths.value_ptr.count() == 0) {
+                        if (self.dir_to_children.getEntry(parent_path)) |children| {
+                            _ = children.value_ptr.*.orderedRemove(basename);
+                        }
+                    }
+                }
+
                 parent_path_maybe = std.fs.path.dirname(parent_path);
+                basename = std.fs.path.basename(parent_path);
             }
         }
 
-        pub fn removeChildren(self: *Index(repo_kind, repo_opts), path: []const u8) !void {
+        pub fn removeChildren(
+            self: *Index(repo_kind, repo_opts),
+            path: []const u8,
+            removed_paths_maybe: ?*std.StringArrayHashMap(void),
+        ) !void {
             const child_paths_maybe = self.dir_to_paths.getEntry(path);
             if (child_paths_maybe) |child_paths| {
                 const child_paths_array = child_paths.value_ptr.*.keys();
@@ -425,7 +451,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     try child_paths_array_copy.append(child_path);
                 }
                 for (child_paths_array_copy.items) |child_path| {
-                    self.removePath(child_path);
+                    try self.removePath(child_path, removed_paths_maybe);
                 }
             }
         }
@@ -435,6 +461,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
             state: rp.Repo(repo_kind, repo_opts).State(.read_write),
             path_parts: []const []const u8,
             action: enum { add, rm },
+            removed_paths_maybe: ?*std.StringArrayHashMap(void),
         ) !void {
             const path = if (path_parts.len == 0) "." else try fs.joinPath(self.arena.allocator(), path_parts);
 
@@ -445,13 +472,14 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                 switch (err) {
                     error.IsDir => {}, // only happens on windows
                     error.FileNotFound => {
-                        if (!self.entries.contains(path) and !self.dir_to_children.contains(path)) {
+                        if (!self.entries.contains(path) and !self.dir_to_paths.contains(path)) {
                             return switch (action) {
                                 .add => error.AddIndexPathNotFound,
                                 .rm => error.RemoveIndexPathNotFound,
                             };
                         }
-                        self.removePath(path);
+                        try self.removePath(path, removed_paths_maybe);
+                        try self.removeChildren(path, removed_paths_maybe);
                         return;
                     },
                     else => |e| return e,
@@ -462,10 +490,11 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
             switch (action) {
                 .add => try self.addPath(state, path),
                 .rm => {
-                    if (!self.entries.contains(path) and !self.dir_to_children.contains(path)) {
+                    if (!self.entries.contains(path) and !self.dir_to_paths.contains(path)) {
                         return error.RemoveIndexPathNotFound;
                     }
-                    self.removePath(path);
+                    try self.removePath(path, removed_paths_maybe);
+                    try self.removeChildren(path, removed_paths_maybe);
                 },
             }
         }

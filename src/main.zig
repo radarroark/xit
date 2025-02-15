@@ -131,9 +131,7 @@ pub fn runPrint(
         error.RepoNotFound => {
             try writers.err.print(
                 \\repo not found, dummy.
-                \\either you're in the wrong place
-                \\or you need to make a new one like this:
-                \\
+                \\either you're in the wrong place or you need to make a new one like this:
                 \\
             , .{});
             try cmd.printHelp(.init, writers.err);
@@ -149,21 +147,11 @@ pub fn runPrint(
             return error.PrintedError;
         },
         error.CannotRemoveFileWithStagedAndUnstagedChanges, error.CannotRemoveFileWithStagedChanges, error.CannotRemoveFileWithUnstagedChanges => {
-            try writers.err.print(
-                \\a file has uncommitted changes.
-                \\if you really want to do it, throw caution
-                \\into the wind by adding the -f flag.
-                \\
-            , .{});
+            try writers.err.print("a file has uncommitted changes. if you really want to do it, throw caution into the wind by adding the -f flag.", .{});
             return error.PrintedError;
         },
         error.EmptyCommit => {
-            try writers.err.print(
-                \\you haven't added anything to commit yet.
-                \\if you really want to commit anyway, add the
-                \\--allow-empty flag and no one will judge you.
-                \\
-            , .{});
+            try writers.err.print("you haven't added anything to commit yet. if you really want to commit anyway, add the --allow-empty flag and no one will judge you.", .{});
             return error.PrintedError;
         },
         error.AddIndexPathNotFound => {
@@ -172,6 +160,10 @@ pub fn runPrint(
         },
         error.RemoveIndexPathNotFound => {
             try writers.err.print("a path you are removing does not exist\n", .{});
+            return error.PrintedError;
+        },
+        error.RemoveDirNotAllowed => {
+            try writers.err.print("to remove a dir, add the -r flag", .{});
             return error.PrintedError;
         },
         error.RefNotFound => {
@@ -184,8 +176,7 @@ pub fn runPrint(
         },
         error.UserConfigNotFound => {
             try writers.err.print(
-                \\you need to set your name and email, mystery man.
-                \\set it like this:
+                \\you need to set your name and email, mystery man. you can do it like this:
                 \\
                 \\    xit config add user.name foo
                 \\    xit config add user.email foo@bar

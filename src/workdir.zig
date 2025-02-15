@@ -232,10 +232,11 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                             try untracked.put(entry.path, entry);
                         }
                     }
+
+                    return contains_file;
                 },
-                else => {},
+                else => return false,
             }
-            return false;
         }
     };
 }
@@ -246,7 +247,8 @@ pub const UntrackOptions = struct {
 
 pub const RemoveOptions = struct {
     force: bool = false,
-    remove_from_work_dir: bool = true,
+    recursive: bool = false,
+    update_work_dir: bool = true,
 };
 
 pub fn indexDiffersFromMount(
@@ -295,7 +297,7 @@ pub fn addPaths(
         const path_parts = try fs.splitPath(allocator, path);
         defer allocator.free(path_parts);
 
-        try index.addOrRemovePath(state, path_parts, .add);
+        try index.addOrRemovePath(state, path_parts, .add, null);
     }
 
     try index.write(allocator, state);
@@ -316,7 +318,7 @@ pub fn unaddPaths(
         const path_parts = try fs.splitPath(allocator, path);
         defer allocator.free(path_parts);
 
-        try index.addOrRemovePath(state, path_parts, .rm);
+        try index.addOrRemovePath(state, path_parts, .rm, null);
 
         // iterate over the HEAD entries and add them to the index
         if (try tr.headTreeEntry(repo_kind, repo_opts, state.readOnly(), allocator, path_parts)) |*tree_entry| {
@@ -325,6 +327,58 @@ pub fn unaddPaths(
     }
 
     try index.write(allocator, state);
+}
+
+fn checkPath(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+    index: *const idx.Index(repo_kind, repo_opts),
+    head_tree: *const tr.Tree(repo_kind, repo_opts),
+    path: []const u8,
+    opts: RemoveOptions,
+) !void {
+    const meta = fs.getMetadata(state.core.work_dir, path) catch |err| switch (err) {
+        error.FileNotFound => return,
+        else => |e| return e,
+    };
+
+    switch (meta.kind()) {
+        .file => {
+            var differs_from_head = false;
+            var differs_from_work_dir = false;
+
+            if (index.entries.get(path)) |*index_entries_for_path| {
+                if (index_entries_for_path[0]) |index_entry| {
+                    if (head_tree.entries.get(path)) |head_entry| {
+                        if (!index_entry.mode.eql(head_entry.mode) or !std.mem.eql(u8, &index_entry.oid, &head_entry.oid)) {
+                            differs_from_head = true;
+                        }
+                    }
+
+                    const file = try state.core.work_dir.openFile(path, .{ .mode = .read_only });
+                    defer file.close();
+                    if (try indexDiffersFromMount(repo_kind, repo_opts, &index_entry, file, meta)) {
+                        differs_from_work_dir = true;
+                    }
+                }
+            }
+
+            if (differs_from_head and differs_from_work_dir) {
+                return error.CannotRemoveFileWithStagedAndUnstagedChanges;
+            } else if (differs_from_head and opts.update_work_dir) {
+                return error.CannotRemoveFileWithStagedChanges;
+            } else if (differs_from_work_dir and opts.update_work_dir) {
+                return error.CannotRemoveFileWithUnstagedChanges;
+            }
+        },
+        .directory => {
+            if (opts.update_work_dir and !opts.recursive) {
+                return error.RemoveDirNotAllowed;
+            }
+        },
+        else => {},
+    }
 }
 
 /// removes the given paths from the index and optionally from the work_dir
@@ -342,58 +396,38 @@ pub fn removePaths(
     var head_tree = try tr.Tree(repo_kind, repo_opts).init(allocator, state.readOnly(), null);
     defer head_tree.deinit();
 
+    var removed_paths = std.StringArrayHashMap(void).init(allocator);
+    defer removed_paths.deinit();
+
     for (paths) |path| {
-        const meta = fs.getMetadata(state.core.work_dir, path) catch |err| switch (err) {
-            error.FileNotFound => return error.RemoveIndexPathNotFound,
-            else => |e| return e,
-        };
-        switch (meta.kind()) {
-            .file => {
-                // if force isn't enabled, do a safety check
-                if (!opts.force) {
-                    var differs_from_head = false;
-                    var differs_from_work_dir = false;
+        // if force isn't enabled, do a safety check
+        if (!opts.force) {
+            try checkPath(repo_kind, repo_opts, state, &index, &head_tree, path, opts);
 
-                    if (index.entries.get(path)) |*index_entries_for_path| {
-                        if (index_entries_for_path[0]) |index_entry| {
-                            if (head_tree.entries.get(path)) |head_entry| {
-                                if (!index_entry.mode.eql(head_entry.mode) or !std.mem.eql(u8, &index_entry.oid, &head_entry.oid)) {
-                                    differs_from_head = true;
-                                }
-                            }
-
-                            const file = try state.core.work_dir.openFile(path, .{ .mode = .read_only });
-                            defer file.close();
-                            if (try indexDiffersFromMount(repo_kind, repo_opts, &index_entry, file, meta)) {
-                                differs_from_work_dir = true;
-                            }
-                        }
-                    }
-
-                    if (differs_from_head and differs_from_work_dir) {
-                        return error.CannotRemoveFileWithStagedAndUnstagedChanges;
-                    } else if (differs_from_head and opts.remove_from_work_dir) {
-                        return error.CannotRemoveFileWithStagedChanges;
-                    } else if (differs_from_work_dir and opts.remove_from_work_dir) {
-                        return error.CannotRemoveFileWithUnstagedChanges;
-                    }
+            if (index.dir_to_paths.get(path)) |sub_paths| {
+                for (sub_paths.keys()) |sub_path| {
+                    try checkPath(repo_kind, repo_opts, state, &index, &head_tree, sub_path, opts);
                 }
-
-                const path_parts = try fs.splitPath(allocator, path);
-                defer allocator.free(path_parts);
-                try index.addOrRemovePath(state, path_parts, .rm);
-            },
-            else => return error.UnexpectedPathType,
+            }
         }
+
+        // remove from index
+        const path_parts = try fs.splitPath(allocator, path);
+        defer allocator.free(path_parts);
+        try index.addOrRemovePath(state, path_parts, .rm, &removed_paths);
     }
 
-    if (opts.remove_from_work_dir) {
-        for (paths) |path| {
-            const meta = try fs.getMetadata(state.core.work_dir, path);
-            switch (meta.kind()) {
-                .file => try state.core.work_dir.deleteFile(path),
-                .directory => return error.CannotDeleteDir,
-                else => return error.UnexpectedPathType,
+    if (opts.update_work_dir) {
+        for (removed_paths.keys()) |path| {
+            try state.core.work_dir.deleteFile(path);
+
+            var dir_path_maybe = std.fs.path.dirname(path);
+            while (dir_path_maybe) |dir_path| {
+                state.core.work_dir.deleteDir(dir_path) catch |err| switch (err) {
+                    error.DirNotEmpty, error.FileNotFound => break,
+                    else => |e| return e,
+                };
+                dir_path_maybe = std.fs.path.dirname(dir_path);
             }
         }
     }
@@ -684,8 +718,8 @@ pub fn migrate(
             }
         }
         // update index
-        index.removePath(path);
-        try index.removeChildren(path);
+        try index.removePath(path, null);
+        try index.removeChildren(path, null);
     }
 
     for (add_files.keys(), add_files.values()) |path, tree_entry| {

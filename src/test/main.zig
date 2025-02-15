@@ -829,114 +829,96 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         // can't remove non-existent file
         try std.testing.expectEqual(error.RemoveIndexPathNotFound, main.run(repo_kind, repo_opts, allocator, &.{ "rm", "no-such-file" }, work_dir, .{}));
 
+        // modify a file
         {
-            // modify a file
-            {
-                const three_txt = try work_dir.openFile("one/two/three.txt", .{ .mode = .read_write });
-                defer three_txt.close();
-                try three_txt.seekTo(0);
-                try three_txt.writeAll("this is now modified");
-                try three_txt.setEndPos(try three_txt.getPos());
-            }
-
-            // can't remove a file with unstaged changes
-            try std.testing.expectEqual(error.CannotRemoveFileWithUnstagedChanges, main.run(repo_kind, repo_opts, allocator, &.{ "rm", "one/two/three.txt" }, work_dir, .{}));
-
-            // stage the changes
-            try main.run(repo_kind, repo_opts, allocator, &.{ "add", "one/two/three.txt" }, work_dir, .{});
-
-            // modify it again
-            {
-                const three_txt = try work_dir.openFile("one/two/three.txt", .{ .mode = .read_write });
-                defer three_txt.close();
-                try three_txt.seekTo(0);
-                try three_txt.writeAll("this is now modified again");
-                try three_txt.setEndPos(try three_txt.getPos());
-            }
-
-            // can't untrack a file with staged and unstaged changes
-            try std.testing.expectEqual(error.CannotRemoveFileWithStagedAndUnstagedChanges, main.run(repo_kind, repo_opts, allocator, &.{ "untrack", "one/two/three.txt" }, work_dir, .{}));
-
-            // add, unadd, and then untrack modified file
-            try main.run(repo_kind, repo_opts, allocator, &.{ "add", "one" }, work_dir, .{});
-            try main.run(repo_kind, repo_opts, allocator, &.{ "unadd", "one" }, work_dir, .{});
-
-            // still tracked because unadd just resets it back to the state from HEAD
-            {
-                var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
-                defer repo.deinit();
-                var moment = try repo.core.latestMoment();
-                const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-                var index = try idx.Index(repo_kind, repo_opts).init(allocator, state);
-                defer index.deinit();
-
-                try std.testing.expect(index.entries.contains("one/two/three.txt"));
-                try std.testing.expectEqual("one, two, three!".len, index.entries.get("one/two/three.txt").?[0].?.file_size);
-            }
-
-            try main.run(repo_kind, repo_opts, allocator, &.{ "untrack", "one/two/three.txt" }, work_dir, .{});
-
-            // not tracked anymore
-            {
-                var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
-                defer repo.deinit();
-                var moment = try repo.core.latestMoment();
-                const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-                var index = try idx.Index(repo_kind, repo_opts).init(allocator, state);
-                defer index.deinit();
-
-                try std.testing.expect(!index.entries.contains("one/two/three.txt"));
-            }
-
-            // stage the changes to the file
-            try main.run(repo_kind, repo_opts, allocator, &.{ "add", "one/two/three.txt" }, work_dir, .{});
-
-            // can't remove a file with staged changes
-            try std.testing.expectEqual(error.CannotRemoveFileWithStagedChanges, main.run(repo_kind, repo_opts, allocator, &.{ "rm", "one/two/three.txt" }, work_dir, .{}));
-
-            // remove file by force
-            try main.run(repo_kind, repo_opts, allocator, &.{ "rm", "one/two/three.txt", "-f" }, work_dir, .{});
-
-            // restore file's original content
-            {
-                const three_txt = try work_dir.createFile("one/two/three.txt", .{});
-                defer three_txt.close();
-                try three_txt.seekTo(0);
-                try three_txt.writeAll("one, two, three!");
-                try three_txt.setEndPos(try three_txt.getPos());
-
-                try main.run(repo_kind, repo_opts, allocator, &.{ "add", "one/two/three.txt" }, work_dir, .{});
-            }
-
-            // remove a file
-            {
-                try main.run(repo_kind, repo_opts, allocator, &.{ "rm", "one/two/three.txt" }, work_dir, .{});
-
-                var file_or_err = work_dir.openFile("one/two/three.txt", .{ .mode = .read_only });
-                if (file_or_err) |*file| {
-                    file.close();
-                    return error.UnexpectedFile;
-                } else |_| {}
-            }
+            const three_txt = try work_dir.openFile("one/two/three.txt", .{ .mode = .read_write });
+            defer three_txt.close();
+            try three_txt.seekTo(0);
+            try three_txt.writeAll("this is now modified");
+            try three_txt.setEndPos(try three_txt.getPos());
         }
 
+        // can't remove a file with unstaged changes
+        try std.testing.expectEqual(error.CannotRemoveFileWithUnstagedChanges, main.run(repo_kind, repo_opts, allocator, &.{ "rm", "one/two/three.txt" }, work_dir, .{}));
+
+        // stage the changes
+        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "one/two/three.txt" }, work_dir, .{});
+
+        // modify it again
         {
-            // create a new file
-            var new_file_txt = try work_dir.createFile("new-file.txt", .{});
-            defer {
-                new_file_txt.close();
-                work_dir.deleteFile("new-file.txt") catch {};
-            }
-            try new_file_txt.writeAll("this is a new file");
+            const three_txt = try work_dir.openFile("one/two/three.txt", .{ .mode = .read_write });
+            defer three_txt.close();
+            try three_txt.seekTo(0);
+            try three_txt.writeAll("this is now modified again");
+            try three_txt.setEndPos(try three_txt.getPos());
+        }
 
-            // can't remove unindexed file
-            try std.testing.expectEqual(error.RemoveIndexPathNotFound, main.run(repo_kind, repo_opts, allocator, &.{ "rm", "new-file.txt" }, work_dir, .{}));
+        // can't untrack a file with staged and unstaged changes
+        try std.testing.expectEqual(error.CannotRemoveFileWithStagedAndUnstagedChanges, main.run(repo_kind, repo_opts, allocator, &.{ "untrack", "one/two/three.txt" }, work_dir, .{}));
 
-            // add file
-            try main.run(repo_kind, repo_opts, allocator, &.{ "add", "new-file.txt" }, work_dir, .{});
+        // add, unadd, and then untrack modified file
+        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "one" }, work_dir, .{});
+        try main.run(repo_kind, repo_opts, allocator, &.{ "unadd", "one" }, work_dir, .{});
 
-            // unadd the same file so it is untracked again
-            try main.run(repo_kind, repo_opts, allocator, &.{ "unadd", "new-file.txt" }, work_dir, .{});
+        // still tracked because unadd just resets it back to the state from HEAD
+        {
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+            defer repo.deinit();
+            var moment = try repo.core.latestMoment();
+            const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
+            var index = try idx.Index(repo_kind, repo_opts).init(allocator, state);
+            defer index.deinit();
+
+            try std.testing.expect(index.entries.contains("one/two/three.txt"));
+            try std.testing.expectEqual("one, two, three!".len, index.entries.get("one/two/three.txt").?[0].?.file_size);
+        }
+
+        try main.run(repo_kind, repo_opts, allocator, &.{ "untrack", "one/two/three.txt" }, work_dir, .{});
+
+        // not tracked anymore
+        {
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+            defer repo.deinit();
+            var moment = try repo.core.latestMoment();
+            const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
+            var index = try idx.Index(repo_kind, repo_opts).init(allocator, state);
+            defer index.deinit();
+
+            try std.testing.expect(!index.entries.contains("one/two/three.txt"));
+        }
+
+        // stage the changes to the file
+        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "one/two/three.txt" }, work_dir, .{});
+
+        // can't remove a file with staged changes
+        try std.testing.expectEqual(error.CannotRemoveFileWithStagedChanges, main.run(repo_kind, repo_opts, allocator, &.{ "rm", "one/two/three.txt" }, work_dir, .{}));
+
+        // remove file by force
+        try main.run(repo_kind, repo_opts, allocator, &.{ "rm", "one/two/three.txt", "-f" }, work_dir, .{});
+
+        // restore file's original content
+        {
+            var two_dir = try work_dir.makeOpenPath("one/two", .{});
+            defer two_dir.close();
+
+            const three_txt = try work_dir.createFile("one/two/three.txt", .{});
+            defer three_txt.close();
+            try three_txt.seekTo(0);
+            try three_txt.writeAll("one, two, three!");
+            try three_txt.setEndPos(try three_txt.getPos());
+
+            try main.run(repo_kind, repo_opts, allocator, &.{ "add", "one/two/three.txt" }, work_dir, .{});
+        }
+
+        // remove a file
+        {
+            try main.run(repo_kind, repo_opts, allocator, &.{ "rm", "one/two/three.txt" }, work_dir, .{});
+
+            var file_or_err = work_dir.openFile("one/two/three.txt", .{ .mode = .read_only });
+            if (file_or_err) |*file| {
+                file.close();
+                return error.UnexpectedFile;
+            } else |_| {}
         }
     }
 
@@ -1102,6 +1084,64 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         try std.testing.expectEqual(6, tree_object.content.tree.entries.count());
     }
 
+    // remove dir from index
+    {
+        // make a nested dir with a few files
+        {
+            var bar_dir = try work_dir.makeOpenPath("foo/bar", .{});
+            defer bar_dir.close();
+            var hi_txt = try bar_dir.createFile("hi.txt", .{});
+            defer hi_txt.close();
+            try hi_txt.writeAll("hi hi");
+            var baz_dir = try work_dir.makeOpenPath("foo/bar/baz", .{});
+            defer baz_dir.close();
+            var bye_txt = try baz_dir.createFile("bye.txt", .{});
+            defer bye_txt.close();
+            try bye_txt.writeAll("bye bye");
+        }
+
+        // can't remove unindexed file
+        try std.testing.expectEqual(error.RemoveIndexPathNotFound, main.run(repo_kind, repo_opts, allocator, &.{ "rm", "foo/bar/hi.txt" }, work_dir, .{}));
+
+        // add dir
+        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "foo" }, work_dir, .{});
+
+        // make a commit
+        try main.run(repo_kind, repo_opts, allocator, &.{ "commit", "-m", "third commit" }, work_dir, .{});
+
+        // untrack hi.txt
+        try main.run(repo_kind, repo_opts, allocator, &.{ "untrack", "foo/bar/hi.txt" }, work_dir, .{});
+
+        // can't remove subdir without -r
+        try std.testing.expectEqual(error.RemoveDirNotAllowed, main.run(repo_kind, repo_opts, allocator, &.{ "rm", "foo" }, work_dir, .{}));
+
+        // remove subdir with -r
+        try main.run(repo_kind, repo_opts, allocator, &.{ "rm", "-r", "foo" }, work_dir, .{ .err = std.io.getStdErr().writer().any() });
+
+        // make sure it was deleted
+        var dir_or_err = work_dir.openDir("foo/bar/baz", .{});
+        if (dir_or_err) |*dir| {
+            dir.close();
+            return error.UnexpectedDir;
+        } else |_| {}
+
+        // but hi.txt was not deleted, because it wasn't in the index
+        var hi_txt = try work_dir.openFile("foo/bar/hi.txt", .{});
+        defer hi_txt.close();
+
+        // add hi.txt back to the index
+        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "foo/bar/hi.txt" }, work_dir, .{});
+    }
+
+    // get HEAD contents
+    const commit3 = blk: {
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+        defer repo.deinit();
+        var moment = try repo.core.latestMoment();
+        const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
+        break :blk try rf.readHeadRecur(repo_kind, repo_opts, state);
+    };
+
     // create a branch
     try main.run(repo_kind, repo_opts, allocator, &.{ "branch", "add", "stuff" }, work_dir, .{});
 
@@ -1114,8 +1154,8 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-        try std.testing.expectEqual(commit2, try rf.readHeadRecur(repo_kind, repo_opts, state));
-        try std.testing.expectEqual(commit2, try rf.readRecur(repo_kind, repo_opts, state, .{ .ref = .{ .kind = .head, .name = "stuff" } }));
+        try std.testing.expectEqual(commit3, try rf.readHeadRecur(repo_kind, repo_opts, state));
+        try std.testing.expectEqual(commit3, try rf.readRecur(repo_kind, repo_opts, state, .{ .ref = .{ .kind = .head, .name = "stuff" } }));
     }
 
     // list all branches
@@ -1234,11 +1274,11 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         try main.run(repo_kind, repo_opts, allocator, &.{ "add", "goodbye.txt" }, work_dir, .{});
 
         // make a commit
-        try main.run(repo_kind, repo_opts, allocator, &.{ "commit", "-m", "third commit" }, work_dir, .{});
+        try main.run(repo_kind, repo_opts, allocator, &.{ "commit", "-m", "fourth commit" }, work_dir, .{});
     }
 
     // get HEAD contents
-    const commit3 = blk: {
+    const commit4 = blk: {
         var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
@@ -1252,7 +1292,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-        try std.testing.expectEqual(commit3, try rf.readRecur(repo_kind, repo_opts, state, .{ .ref = .{ .kind = .head, .name = "master" } }));
+        try std.testing.expectEqual(commit4, try rf.readRecur(repo_kind, repo_opts, state, .{ .ref = .{ .kind = .head, .name = "master" } }));
     }
 
     // log
@@ -1261,6 +1301,17 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         defer repo.deinit();
         var iter = try repo.log(allocator, null);
         defer iter.deinit();
+
+        {
+            var object = try iter.next() orelse return error.ExpectedObject;
+            defer object.deinit();
+            try std.testing.expectEqual(commit4, object.oid);
+
+            try object.object_reader.seekTo(object.content.commit.message_position);
+            const message = try object.object_reader.reader.reader().readAllAlloc(allocator, repo_opts.max_read_size);
+            defer allocator.free(message);
+            try std.testing.expectEqualStrings("fourth commit", message);
+        }
 
         {
             var object = try iter.next() orelse return error.ExpectedObject;
@@ -1304,8 +1355,8 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-        const ancestor_commit = try mrg.commonAncestor(repo_kind, repo_opts, allocator, state, &commit3, &commit4_stuff);
-        try std.testing.expectEqualStrings(&commit2, &ancestor_commit);
+        const ancestor_commit = try mrg.commonAncestor(repo_kind, repo_opts, allocator, state, &commit4, &commit4_stuff);
+        try std.testing.expectEqualStrings(&commit3, &ancestor_commit);
     }
 
     // merge
@@ -1332,7 +1383,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     }
 
     // get HEAD contents
-    const commit4 = blk: {
+    const commit5 = blk: {
         var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
@@ -1469,5 +1520,5 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         try main.run(repo_kind, repo_opts, allocator, &.{ "tag", "rm", "ann" }, work_dir, .{});
     }
 
-    return commit4;
+    return commit5;
 }
