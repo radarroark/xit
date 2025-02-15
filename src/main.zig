@@ -182,6 +182,16 @@ pub fn runPrint(
             try writers.err.print("branch already exists\n", .{});
             return error.PrintedError;
         },
+        error.UserConfigNotFound => {
+            try writers.err.print(
+                \\you need to set your name and email, mystery man.
+                \\set it like this:
+                \\
+                \\    xit config add user.name foo
+                \\    xit config add user.email foo@bar
+            , .{});
+            return error.PrintedError;
+        },
         else => |e| return e,
     };
 }
