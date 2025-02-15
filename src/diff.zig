@@ -21,7 +21,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                 object_reader: obj.ObjectReader(repo_kind, repo_opts),
                 eof: bool,
             },
-            workdir: struct {
+            work_dir: struct {
                 file: std.fs.File,
                 eof: bool,
             },
@@ -75,7 +75,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                 .line_offsets = undefined,
                 .current_line = 0,
                 .source = .{
-                    .workdir = .{
+                    .work_dir = .{
                         .file = file,
                         .eof = false,
                     },
@@ -192,14 +192,14 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                     self.current_line += 1;
                     return line;
                 },
-                .workdir => |*workdir| {
-                    if (workdir.eof) {
+                .work_dir => |*work_dir| {
+                    if (work_dir.eof) {
                         return null;
                     }
                     var line_arr = std.ArrayList(u8).init(self.allocator);
                     errdefer line_arr.deinit();
-                    workdir.file.reader().streamUntilDelimiter(line_arr.writer(), '\n', repo_opts.max_line_size) catch |err| switch (err) {
-                        error.EndOfStream => workdir.eof = true,
+                    work_dir.file.reader().streamUntilDelimiter(line_arr.writer(), '\n', repo_opts.max_line_size) catch |err| switch (err) {
+                        error.EndOfStream => work_dir.eof = true,
                         else => |e| return e,
                     };
                     const line = try line_arr.toOwnedSlice();
@@ -234,9 +234,9 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                     object.eof = false;
                     try object.object_reader.reset();
                 },
-                .workdir => |*workdir| {
-                    workdir.eof = false;
-                    try workdir.file.seekTo(0);
+                .work_dir => |*work_dir| {
+                    work_dir.eof = false;
+                    try work_dir.file.seekTo(0);
                 },
                 .buffer => |*buffer| buffer.iter.reset(),
                 .nothing => {},
@@ -251,7 +251,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
         pub fn deinit(self: *LineIterator(repo_kind, repo_opts)) void {
             switch (self.source) {
                 .object => |*object| object.object_reader.deinit(),
-                .workdir => |*workdir| workdir.file.close(),
+                .work_dir => |*work_dir| work_dir.file.close(),
                 .buffer => {},
                 .nothing => {},
                 .binary => {},
@@ -273,9 +273,9 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                     object.eof = false;
                     try object.object_reader.seekTo(position);
                 },
-                .workdir => |*workdir| {
+                .work_dir => |*work_dir| {
                     try self.reset();
-                    try workdir.file.seekTo(position);
+                    try work_dir.file.seekTo(position);
                 },
                 .buffer => {
                     try self.reset();
@@ -326,7 +326,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
             if (is_binary) {
                 switch (self.source) {
                     .object => |*object| object.object_reader.deinit(),
-                    .workdir => |*workdir| workdir.file.close(),
+                    .work_dir => |*work_dir| work_dir.file.close(),
                     .buffer => {},
                     .nothing => {},
                     .binary => {},
@@ -1223,14 +1223,14 @@ pub const ConflictDiffKind = enum {
 };
 
 pub const DiffKind = enum {
-    workdir,
+    work_dir,
     index,
     tree,
 };
 
 pub fn BasicDiffOptions(comptime hash_kind: hash.HashKind) type {
     return union(DiffKind) {
-        workdir: struct {
+        work_dir: struct {
             conflict_diff_kind: ConflictDiffKind,
         },
         index,
@@ -1243,7 +1243,7 @@ pub fn BasicDiffOptions(comptime hash_kind: hash.HashKind) type {
 
 pub fn DiffOptions(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return union(DiffKind) {
-        workdir: struct {
+        work_dir: struct {
             conflict_diff_kind: ConflictDiffKind,
             status: *work.Status(repo_kind, repo_opts),
         },
@@ -1366,16 +1366,16 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
             const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = self.core, .extra = .{ .moment = &self.moment } };
             var next_index = self.next_index;
             switch (self.diff_opts) {
-                .workdir => |workdir| {
-                    if (next_index < workdir.status.conflicts.count()) {
-                        const path = workdir.status.conflicts.keys()[next_index];
+                .work_dir => |work_dir| {
+                    if (next_index < work_dir.status.conflicts.count()) {
+                        const path = work_dir.status.conflicts.keys()[next_index];
                         const meta = try fs.getMetadata(self.core.work_dir, path);
-                        const stage: usize = switch (workdir.conflict_diff_kind) {
+                        const stage: usize = switch (work_dir.conflict_diff_kind) {
                             .base => 1,
                             .target => 2,
                             .source => 3,
                         };
-                        const index_entries_for_path = workdir.status.index.entries.get(path) orelse return error.EntryNotFound;
+                        const index_entries_for_path = work_dir.status.index.entries.get(path) orelse return error.EntryNotFound;
                         // if there is an entry for the stage we are diffing
                         if (index_entries_for_path[stage]) |index_entry| {
                             var a = try LineIterator(repo_kind, repo_opts).initFromIndex(state, self.allocator, index_entry);
@@ -1395,12 +1395,12 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                             return try self.next();
                         }
                     } else {
-                        next_index -= workdir.status.conflicts.count();
+                        next_index -= work_dir.status.conflicts.count();
                     }
 
-                    if (next_index < workdir.status.workdir_modified.count()) {
-                        const entry = workdir.status.workdir_modified.values()[next_index];
-                        const index_entries_for_path = workdir.status.index.entries.get(entry.path) orelse return error.EntryNotFound;
+                    if (next_index < work_dir.status.work_dir_modified.count()) {
+                        const entry = work_dir.status.work_dir_modified.values()[next_index];
+                        const index_entries_for_path = work_dir.status.index.entries.get(entry.path) orelse return error.EntryNotFound;
                         var a = try LineIterator(repo_kind, repo_opts).initFromIndex(state, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
                         errdefer a.deinit();
                         var b = try LineIterator(repo_kind, repo_opts).initFromWorkspace(state, self.allocator, entry.path, fs.getMode(entry.meta));
@@ -1408,12 +1408,12 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                         self.next_index += 1;
                         return .{ .path = entry.path, .a = a, .b = b };
                     } else {
-                        next_index -= workdir.status.workdir_modified.count();
+                        next_index -= work_dir.status.work_dir_modified.count();
                     }
 
-                    if (next_index < workdir.status.workdir_deleted.count()) {
-                        const path = workdir.status.workdir_deleted.keys()[next_index];
-                        const index_entries_for_path = workdir.status.index.entries.get(path) orelse return error.EntryNotFound;
+                    if (next_index < work_dir.status.work_dir_deleted.count()) {
+                        const path = work_dir.status.work_dir_deleted.keys()[next_index];
+                        const index_entries_for_path = work_dir.status.index.entries.get(path) orelse return error.EntryNotFound;
                         var a = try LineIterator(repo_kind, repo_opts).initFromIndex(state, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
                         errdefer a.deinit();
                         var b = try LineIterator(repo_kind, repo_opts).initFromNothing(self.allocator, path);

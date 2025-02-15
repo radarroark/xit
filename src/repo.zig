@@ -514,7 +514,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
         pub fn untrack(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, paths: []const []const u8, opts: work.UntrackOptions) !void {
             try self.remove(allocator, paths, .{
                 .force = opts.force,
-                .remove_from_workdir = false,
+                .remove_from_work_dir = false,
             });
         }
 
@@ -663,7 +663,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
-        pub fn switchWorkdir(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: work.SwitchInput(repo_opts.hash)) !work.Switch(repo_kind, repo_opts) {
+        pub fn switchWorkDir(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: work.SwitchInput(repo_opts.hash)) !work.Switch(repo_kind, repo_opts) {
             switch (repo_kind) {
                 .git => return try work.Switch(repo_kind, repo_opts).init(.{ .core = &self.core, .extra = .{} }, allocator, input),
                 .xit => {
@@ -693,11 +693,11 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
-        pub fn resetWorkdir(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: work.ResetInput(repo_opts.hash)) !work.Switch(repo_kind, repo_opts) {
-            return try self.switchWorkdir(allocator, .{
+        pub fn resetWorkDir(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: work.ResetInput(repo_opts.hash)) !work.Switch(repo_kind, repo_opts) {
+            return try self.switchWorkDir(allocator, .{
                 .kind = .reset,
                 .target = input.target,
-                .update_workdir = input.update_workdir,
+                .update_work_dir = input.update_work_dir,
                 .force = input.force,
             });
         }

@@ -63,11 +63,11 @@ pub fn main() !void {
         var git_repo = try rp.Repo(.git, .{}).open(allocator, .{ .cwd = temp_dir });
         defer git_repo.deinit();
 
-        // restore all files in workdir
+        // restore all files in work dir
         // (they are all missing because we only copied the .git dir)
         var status = try git_repo.status(allocator);
         defer status.deinit();
-        for (status.workdir_deleted.keys()) |path| {
+        for (status.work_dir_deleted.keys()) |path| {
             if (std.mem.startsWith(u8, path, "deps/")) continue;
             try writers.out.print("Restoring: {s}\n", .{path});
             git_repo.restore(allocator, path) catch |err| switch (err) {
@@ -105,7 +105,7 @@ pub fn main() !void {
             var commit_object = commits.items[commits.items.len - i - 1];
             try writers.out.print("Creating commit: {s}\n", .{commit_object.content.commit.metadata.message orelse ""});
 
-            var switch_result = try git_repo.switchWorkdir(allocator, .{ .target = .{ .oid = &commit_object.oid }, .force = true });
+            var switch_result = try git_repo.switchWorkDir(allocator, .{ .target = .{ .oid = &commit_object.oid }, .force = true });
             defer switch_result.deinit();
             if (.success != switch_result.result) {
                 return error.CheckoutFailed;

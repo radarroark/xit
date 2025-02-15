@@ -96,7 +96,7 @@ pub fn start(
     // focus on the correct tab if sub command is provided
     if (cmd_kind_maybe) |cmd_kind| {
         const child_id_maybe = switch (cmd_kind) {
-            .status, .diff_workdir, .diff_added => root.ui_root.box.children.values()[0].widget.ui_root_tabs.getChildFocusId(.status),
+            .status, .diff_work_dir, .diff_added => root.ui_root.box.children.values()[0].widget.ui_root_tabs.getChildFocusId(.status),
             .log => root.ui_root.box.children.values()[0].widget.ui_root_tabs.getChildFocusId(.log),
             else => null,
         };

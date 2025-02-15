@@ -238,11 +238,11 @@ fn runCommand(
                 try writers.out.print("?? {s}\n", .{entry.path});
             }
 
-            for (stat.workdir_modified.values()) |entry| {
+            for (stat.work_dir_modified.values()) |entry| {
                 try writers.out.print(" M {s}\n", .{entry.path});
             }
 
-            for (stat.workdir_deleted.keys()) |path| {
+            for (stat.work_dir_deleted.keys()) |path| {
                 try writers.out.print(" D {s}\n", .{path});
             }
 
@@ -290,22 +290,22 @@ fn runCommand(
                 }
             }
         },
-        .diff_workdir, .diff_added => |diff_cmd| {
+        .diff_work_dir, .diff_added => |diff_cmd| {
             const DiffState = union(df.DiffKind) {
-                workdir: work.Status(repo_kind, repo_opts),
+                work_dir: work.Status(repo_kind, repo_opts),
                 index: work.Status(repo_kind, repo_opts),
                 tree: tr.TreeDiff(repo_kind, repo_opts),
 
                 fn deinit(diff_state: *@This()) void {
                     switch (diff_state.*) {
-                        .workdir => diff_state.workdir.deinit(),
+                        .work_dir => diff_state.work_dir.deinit(),
                         .index => diff_state.index.deinit(),
                         .tree => diff_state.tree.deinit(),
                     }
                 }
             };
             var diff_state: DiffState = switch (diff_cmd) {
-                .workdir => .{ .workdir = try repo.status(allocator) },
+                .work_dir => .{ .work_dir = try repo.status(allocator) },
                 .index => .{ .index = try repo.status(allocator) },
                 .tree => |tree| .{
                     .tree = try repo.treeDiff(allocator, if (tree.old) |old| &old else null, if (tree.new) |new| &new else null),
@@ -313,10 +313,10 @@ fn runCommand(
             };
             defer diff_state.deinit();
             var diff_iter = try repo.filePairs(allocator, switch (diff_cmd) {
-                .workdir => |workdir| .{
-                    .workdir = .{
-                        .conflict_diff_kind = workdir.conflict_diff_kind,
-                        .status = &diff_state.workdir,
+                .work_dir => |work_dir| .{
+                    .work_dir = .{
+                        .conflict_diff_kind = work_dir.conflict_diff_kind,
+                        .status = &diff_state.work_dir,
                     },
                 },
                 .index => .{
@@ -385,8 +385,8 @@ fn runCommand(
                 .remove => |rm_branch| try repo.removeBranch(rm_branch),
             }
         },
-        .switch_workdir, .reset_workdir, .reset_added => |switch_workdir_cmd| {
-            var switch_result = try repo.switchWorkdir(allocator, switch_workdir_cmd);
+        .switch_work_dir, .reset_work_dir, .reset_added => |switch_work_dir_cmd| {
+            var switch_result = try repo.switchWorkDir(allocator, switch_work_dir_cmd);
             defer switch_result.deinit();
             switch (switch_result.result) {
                 .success => {},
