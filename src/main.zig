@@ -15,7 +15,7 @@ const rp = @import("./repo.zig");
 const ui = @import("./ui.zig");
 const hash = @import("./hash.zig");
 const df = @import("./diff.zig");
-const mnt = @import("./mount.zig");
+const work = @import("./workdir.zig");
 const mrg = @import("./merge.zig");
 const obj = @import("./object.zig");
 const tr = @import("./tree.zig");
@@ -238,11 +238,11 @@ fn runCommand(
                 try writers.out.print("?? {s}\n", .{entry.path});
             }
 
-            for (stat.mount_modified.values()) |entry| {
+            for (stat.workdir_modified.values()) |entry| {
                 try writers.out.print(" M {s}\n", .{entry.path});
             }
 
-            for (stat.mount_deleted.keys()) |path| {
+            for (stat.workdir_deleted.keys()) |path| {
                 try writers.out.print(" D {s}\n", .{path});
             }
 
@@ -290,22 +290,22 @@ fn runCommand(
                 }
             }
         },
-        .diff_mount, .diff_added => |diff_cmd| {
+        .diff_workdir, .diff_added => |diff_cmd| {
             const DiffState = union(df.DiffKind) {
-                mount: mnt.Status(repo_kind, repo_opts),
-                index: mnt.Status(repo_kind, repo_opts),
+                workdir: work.Status(repo_kind, repo_opts),
+                index: work.Status(repo_kind, repo_opts),
                 tree: tr.TreeDiff(repo_kind, repo_opts),
 
                 fn deinit(diff_state: *@This()) void {
                     switch (diff_state.*) {
-                        .mount => diff_state.mount.deinit(),
+                        .workdir => diff_state.workdir.deinit(),
                         .index => diff_state.index.deinit(),
                         .tree => diff_state.tree.deinit(),
                     }
                 }
             };
             var diff_state: DiffState = switch (diff_cmd) {
-                .mount => .{ .mount = try repo.status(allocator) },
+                .workdir => .{ .workdir = try repo.status(allocator) },
                 .index => .{ .index = try repo.status(allocator) },
                 .tree => |tree| .{
                     .tree = try repo.treeDiff(allocator, if (tree.old) |old| &old else null, if (tree.new) |new| &new else null),
@@ -313,10 +313,10 @@ fn runCommand(
             };
             defer diff_state.deinit();
             var diff_iter = try repo.filePairs(allocator, switch (diff_cmd) {
-                .mount => |mount| .{
-                    .mount = .{
-                        .conflict_diff_kind = mount.conflict_diff_kind,
-                        .status = &diff_state.mount,
+                .workdir => |workdir| .{
+                    .workdir = .{
+                        .conflict_diff_kind = workdir.conflict_diff_kind,
+                        .status = &diff_state.workdir,
                     },
                 },
                 .index => .{
@@ -385,8 +385,8 @@ fn runCommand(
                 .remove => |rm_branch| try repo.removeBranch(rm_branch),
             }
         },
-        .switch_mount, .reset_mount, .reset_added => |switch_mount_cmd| {
-            var switch_result = try repo.switchMount(allocator, switch_mount_cmd);
+        .switch_workdir, .reset_workdir, .reset_added => |switch_workdir_cmd| {
+            var switch_result = try repo.switchWorkdir(allocator, switch_workdir_cmd);
             defer switch_result.deinit();
             switch (switch_result.result) {
                 .success => {},

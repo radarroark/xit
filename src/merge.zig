@@ -3,7 +3,7 @@ const hash = @import("./hash.zig");
 const obj = @import("./object.zig");
 const idx = @import("./index.zig");
 const rf = @import("./ref.zig");
-const mnt = @import("./mount.zig");
+const work = @import("./workdir.zig");
 const fs = @import("./fs.zig");
 const rp = @import("./repo.zig");
 const df = @import("./diff.zig");
@@ -1272,7 +1272,7 @@ fn fileDirConflict(
                                 .tree_entry = new,
                             },
                         });
-                        // remove from the mount
+                        // remove from the workdir
                         try clean_diff.changes.put(parent_path, .{ .old = new, .new = null });
                     },
                     .source => {
@@ -1286,7 +1286,7 @@ fn fileDirConflict(
                                 .tree_entry = new,
                             },
                         });
-                        // prevent from being added to mount
+                        // prevent from being added to workdir
                         _ = clean_diff.changes.swapRemove(parent_path);
                     },
                 }
@@ -1352,7 +1352,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
             allocator: std.mem.Allocator,
             merge_input: MergeInput(repo_kind, repo_opts.hash),
         ) !Merge(repo_kind, repo_opts) {
-            // TODO: exit early if mount is dirty
+            // TODO: exit early if workdir is dirty
 
             const arena = try allocator.create(std.heap.ArenaAllocator);
             arena.* = std.heap.ArenaAllocator.init(allocator);
@@ -1431,8 +1431,8 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                         var index = try idx.Index(repo_kind, repo_opts).init(allocator, state.readOnly());
                         defer index.deinit();
 
-                        // update the mount
-                        try mnt.migrate(repo_kind, repo_opts, state, allocator, clean_diff, &index, true, null);
+                        // update the workdir
+                        try work.migrate(repo_kind, repo_opts, state, allocator, clean_diff, &index, true, null);
 
                         return .{
                             .arena = arena,
@@ -1532,15 +1532,15 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                             var index = try idx.Index(repo_kind, repo_opts).init(allocator, state.readOnly());
                             defer index.deinit();
 
-                            // update the mount
-                            try mnt.migrate(repo_kind, repo_opts, state, allocator, clean_diff, &index, true, null);
+                            // update the workdir
+                            try work.migrate(repo_kind, repo_opts, state, allocator, clean_diff, &index, true, null);
 
                             for (conflicts.keys(), conflicts.values()) |path, conflict| {
                                 // add conflict to index
                                 try index.addConflictEntries(path, .{ conflict.base, conflict.target, conflict.source });
                                 // write renamed file if necessary
                                 if (conflict.renamed) |renamed| {
-                                    try mnt.objectToFile(repo_kind, repo_opts, state.readOnly(), allocator, renamed.path, renamed.tree_entry);
+                                    try work.objectToFile(repo_kind, repo_opts, state.readOnly(), allocator, renamed.path, renamed.tree_entry);
                                 }
                             }
 
@@ -1577,15 +1577,15 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                             var index = try idx.Index(repo_kind, repo_opts).init(allocator, state.readOnly());
                             defer index.deinit();
 
-                            // update the mount
-                            try mnt.migrate(repo_kind, repo_opts, state, allocator, clean_diff, &index, true, null);
+                            // update the workdir
+                            try work.migrate(repo_kind, repo_opts, state, allocator, clean_diff, &index, true, null);
 
                             for (conflicts.keys(), conflicts.values()) |path, conflict| {
                                 // add conflict to index
                                 try index.addConflictEntries(path, .{ conflict.base, conflict.target, conflict.source });
                                 // write renamed file if necessary
                                 if (conflict.renamed) |renamed| {
-                                    try mnt.objectToFile(repo_kind, repo_opts, state.readOnly(), allocator, renamed.path, renamed.tree_entry);
+                                    try work.objectToFile(repo_kind, repo_opts, state.readOnly(), allocator, renamed.path, renamed.tree_entry);
                                 }
                             }
 

@@ -4,7 +4,7 @@ const obj = @import("./object.zig");
 const cmd = @import("./command.zig");
 const idx = @import("./index.zig");
 const bch = @import("./branch.zig");
-const mnt = @import("./mount.zig");
+const work = @import("./workdir.zig");
 const rf = @import("./ref.zig");
 const fs = @import("./fs.zig");
 const df = @import("./diff.zig");
@@ -438,7 +438,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     defer lock.deinit();
 
                     const state = State(.read_write){ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } };
-                    try mnt.addPaths(repo_kind, repo_opts, state, allocator, normalized_paths.items);
+                    try work.addPaths(repo_kind, repo_opts, state, allocator, normalized_paths.items);
 
                     lock.success = true;
                 },
@@ -452,7 +452,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            try mnt.addPaths(repo_kind, repo_opts, state, ctx.allocator, ctx.paths);
+                            try work.addPaths(repo_kind, repo_opts, state, ctx.allocator, ctx.paths);
                         }
                     };
 
@@ -485,7 +485,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     defer lock.deinit();
 
                     const state = State(.read_write){ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } };
-                    try mnt.unaddPaths(repo_kind, repo_opts, state, allocator, normalized_paths.items);
+                    try work.unaddPaths(repo_kind, repo_opts, state, allocator, normalized_paths.items);
 
                     lock.success = true;
                 },
@@ -498,7 +498,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            try mnt.unaddPaths(repo_kind, repo_opts, state, ctx.allocator, ctx.paths);
+                            try work.unaddPaths(repo_kind, repo_opts, state, ctx.allocator, ctx.paths);
                         }
                     };
 
@@ -511,14 +511,14 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
-        pub fn untrack(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, paths: []const []const u8, opts: mnt.UntrackOptions) !void {
+        pub fn untrack(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, paths: []const []const u8, opts: work.UntrackOptions) !void {
             try self.remove(allocator, paths, .{
                 .force = opts.force,
-                .remove_from_mount = false,
+                .remove_from_workdir = false,
             });
         }
 
-        pub fn remove(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, paths: []const []const u8, opts: mnt.RemoveOptions) !void {
+        pub fn remove(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, paths: []const []const u8, opts: work.RemoveOptions) !void {
             var arena = std.heap.ArenaAllocator.init(allocator);
             defer arena.deinit();
 
@@ -538,7 +538,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     defer lock.deinit();
 
                     const state = State(.read_write){ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } };
-                    try mnt.removePaths(repo_kind, repo_opts, state, allocator, normalized_paths.items, opts);
+                    try work.removePaths(repo_kind, repo_opts, state, allocator, normalized_paths.items, opts);
 
                     lock.success = true;
                 },
@@ -547,12 +547,12 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         core: *Repo(repo_kind, repo_opts).Core,
                         allocator: std.mem.Allocator,
                         paths: []const []const u8,
-                        opts: mnt.RemoveOptions,
+                        opts: work.RemoveOptions,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            try mnt.removePaths(repo_kind, repo_opts, state, ctx.allocator, ctx.paths, ctx.opts);
+                            try work.removePaths(repo_kind, repo_opts, state, ctx.allocator, ctx.paths, ctx.opts);
                         }
                     };
 
@@ -565,18 +565,18 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
-        pub fn status(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator) !mnt.Status(repo_kind, repo_opts) {
+        pub fn status(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator) !work.Status(repo_kind, repo_opts) {
             var moment = try self.core.latestMoment();
             const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
-            return try mnt.Status(repo_kind, repo_opts).init(allocator, state, null);
+            return try work.Status(repo_kind, repo_opts).init(allocator, state, null);
         }
 
         pub fn filePair(
             self: *Repo(repo_kind, repo_opts),
             allocator: std.mem.Allocator,
             path: []const u8,
-            status_kind: mnt.StatusKind,
-            stat: *mnt.Status(repo_kind, repo_opts),
+            status_kind: work.StatusKind,
+            stat: *work.Status(repo_kind, repo_opts),
         ) !df.LineIteratorPair(repo_kind, repo_opts) {
             var moment = try self.core.latestMoment();
             const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
@@ -663,22 +663,22 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
-        pub fn switchMount(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: mnt.SwitchInput(repo_opts.hash)) !mnt.Switch(repo_kind, repo_opts) {
+        pub fn switchWorkdir(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: work.SwitchInput(repo_opts.hash)) !work.Switch(repo_kind, repo_opts) {
             switch (repo_kind) {
-                .git => return try mnt.Switch(repo_kind, repo_opts).init(.{ .core = &self.core, .extra = .{} }, allocator, input),
+                .git => return try work.Switch(repo_kind, repo_opts).init(.{ .core = &self.core, .extra = .{} }, allocator, input),
                 .xit => {
-                    var result: mnt.Switch(repo_kind, repo_opts) = undefined;
+                    var result: work.Switch(repo_kind, repo_opts) = undefined;
 
                     const Ctx = struct {
                         core: *Repo(repo_kind, repo_opts).Core,
                         allocator: std.mem.Allocator,
-                        input: mnt.SwitchInput(repo_opts.hash),
-                        result: *mnt.Switch(repo_kind, repo_opts),
+                        input: work.SwitchInput(repo_opts.hash),
+                        result: *work.Switch(repo_kind, repo_opts),
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            ctx.result.* = try mnt.Switch(repo_kind, repo_opts).init(state, ctx.allocator, ctx.input);
+                            ctx.result.* = try work.Switch(repo_kind, repo_opts).init(state, ctx.allocator, ctx.input);
                         }
                     };
 
@@ -693,11 +693,11 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
-        pub fn resetMount(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: mnt.ResetInput(repo_opts.hash)) !mnt.Switch(repo_kind, repo_opts) {
-            return try self.switchMount(allocator, .{
+        pub fn resetWorkdir(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: work.ResetInput(repo_opts.hash)) !work.Switch(repo_kind, repo_opts) {
+            return try self.switchWorkdir(allocator, .{
                 .kind = .reset,
                 .target = input.target,
-                .update_mount = input.update_mount,
+                .update_workdir = input.update_workdir,
                 .force = input.force,
             });
         }
@@ -748,7 +748,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             const path_parts = try fs.splitPath(allocator, rel_path);
             defer allocator.free(path_parts);
 
-            try mnt.restore(repo_kind, repo_opts, state, allocator, path_parts);
+            try work.restore(repo_kind, repo_opts, state, allocator, path_parts);
         }
 
         pub fn log(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, start_oids_maybe: ?[]const [hash.hexLen(repo_opts.hash)]u8) !obj.ObjectIterator(repo_kind, repo_opts, .full) {

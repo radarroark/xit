@@ -8,7 +8,7 @@ const cfg = @import("./config.zig");
 const bch = @import("./branch.zig");
 const rf = @import("./ref.zig");
 const hash = @import("./hash.zig");
-const mnt = @import("./mount.zig");
+const work = @import("./workdir.zig");
 const tag = @import("./tag.zig");
 
 pub const CommandKind = enum {
@@ -20,11 +20,11 @@ pub const CommandKind = enum {
     commit,
     tag,
     status,
-    diff_mount,
+    diff_workdir,
     diff_added,
     branch,
-    switch_mount,
-    reset_mount,
+    switch_workdir,
+    reset_workdir,
     reset_added,
     reset_head,
     restore,
@@ -79,7 +79,7 @@ fn commandHelp(command_kind: CommandKind) Help {
         .untrack => .{
             .name = "untrack",
             .descrip =
-            \\no longer track file in the index, but leave it in the mount (working tree).
+            \\no longer track file in the index, but leave it in the workdir.
             \\similar to `git rm --cached`.
             ,
             .example =
@@ -89,7 +89,7 @@ fn commandHelp(command_kind: CommandKind) Help {
         .rm => .{
             .name = "rm",
             .descrip =
-            \\no longer track file in the index *and* remove it from the mount (working tree).
+            \\no longer track file in the index *and* remove it from the workdir.
             ,
             .example =
             \\xit rm myfile.txt
@@ -130,10 +130,10 @@ fn commandHelp(command_kind: CommandKind) Help {
             \\    xit status --cli
             ,
         },
-        .diff_mount => .{
+        .diff_workdir => .{
             .name = "diff",
             .descrip =
-            \\show changes between the last commit and the mount (working tree) that haven't been added to the index.
+            \\show changes between the last commit and the workdir that haven't been added to the index.
             ,
             .example =
             \\display in TUI:
@@ -169,11 +169,11 @@ fn commandHelp(command_kind: CommandKind) Help {
             \\    xit branch list
             ,
         },
-        .switch_mount => .{
+        .switch_workdir => .{
             .name = "switch",
             .descrip =
             \\switch to a branch or commit id.
-            \\updates both the index and the mount (working tree).
+            \\updates both the index and the workdir.
             ,
             .example =
             \\switch to branch:
@@ -182,11 +182,11 @@ fn commandHelp(command_kind: CommandKind) Help {
             \\    xit switch a1b2c3...
             ,
         },
-        .reset_mount => .{
+        .reset_workdir => .{
             .name = "reset",
             .descrip =
             \\make the current branch point to a new commit id.
-            \\updates both the index and the mount (working tree).
+            \\updates both the index and the workdir.
             \\similar to `git reset --hard`.
             ,
             .example =
@@ -200,7 +200,7 @@ fn commandHelp(command_kind: CommandKind) Help {
             .name = "reset-added",
             .descrip =
             \\make the current branch point to a new commit id.
-            \\updates only the index, not the mount (working tree).
+            \\updates only the index, not the workdir.
             \\similar to `git reset --mixed`.
             ,
             .example =
@@ -214,7 +214,7 @@ fn commandHelp(command_kind: CommandKind) Help {
             .name = "reset-head",
             .descrip =
             \\make the current branch point to a new commit id.
-            \\does not update the index or the mount (working tree).
+            \\does not update the index or the workdir.
             \\similar to `git reset --soft`.
             ,
             .example =
@@ -227,7 +227,7 @@ fn commandHelp(command_kind: CommandKind) Help {
         .restore => .{
             .name = "restore",
             .descrip =
-            \\restore files in the mount (working tree).
+            \\restore files in the workdir.
             ,
             .example =
             \\xit restore myfile.txt
@@ -443,15 +443,15 @@ pub const CommandArgs = struct {
             else if (std.mem.eql(u8, command_name, "status"))
                 .status
             else if (std.mem.eql(u8, command_name, "diff"))
-                .diff_mount
+                .diff_workdir
             else if (std.mem.eql(u8, command_name, "diff-added"))
                 .diff_added
             else if (std.mem.eql(u8, command_name, "branch"))
                 .branch
             else if (std.mem.eql(u8, command_name, "switch"))
-                .switch_mount
+                .switch_workdir
             else if (std.mem.eql(u8, command_name, "reset"))
-                .reset_mount
+                .reset_workdir
             else if (std.mem.eql(u8, command_name, "reset-added"))
                 .reset_added
             else if (std.mem.eql(u8, command_name, "reset-head"))
@@ -518,21 +518,21 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
         },
         untrack: struct {
             paths: []const []const u8,
-            opts: mnt.UntrackOptions,
+            opts: work.UntrackOptions,
         },
         rm: struct {
             paths: []const []const u8,
-            opts: mnt.RemoveOptions,
+            opts: work.RemoveOptions,
         },
         commit: obj.CommitMetadata(hash_kind),
         tag: tag.TagCommand,
         status,
-        diff_mount: df.BasicDiffOptions(hash_kind),
+        diff_workdir: df.BasicDiffOptions(hash_kind),
         diff_added: df.BasicDiffOptions(hash_kind),
         branch: bch.BranchCommand,
-        switch_mount: mnt.SwitchInput(hash_kind),
-        reset_mount: mnt.SwitchInput(hash_kind),
-        reset_added: mnt.SwitchInput(hash_kind),
+        switch_workdir: work.SwitchInput(hash_kind),
+        reset_workdir: work.SwitchInput(hash_kind),
+        reset_added: work.SwitchInput(hash_kind),
         reset_head: rf.RefOrOid(hash_kind),
         restore: struct {
             path: []const u8,
@@ -591,7 +591,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                         .paths = cmd_args.positional_args,
                         .opts = .{
                             .force = cmd_args.contains("-f"),
-                            .remove_from_mount = true,
+                            .remove_from_workdir = true,
                         },
                     } };
                 },
@@ -634,7 +634,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                     return .{ .tag = cmd };
                 },
                 .status => return .status,
-                .diff_mount => {
+                .diff_workdir => {
                     const conflict_diff_kind: df.ConflictDiffKind =
                         if (cmd_args.contains("--base"))
                         .base
@@ -644,7 +644,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                         .source
                     else
                         .target;
-                    return .{ .diff_mount = .{ .mount = .{ .conflict_diff_kind = conflict_diff_kind } } };
+                    return .{ .diff_workdir = .{ .workdir = .{ .conflict_diff_kind = conflict_diff_kind } } };
                 },
                 .diff_added => return .{ .diff_added = .index },
                 .branch => {
@@ -672,25 +672,25 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
 
                     return .{ .branch = cmd };
                 },
-                .switch_mount => {
+                .switch_workdir => {
                     if (cmd_args.positional_args.len != 1) return null;
                     const target = cmd_args.positional_args[0];
 
-                    return .{ .switch_mount = .{
+                    return .{ .switch_workdir = .{
                         .kind = .@"switch",
                         .target = rf.RefOrOid(hash_kind).initFromUser(target) orelse return null,
-                        .update_mount = true,
+                        .update_workdir = true,
                         .force = cmd_args.contains("-f"),
                     } };
                 },
-                .reset_mount => {
+                .reset_workdir => {
                     if (cmd_args.positional_args.len != 1) return null;
                     const target = cmd_args.positional_args[0];
 
-                    return .{ .reset_mount = .{
+                    return .{ .reset_workdir = .{
                         .kind = .reset,
                         .target = rf.RefOrOid(hash_kind).initFromUser(target) orelse return null,
-                        .update_mount = true,
+                        .update_workdir = true,
                         .force = cmd_args.contains("-f"),
                     } };
                 },
@@ -701,7 +701,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                     return .{ .reset_added = .{
                         .kind = .reset,
                         .target = rf.RefOrOid(hash_kind).initFromUser(target) orelse return null,
-                        .update_mount = false,
+                        .update_workdir = false,
                         .force = cmd_args.contains("-f"),
                     } };
                 },
@@ -888,7 +888,7 @@ pub fn CommandDispatch(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash
                 if (show_help) {
                     return .{ .help = command_kind };
                 } else if (cmd_args.positional_args.len == 0 and !force_cli and switch (command_kind) {
-                    .status, .diff_mount, .diff_added, .log => true,
+                    .status, .diff_workdir, .diff_added, .log => true,
                     else => false,
                 }) {
                     return .{ .tui = command_kind };

@@ -1,17 +1,3 @@
-//! functionality related to reading and updating the "mount",
-//! which is xit's term for what git calls the working tree,
-//! working copy, or workspace. I don't like those terms because:
-//!
-//! 1. "tree" is an overloaded term...it also refers to internal
-//!    tree objects.
-//! 2. "work" is too narrow. if you're using a VCS for source
-//!    code, then yes, you "work" in that directory. but people
-//!    are increasingly using VCSes for other things, like
-//!    deploying static files to a web server. in that case, you
-//!    aren't really working out of the directory, you just want
-//!    the VCS to mount files so they can be served.
-//! 3. those terms are too long and I'm friggin lazy.
-
 const std = @import("std");
 const builtin = @import("builtin");
 const hash = @import("./hash.zig");
@@ -50,8 +36,8 @@ pub const MergeConflictStatus = struct {
 pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return struct {
         untracked: std.StringArrayHashMap(Entry),
-        mount_modified: std.StringArrayHashMap(Entry),
-        mount_deleted: std.StringArrayHashMap(void),
+        workdir_modified: std.StringArrayHashMap(Entry),
+        workdir_deleted: std.StringArrayHashMap(void),
         index_added: std.StringArrayHashMap(void),
         index_modified: std.StringArrayHashMap(void),
         index_deleted: std.StringArrayHashMap(void),
@@ -74,11 +60,11 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             var untracked = std.StringArrayHashMap(Entry).init(allocator);
             errdefer untracked.deinit();
 
-            var mount_modified = std.StringArrayHashMap(Entry).init(allocator);
-            errdefer mount_modified.deinit();
+            var workdir_modified = std.StringArrayHashMap(Entry).init(allocator);
+            errdefer workdir_modified.deinit();
 
-            var mount_deleted = std.StringArrayHashMap(void).init(allocator);
-            errdefer mount_deleted.deinit();
+            var workdir_deleted = std.StringArrayHashMap(void).init(allocator);
+            errdefer workdir_deleted.deinit();
 
             var index_added = std.StringArrayHashMap(void).init(allocator);
             errdefer index_added.deinit();
@@ -105,7 +91,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             var index_bools = try allocator.alloc(bool, index.entries.count());
             defer allocator.free(index_bools);
 
-            _ = try addEntries(arena.allocator(), &untracked, &mount_modified, &index, &index_bools, state.core.repo_dir, ".");
+            _ = try addEntries(arena.allocator(), &untracked, &workdir_modified, &index, &index_bools, state.core.repo_dir, ".");
 
             var head_tree = try tr.Tree(repo_kind, repo_opts).init(allocator, state, oid_maybe);
             errdefer head_tree.deinit();
@@ -115,7 +101,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                 // if it is a non-conflict entry
                 if (index_entries_for_path[0]) |index_entry| {
                     if (!index_bools[i]) {
-                        try mount_deleted.put(path, {});
+                        try workdir_deleted.put(path, {});
                     }
                     if (head_tree.entries.get(index_entry.path)) |head_entry| {
                         if (!index_entry.mode.eql(head_entry.mode) or !std.mem.eql(u8, &index_entry.oid, &head_entry.oid)) {
@@ -143,8 +129,8 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
             return Status(repo_kind, repo_opts){
                 .untracked = untracked,
-                .mount_modified = mount_modified,
-                .mount_deleted = mount_deleted,
+                .workdir_modified = workdir_modified,
+                .workdir_deleted = workdir_deleted,
                 .index_added = index_added,
                 .index_modified = index_modified,
                 .index_deleted = index_deleted,
@@ -158,8 +144,8 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
         pub fn deinit(self: *Status(repo_kind, repo_opts)) void {
             self.untracked.deinit();
-            self.mount_modified.deinit();
-            self.mount_deleted.deinit();
+            self.workdir_modified.deinit();
+            self.workdir_deleted.deinit();
             self.index_added.deinit();
             self.index_modified.deinit();
             self.index_deleted.deinit();
@@ -260,7 +246,7 @@ pub const UntrackOptions = struct {
 
 pub const RemoveOptions = struct {
     force: bool = false,
-    remove_from_mount: bool = true,
+    remove_from_workdir: bool = true,
 };
 
 pub fn indexDiffersFromMount(
@@ -341,7 +327,7 @@ pub fn unaddPaths(
     try index.write(allocator, state);
 }
 
-/// removes the given paths from the index and optionally from the mount
+/// removes the given paths from the index and optionally from the workdir
 pub fn removePaths(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
@@ -366,7 +352,7 @@ pub fn removePaths(
                 // if force isn't enabled, do a safety check
                 if (!opts.force) {
                     var differs_from_head = false;
-                    var differs_from_mount = false;
+                    var differs_from_workdir = false;
 
                     if (index.entries.get(path)) |*index_entries_for_path| {
                         if (index_entries_for_path[0]) |index_entry| {
@@ -379,16 +365,16 @@ pub fn removePaths(
                             const file = try state.core.repo_dir.openFile(path, .{ .mode = .read_only });
                             defer file.close();
                             if (try indexDiffersFromMount(repo_kind, repo_opts, &index_entry, file, meta)) {
-                                differs_from_mount = true;
+                                differs_from_workdir = true;
                             }
                         }
                     }
 
-                    if (differs_from_head and differs_from_mount) {
+                    if (differs_from_head and differs_from_workdir) {
                         return error.CannotRemoveFileWithStagedAndUnstagedChanges;
-                    } else if (differs_from_head and opts.remove_from_mount) {
+                    } else if (differs_from_head and opts.remove_from_workdir) {
                         return error.CannotRemoveFileWithStagedChanges;
-                    } else if (differs_from_mount and opts.remove_from_mount) {
+                    } else if (differs_from_workdir and opts.remove_from_workdir) {
                         return error.CannotRemoveFileWithUnstagedChanges;
                     }
                 }
@@ -401,7 +387,7 @@ pub fn removePaths(
         }
     }
 
-    if (opts.remove_from_mount) {
+    if (opts.remove_from_workdir) {
         for (paths) |path| {
             const meta = try fs.getMetadata(state.core.repo_dir, path);
             switch (meta.kind()) {
@@ -592,7 +578,7 @@ pub fn migrate(
     allocator: std.mem.Allocator,
     tree_diff: tr.TreeDiff(repo_kind, repo_opts),
     index: *idx.Index(repo_kind, repo_opts),
-    update_mount: bool,
+    update_workdir: bool,
     switch_result_maybe: ?*Switch(repo_kind, repo_opts),
 ) !void {
     var add_files = std.StringArrayHashMap(tr.TreeEntry(repo_opts.hash)).init(allocator);
@@ -626,7 +612,7 @@ pub fn migrate(
             } else {
                 const meta = fs.getMetadata(state.core.repo_dir, path) catch |err| switch (err) {
                     error.FileNotFound, error.NotDir => {
-                        // if the path doesn't exist in the mount,
+                        // if the path doesn't exist in the workdir,
                         // but one of its parents *does* exist and isn't tracked
                         if (untrackedParent(repo_kind, repo_opts, state.core.repo_dir, path, index)) |_| {
                             switch_result.setConflict();
@@ -682,8 +668,8 @@ pub fn migrate(
     }
 
     for (remove_files.keys()) |path| {
-        // update mount
-        if (update_mount) {
+        // update workdir
+        if (update_workdir) {
             state.core.repo_dir.deleteFile(path) catch |err| switch (err) {
                 error.FileNotFound => {},
                 else => |e| return e,
@@ -703,8 +689,8 @@ pub fn migrate(
     }
 
     for (add_files.keys(), add_files.values()) |path, tree_entry| {
-        // update mount
-        if (update_mount) {
+        // update workdir
+        if (update_workdir) {
             try objectToFile(repo_kind, repo_opts, state.readOnly(), allocator, path, tree_entry);
         }
         // update index
@@ -712,8 +698,8 @@ pub fn migrate(
     }
 
     for (edit_files.keys(), edit_files.values()) |path, tree_entry| {
-        // update mount
-        if (update_mount) {
+        // update workdir
+        if (update_workdir) {
             try objectToFile(repo_kind, repo_opts, state.readOnly(), allocator, path, tree_entry);
         }
         // update index
@@ -737,7 +723,7 @@ pub fn restore(
 pub fn ResetInput(comptime hash_kind: hash.HashKind) type {
     return struct {
         target: rf.RefOrOid(hash_kind),
-        update_mount: bool = true,
+        update_workdir: bool = true,
         force: bool = false,
     };
 }
@@ -749,7 +735,7 @@ pub fn SwitchInput(comptime hash_kind: hash.HashKind) type {
             reset,
         } = .@"switch",
         target: rf.RefOrOid(hash_kind),
-        update_mount: bool = true,
+        update_workdir: bool = true,
         force: bool = false,
     };
 }
@@ -805,8 +791,8 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     var index = try idx.Index(repo_kind, repo_opts).init(allocator, state.readOnly());
                     defer index.deinit();
 
-                    // update the mount
-                    try migrate(repo_kind, repo_opts, state, allocator, tree_diff, &index, input.update_mount, if (input.force) null else &switch_result);
+                    // update the workdir
+                    try migrate(repo_kind, repo_opts, state, allocator, tree_diff, &index, input.update_workdir, if (input.force) null else &switch_result);
 
                     // return early if conflict
                     if (.conflict == switch_result.result) {
@@ -830,8 +816,8 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     var index = try idx.Index(repo_kind, repo_opts).init(allocator, state.readOnly());
                     defer index.deinit();
 
-                    // update the mount
-                    try migrate(repo_kind, repo_opts, state, allocator, tree_diff, &index, input.update_mount, if (input.force) null else &switch_result);
+                    // update the workdir
+                    try migrate(repo_kind, repo_opts, state, allocator, tree_diff, &index, input.update_workdir, if (input.force) null else &switch_result);
 
                     // return early if conflict
                     if (.conflict == switch_result.result) {
