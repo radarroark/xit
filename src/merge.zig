@@ -1323,6 +1323,7 @@ pub fn MergeInput(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.Hash
     return struct {
         kind: MergeKind,
         action: MergeAction(repo_kind, hash_kind),
+        commit_metadata: ?obj.CommitMetadata(hash_kind) = null,
     };
 }
 
@@ -1508,7 +1509,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     }
 
                     // create commit message
-                    var commit_metadata: obj.CommitMetadata(repo_opts.hash) = switch (merge_input.kind) {
+                    var commit_metadata: obj.CommitMetadata(repo_opts.hash) = merge_input.commit_metadata orelse switch (merge_input.kind) {
                         .full => .{
                             .message = try std.fmt.allocPrint(arena.allocator(), "merge from {s}", .{source_name}),
                         },
@@ -1642,7 +1643,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     // commit the change
                     commit_metadata.parent_oids = switch (merge_input.kind) {
                         .full => &.{ target_oid, source_oid },
-                        .pick => &.{base_oid},
+                        .pick => &.{target_oid},
                     };
                     const commit_oid = try obj.writeCommit(repo_kind, repo_opts, state, allocator, commit_metadata);
 
@@ -1671,7 +1672,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     }
 
                     var source_oid: [hash.hexLen(repo_opts.hash)]u8 = undefined;
-                    var commit_metadata = obj.CommitMetadata(repo_opts.hash){};
+                    var commit_metadata: obj.CommitMetadata(repo_opts.hash) = merge_input.commit_metadata orelse .{};
 
                     // read the existing merge state
                     switch (repo_kind) {

@@ -1327,7 +1327,11 @@ fn testCherryPick(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOp
 
     // if we try cherry-picking the same commit again, it succeeds again
     {
-        var merge = try repo.merge(allocator, .{ .kind = .pick, .action = .{ .new = .{ .source = &.{.{ .oid = &commit_d }} } } });
+        var merge = try repo.merge(allocator, .{
+            .kind = .pick,
+            .action = .{ .new = .{ .source = &.{.{ .oid = &commit_d }} } },
+            .commit_metadata = .{ .allow_empty = true },
+        });
         defer merge.deinit();
         try std.testing.expect(.success == merge.result);
     }
