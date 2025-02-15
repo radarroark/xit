@@ -40,7 +40,7 @@ The xit
 
 * xitdb has all the trappings of a "real" database, including atomicity: the database will never be left in an inconsistent state if a transaction fails. More importantly, it has general-purpose data structures (a hashmap and an arraylist) that can be nested arbitrarily.
 
-* Unlike SQLite, xitdb is immutable. Each transaction creates a new "copy" of the database, and it shares data with previous copies. Copying immutable data is just a pointer copy. This means xit can create a new branch very efficiently: just copy the current branch's pointer, and all changes to it won't affect the current branch. This also allows xit to undo any transaction, called "universal undo".
+* Unlike SQLite, xitdb is immutable. Each transaction creates a new "copy" of the database, and it shares data with previous copies. Copying immutable data is just a pointer copy. This means xit can store commit state very efficiently: just copy the pointer to the last commit's state, and all changes to it won't affect the last commit. This also allows xit to undo any transaction, called "universal undo".
 
 * The best feature of xitdb, though, is that it is just over 2000 lines of Zig with no external dependencies. Compared to a project like SQLite, xitdb is more than an order of magnitude smaller. This brings it well into the territory of being reimplementable. Rewriting it in a different language is entirely doable.
 
