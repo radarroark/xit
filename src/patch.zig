@@ -1,10 +1,10 @@
 const std = @import("std");
 const rp = @import("./repo.zig");
 const hash = @import("./hash.zig");
-const mnt = @import("./mount.zig");
 const df = @import("./diff.zig");
 const rf = @import("./ref.zig");
 const obj = @import("./object.zig");
+const tr = @import("./tree.zig");
 
 pub fn NodeId(comptime hash_kind: hash.HashKind) type {
     return packed struct {
@@ -455,30 +455,38 @@ pub fn writeAndApplyPatches(
     comptime repo_opts: rp.RepoOpts(.xit),
     state: rp.Repo(.xit, repo_opts).State(.read_write),
     allocator: std.mem.Allocator,
-    status: *mnt.Status(.xit, repo_opts),
     commit_oid: *const [hash.hexLen(repo_opts.hash)]u8,
 ) !void {
+    const parent_commit_oid_maybe = blk: {
+        var commit_object = try obj.Object(.xit, repo_opts, .full).init(allocator, state.readOnly(), commit_oid);
+        defer commit_object.deinit();
+
+        if (commit_object.content.commit.metadata.firstParent()) |oid| {
+            break :blk oid.*;
+        } else {
+            break :blk null;
+        }
+    };
+
     // init snapshot
     const commit_id_to_snapshot_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "commit-id->snapshot"));
     const commit_id_to_snapshot = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(commit_id_to_snapshot_cursor);
     var snapshot_cursor = try commit_id_to_snapshot.putCursor(try hash.hexToInt(repo_opts.hash, commit_oid));
 
     // if there is a parent commit, set the initial value of the snapshot to the one from that commit
-    {
-        var commit_object = try obj.Object(.xit, repo_opts, .full).init(allocator, state.readOnly(), commit_oid);
-        defer commit_object.deinit();
-
-        if (commit_object.content.commit.metadata.firstParent()) |commit_parent_oid| {
-            if (try commit_id_to_snapshot.getCursor(try hash.hexToInt(repo_opts.hash, commit_parent_oid))) |parent_snapshot_cursor| {
-                try snapshot_cursor.write(.{ .slot = parent_snapshot_cursor.slot() });
-            }
+    if (parent_commit_oid_maybe) |*parent_commit_oid| {
+        if (try commit_id_to_snapshot.getCursor(try hash.hexToInt(repo_opts.hash, parent_commit_oid))) |parent_snapshot_cursor| {
+            try snapshot_cursor.write(.{ .slot = parent_snapshot_cursor.slot() });
         }
     }
 
     const snapshot = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(snapshot_cursor);
 
-    // init file iterator for index diff
-    var file_iter = try df.FileIterator(.xit, repo_opts).init(allocator, state.readOnly(), .{ .index = .{ .status = status } });
+    // init file iterator
+    var tree_diff = tr.TreeDiff(.xit, repo_opts).init(allocator);
+    defer tree_diff.deinit();
+    try tree_diff.compare(state.readOnly(), if (parent_commit_oid_maybe) |parent_commit_oid| &parent_commit_oid else null, commit_oid, null);
+    var file_iter = try df.FileIterator(.xit, repo_opts).init(allocator, state.readOnly(), .{ .tree = .{ .tree_diff = &tree_diff } });
 
     // iterate over each modified file and create/apply the patch
     while (try file_iter.next()) |*line_iter_pair_ptr| {
