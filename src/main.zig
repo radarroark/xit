@@ -207,21 +207,11 @@ fn runCommand(
 ) !void {
     switch (command) {
         .init => {},
-        .add => |add_cmd| {
-            try repo.add(allocator, add_cmd.paths);
-        },
-        .unadd => |unadd_cmd| {
-            try repo.unadd(allocator, unadd_cmd.paths);
-        },
-        .untrack => |untrack_cmd| {
-            try repo.untrack(allocator, untrack_cmd.paths, untrack_cmd.opts);
-        },
-        .rm => |rm_cmd| {
-            try repo.remove(allocator, rm_cmd.paths, rm_cmd.opts);
-        },
-        .commit => |commit_cmd| {
-            _ = try repo.commit(allocator, commit_cmd);
-        },
+        .add => |add_cmd| try repo.add(allocator, add_cmd.paths),
+        .unadd => |unadd_cmd| try repo.unadd(allocator, unadd_cmd.paths),
+        .untrack => |untrack_cmd| try repo.untrack(allocator, untrack_cmd.paths, untrack_cmd.opts),
+        .rm => |rm_cmd| try repo.remove(allocator, rm_cmd.paths, rm_cmd.opts),
+        .commit => |commit_cmd| _ = try repo.commit(allocator, commit_cmd),
         .tag => |tag_cmd| switch (tag_cmd) {
             .list => {
                 var ref_list = try repo.listTags(allocator);
@@ -489,9 +479,7 @@ fn runCommand(
                 .remove => |remote_remove_cmd| try repo.removeRemote(allocator, remote_remove_cmd),
             }
         },
-        .fetch => |fetch_cmd| {
-            _ = try repo.fetch(allocator, fetch_cmd.remote_name);
-        },
+        .fetch => |fetch_cmd| _ = try repo.fetch(allocator, fetch_cmd.remote_name),
         .pull => |pull_cmd| {
             var result = try repo.pull(allocator, pull_cmd.remote_name, pull_cmd.remote_ref_name);
             defer result.deinit();
