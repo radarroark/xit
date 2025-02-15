@@ -147,11 +147,11 @@ pub fn runPrint(
             return error.PrintedError;
         },
         error.CannotRemoveFileWithStagedAndUnstagedChanges, error.CannotRemoveFileWithStagedChanges, error.CannotRemoveFileWithUnstagedChanges => {
-            try writers.err.print("a file has uncommitted changes. if you really want to do it, throw caution into the wind by adding the -f flag.", .{});
+            try writers.err.print("a file has uncommitted changes. if you really want to do it, throw caution into the wind by adding the -f flag.\n", .{});
             return error.PrintedError;
         },
         error.EmptyCommit => {
-            try writers.err.print("you haven't added anything to commit yet. if you really want to commit anyway, add the --allow-empty flag and no one will judge you.", .{});
+            try writers.err.print("you haven't added anything to commit yet. if you really want to commit anyway, add the --allow-empty flag and no one will judge you.\n", .{});
             return error.PrintedError;
         },
         error.AddIndexPathNotFound => {
@@ -162,8 +162,8 @@ pub fn runPrint(
             try writers.err.print("a path you are removing does not exist\n", .{});
             return error.PrintedError;
         },
-        error.RemoveDirNotAllowed => {
-            try writers.err.print("to remove a dir, add the -r flag", .{});
+        error.RecursiveOptionRequired => {
+            try writers.err.print("to do this on a dir, add the -r flag\n", .{});
             return error.PrintedError;
         },
         error.RefNotFound => {
@@ -199,7 +199,7 @@ fn runCommand(
     switch (command) {
         .init => {},
         .add => |add_cmd| try repo.add(allocator, add_cmd.paths),
-        .unadd => |unadd_cmd| try repo.unadd(allocator, unadd_cmd.paths),
+        .unadd => |unadd_cmd| try repo.unadd(allocator, unadd_cmd.paths, unadd_cmd.opts),
         .untrack => |untrack_cmd| try repo.untrack(allocator, untrack_cmd.paths, untrack_cmd.opts),
         .rm => |rm_cmd| try repo.remove(allocator, rm_cmd.paths, rm_cmd.opts),
         .commit => |commit_cmd| _ = try repo.commit(allocator, commit_cmd),

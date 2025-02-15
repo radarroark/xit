@@ -74,6 +74,7 @@ fn commandHelp(command_kind: CommandKind) Help {
             ,
             .example =
             \\xit unadd myfile.txt
+            \\xit unadd -r mydir
             ,
         },
         .untrack => .{
@@ -84,7 +85,7 @@ fn commandHelp(command_kind: CommandKind) Help {
             ,
             .example =
             \\xit untrack myfile.txt
-            \\xit untrack mydir
+            \\xit untrack -r mydir
             ,
         },
         .rm => .{
@@ -522,6 +523,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
         },
         unadd: struct {
             paths: []const []const u8,
+            opts: work.UnaddOptions,
         },
         untrack: struct {
             paths: []const []const u8,
@@ -579,6 +581,9 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
 
                     return .{ .unadd = .{
                         .paths = cmd_args.positional_args,
+                        .opts = .{
+                            .recursive = cmd_args.contains("-r"),
+                        },
                     } };
                 },
                 .untrack => {
@@ -588,6 +593,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                         .paths = cmd_args.positional_args,
                         .opts = .{
                             .force = cmd_args.contains("-f"),
+                            .recursive = cmd_args.contains("-r"),
                         },
                     } };
                 },

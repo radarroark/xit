@@ -241,8 +241,13 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
     };
 }
 
+pub const UnaddOptions = struct {
+    recursive: bool = false,
+};
+
 pub const UntrackOptions = struct {
     force: bool = false,
+    recursive: bool = false,
 };
 
 pub const RemoveOptions = struct {
@@ -310,6 +315,7 @@ pub fn unaddPaths(
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
     allocator: std.mem.Allocator,
     paths: []const []const u8,
+    opts: UnaddOptions,
 ) !void {
     var index = try idx.Index(repo_kind, repo_opts).init(allocator, state.readOnly());
     defer index.deinit();
@@ -317,6 +323,10 @@ pub fn unaddPaths(
     for (paths) |path| {
         const path_parts = try fs.splitPath(allocator, path);
         defer allocator.free(path_parts);
+
+        if (index.dir_to_paths.contains(path) and !opts.recursive) {
+            return error.RecursiveOptionRequired;
+        }
 
         try index.addOrRemovePath(state, path_parts, .rm, null);
 
@@ -372,10 +382,8 @@ fn checkPath(
                 return error.CannotRemoveFileWithUnstagedChanges;
             }
         },
-        .directory => {
-            if (opts.update_work_dir and !opts.recursive) {
-                return error.RemoveDirNotAllowed;
-            }
+        .directory => if (!opts.recursive) {
+            return error.RecursiveOptionRequired;
         },
         else => {},
     }

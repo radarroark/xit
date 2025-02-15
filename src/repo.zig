@@ -465,7 +465,12 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
-        pub fn unadd(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, paths: []const []const u8) !void {
+        pub fn unadd(
+            self: *Repo(repo_kind, repo_opts),
+            allocator: std.mem.Allocator,
+            paths: []const []const u8,
+            opts: work.UnaddOptions,
+        ) !void {
             var arena = std.heap.ArenaAllocator.init(allocator);
             defer arena.deinit();
 
@@ -485,7 +490,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     defer lock.deinit();
 
                     const state = State(.read_write){ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } };
-                    try work.unaddPaths(repo_kind, repo_opts, state, allocator, normalized_paths.items);
+                    try work.unaddPaths(repo_kind, repo_opts, state, allocator, normalized_paths.items, opts);
 
                     lock.success = true;
                 },
@@ -494,32 +499,43 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         core: *Repo(repo_kind, repo_opts).Core,
                         allocator: std.mem.Allocator,
                         paths: []const []const u8,
+                        opts: work.UnaddOptions,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            try work.unaddPaths(repo_kind, repo_opts, state, ctx.allocator, ctx.paths);
+                            try work.unaddPaths(repo_kind, repo_opts, state, ctx.allocator, ctx.paths, ctx.opts);
                         }
                     };
 
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
                     try history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
-                        Ctx{ .core = &self.core, .allocator = allocator, .paths = normalized_paths.items },
+                        Ctx{ .core = &self.core, .allocator = allocator, .paths = normalized_paths.items, .opts = opts },
                     );
                 },
             }
         }
 
-        pub fn untrack(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, paths: []const []const u8, opts: work.UntrackOptions) !void {
+        pub fn untrack(
+            self: *Repo(repo_kind, repo_opts),
+            allocator: std.mem.Allocator,
+            paths: []const []const u8,
+            opts: work.UntrackOptions,
+        ) !void {
             try self.remove(allocator, paths, .{
                 .force = opts.force,
-                .recursive = true,
+                .recursive = opts.recursive,
                 .update_work_dir = false,
             });
         }
 
-        pub fn remove(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, paths: []const []const u8, opts: work.RemoveOptions) !void {
+        pub fn remove(
+            self: *Repo(repo_kind, repo_opts),
+            allocator: std.mem.Allocator,
+            paths: []const []const u8,
+            opts: work.RemoveOptions,
+        ) !void {
             var arena = std.heap.ArenaAllocator.init(allocator);
             defer arena.deinit();
 

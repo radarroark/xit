@@ -856,9 +856,17 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         // can't untrack a file with staged and unstaged changes
         try std.testing.expectEqual(error.CannotRemoveFileWithStagedAndUnstagedChanges, main.run(repo_kind, repo_opts, allocator, &.{ "untrack", "one/two/three.txt" }, work_dir, .{}));
 
-        // add, unadd, and then untrack modified file
+        // add dir
         try main.run(repo_kind, repo_opts, allocator, &.{ "add", "one" }, work_dir, .{});
-        try main.run(repo_kind, repo_opts, allocator, &.{ "unadd", "one" }, work_dir, .{});
+
+        // can't untrack a dir without -r
+        try std.testing.expectEqual(error.RecursiveOptionRequired, main.run(repo_kind, repo_opts, allocator, &.{ "untrack", "one" }, work_dir, .{}));
+
+        // can't unadd a dir without -r
+        try std.testing.expectEqual(error.RecursiveOptionRequired, main.run(repo_kind, repo_opts, allocator, &.{ "unadd", "one" }, work_dir, .{}));
+
+        // unadd dir
+        try main.run(repo_kind, repo_opts, allocator, &.{ "unadd", "-r", "one" }, work_dir, .{});
 
         // still tracked because unadd just resets it back to the state from HEAD
         {
@@ -1113,7 +1121,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         try main.run(repo_kind, repo_opts, allocator, &.{ "untrack", "foo/bar/hi.txt" }, work_dir, .{});
 
         // can't remove subdir without -r
-        try std.testing.expectEqual(error.RemoveDirNotAllowed, main.run(repo_kind, repo_opts, allocator, &.{ "rm", "foo" }, work_dir, .{}));
+        try std.testing.expectEqual(error.RecursiveOptionRequired, main.run(repo_kind, repo_opts, allocator, &.{ "rm", "foo" }, work_dir, .{}));
 
         // remove subdir with -r
         try main.run(repo_kind, repo_opts, allocator, &.{ "rm", "-r", "foo" }, work_dir, .{ .err = std.io.getStdErr().writer().any() });
