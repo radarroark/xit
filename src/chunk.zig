@@ -339,7 +339,7 @@ pub fn writeChunks(
                 // since the beginning and end could have truncated unicode codepoints,
                 // we must first trim them. if we don't do this, non-English text will
                 // sometimes fail to validate as utf8 and thus won't get compressed.
-                if (std.unicode.utf8ValidateSlice(trimTruncatedCodepoints(chunk))) {
+                if (repo_opts.extra.compress_chunks and std.unicode.utf8ValidateSlice(trimTruncatedCodepoints(chunk))) {
                     try lock.lock_file.writer().writeByte(@intFromEnum(CompressKind.zlib));
                     var zlib_stream = try std.compress.zlib.compressor(lock.lock_file.writer(), .{ .level = .default });
                     try zlib_stream.writer().writeAll(chunk);
