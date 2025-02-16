@@ -42,6 +42,7 @@ pub fn validateName(name: []const u8) bool {
 }
 
 pub const RefKind = union(enum) {
+    none,
     head,
     tag,
     remote: []const u8,
@@ -55,7 +56,17 @@ pub const Ref = struct {
         var split_iter = std.mem.splitScalar(u8, ref_path, '/');
 
         const refs_str = split_iter.next() orelse return null;
-        if (!std.mem.eql(u8, "refs", refs_str)) return null;
+        if (!std.mem.eql(u8, "refs", refs_str)) {
+            // if there are no further parts, this is an unqualified ref like HEAD
+            if (null == split_iter.peek()) {
+                return .{ .kind = .none, .name = ref_path };
+            }
+            // the path has slashes but doesn't start with "refs"
+            // so it's probably invalid
+            else {
+                return null;
+            }
+        }
 
         const ref_kind = split_iter.next() orelse return null;
         const ref_name = ref_path[refs_str.len + 1 + ref_kind.len + 1 ..];
@@ -75,6 +86,7 @@ pub const Ref = struct {
 
     pub fn toPath(self: Ref, buffer: []u8) ![]const u8 {
         return switch (self.kind) {
+            .none => try std.fmt.bufPrint(buffer, "{s}", .{self.name}),
             .head => try std.fmt.bufPrint(buffer, "refs/heads/{s}", .{self.name}),
             .tag => try std.fmt.bufPrint(buffer, "refs/tags/{s}", .{self.name}),
             .remote => |remote| try std.fmt.bufPrint(buffer, "refs/remotes/{s}/{s}", .{ remote, self.name }),
@@ -145,6 +157,7 @@ pub const RefList = struct {
         errdefer ref_list.deinit();
 
         const dir_name = switch (ref_kind) {
+            .none => return error.NotImplemented,
             .head => "heads",
             .tag => "tags",
             .remote => return error.NotImplemented,
@@ -294,35 +307,33 @@ pub fn read(
         },
         .xit => {
             var map = state.extra.moment.*;
-            var ref_name = ref_path;
+            const ref = Ref.initFromPath(ref_path) orelse return error.InvalidRef;
+            const refs_cursor = (try map.getCursor(hash.hashInt(repo_opts.hash, "refs"))) orelse return error.RefNotFound;
+            const refs = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_only).init(refs_cursor);
 
-            if (Ref.initFromPath(ref_path)) |ref| {
-                const refs_cursor = (try map.getCursor(hash.hashInt(repo_opts.hash, "refs"))) orelse return error.RefNotFound;
-                const refs = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_only).init(refs_cursor);
-                switch (ref.kind) {
-                    .head => {
-                        const heads_cursor = (try refs.getCursor(hash.hashInt(repo_opts.hash, "heads"))) orelse return error.RefNotFound;
-                        map = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_only).init(heads_cursor);
-                    },
-                    .tag => {
-                        const tags_cursor = (try refs.getCursor(hash.hashInt(repo_opts.hash, "tags"))) orelse return error.RefNotFound;
-                        map = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_only).init(tags_cursor);
-                    },
-                    .remote => |remote| {
-                        const remotes_cursor = (try refs.getCursor(hash.hashInt(repo_opts.hash, "remotes"))) orelse return error.RefNotFound;
-                        const remotes = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_only).init(remotes_cursor);
-                        const remote_cursor = (try remotes.getCursor(hash.hashInt(repo_opts.hash, remote))) orelse return error.RefNotFound;
-                        map = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_only).init(remote_cursor);
-                    },
-                }
-                ref_name = ref.name;
+            switch (ref.kind) {
+                .none => {},
+                .head => {
+                    const heads_cursor = (try refs.getCursor(hash.hashInt(repo_opts.hash, "heads"))) orelse return error.RefNotFound;
+                    map = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_only).init(heads_cursor);
+                },
+                .tag => {
+                    const tags_cursor = (try refs.getCursor(hash.hashInt(repo_opts.hash, "tags"))) orelse return error.RefNotFound;
+                    map = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_only).init(tags_cursor);
+                },
+                .remote => |remote| {
+                    const remotes_cursor = (try refs.getCursor(hash.hashInt(repo_opts.hash, "remotes"))) orelse return error.RefNotFound;
+                    const remotes = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_only).init(remotes_cursor);
+                    const remote_cursor = (try remotes.getCursor(hash.hashInt(repo_opts.hash, remote))) orelse return error.RefNotFound;
+                    map = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_only).init(remote_cursor);
+                },
             }
 
             // if the ref's key hasn't been set, it doesn't exist
-            _ = (try map.getKeyCursor(hash.hashInt(repo_opts.hash, ref_name))) orelse return error.RefNotFound;
+            _ = (try map.getKeyCursor(hash.hashInt(repo_opts.hash, ref.name))) orelse return error.RefNotFound;
 
             // if the ref's content hasn't been set, it's an empty ref so just return null
-            const ref_cursor = (try map.getCursor(hash.hashInt(repo_opts.hash, ref_name))) orelse return null;
+            const ref_cursor = (try map.getCursor(hash.hashInt(repo_opts.hash, ref.name))) orelse return null;
             const ref_content = try ref_cursor.readBytes(buffer);
             return RefOrOid(repo_opts.hash).initFromDb(ref_content);
         },
@@ -383,35 +394,33 @@ pub fn write(
         },
         .xit => {
             var map = state.extra.moment.*;
-            var ref_name = ref_path;
+            const ref = Ref.initFromPath(ref_path) orelse return error.InvalidRef;
+            const refs_cursor = try map.putCursor(hash.hashInt(repo_opts.hash, "refs"));
+            const refs = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(refs_cursor);
 
-            if (Ref.initFromPath(ref_path)) |ref| {
-                const refs_cursor = try map.putCursor(hash.hashInt(repo_opts.hash, "refs"));
-                const refs = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(refs_cursor);
-                switch (ref.kind) {
-                    .head => {
-                        const heads_cursor = try refs.putCursor(hash.hashInt(repo_opts.hash, "heads"));
-                        map = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(heads_cursor);
-                    },
-                    .tag => {
-                        const tags_cursor = try refs.putCursor(hash.hashInt(repo_opts.hash, "tags"));
-                        map = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(tags_cursor);
-                    },
-                    .remote => |remote_name| {
-                        const remotes_cursor = try refs.putCursor(hash.hashInt(repo_opts.hash, "remotes"));
-                        const remotes = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(remotes_cursor);
-                        const remote_cursor = try remotes.putCursor(hash.hashInt(repo_opts.hash, remote_name));
-                        map = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(remote_cursor);
-                    },
-                }
-                ref_name = ref.name;
+            switch (ref.kind) {
+                .none => {},
+                .head => {
+                    const heads_cursor = try refs.putCursor(hash.hashInt(repo_opts.hash, "heads"));
+                    map = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(heads_cursor);
+                },
+                .tag => {
+                    const tags_cursor = try refs.putCursor(hash.hashInt(repo_opts.hash, "tags"));
+                    map = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(tags_cursor);
+                },
+                .remote => |remote_name| {
+                    const remotes_cursor = try refs.putCursor(hash.hashInt(repo_opts.hash, "remotes"));
+                    const remotes = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(remotes_cursor);
+                    const remote_cursor = try remotes.putCursor(hash.hashInt(repo_opts.hash, remote_name));
+                    map = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(remote_cursor);
+                },
             }
 
-            const ref_name_hash = hash.hashInt(repo_opts.hash, ref_name);
+            const ref_name_hash = hash.hashInt(repo_opts.hash, ref.name);
             const ref_name_set_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "ref-name-set"));
             const ref_name_set = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(ref_name_set_cursor);
             var ref_name_cursor = try ref_name_set.putKeyCursor(ref_name_hash);
-            try ref_name_cursor.writeIfEmpty(.{ .bytes = ref_name });
+            try ref_name_cursor.writeIfEmpty(.{ .bytes = ref.name });
             try map.putKey(ref_name_hash, .{ .slot = ref_name_cursor.slot() });
             const ref_content_set_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "ref-content-set"));
             const ref_content_set = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(ref_content_set_cursor);
