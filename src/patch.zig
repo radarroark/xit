@@ -5,6 +5,10 @@ const df = @import("./diff.zig");
 const obj = @import("./object.zig");
 const tr = @import("./tree.zig");
 
+// a globally-unique id representing a line.
+// it's just the hash of the patch it came from,
+// and the number representing which line from
+// the patch it is. it's not that complicated.
 pub fn LineId(comptime hash_kind: hash.HashKind) type {
     return packed struct {
         line: u64,
@@ -23,217 +27,94 @@ const ChangeKind = enum(u8) {
     delete_line,
 };
 
-fn createPatchEntries(
+pub fn writeAndApplyPatches(
     comptime repo_opts: rp.RepoOpts(.xit),
-    moment: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write),
-    snapshot: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write),
-    arena: *std.heap.ArenaAllocator,
-    myers_diff_iter: *df.MyersDiffIterator(.xit, repo_opts),
-    path_hash: hash.HashInt(repo_opts.hash),
-    patch_hash: hash.HashInt(repo_opts.hash),
-    patch_entries: *std.ArrayList([]const u8),
-    patch_offsets: *std.ArrayList(u64),
+    state: rp.Repo(.xit, repo_opts).State(.read_write),
+    allocator: std.mem.Allocator,
+    commit_oid: *const [hash.hexLen(repo_opts.hash)]u8,
 ) !void {
-    // get path slot
-    const path_set_cursor = (try moment.getCursor(hash.hashInt(repo_opts.hash, "path-set"))) orelse return error.KeyNotFound;
-    const path_set = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(path_set_cursor);
-    const path_slot = try path_set.getSlot(path_hash);
+    const parent_commit_oid_maybe = blk: {
+        var commit_object = try obj.Object(.xit, repo_opts, .full).init(allocator, state.readOnly(), commit_oid);
+        defer commit_object.deinit();
 
-    // init line list
-    const path_to_line_id_list_cursor = try snapshot.putCursor(hash.hashInt(repo_opts.hash, "path->line-id-list"));
-    const path_to_line_id_list = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(path_to_line_id_list_cursor);
-    try path_to_line_id_list.putKey(path_hash, .{ .slot = path_slot });
-    const line_id_list_cursor_maybe = try path_to_line_id_list.getCursor(path_hash);
-
-    var new_line_count: u64 = 0;
-    const LastLineId = struct {
-        id: LineId(repo_opts.hash),
-        origin: enum { old, new },
+        if (commit_object.content.commit.metadata.firstParent()) |oid| {
+            break :blk oid.*;
+        } else {
+            break :blk null;
+        }
     };
-    var last_line = LastLineId{ .id = @bitCast(LineId(repo_opts.hash).first_int), .origin = .old };
 
-    while (try myers_diff_iter.next()) |edit| {
-        switch (edit) {
-            .eql => |eql| {
-                var line_id_list_cursor = line_id_list_cursor_maybe orelse return error.LineListNotFound;
-                var line_id_list_reader = try line_id_list_cursor.reader();
-                try line_id_list_reader.seekTo(eql.old_line.num * @sizeOf(u64));
+    // init snapshot
+    const commit_id_to_snapshot_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "commit-id->snapshot"));
+    const commit_id_to_snapshot = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(commit_id_to_snapshot_cursor);
+    var snapshot_cursor = try commit_id_to_snapshot.putCursor(try hash.hexToInt(repo_opts.hash, commit_oid));
 
-                const line_id_position = try line_id_list_reader.readInt(u64, .big);
-                var line_id_cursor = rp.Repo(.xit, repo_opts).DB.Cursor(.read_only){
-                    .slot_ptr = .{
-                        .position = null,
-                        .slot = .{ .tag = .bytes, .value = line_id_position },
-                    },
-                    .db = moment.cursor.db,
-                };
+    // if there is a parent commit, set the initial value of the snapshot to the one from that commit
+    if (parent_commit_oid_maybe) |*parent_commit_oid| {
+        if (try commit_id_to_snapshot.getCursor(try hash.hexToInt(repo_opts.hash, parent_commit_oid))) |parent_snapshot_cursor| {
+            try snapshot_cursor.write(.{ .slot = parent_snapshot_cursor.slot() });
+        }
+    }
 
-                var line_id_reader = try line_id_cursor.reader();
-                var line_id_bytes = [_]u8{0} ** LineId(repo_opts.hash).byte_size;
-                try line_id_reader.readNoEof(&line_id_bytes);
+    const snapshot = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(snapshot_cursor);
 
-                if (last_line.origin == .new) {
-                    var buffer = std.ArrayList(u8).init(arena.allocator());
-                    try buffer.writer().writeInt(u8, @intFromEnum(ChangeKind.new_edge), .big);
-                    try buffer.writer().writeAll(&line_id_bytes);
-                    try buffer.writer().writeInt(LineId(repo_opts.hash).Int, @bitCast(last_line.id), .big);
-                    try patch_entries.append(buffer.items);
-                }
+    // init file iterator
+    var tree_diff = tr.TreeDiff(.xit, repo_opts).init(allocator);
+    defer tree_diff.deinit();
+    try tree_diff.compare(state.readOnly(), if (parent_commit_oid_maybe) |parent_commit_oid| &parent_commit_oid else null, commit_oid, null);
+    var file_iter = try df.FileIterator(.xit, repo_opts).init(allocator, state.readOnly(), .{ .tree = .{ .tree_diff = &tree_diff } });
 
-                var stream = std.io.fixedBufferStream(&line_id_bytes);
-                var reader = stream.reader();
-                const line_id_int = try reader.readInt(LineId(repo_opts.hash).Int, .big);
+    // iterate over each modified file and create/apply the patch
+    while (try file_iter.next()) |*line_iter_pair_ptr| {
+        var line_iter_pair = line_iter_pair_ptr.*;
+        defer line_iter_pair.deinit();
+        if (line_iter_pair.a.source == .binary or line_iter_pair.b.source == .binary) {
+            // the file is or was binary, so we can't create a patch for it.
+            // remove existing patch data if there is any.
+            try removePatch(repo_opts, &snapshot, line_iter_pair.path);
+        } else {
+            // store path
+            const path_hash = hash.hashInt(repo_opts.hash, line_iter_pair.path);
+            const path_set_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "path-set"));
+            const path_set = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(path_set_cursor);
+            var path_cursor = try path_set.putKeyCursor(path_hash);
+            try path_cursor.writeIfEmpty(.{ .bytes = line_iter_pair.path });
 
-                last_line = .{ .id = @bitCast(line_id_int), .origin = .old };
-            },
-            .ins => |ins| {
-                const line_id = LineId(repo_opts.hash){
-                    .line = new_line_count,
-                    .patch_id = patch_hash,
-                };
+            // create patch
+            const patch_hash_bytes = try writePatch(repo_opts, state.extra.moment, &snapshot, allocator, &line_iter_pair, path_hash);
+            const patch_hash = hash.bytesToInt(repo_opts.hash, &patch_hash_bytes);
 
-                var buffer = std.ArrayList(u8).init(arena.allocator());
-                try buffer.writer().writeInt(u8, @intFromEnum(ChangeKind.new_edge), .big);
-                try buffer.writer().writeInt(LineId(repo_opts.hash).Int, @bitCast(line_id), .big);
-                try buffer.writer().writeInt(LineId(repo_opts.hash).Int, @bitCast(last_line.id), .big);
-                try patch_entries.append(buffer.items);
+            // apply patch
+            try applyPatch(repo_opts, state.readOnly().extra.moment, &snapshot, allocator, path_hash, patch_hash);
 
-                try patch_offsets.append(ins.new_line.offset);
-
-                new_line_count += 1;
-
-                last_line = .{ .id = line_id, .origin = .new };
-            },
-            .del => |del| {
-                var buffer = std.ArrayList(u8).init(arena.allocator());
-                try buffer.writer().writeInt(u8, @intFromEnum(ChangeKind.delete_line), .big);
-
-                var line_id_list_cursor = line_id_list_cursor_maybe orelse return error.LineListNotFound;
-                var line_id_list_reader = try line_id_list_cursor.reader();
-                try line_id_list_reader.seekTo(del.old_line.num * @sizeOf(u64));
-
-                const line_id_position = try line_id_list_reader.readInt(u64, .big);
-                var line_id_cursor = rp.Repo(.xit, repo_opts).DB.Cursor(.read_only){
-                    .slot_ptr = .{
-                        .position = null,
-                        .slot = .{ .tag = .bytes, .value = line_id_position },
-                    },
-                    .db = moment.cursor.db,
-                };
-
-                var line_id_reader = try line_id_cursor.reader();
-                var line_id_bytes = [_]u8{0} ** LineId(repo_opts.hash).byte_size;
-                try line_id_reader.readNoEof(&line_id_bytes);
-
-                try buffer.writer().writeAll(&line_id_bytes);
-
-                try patch_entries.append(buffer.items);
-
-                last_line = .{ .id = last_line.id, .origin = .new };
-            },
+            // associate patch hash with path/commit
+            const path_to_patch_id_cursor = try snapshot.putCursor(hash.hashInt(repo_opts.hash, "path->patch-id"));
+            const path_to_patch_id = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(path_to_patch_id_cursor);
+            try path_to_patch_id.putKey(path_hash, .{ .slot = path_cursor.slot() });
+            try path_to_patch_id.put(path_hash, .{ .bytes = &patch_hash_bytes });
         }
     }
 }
 
-fn patchHash(
-    comptime repo_opts: rp.RepoOpts(.xit),
-    moment: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write),
-    snapshot: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write),
-    allocator: std.mem.Allocator,
-    myers_diff_iter: *df.MyersDiffIterator(.xit, repo_opts),
-    new_oid: *const [hash.byteLen(repo_opts.hash)]u8,
-    path_hash: hash.HashInt(repo_opts.hash),
-) ![hash.byteLen(repo_opts.hash)]u8 {
-    var patch_entries = std.ArrayList([]const u8).init(allocator);
-    defer patch_entries.deinit();
+fn removePatch(comptime repo_opts: rp.RepoOpts(.xit), snapshot: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write), path: []const u8) !void {
+    const path_hash = hash.hashInt(repo_opts.hash, path);
 
-    var patch_offsets = std.ArrayList(u64).init(allocator);
-    defer patch_offsets.deinit();
-
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
-
-    try createPatchEntries(repo_opts, moment, snapshot, &arena, myers_diff_iter, path_hash, 0, &patch_entries, &patch_offsets);
-
-    var hasher = hash.Hasher(repo_opts.hash).init();
-
-    for (patch_entries.items) |patch_entry| {
-        hasher.update(patch_entry);
-    }
-
-    hasher.update(new_oid);
-    for (patch_offsets.items) |patch_offset| {
-        var buffer = [_]u8{0} ** (@bitSizeOf(u64) / 8);
-        std.mem.writeInt(u64, &buffer, patch_offset, .big);
-        hasher.update(&buffer);
-    }
-
-    var patch_hash = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-    hasher.final(&patch_hash);
-    return patch_hash;
-}
-
-fn writePatch(
-    comptime repo_opts: rp.RepoOpts(.xit),
-    moment: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write),
-    snapshot: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write),
-    allocator: std.mem.Allocator,
-    line_iter_pair: *df.LineIteratorPair(.xit, repo_opts),
-    path_hash: hash.HashInt(repo_opts.hash),
-) ![hash.byteLen(repo_opts.hash)]u8 {
-    var myers_diff_iter = try df.MyersDiffIterator(.xit, repo_opts).init(allocator, &line_iter_pair.a, &line_iter_pair.b);
-    defer myers_diff_iter.deinit();
-
-    const new_oid = &line_iter_pair.b.oid;
-
-    const patch_hash_bytes = try patchHash(repo_opts, moment, snapshot, allocator, &myers_diff_iter, new_oid, path_hash);
-    const patch_hash = hash.bytesToInt(repo_opts.hash, &patch_hash_bytes);
-
-    try myers_diff_iter.reset();
-
-    // exit early if patch already exists
-    if (try moment.cursor.readPath(void, &.{
-        .{ .hash_map_get = .{ .value = hash.hashInt(repo_opts.hash, "patch-id->change-list") } },
-        .{ .hash_map_get = .{ .value = patch_hash } },
+    if (try snapshot.cursor.readPath(void, &.{
+        .{ .hash_map_get = .{ .value = hash.hashInt(repo_opts.hash, "path->line-id-list") } },
+        .{ .hash_map_get = .{ .key = path_hash } },
     })) |_| {
-        return patch_hash_bytes;
+        const path_to_live_parent_to_children_cursor = try snapshot.putCursor(hash.hashInt(repo_opts.hash, "path->live-parent->children"));
+        const path_to_live_parent_to_children = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(path_to_live_parent_to_children_cursor);
+        _ = try path_to_live_parent_to_children.remove(path_hash);
+
+        const path_to_child_to_parent_cursor = try snapshot.putCursor(hash.hashInt(repo_opts.hash, "path->child->parent"));
+        const path_to_child_to_parent = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(path_to_child_to_parent_cursor);
+        _ = try path_to_child_to_parent.remove(path_hash);
+
+        const path_to_line_id_list_cursor = try snapshot.putCursor(hash.hashInt(repo_opts.hash, "path->line-id-list"));
+        const path_to_line_id_list = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(path_to_line_id_list_cursor);
+        _ = try path_to_line_id_list.remove(path_hash);
     }
-
-    // init change list
-    const patch_id_to_change_list_cursor = try moment.putCursor(hash.hashInt(repo_opts.hash, "patch-id->change-list"));
-    const patch_id_to_change_list = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(patch_id_to_change_list_cursor);
-    var change_list_cursor = try patch_id_to_change_list.putCursor(patch_hash);
-
-    // init offset list
-    const patch_id_to_offset_list_cursor = try moment.putCursor(hash.hashInt(repo_opts.hash, "patch-id->offset-list"));
-    const patch_id_to_offset_list = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(patch_id_to_offset_list_cursor);
-    var offset_list_cursor = try patch_id_to_offset_list.putCursor(patch_hash);
-
-    var patch_entries = std.ArrayList([]const u8).init(allocator);
-    defer patch_entries.deinit();
-
-    var patch_offsets = std.ArrayList(u64).init(allocator);
-    defer patch_offsets.deinit();
-
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
-
-    try createPatchEntries(repo_opts, moment, snapshot, &arena, &myers_diff_iter, path_hash, patch_hash, &patch_entries, &patch_offsets);
-
-    var change_list_writer = try change_list_cursor.writer();
-    for (patch_entries.items) |patch_entry| {
-        try change_list_writer.writeAll(patch_entry);
-    }
-    try change_list_writer.finish();
-
-    var offset_list_writer = try offset_list_cursor.writer();
-    try offset_list_writer.writeAll(new_oid);
-    for (patch_offsets.items) |patch_offset| {
-        try offset_list_writer.writeInt(u64, patch_offset, .big);
-    }
-    try offset_list_writer.finish();
-
-    return patch_hash_bytes;
 }
 
 pub fn applyPatch(
@@ -429,92 +310,215 @@ pub fn applyPatch(
     try line_id_list_writer.finish();
 }
 
-fn removePatch(comptime repo_opts: rp.RepoOpts(.xit), snapshot: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write), path: []const u8) !void {
-    const path_hash = hash.hashInt(repo_opts.hash, path);
+fn writePatch(
+    comptime repo_opts: rp.RepoOpts(.xit),
+    moment: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write),
+    snapshot: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write),
+    allocator: std.mem.Allocator,
+    line_iter_pair: *df.LineIteratorPair(.xit, repo_opts),
+    path_hash: hash.HashInt(repo_opts.hash),
+) ![hash.byteLen(repo_opts.hash)]u8 {
+    var myers_diff_iter = try df.MyersDiffIterator(.xit, repo_opts).init(allocator, &line_iter_pair.a, &line_iter_pair.b);
+    defer myers_diff_iter.deinit();
 
-    if (try snapshot.cursor.readPath(void, &.{
-        .{ .hash_map_get = .{ .value = hash.hashInt(repo_opts.hash, "path->line-id-list") } },
-        .{ .hash_map_get = .{ .key = path_hash } },
+    const new_oid = &line_iter_pair.b.oid;
+
+    const patch_hash_bytes = try patchHash(repo_opts, moment, snapshot, allocator, &myers_diff_iter, new_oid, path_hash);
+    const patch_hash = hash.bytesToInt(repo_opts.hash, &patch_hash_bytes);
+
+    try myers_diff_iter.reset();
+
+    // exit early if patch already exists
+    if (try moment.cursor.readPath(void, &.{
+        .{ .hash_map_get = .{ .value = hash.hashInt(repo_opts.hash, "patch-id->change-list") } },
+        .{ .hash_map_get = .{ .value = patch_hash } },
     })) |_| {
-        const path_to_live_parent_to_children_cursor = try snapshot.putCursor(hash.hashInt(repo_opts.hash, "path->live-parent->children"));
-        const path_to_live_parent_to_children = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(path_to_live_parent_to_children_cursor);
-        _ = try path_to_live_parent_to_children.remove(path_hash);
-
-        const path_to_child_to_parent_cursor = try snapshot.putCursor(hash.hashInt(repo_opts.hash, "path->child->parent"));
-        const path_to_child_to_parent = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(path_to_child_to_parent_cursor);
-        _ = try path_to_child_to_parent.remove(path_hash);
-
-        const path_to_line_id_list_cursor = try snapshot.putCursor(hash.hashInt(repo_opts.hash, "path->line-id-list"));
-        const path_to_line_id_list = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(path_to_line_id_list_cursor);
-        _ = try path_to_line_id_list.remove(path_hash);
+        return patch_hash_bytes;
     }
+
+    // init change list
+    const patch_id_to_change_list_cursor = try moment.putCursor(hash.hashInt(repo_opts.hash, "patch-id->change-list"));
+    const patch_id_to_change_list = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(patch_id_to_change_list_cursor);
+    var change_list_cursor = try patch_id_to_change_list.putCursor(patch_hash);
+
+    // init offset list
+    const patch_id_to_offset_list_cursor = try moment.putCursor(hash.hashInt(repo_opts.hash, "patch-id->offset-list"));
+    const patch_id_to_offset_list = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(patch_id_to_offset_list_cursor);
+    var offset_list_cursor = try patch_id_to_offset_list.putCursor(patch_hash);
+
+    var patch_entries = std.ArrayList([]const u8).init(allocator);
+    defer patch_entries.deinit();
+
+    var patch_offsets = std.ArrayList(u64).init(allocator);
+    defer patch_offsets.deinit();
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    try createPatchEntries(repo_opts, moment, snapshot, &arena, &myers_diff_iter, path_hash, patch_hash, &patch_entries, &patch_offsets);
+
+    var change_list_writer = try change_list_cursor.writer();
+    for (patch_entries.items) |patch_entry| {
+        try change_list_writer.writeAll(patch_entry);
+    }
+    try change_list_writer.finish();
+
+    var offset_list_writer = try offset_list_cursor.writer();
+    try offset_list_writer.writeAll(new_oid);
+    for (patch_offsets.items) |patch_offset| {
+        try offset_list_writer.writeInt(u64, patch_offset, .big);
+    }
+    try offset_list_writer.finish();
+
+    return patch_hash_bytes;
 }
 
-pub fn writeAndApplyPatches(
+fn patchHash(
     comptime repo_opts: rp.RepoOpts(.xit),
-    state: rp.Repo(.xit, repo_opts).State(.read_write),
+    moment: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write),
+    snapshot: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write),
     allocator: std.mem.Allocator,
-    commit_oid: *const [hash.hexLen(repo_opts.hash)]u8,
-) !void {
-    const parent_commit_oid_maybe = blk: {
-        var commit_object = try obj.Object(.xit, repo_opts, .full).init(allocator, state.readOnly(), commit_oid);
-        defer commit_object.deinit();
+    myers_diff_iter: *df.MyersDiffIterator(.xit, repo_opts),
+    new_oid: *const [hash.byteLen(repo_opts.hash)]u8,
+    path_hash: hash.HashInt(repo_opts.hash),
+) ![hash.byteLen(repo_opts.hash)]u8 {
+    var patch_entries = std.ArrayList([]const u8).init(allocator);
+    defer patch_entries.deinit();
 
-        if (commit_object.content.commit.metadata.firstParent()) |oid| {
-            break :blk oid.*;
-        } else {
-            break :blk null;
-        }
-    };
+    var patch_offsets = std.ArrayList(u64).init(allocator);
+    defer patch_offsets.deinit();
 
-    // init snapshot
-    const commit_id_to_snapshot_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "commit-id->snapshot"));
-    const commit_id_to_snapshot = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(commit_id_to_snapshot_cursor);
-    var snapshot_cursor = try commit_id_to_snapshot.putCursor(try hash.hexToInt(repo_opts.hash, commit_oid));
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
 
-    // if there is a parent commit, set the initial value of the snapshot to the one from that commit
-    if (parent_commit_oid_maybe) |*parent_commit_oid| {
-        if (try commit_id_to_snapshot.getCursor(try hash.hexToInt(repo_opts.hash, parent_commit_oid))) |parent_snapshot_cursor| {
-            try snapshot_cursor.write(.{ .slot = parent_snapshot_cursor.slot() });
-        }
+    try createPatchEntries(repo_opts, moment, snapshot, &arena, myers_diff_iter, path_hash, 0, &patch_entries, &patch_offsets);
+
+    var hasher = hash.Hasher(repo_opts.hash).init();
+
+    for (patch_entries.items) |patch_entry| {
+        hasher.update(patch_entry);
     }
 
-    const snapshot = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(snapshot_cursor);
+    hasher.update(new_oid);
+    for (patch_offsets.items) |patch_offset| {
+        var buffer = [_]u8{0} ** (@bitSizeOf(u64) / 8);
+        std.mem.writeInt(u64, &buffer, patch_offset, .big);
+        hasher.update(&buffer);
+    }
 
-    // init file iterator
-    var tree_diff = tr.TreeDiff(.xit, repo_opts).init(allocator);
-    defer tree_diff.deinit();
-    try tree_diff.compare(state.readOnly(), if (parent_commit_oid_maybe) |parent_commit_oid| &parent_commit_oid else null, commit_oid, null);
-    var file_iter = try df.FileIterator(.xit, repo_opts).init(allocator, state.readOnly(), .{ .tree = .{ .tree_diff = &tree_diff } });
+    var patch_hash = [_]u8{0} ** hash.byteLen(repo_opts.hash);
+    hasher.final(&patch_hash);
+    return patch_hash;
+}
 
-    // iterate over each modified file and create/apply the patch
-    while (try file_iter.next()) |*line_iter_pair_ptr| {
-        var line_iter_pair = line_iter_pair_ptr.*;
-        defer line_iter_pair.deinit();
-        if (line_iter_pair.a.source == .binary or line_iter_pair.b.source == .binary) {
-            // the file is or was binary, so we can't create a patch for it.
-            // remove existing patch data if there is any.
-            try removePatch(repo_opts, &snapshot, line_iter_pair.path);
-        } else {
-            // store path
-            const path_hash = hash.hashInt(repo_opts.hash, line_iter_pair.path);
-            const path_set_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "path-set"));
-            const path_set = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(path_set_cursor);
-            var path_cursor = try path_set.putKeyCursor(path_hash);
-            try path_cursor.writeIfEmpty(.{ .bytes = line_iter_pair.path });
+fn createPatchEntries(
+    comptime repo_opts: rp.RepoOpts(.xit),
+    moment: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write),
+    snapshot: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write),
+    arena: *std.heap.ArenaAllocator,
+    myers_diff_iter: *df.MyersDiffIterator(.xit, repo_opts),
+    path_hash: hash.HashInt(repo_opts.hash),
+    patch_hash: hash.HashInt(repo_opts.hash),
+    patch_entries: *std.ArrayList([]const u8),
+    patch_offsets: *std.ArrayList(u64),
+) !void {
+    // get path slot
+    const path_set_cursor = (try moment.getCursor(hash.hashInt(repo_opts.hash, "path-set"))) orelse return error.KeyNotFound;
+    const path_set = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(path_set_cursor);
+    const path_slot = try path_set.getSlot(path_hash);
 
-            // create patch
-            const patch_hash_bytes = try writePatch(repo_opts, state.extra.moment, &snapshot, allocator, &line_iter_pair, path_hash);
-            const patch_hash = hash.bytesToInt(repo_opts.hash, &patch_hash_bytes);
+    // init line list
+    const path_to_line_id_list_cursor = try snapshot.putCursor(hash.hashInt(repo_opts.hash, "path->line-id-list"));
+    const path_to_line_id_list = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(path_to_line_id_list_cursor);
+    try path_to_line_id_list.putKey(path_hash, .{ .slot = path_slot });
+    const line_id_list_cursor_maybe = try path_to_line_id_list.getCursor(path_hash);
 
-            // apply patch
-            try applyPatch(repo_opts, state.readOnly().extra.moment, &snapshot, allocator, path_hash, patch_hash);
+    var new_line_count: u64 = 0;
+    const LastLineId = struct {
+        id: LineId(repo_opts.hash),
+        origin: enum { old, new },
+    };
+    var last_line = LastLineId{ .id = @bitCast(LineId(repo_opts.hash).first_int), .origin = .old };
 
-            // associate patch hash with path/commit
-            const path_to_patch_id_cursor = try snapshot.putCursor(hash.hashInt(repo_opts.hash, "path->patch-id"));
-            const path_to_patch_id = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(path_to_patch_id_cursor);
-            try path_to_patch_id.putKey(path_hash, .{ .slot = path_cursor.slot() });
-            try path_to_patch_id.put(path_hash, .{ .bytes = &patch_hash_bytes });
+    while (try myers_diff_iter.next()) |edit| {
+        switch (edit) {
+            .eql => |eql| {
+                var line_id_list_cursor = line_id_list_cursor_maybe orelse return error.LineListNotFound;
+                var line_id_list_reader = try line_id_list_cursor.reader();
+                try line_id_list_reader.seekTo(eql.old_line.num * @sizeOf(u64));
+
+                const line_id_position = try line_id_list_reader.readInt(u64, .big);
+                var line_id_cursor = rp.Repo(.xit, repo_opts).DB.Cursor(.read_only){
+                    .slot_ptr = .{
+                        .position = null,
+                        .slot = .{ .tag = .bytes, .value = line_id_position },
+                    },
+                    .db = moment.cursor.db,
+                };
+
+                var line_id_reader = try line_id_cursor.reader();
+                var line_id_bytes = [_]u8{0} ** LineId(repo_opts.hash).byte_size;
+                try line_id_reader.readNoEof(&line_id_bytes);
+
+                if (last_line.origin == .new) {
+                    var buffer = std.ArrayList(u8).init(arena.allocator());
+                    try buffer.writer().writeInt(u8, @intFromEnum(ChangeKind.new_edge), .big);
+                    try buffer.writer().writeAll(&line_id_bytes);
+                    try buffer.writer().writeInt(LineId(repo_opts.hash).Int, @bitCast(last_line.id), .big);
+                    try patch_entries.append(buffer.items);
+                }
+
+                var stream = std.io.fixedBufferStream(&line_id_bytes);
+                var reader = stream.reader();
+                const line_id_int = try reader.readInt(LineId(repo_opts.hash).Int, .big);
+
+                last_line = .{ .id = @bitCast(line_id_int), .origin = .old };
+            },
+            .ins => |ins| {
+                const line_id = LineId(repo_opts.hash){
+                    .line = new_line_count,
+                    .patch_id = patch_hash,
+                };
+
+                var buffer = std.ArrayList(u8).init(arena.allocator());
+                try buffer.writer().writeInt(u8, @intFromEnum(ChangeKind.new_edge), .big);
+                try buffer.writer().writeInt(LineId(repo_opts.hash).Int, @bitCast(line_id), .big);
+                try buffer.writer().writeInt(LineId(repo_opts.hash).Int, @bitCast(last_line.id), .big);
+                try patch_entries.append(buffer.items);
+
+                try patch_offsets.append(ins.new_line.offset);
+
+                new_line_count += 1;
+
+                last_line = .{ .id = line_id, .origin = .new };
+            },
+            .del => |del| {
+                var buffer = std.ArrayList(u8).init(arena.allocator());
+                try buffer.writer().writeInt(u8, @intFromEnum(ChangeKind.delete_line), .big);
+
+                var line_id_list_cursor = line_id_list_cursor_maybe orelse return error.LineListNotFound;
+                var line_id_list_reader = try line_id_list_cursor.reader();
+                try line_id_list_reader.seekTo(del.old_line.num * @sizeOf(u64));
+
+                const line_id_position = try line_id_list_reader.readInt(u64, .big);
+                var line_id_cursor = rp.Repo(.xit, repo_opts).DB.Cursor(.read_only){
+                    .slot_ptr = .{
+                        .position = null,
+                        .slot = .{ .tag = .bytes, .value = line_id_position },
+                    },
+                    .db = moment.cursor.db,
+                };
+
+                var line_id_reader = try line_id_cursor.reader();
+                var line_id_bytes = [_]u8{0} ** LineId(repo_opts.hash).byte_size;
+                try line_id_reader.readNoEof(&line_id_bytes);
+
+                try buffer.writer().writeAll(&line_id_bytes);
+
+                try patch_entries.append(buffer.items);
+
+                last_line = .{ .id = last_line.id, .origin = .new };
+            },
         }
     }
 }
