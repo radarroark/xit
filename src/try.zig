@@ -114,6 +114,7 @@ pub fn main() !void {
             try xit_repo.add(allocator, &.{ "build.zig", "build.zig.zon", "src" });
 
             var metadata = commit_object.content.commit.metadata;
+            metadata.parent_oids = null;
             metadata.allow_empty = true;
             _ = try xit_repo.commit(allocator, metadata);
         }
