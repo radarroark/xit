@@ -20,13 +20,13 @@ pub const CommandKind = enum {
     commit,
     tag,
     status,
-    diff_work_dir,
+    diff_dir,
     diff_added,
     branch,
-    switch_work_dir,
-    reset_work_dir,
-    reset_added,
-    reset_head,
+    switch_dir,
+    reset,
+    reset_dir,
+    reset_add,
     restore,
     log,
     merge,
@@ -133,7 +133,7 @@ fn commandHelp(command_kind: CommandKind) Help {
             \\    xit status --cli
             ,
         },
-        .diff_work_dir => .{
+        .diff_dir => .{
             .name = "diff",
             .descrip =
             \\show changes between the last commit and the work dir that haven't been added to the index.
@@ -172,7 +172,7 @@ fn commandHelp(command_kind: CommandKind) Help {
             \\    xit branch list
             ,
         },
-        .switch_work_dir => .{
+        .switch_dir => .{
             .name = "switch",
             .descrip =
             \\switch to a branch or commit id.
@@ -185,12 +185,11 @@ fn commandHelp(command_kind: CommandKind) Help {
             \\    xit switch a1b2c3...
             ,
         },
-        .reset_work_dir => .{
+        .reset => .{
             .name = "reset",
             .descrip =
             \\make the current branch point to a new commit id.
-            \\updates both the index and the work dir.
-            \\similar to `git reset --hard`.
+            \\updates the index, but the files in the work dir are left alone.
             ,
             .example =
             \\reset current branch to match another branch:
@@ -199,32 +198,33 @@ fn commandHelp(command_kind: CommandKind) Help {
             \\    xit reset 1a2b3c...
             ,
         },
-        .reset_added => .{
-            .name = "reset-added",
+        .reset_dir => .{
+            .name = "reset-dir",
             .descrip =
             \\make the current branch point to a new commit id.
-            \\updates only the index, not the work dir.
-            \\similar to `git reset --mixed`.
+            \\updates both the index and the work dir.
+            \\similar to `git reset --hard`.
             ,
             .example =
             \\reset current branch to match another branch:
-            \\    xit reset-added mybranch
+            \\    xit reset-dir mybranch
             \\reset current branch to point to a new commit id:
-            \\    xit reset-added 1a2b3c...
+            \\    xit reset-dir 1a2b3c...
             ,
         },
-        .reset_head => .{
-            .name = "reset-head",
+        .reset_add => .{
+            .name = "reset-add",
             .descrip =
             \\make the current branch point to a new commit id.
             \\does not update the index or the work dir.
+            \\this is like calling reset and then adding everything to the index.
             \\similar to `git reset --soft`.
             ,
             .example =
             \\reset current branch to match another branch:
-            \\    xit reset-head mybranch
+            \\    xit reset-add mybranch
             \\reset current branch to point to a new commit id:
-            \\    xit reset-head 1a2b3c...
+            \\    xit reset-add 1a2b3c...
             ,
         },
         .restore => .{
@@ -435,55 +435,11 @@ pub const CommandArgs = struct {
             const command_name = args_slice[0];
             const extra_args = args_slice[1..];
 
-            const command_kind: ?CommandKind =
-                if (std.mem.eql(u8, command_name, "init"))
-                .init
-            else if (std.mem.eql(u8, command_name, "add"))
-                .add
-            else if (std.mem.eql(u8, command_name, "unadd"))
-                .unadd
-            else if (std.mem.eql(u8, command_name, "untrack"))
-                .untrack
-            else if (std.mem.eql(u8, command_name, "rm"))
-                .rm
-            else if (std.mem.eql(u8, command_name, "commit"))
-                .commit
-            else if (std.mem.eql(u8, command_name, "tag"))
-                .tag
-            else if (std.mem.eql(u8, command_name, "status"))
-                .status
-            else if (std.mem.eql(u8, command_name, "diff"))
-                .diff_work_dir
-            else if (std.mem.eql(u8, command_name, "diff-added"))
-                .diff_added
-            else if (std.mem.eql(u8, command_name, "branch"))
-                .branch
-            else if (std.mem.eql(u8, command_name, "switch"))
-                .switch_work_dir
-            else if (std.mem.eql(u8, command_name, "reset"))
-                .reset_work_dir
-            else if (std.mem.eql(u8, command_name, "reset-added"))
-                .reset_added
-            else if (std.mem.eql(u8, command_name, "reset-head"))
-                .reset_head
-            else if (std.mem.eql(u8, command_name, "restore"))
-                .restore
-            else if (std.mem.eql(u8, command_name, "log"))
-                .log
-            else if (std.mem.eql(u8, command_name, "merge"))
-                .merge
-            else if (std.mem.eql(u8, command_name, "cherry-pick"))
-                .cherry_pick
-            else if (std.mem.eql(u8, command_name, "config"))
-                .config
-            else if (std.mem.eql(u8, command_name, "remote"))
-                .remote
-            else if (std.mem.eql(u8, command_name, "fetch"))
-                .fetch
-            else if (std.mem.eql(u8, command_name, "pull"))
-                .pull
-            else
-                null;
+            const command_kind: ?CommandKind = inline for (0..@typeInfo(CommandKind).Enum.fields.len) |i| {
+                if (std.mem.eql(u8, command_name, commandHelp(@enumFromInt(i)).name)) {
+                    break @enumFromInt(i);
+                }
+            } else null;
 
             return .{
                 .allocator = allocator,
@@ -538,13 +494,13 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
         commit: obj.CommitMetadata(hash_kind),
         tag: tag.TagCommand,
         status,
-        diff_work_dir: df.BasicDiffOptions(hash_kind),
+        diff_dir: df.BasicDiffOptions(hash_kind),
         diff_added: df.BasicDiffOptions(hash_kind),
         branch: bch.BranchCommand,
-        switch_work_dir: work.SwitchInput(hash_kind),
-        reset_work_dir: work.SwitchInput(hash_kind),
-        reset_added: work.SwitchInput(hash_kind),
-        reset_head: rf.RefOrOid(hash_kind),
+        switch_dir: work.SwitchInput(hash_kind),
+        reset: work.SwitchInput(hash_kind),
+        reset_dir: work.SwitchInput(hash_kind),
+        reset_add: rf.RefOrOid(hash_kind),
         restore: struct {
             path: []const u8,
         },
@@ -650,7 +606,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                     return .{ .tag = cmd };
                 },
                 .status => return .status,
-                .diff_work_dir => {
+                .diff_dir => {
                     const conflict_diff_kind: df.ConflictDiffKind =
                         if (cmd_args.contains("--base"))
                         .base
@@ -660,7 +616,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                         .source
                     else
                         .target;
-                    return .{ .diff_work_dir = .{ .work_dir = .{ .conflict_diff_kind = conflict_diff_kind } } };
+                    return .{ .diff_dir = .{ .work_dir = .{ .conflict_diff_kind = conflict_diff_kind } } };
                 },
                 .diff_added => return .{ .diff_added = .index },
                 .branch => {
@@ -688,44 +644,44 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
 
                     return .{ .branch = cmd };
                 },
-                .switch_work_dir => {
+                .switch_dir => {
                     if (cmd_args.positional_args.len != 1) return null;
                     const target = cmd_args.positional_args[0];
 
-                    return .{ .switch_work_dir = .{
+                    return .{ .switch_dir = .{
                         .kind = .@"switch",
                         .target = rf.RefOrOid(hash_kind).initFromUser(target) orelse return null,
                         .update_work_dir = true,
                         .force = cmd_args.contains("-f"),
                     } };
                 },
-                .reset_work_dir => {
+                .reset => {
                     if (cmd_args.positional_args.len != 1) return null;
                     const target = cmd_args.positional_args[0];
 
-                    return .{ .reset_work_dir = .{
-                        .kind = .reset,
-                        .target = rf.RefOrOid(hash_kind).initFromUser(target) orelse return null,
-                        .update_work_dir = true,
-                        .force = cmd_args.contains("-f"),
-                    } };
-                },
-                .reset_added => {
-                    if (cmd_args.positional_args.len != 1) return null;
-                    const target = cmd_args.positional_args[0];
-
-                    return .{ .reset_added = .{
+                    return .{ .reset = .{
                         .kind = .reset,
                         .target = rf.RefOrOid(hash_kind).initFromUser(target) orelse return null,
                         .update_work_dir = false,
                         .force = cmd_args.contains("-f"),
                     } };
                 },
-                .reset_head => {
+                .reset_dir => {
                     if (cmd_args.positional_args.len != 1) return null;
                     const target = cmd_args.positional_args[0];
 
-                    return .{ .reset_head = rf.RefOrOid(hash_kind).initFromUser(target) orelse return null };
+                    return .{ .reset_dir = .{
+                        .kind = .reset,
+                        .target = rf.RefOrOid(hash_kind).initFromUser(target) orelse return null,
+                        .update_work_dir = true,
+                        .force = cmd_args.contains("-f"),
+                    } };
+                },
+                .reset_add => {
+                    if (cmd_args.positional_args.len != 1) return null;
+                    const target = cmd_args.positional_args[0];
+
+                    return .{ .reset_add = rf.RefOrOid(hash_kind).initFromUser(target) orelse return null };
                 },
                 .restore => {
                     if (cmd_args.positional_args.len != 1) return null;
@@ -904,7 +860,7 @@ pub fn CommandDispatch(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash
                 if (show_help) {
                     return .{ .help = command_kind };
                 } else if (cmd_args.positional_args.len == 0 and !force_cli and switch (command_kind) {
-                    .status, .diff_work_dir, .diff_added, .log => true,
+                    .status, .diff_dir, .diff_added, .log => true,
                     else => false,
                 }) {
                     return .{ .tui = command_kind };

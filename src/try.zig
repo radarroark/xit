@@ -105,7 +105,7 @@ pub fn main() !void {
             var commit_object = commits.items[commits.items.len - i - 1];
             try writers.out.print("Creating commit: {s}\n", .{commit_object.content.commit.metadata.message orelse ""});
 
-            var switch_result = try git_repo.switchWorkDir(allocator, .{ .target = .{ .oid = &commit_object.oid }, .force = true });
+            var switch_result = try git_repo.switchDir(allocator, .{ .target = .{ .oid = &commit_object.oid }, .force = true });
             defer switch_result.deinit();
             if (.success != switch_result.result) {
                 return error.CheckoutFailed;

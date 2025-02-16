@@ -754,7 +754,6 @@ pub fn restore(
 pub fn ResetInput(comptime hash_kind: hash.HashKind) type {
     return struct {
         target: rf.RefOrOid(hash_kind),
-        update_work_dir: bool = true,
         force: bool = false,
     };
 }

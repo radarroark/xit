@@ -281,7 +281,7 @@ fn runCommand(
                 }
             }
         },
-        .diff_work_dir, .diff_added => |diff_cmd| {
+        .diff_dir, .diff_added => |diff_cmd| {
             const DiffState = union(df.DiffKind) {
                 work_dir: work.Status(repo_kind, repo_opts),
                 index: work.Status(repo_kind, repo_opts),
@@ -376,8 +376,8 @@ fn runCommand(
                 .remove => |rm_branch| try repo.removeBranch(rm_branch),
             }
         },
-        .switch_work_dir, .reset_work_dir, .reset_added => |switch_work_dir_cmd| {
-            var switch_result = try repo.switchWorkDir(allocator, switch_work_dir_cmd);
+        .switch_dir, .reset, .reset_dir => |switch_dir_cmd| {
+            var switch_result = try repo.switchDir(allocator, switch_dir_cmd);
             defer switch_result.deinit();
             switch (switch_result.result) {
                 .success => {},
@@ -407,7 +407,7 @@ fn runCommand(
                 },
             }
         },
-        .reset_head => |reset_head_cmd| try repo.resetHead(reset_head_cmd),
+        .reset_add => |reset_add_cmd| try repo.resetAdd(reset_add_cmd),
         .restore => |restore_cmd| try repo.restore(allocator, restore_cmd.path),
         .log => {
             var commit_iter = try repo.log(allocator, null);

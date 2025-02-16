@@ -178,7 +178,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
                     // create default branch
                     try self.addBranch(.{ .name = default_branch_name });
-                    try self.resetHead(.{ .ref = .{ .kind = .head, .name = default_branch_name } });
+                    try self.resetAdd(.{ .ref = .{ .kind = .head, .name = default_branch_name } });
 
                     return self;
                 },
@@ -213,7 +213,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
                     // create default branch
                     try self.addBranch(.{ .name = default_branch_name });
-                    try self.resetHead(.{ .ref = .{ .kind = .head, .name = default_branch_name } });
+                    try self.resetAdd(.{ .ref = .{ .kind = .head, .name = default_branch_name } });
 
                     return self;
                 },
@@ -681,7 +681,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
-        pub fn switchWorkDir(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: work.SwitchInput(repo_opts.hash)) !work.Switch(repo_kind, repo_opts) {
+        pub fn switchDir(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: work.SwitchInput(repo_opts.hash)) !work.Switch(repo_kind, repo_opts) {
             switch (repo_kind) {
                 .git => return try work.Switch(repo_kind, repo_opts).init(.{ .core = &self.core, .extra = .{} }, allocator, input),
                 .xit => {
@@ -711,16 +711,25 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
-        pub fn resetWorkDir(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: work.ResetInput(repo_opts.hash)) !work.Switch(repo_kind, repo_opts) {
-            return try self.switchWorkDir(allocator, .{
+        pub fn reset(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: work.ResetInput(repo_opts.hash)) !work.Switch(repo_kind, repo_opts) {
+            return try self.switchDir(allocator, .{
                 .kind = .reset,
                 .target = input.target,
-                .update_work_dir = input.update_work_dir,
+                .update_work_dir = false,
                 .force = input.force,
             });
         }
 
-        pub fn resetHead(self: *Repo(repo_kind, repo_opts), target: rf.RefOrOid(repo_opts.hash)) !void {
+        pub fn resetDir(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: work.ResetInput(repo_opts.hash)) !work.Switch(repo_kind, repo_opts) {
+            return try self.switchDir(allocator, .{
+                .kind = .reset,
+                .target = input.target,
+                .update_work_dir = true,
+                .force = input.force,
+            });
+        }
+
+        pub fn resetAdd(self: *Repo(repo_kind, repo_opts), target: rf.RefOrOid(repo_opts.hash)) !void {
             switch (repo_kind) {
                 .git => try rf.replaceHead(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, target),
                 .xit => {
