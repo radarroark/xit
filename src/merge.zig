@@ -654,7 +654,7 @@ fn writeBlobWithPatches(
             inner_state: rp.Repo(.xit, repo_opts).State(.read_only),
             inner_allocator: std.mem.Allocator,
             offset_list_cursor: *rp.Repo(.xit, repo_opts).DB.Cursor(.read_only),
-            node_id: patch.NodeId(repo_opts.hash),
+            line_id: patch.LineId(repo_opts.hash),
         ) ![]const u8 {
             var offset_list_reader = try offset_list_cursor.reader();
 
@@ -664,7 +664,7 @@ fn writeBlobWithPatches(
             var oid = [_]u8{0} ** hash_size;
             try offset_list_reader.readNoEof(&oid);
             const oid_hex = std.fmt.bytesToHex(&oid, .lower);
-            try offset_list_reader.seekTo(hash_size + node_id.node * offset_size);
+            try offset_list_reader.seekTo(hash_size + line_id.line * offset_size);
             const change_offset = try offset_list_reader.readInt(u64, .big);
 
             var obj_rdr = try obj.ObjectReader(.xit, repo_opts).init(inner_allocator, inner_state, &oid_hex);
@@ -688,7 +688,7 @@ fn writeBlobWithPatches(
             inner_state: rp.Repo(.xit, repo_opts).State(.read_only),
             inner_allocator: std.mem.Allocator,
             patch_id_to_offset_list_ptr: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_only),
-            node_ids: []patch.NodeId(repo_opts.hash),
+            line_ids: []patch.LineId(repo_opts.hash),
         ) !@This() {
             var lines = std.ArrayList([]const u8).init(inner_allocator);
             errdefer {
@@ -697,9 +697,9 @@ fn writeBlobWithPatches(
                 }
                 lines.deinit();
             }
-            for (node_ids) |node_id| {
-                var offset_list_cursor = (try patch_id_to_offset_list_ptr.getCursor(node_id.patch_id)) orelse return error.KeyNotFound;
-                const line = try readLine(inner_state, inner_allocator, &offset_list_cursor, node_id);
+            for (line_ids) |line_id| {
+                var offset_list_cursor = (try patch_id_to_offset_list_ptr.getCursor(line_id.patch_id)) orelse return error.KeyNotFound;
+                const line = try readLine(inner_state, inner_allocator, &offset_list_cursor, line_id);
                 errdefer inner_allocator.free(line);
                 try lines.append(line);
             }
@@ -743,7 +743,7 @@ fn writeBlobWithPatches(
         patch_id_to_offset_list: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_only),
         line_buffer: *std.ArrayList([]const u8),
         current_line: ?[]const u8,
-        current_node_id_hash: ?hash.HashInt(repo_opts.hash),
+        current_line_id_hash: ?hash.HashInt(repo_opts.hash),
         has_conflict: bool,
 
         const Parent = @This();
@@ -804,7 +804,7 @@ fn writeBlobWithPatches(
                                 self.parent.current_line = null;
                             }
                             // if we aren't at the very last line, add a newline character
-                            if (self.parent.current_line != null or self.parent.current_node_id_hash != null) {
+                            if (self.parent.current_line != null or self.parent.current_line_id_hash != null) {
                                 buf[size] = '\n';
                                 return size + 1;
                             }
@@ -813,54 +813,54 @@ fn writeBlobWithPatches(
                     return size;
                 }
 
-                if (self.parent.current_node_id_hash) |current_node_id_hash| {
-                    const children_cursor = (try self.parent.merge_live_parent_to_children.getCursor(current_node_id_hash)) orelse return error.KeyNotFound;
+                if (self.parent.current_line_id_hash) |current_line_id_hash| {
+                    const children_cursor = (try self.parent.merge_live_parent_to_children.getCursor(current_line_id_hash)) orelse return error.KeyNotFound;
                     var children_iter = try children_cursor.iterator();
                     defer children_iter.deinit();
 
                     const first_child_cursor = (try children_iter.next()) orelse return error.ExpectedChild;
                     const first_kv_pair = try first_child_cursor.readKeyValuePair();
-                    var first_child_bytes = [_]u8{0} ** patch.NodeId(repo_opts.hash).byte_size;
+                    var first_child_bytes = [_]u8{0} ** patch.LineId(repo_opts.hash).byte_size;
                     const first_child_slice = try first_kv_pair.key_cursor.readBytes(&first_child_bytes);
-                    const first_node_id: patch.NodeId(repo_opts.hash) = blk: {
+                    const first_line_id: patch.LineId(repo_opts.hash) = blk: {
                         var stream = std.io.fixedBufferStream(first_child_slice);
-                        var node_id_reader = stream.reader();
-                        break :blk @bitCast(try node_id_reader.readInt(patch.NodeId(repo_opts.hash).Int, .big));
+                        var line_id_reader = stream.reader();
+                        break :blk @bitCast(try line_id_reader.readInt(patch.LineId(repo_opts.hash).Int, .big));
                     };
-                    const first_node_id_hash = hash.hashInt(repo_opts.hash, first_child_slice);
+                    const first_line_id_hash = hash.hashInt(repo_opts.hash, first_child_slice);
 
                     if (try children_iter.next()) |second_child_cursor| {
                         if (try children_iter.next() != null) return error.MoreThanTwoChildrenFound;
 
                         const second_kv_pair = try second_child_cursor.readKeyValuePair();
-                        var second_child_bytes = [_]u8{0} ** patch.NodeId(repo_opts.hash).byte_size;
+                        var second_child_bytes = [_]u8{0} ** patch.LineId(repo_opts.hash).byte_size;
                         const second_child_slice = try second_kv_pair.key_cursor.readBytes(&second_child_bytes);
-                        const second_node_id: patch.NodeId(repo_opts.hash) = blk: {
+                        const second_line_id: patch.LineId(repo_opts.hash) = blk: {
                             var stream = std.io.fixedBufferStream(second_child_slice);
-                            var node_id_reader = stream.reader();
-                            break :blk @bitCast(try node_id_reader.readInt(patch.NodeId(repo_opts.hash).Int, .big));
+                            var line_id_reader = stream.reader();
+                            break :blk @bitCast(try line_id_reader.readInt(patch.LineId(repo_opts.hash).Int, .big));
                         };
-                        const second_node_id_hash = hash.hashInt(repo_opts.hash, second_child_slice);
+                        const second_line_id_hash = hash.hashInt(repo_opts.hash, second_child_slice);
 
-                        const target_node_id, const target_node_id_hash, const source_node_id, const source_node_id_hash =
-                            if (try self.parent.target_live_parent_to_children.getCursor(first_node_id_hash) != null)
-                            .{ first_node_id, first_node_id_hash, second_node_id, second_node_id_hash }
+                        const target_line_id, const target_line_id_hash, const source_line_id, const source_line_id_hash =
+                            if (try self.parent.target_live_parent_to_children.getCursor(first_line_id_hash) != null)
+                            .{ first_line_id, first_line_id_hash, second_line_id, second_line_id_hash }
                         else
-                            .{ second_node_id, second_node_id_hash, first_node_id, first_node_id_hash };
+                            .{ second_line_id, second_line_id_hash, first_line_id, first_line_id_hash };
 
-                        var target_node_ids = std.ArrayList(patch.NodeId(repo_opts.hash)).init(self.parent.allocator);
-                        defer target_node_ids.deinit();
+                        var target_line_ids = std.ArrayList(patch.LineId(repo_opts.hash)).init(self.parent.allocator);
+                        defer target_line_ids.deinit();
 
-                        var join_node_id_hash_maybe: ?hash.HashInt(repo_opts.hash) = null;
+                        var join_line_id_hash_maybe: ?hash.HashInt(repo_opts.hash) = null;
 
-                        // find the target node ids that aren't in source
-                        var next_node_id = target_node_id;
-                        var next_node_id_hash = target_node_id_hash;
-                        while (try self.parent.target_live_parent_to_children.getCursor(next_node_id_hash)) |next_children_cursor| {
-                            if (null == try self.parent.source_live_parent_to_children.getCursor(next_node_id_hash)) {
-                                try target_node_ids.append(next_node_id);
+                        // find the target line ids that aren't in source
+                        var next_line_id = target_line_id;
+                        var next_line_id_hash = target_line_id_hash;
+                        while (try self.parent.target_live_parent_to_children.getCursor(next_line_id_hash)) |next_children_cursor| {
+                            if (null == try self.parent.source_live_parent_to_children.getCursor(next_line_id_hash)) {
+                                try target_line_ids.append(next_line_id);
                             } else {
-                                join_node_id_hash_maybe = next_node_id_hash;
+                                join_line_id_hash_maybe = next_line_id_hash;
                                 break;
                             }
                             var next_children_iter = try next_children_cursor.iterator();
@@ -868,30 +868,30 @@ fn writeBlobWithPatches(
                             if (try next_children_iter.next()) |next_child_cursor| {
                                 if (try next_children_iter.next() != null) return error.ExpectedOneChild;
                                 const next_kv_pair = try next_child_cursor.readKeyValuePair();
-                                var next_child_bytes = [_]u8{0} ** patch.NodeId(repo_opts.hash).byte_size;
+                                var next_child_bytes = [_]u8{0} ** patch.LineId(repo_opts.hash).byte_size;
                                 const next_child_slice = try next_kv_pair.key_cursor.readBytes(&next_child_bytes);
-                                next_node_id = blk: {
+                                next_line_id = blk: {
                                     var stream = std.io.fixedBufferStream(next_child_slice);
-                                    var node_id_reader = stream.reader();
-                                    break :blk @bitCast(try node_id_reader.readInt(patch.NodeId(repo_opts.hash).Int, .big));
+                                    var line_id_reader = stream.reader();
+                                    break :blk @bitCast(try line_id_reader.readInt(patch.LineId(repo_opts.hash).Int, .big));
                                 };
-                                next_node_id_hash = hash.hashInt(repo_opts.hash, next_child_slice);
+                                next_line_id_hash = hash.hashInt(repo_opts.hash, next_child_slice);
                             } else {
                                 break;
                             }
                         }
 
-                        var source_node_ids = std.ArrayList(patch.NodeId(repo_opts.hash)).init(self.parent.allocator);
-                        defer source_node_ids.deinit();
+                        var source_line_ids = std.ArrayList(patch.LineId(repo_opts.hash)).init(self.parent.allocator);
+                        defer source_line_ids.deinit();
 
-                        // find the source node ids that aren't in target
-                        next_node_id = source_node_id;
-                        next_node_id_hash = source_node_id_hash;
-                        while (try self.parent.source_live_parent_to_children.getCursor(next_node_id_hash)) |next_children_cursor| {
-                            if (null == try self.parent.target_live_parent_to_children.getCursor(next_node_id_hash)) {
-                                try source_node_ids.append(next_node_id);
+                        // find the source line ids that aren't in target
+                        next_line_id = source_line_id;
+                        next_line_id_hash = source_line_id_hash;
+                        while (try self.parent.source_live_parent_to_children.getCursor(next_line_id_hash)) |next_children_cursor| {
+                            if (null == try self.parent.target_live_parent_to_children.getCursor(next_line_id_hash)) {
+                                try source_line_ids.append(next_line_id);
                             } else {
-                                if (next_node_id_hash != join_node_id_hash_maybe) return error.ExpectedJoinNode;
+                                if (next_line_id_hash != join_line_id_hash_maybe) return error.ExpectedJoinLine;
                                 break;
                             }
                             var next_children_iter = try next_children_cursor.iterator();
@@ -899,78 +899,78 @@ fn writeBlobWithPatches(
                             if (try next_children_iter.next()) |next_child_cursor| {
                                 if (try next_children_iter.next() != null) return error.ExpectedOneChild;
                                 const next_kv_pair = try next_child_cursor.readKeyValuePair();
-                                var next_child_bytes = [_]u8{0} ** patch.NodeId(repo_opts.hash).byte_size;
+                                var next_child_bytes = [_]u8{0} ** patch.LineId(repo_opts.hash).byte_size;
                                 const next_child_slice = try next_kv_pair.key_cursor.readBytes(&next_child_bytes);
-                                next_node_id = blk: {
+                                next_line_id = blk: {
                                     var stream = std.io.fixedBufferStream(next_child_slice);
-                                    var node_id_reader = stream.reader();
-                                    break :blk @bitCast(try node_id_reader.readInt(patch.NodeId(repo_opts.hash).Int, .big));
+                                    var line_id_reader = stream.reader();
+                                    break :blk @bitCast(try line_id_reader.readInt(patch.LineId(repo_opts.hash).Int, .big));
                                 };
-                                next_node_id_hash = hash.hashInt(repo_opts.hash, next_child_slice);
+                                next_line_id_hash = hash.hashInt(repo_opts.hash, next_child_slice);
                             } else {
                                 break;
                             }
                         }
 
-                        var base_node_ids = std.ArrayList(patch.NodeId(repo_opts.hash)).init(self.parent.allocator);
-                        defer base_node_ids.deinit();
+                        var base_line_ids = std.ArrayList(patch.LineId(repo_opts.hash)).init(self.parent.allocator);
+                        defer base_line_ids.deinit();
 
-                        // find the base node ids up to (but not including) the join node id if it exists,
+                        // find the base line ids up to (but not including) the join line id if it exists,
                         // or until the end of the file
-                        next_node_id_hash = current_node_id_hash;
-                        while (try self.parent.base_live_parent_to_children.getCursor(next_node_id_hash)) |next_children_cursor| {
+                        next_line_id_hash = current_line_id_hash;
+                        while (try self.parent.base_live_parent_to_children.getCursor(next_line_id_hash)) |next_children_cursor| {
                             var next_children_iter = try next_children_cursor.iterator();
                             defer next_children_iter.deinit();
                             if (try next_children_iter.next()) |next_child_cursor| {
                                 if (try next_children_iter.next() != null) return error.ExpectedOneChild;
                                 const next_kv_pair = try next_child_cursor.readKeyValuePair();
-                                var next_child_bytes = [_]u8{0} ** patch.NodeId(repo_opts.hash).byte_size;
+                                var next_child_bytes = [_]u8{0} ** patch.LineId(repo_opts.hash).byte_size;
                                 const next_child_slice = try next_kv_pair.key_cursor.readBytes(&next_child_bytes);
-                                next_node_id = blk: {
+                                next_line_id = blk: {
                                     var stream = std.io.fixedBufferStream(next_child_slice);
-                                    var node_id_reader = stream.reader();
-                                    break :blk @bitCast(try node_id_reader.readInt(patch.NodeId(repo_opts.hash).Int, .big));
+                                    var line_id_reader = stream.reader();
+                                    break :blk @bitCast(try line_id_reader.readInt(patch.LineId(repo_opts.hash).Int, .big));
                                 };
-                                next_node_id_hash = hash.hashInt(repo_opts.hash, next_child_slice);
-                                if (join_node_id_hash_maybe) |join_node_id_hash| {
-                                    if (next_node_id_hash != join_node_id_hash) {
-                                        try base_node_ids.append(next_node_id);
+                                next_line_id_hash = hash.hashInt(repo_opts.hash, next_child_slice);
+                                if (join_line_id_hash_maybe) |join_line_id_hash| {
+                                    if (next_line_id_hash != join_line_id_hash) {
+                                        try base_line_ids.append(next_line_id);
                                     } else {
                                         break;
                                     }
                                 } else {
-                                    try base_node_ids.append(next_node_id);
+                                    try base_line_ids.append(next_line_id);
                                 }
                             } else {
                                 break;
                             }
                         }
 
-                        // set the current node id to be the parent of the join node id if it exists,
+                        // set the current line id to be the parent of the join line id if it exists,
                         // otherwise we're at the end of the file
-                        if (join_node_id_hash_maybe) |join_node_id_hash| {
-                            if (source_node_ids.items.len == 0) return error.ExpectedAtLeastOneSourceNodeId;
-                            const join_parent_node_id = source_node_ids.items[source_node_ids.items.len - 1];
-                            var join_parent_bytes = [_]u8{0} ** patch.NodeId(repo_opts.hash).byte_size;
+                        if (join_line_id_hash_maybe) |join_line_id_hash| {
+                            if (source_line_ids.items.len == 0) return error.ExpectedAtLeastOneSourceLineId;
+                            const join_parent_line_id = source_line_ids.items[source_line_ids.items.len - 1];
+                            var join_parent_bytes = [_]u8{0} ** patch.LineId(repo_opts.hash).byte_size;
                             {
                                 var stream = std.io.fixedBufferStream(&join_parent_bytes);
-                                var node_id_writer = stream.writer();
-                                try node_id_writer.writeInt(patch.NodeId(repo_opts.hash).Int, @bitCast(join_parent_node_id), .big);
+                                var line_id_writer = stream.writer();
+                                try line_id_writer.writeInt(patch.LineId(repo_opts.hash).Int, @bitCast(join_parent_line_id), .big);
                             }
-                            const join_parent_node_id_hash = hash.hashInt(repo_opts.hash, &join_parent_bytes);
-                            self.parent.current_node_id_hash = join_parent_node_id_hash;
+                            const join_parent_line_id_hash = hash.hashInt(repo_opts.hash, &join_parent_bytes);
+                            self.parent.current_line_id_hash = join_parent_line_id_hash;
 
-                            // TODO: is it actually guaranteed that the join node is in base?
-                            if (null == try self.parent.base_live_parent_to_children.getCursor(join_node_id_hash)) return error.ExpectedBaseToContainJoinNode;
+                            // TODO: is it actually guaranteed that the join line is in base?
+                            if (null == try self.parent.base_live_parent_to_children.getCursor(join_line_id_hash)) return error.ExpectedBaseToContainJoinLine;
                         } else {
-                            self.parent.current_node_id_hash = null;
+                            self.parent.current_line_id_hash = null;
                         }
 
-                        var base_lines = try LineRange.init(self.parent.state, self.parent.allocator, self.parent.patch_id_to_offset_list, base_node_ids.items);
+                        var base_lines = try LineRange.init(self.parent.state, self.parent.allocator, self.parent.patch_id_to_offset_list, base_line_ids.items);
                         defer base_lines.deinit();
-                        var target_lines = try LineRange.init(self.parent.state, self.parent.allocator, self.parent.patch_id_to_offset_list, target_node_ids.items);
+                        var target_lines = try LineRange.init(self.parent.state, self.parent.allocator, self.parent.patch_id_to_offset_list, target_line_ids.items);
                         defer target_lines.deinit();
-                        var source_lines = try LineRange.init(self.parent.state, self.parent.allocator, self.parent.patch_id_to_offset_list, source_node_ids.items);
+                        var source_lines = try LineRange.init(self.parent.state, self.parent.allocator, self.parent.patch_id_to_offset_list, source_line_ids.items);
                         defer source_lines.deinit();
 
                         // if base == target or target == source, return source to autoresolve conflict
@@ -1027,19 +1027,19 @@ fn writeBlobWithPatches(
                         self.parent.current_line = self.parent.line_buffer.items[0];
                         self.parent.has_conflict = true;
                     } else {
-                        var offset_list_cursor = (try self.parent.patch_id_to_offset_list.getCursor(first_node_id.patch_id)) orelse return error.KeyNotFound;
-                        const line = try readLine(self.parent.state, self.parent.allocator, &offset_list_cursor, first_node_id);
+                        var offset_list_cursor = (try self.parent.patch_id_to_offset_list.getCursor(first_line_id.patch_id)) orelse return error.KeyNotFound;
+                        const line = try readLine(self.parent.state, self.parent.allocator, &offset_list_cursor, first_line_id);
                         errdefer self.parent.allocator.free(line);
                         try self.parent.line_buffer.append(line);
                         self.parent.current_line = self.parent.line_buffer.items[0];
 
-                        const next_children_cursor = (try self.parent.merge_live_parent_to_children.getCursor(first_node_id_hash)) orelse return error.KeyNotFound;
+                        const next_children_cursor = (try self.parent.merge_live_parent_to_children.getCursor(first_line_id_hash)) orelse return error.KeyNotFound;
                         var next_children_iter = try next_children_cursor.iterator();
                         defer next_children_iter.deinit();
                         if (try next_children_iter.next()) |_| {
-                            self.parent.current_node_id_hash = first_node_id_hash;
+                            self.parent.current_line_id_hash = first_line_id_hash;
                         } else {
-                            self.parent.current_node_id_hash = null;
+                            self.parent.current_line_id_hash = null;
                         }
                     }
                     return self.readStep(buf);
@@ -1055,7 +1055,7 @@ fn writeBlobWithPatches(
             }
             self.line_buffer.clearAndFree();
             self.current_line = null;
-            self.current_node_id_hash = hash.hashInt(repo_opts.hash, &patch.NodeId(repo_opts.hash).first_bytes);
+            self.current_line_id_hash = hash.hashInt(repo_opts.hash, &patch.LineId(repo_opts.hash).first_bytes);
             self.has_conflict = false;
 
             for (0..offset) |_| {
@@ -1107,7 +1107,7 @@ fn writeBlobWithPatches(
         .patch_id_to_offset_list = &patch_id_to_offset_list,
         .line_buffer = &line_buffer,
         .current_line = null,
-        .current_node_id_hash = hash.hashInt(repo_opts.hash, &patch.NodeId(repo_opts.hash).first_bytes),
+        .current_line_id_hash = hash.hashInt(repo_opts.hash, &patch.LineId(repo_opts.hash).first_bytes),
         .has_conflict = false,
     };
 
