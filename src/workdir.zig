@@ -339,7 +339,7 @@ pub fn unaddPaths(
     try index.write(allocator, state);
 }
 
-/// removes the given paths from the index and optionally from the work_dir
+/// removes the given paths from the index and optionally from the work dir
 pub fn removePaths(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
@@ -643,7 +643,7 @@ pub fn migrate(
             } else {
                 const meta = fs.getMetadata(state.core.work_dir, path) catch |err| switch (err) {
                     error.FileNotFound, error.NotDir => {
-                        // if the path doesn't exist in the work_dir,
+                        // if the path doesn't exist in the work dir,
                         // but one of its parents *does* exist and isn't tracked
                         if (untrackedParent(repo_kind, repo_opts, state.core.work_dir, path, index)) |_| {
                             switch_result.setConflict();
@@ -699,7 +699,7 @@ pub fn migrate(
     }
 
     for (remove_files.keys()) |path| {
-        // update work_dir
+        // update work dir
         if (update_work_dir) {
             state.core.work_dir.deleteFile(path) catch |err| switch (err) {
                 error.FileNotFound => {},
@@ -720,7 +720,7 @@ pub fn migrate(
     }
 
     for (add_files.keys(), add_files.values()) |path, tree_entry| {
-        // update work_dir
+        // update work dir
         if (update_work_dir) {
             try objectToFile(repo_kind, repo_opts, state.readOnly(), allocator, path, tree_entry);
         }
@@ -729,7 +729,7 @@ pub fn migrate(
     }
 
     for (edit_files.keys(), edit_files.values()) |path, tree_entry| {
-        // update work_dir
+        // update work dir
         if (update_work_dir) {
             try objectToFile(repo_kind, repo_opts, state.readOnly(), allocator, path, tree_entry);
         }
@@ -821,7 +821,7 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     var index = try idx.Index(repo_kind, repo_opts).init(allocator, state.readOnly());
                     defer index.deinit();
 
-                    // update the work_dir
+                    // update the work dir
                     try migrate(repo_kind, repo_opts, state, allocator, tree_diff, &index, input.update_work_dir, if (input.force) null else &switch_result);
 
                     // return early if conflict
@@ -846,7 +846,7 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     var index = try idx.Index(repo_kind, repo_opts).init(allocator, state.readOnly());
                     defer index.deinit();
 
-                    // update the work_dir
+                    // update the work dir
                     try migrate(repo_kind, repo_opts, state, allocator, tree_diff, &index, input.update_work_dir, if (input.force) null else &switch_result);
 
                     // return early if conflict
