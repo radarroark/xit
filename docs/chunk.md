@@ -10,10 +10,6 @@ The above issues were very straight-forward to solve in xit:
 
 1. When an object is added to xit, it immediately splits it into chunks using FastCDC, a content-defined chunking algorithm. By chunking files, they are immediately being deduplicated because only the chunks that changed need to be saved internally. This is pretty much what every backup program on the planet does, so there is no innovation going on here, but that won't stop me from pretending there is.
 
-2. A chunk is only compressed if it contains text data. A chunk with binary data is always stored uncompressed. It marks this with a special byte at the beginning of the chunk. If the first byte is 0, it is uncompressed; if it is 1, it is zlib-compressed. Other algorithms can be accomodated later.
+2. A chunk with binary data is always stored uncompressed. Chunks mark their compression type with a special byte at the beginning of the chunk. If the first byte is 0, it is uncompressed; if it is 1, it is zlib-compressed. Other algorithms can be accomodated later.
 
-Since compression is done per chunk, rather than on the entire object, it won't compress as well as it would in git. You get more benefit from compression if you can run it over the entire file. I think this is a worthwhile tradeoff:
-
-* Compressing before chunking would harm deduplication by causing more chunks to be different compared to an earlier revision.
-
-* Compressing before chunking would force the system to decompress all previous chunks before getting the data in a given chunk. By compressing per chunk, we can jump directly to the chunk we want and only start decompressing from there.
+While xit has compression support, it currently disables it even for text files, because it significantly slows down patch creation/application. This means xit repos with text files will probably be larger on disk than git repos. We may re-enable it if perf improves, or possibly put it behind a config option, but I don't think it's that important these days. Disk space is cheap, and xit's patch code is computationally intense, so for now it's a good tradeoff to use more of the former to make the latter faster.

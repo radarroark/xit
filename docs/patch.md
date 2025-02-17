@@ -2,7 +2,7 @@ There are two broad categories of version control: snapshot-based and patch-base
 
 A snapshot-based system tracks the state of the repo after each change (the full content of the files at each commit). It's fair to say this side has "won", as the dominant VCS (git) and most of the lesser used ones (mercurial, fossil, etc) are in this category.
 
-A patch-based system tracks the change itself (a diff of the previous and current commit). The best examples are Darcs and Pijul. This side is clearly not as popular, but by being more obscure you do get to enjoy the warm fuzzy feelings of superiority over plebs who use the more popular approach. This is, naturally, its own form of winning.
+A patch-based system tracks the change itself (a diff of what changed since the last "commit"). The best examples are Darcs and Pijul. This side is clearly not as popular, but by being more obscure you do get to enjoy the warm fuzzy feelings of superiority over plebs who use the more popular approach. This is, naturally, its own form of winning.
 
 * The category can get confusing because some VCSes, such as mercurial, *do* store diffs internally at times. Even the much-maligned CVS (and RCS, on which it was built) stored diffs internally, rather than full contents of files. However, these are implementation details. Those systems used internal diffs merely as a storage optimization. What made Darcs and Pijul unique is that they exposed those diffs to the user as a first class concept, representing history as a set of patches and applying those patches to move changes.
 

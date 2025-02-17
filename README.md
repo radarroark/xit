@@ -17,8 +17,8 @@ A version control system written in Zig. Is it ready yet? Nope...it doesn't even
   * [read more](docs/tui.md) about the TUI
   * *status: partially implemented (only log and status for now)*
 * store large/binary files efficiently
-  * use modern chunking algorithm (FastCDC) so files are deltified efficiently
-  * only use compression on text data so the cost isn't paid on binary files where it has no benefit
+  * use modern chunking algorithm (FastCDC) so large files are deltified efficiently
+  * don't compress binary files...it has no benefit and sometimes makes them larger
   * [read more](docs/chunk.md) about chunking
   * *status: fully implemented*
 
