@@ -372,11 +372,10 @@ pub const CommandArgs = struct {
     map_args: std.StringArrayHashMap(?[]const u8),
     unused_args: std.StringArrayHashMap(void),
 
-    const standalone_keys = std.StaticStringMap(void).initComptime(.{
-        .{"--help"},
-        .{"--cli"},
-        .{"-f"},
-        .{"-r"},
+    // flags that can have a value associated with them
+    // must be included here
+    const value_flags = std.StaticStringMap(void).initComptime(.{
+        .{"-m"},
     });
 
     pub fn init(allocator: std.mem.Allocator, args: []const []const u8) !CommandArgs {
@@ -392,31 +391,25 @@ pub const CommandArgs = struct {
         var unused_args = std.StringArrayHashMap(void).init(arena.allocator());
 
         for (args) |arg| {
-            if (arg.len == 0) {
-                continue;
-            } else if (arg.len > 1 and arg[0] == '-') {
+            if (arg.len > 1 and arg[0] == '-') {
                 try map_args.put(arg, null);
                 try unused_args.put(arg, {});
             } else {
+                // if the last key is a value flag and doesn't have a value yet,
+                // set this arg as its value
                 const keys = map_args.keys();
                 if (keys.len > 0) {
                     const last_key = keys[keys.len - 1];
-                    const last_val_maybe = map_args.get(last_key);
-                    if (last_val_maybe) |last_val| {
-                        // if the last key doesn't have a value yet and isn't standalone, add it
-                        if (last_val == null and !standalone_keys.has(last_key)) {
+                    if (map_args.get(last_key)) |last_val| {
+                        if (value_flags.has(last_key) and last_val == null) {
                             try map_args.put(last_key, arg);
+                            continue;
                         }
-                        // otherwise, it's a positional arg
-                        else {
-                            try positional_args.append(arg);
-                        }
-                    } else {
-                        try positional_args.append(arg);
                     }
-                } else {
-                    try positional_args.append(arg);
                 }
+
+                // in any other case, just consider it a positional arg
+                try positional_args.append(arg);
             }
         }
 
@@ -463,7 +456,8 @@ pub const CommandArgs = struct {
         return self.map_args.contains(arg);
     }
 
-    pub fn get(self: *CommandArgs, arg: []const u8) ??[]const u8 {
+    pub fn get(self: *CommandArgs, comptime arg: []const u8) ??[]const u8 {
+        comptime std.debug.assert(value_flags.has(arg)); // can only call `get` with flags included in `value_flags`
         _ = self.unused_args.orderedRemove(arg);
         return self.map_args.get(arg);
     }
