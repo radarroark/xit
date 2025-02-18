@@ -36,7 +36,7 @@ pub fn add(
 
     const target = try rf.readHeadRecur(repo_kind, repo_opts, state.readOnly());
     const tag_oid = try obj.writeTag(repo_kind, repo_opts, state, allocator, input, &target);
-    try rf.write(repo_kind, repo_opts, state, ref_path, &tag_oid);
+    try rf.write(repo_kind, repo_opts, state, ref_path, .{ .oid = &tag_oid });
 
     return tag_oid;
 }

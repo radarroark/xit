@@ -379,8 +379,18 @@ pub fn write(
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
     ref_path: []const u8,
-    content: []const u8,
+    ref_or_oid: RefOrOid(repo_opts.hash),
 ) !void {
+    var buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
+    const content = switch (ref_or_oid) {
+        .oid => |oid| oid,
+        .ref => |ref| blk: {
+            var path_buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
+            const path = try ref.toPath(&path_buffer);
+            break :blk try std.fmt.bufPrint(&buffer, "ref: {s}", .{path});
+        },
+    };
+
     switch (repo_kind) {
         .git => {
             if (std.fs.path.dirname(ref_path)) |ref_parent_path| {
@@ -441,22 +451,20 @@ pub fn writeRecur(
     var buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
     const ref_or_oid_maybe = read(repo_kind, repo_opts, state.readOnly(), ref_path, &buffer) catch |err| switch (err) {
         error.RefNotFound => {
-            try write(repo_kind, repo_opts, state, ref_path, oid_hex);
+            try write(repo_kind, repo_opts, state, ref_path, .{ .oid = oid_hex });
             return;
         },
         else => |e| return e,
     };
-    if (ref_or_oid_maybe) |input| {
-        switch (input) {
-            .ref => |ref| {
-                var ref_path_buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
-                const next_ref_path = try ref.toPath(&ref_path_buffer);
-                try writeRecur(repo_kind, repo_opts, state, next_ref_path, oid_hex);
-            },
-            .oid => try write(repo_kind, repo_opts, state, ref_path, oid_hex),
-        }
+    if (ref_or_oid_maybe) |input| switch (input) {
+        .ref => |ref| {
+            var ref_path_buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
+            const next_ref_path = try ref.toPath(&ref_path_buffer);
+            try writeRecur(repo_kind, repo_opts, state, next_ref_path, oid_hex);
+        },
+        .oid => try write(repo_kind, repo_opts, state, ref_path, .{ .oid = oid_hex }),
     } else {
-        try write(repo_kind, repo_opts, state, ref_path, oid_hex);
+        try write(repo_kind, repo_opts, state, ref_path, .{ .oid = oid_hex });
     }
 }
 
@@ -466,16 +474,7 @@ pub fn replaceHead(
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
     ref_or_oid: RefOrOid(repo_opts.hash),
 ) !void {
-    var buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
-    const content = switch (ref_or_oid) {
-        .oid => |oid| oid,
-        .ref => |ref| blk: {
-            var path_buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
-            const path = try ref.toPath(&path_buffer);
-            break :blk try std.fmt.bufPrint(&buffer, "ref: {s}", .{path});
-        },
-    };
-    try write(repo_kind, repo_opts, state, "HEAD", content);
+    try write(repo_kind, repo_opts, state, "HEAD", ref_or_oid);
 }
 
 pub fn updateHead(
