@@ -94,7 +94,7 @@ pub const Ref = struct {
     }
 };
 
-fn isOid(comptime hash_kind: hash.HashKind, content: []const u8) bool {
+pub fn isOid(comptime hash_kind: hash.HashKind, content: []const u8) bool {
     if (content.len != hash.hexLen(hash_kind)) {
         return false;
     }
