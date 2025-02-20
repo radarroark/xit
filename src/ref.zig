@@ -385,9 +385,9 @@ pub fn write(
     const content = switch (ref_or_oid) {
         .oid => |oid| oid,
         .ref => |ref| blk: {
-            var path_buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
-            const path = try ref.toPath(&path_buffer);
-            break :blk try std.fmt.bufPrint(&buffer, "ref: {s}", .{path});
+            @memcpy(buffer[0..REF_START_STR.len], REF_START_STR);
+            const path = try ref.toPath(buffer[REF_START_STR.len..]);
+            break :blk buffer[0 .. REF_START_STR.len + path.len];
         },
     };
 
