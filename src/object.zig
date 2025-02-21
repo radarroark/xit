@@ -996,6 +996,10 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
     };
 }
 
+pub const ObjectIteratorOptions = struct {
+    recursive: bool,
+};
+
 pub fn ObjectIterator(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
@@ -1008,16 +1012,12 @@ pub fn ObjectIterator(
         oid_queue: std.DoublyLinkedList([hash.hexLen(repo_opts.hash)]u8),
         oid_excludes: std.AutoHashMap([hash.hexLen(repo_opts.hash)]u8, void),
         object: Object(repo_kind, repo_opts, load_kind),
-        options: Options,
-
-        pub const Options = struct {
-            recursive: bool,
-        };
+        options: ObjectIteratorOptions,
 
         pub fn init(
             allocator: std.mem.Allocator,
             state: rp.Repo(repo_kind, repo_opts).State(.read_only),
-            options: Options,
+            options: ObjectIteratorOptions,
         ) !ObjectIterator(repo_kind, repo_opts, load_kind) {
             return .{
                 .allocator = allocator,

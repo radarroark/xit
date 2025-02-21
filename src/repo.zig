@@ -802,7 +802,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
         pub fn logRaw(
             self: *Repo(repo_kind, repo_opts),
             allocator: std.mem.Allocator,
-            opts: obj.ObjectIterator(repo_kind, repo_opts, .full).Options,
+            opts: obj.ObjectIteratorOptions,
         ) !obj.ObjectIterator(repo_kind, repo_opts, .raw) {
             var moment = try self.core.latestMoment();
             const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
