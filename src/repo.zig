@@ -57,6 +57,9 @@ pub const InitOpts = struct {
 
 pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind)) type {
     return struct {
+        comptime self_repo_kind: RepoKind = repo_kind,
+        comptime self_repo_opts: RepoOpts(repo_kind) = repo_opts,
+
         core: Core,
         init_opts: InitOpts,
 
@@ -778,7 +781,11 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             try work.restore(repo_kind, repo_opts, state, allocator, path_parts);
         }
 
-        pub fn log(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, start_oids_maybe: ?[]const [hash.hexLen(repo_opts.hash)]u8) !obj.ObjectIterator(repo_kind, repo_opts, .full) {
+        pub fn log(
+            self: *Repo(repo_kind, repo_opts),
+            allocator: std.mem.Allocator,
+            start_oids_maybe: ?[]const [hash.hexLen(repo_opts.hash)]u8,
+        ) !obj.ObjectIterator(repo_kind, repo_opts, .full) {
             var moment = try self.core.latestMoment();
             const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
             var iter = try obj.ObjectIterator(repo_kind, repo_opts, .full).init(allocator, state, .{ .recursive = false });
@@ -790,6 +797,16 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
 
             return iter;
+        }
+
+        pub fn logRaw(
+            self: *Repo(repo_kind, repo_opts),
+            allocator: std.mem.Allocator,
+            opts: obj.ObjectIterator(repo_kind, repo_opts, .full).Options,
+        ) !obj.ObjectIterator(repo_kind, repo_opts, .raw) {
+            var moment = try self.core.latestMoment();
+            const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
+            return try obj.ObjectIterator(repo_kind, repo_opts, .raw).init(allocator, state, opts);
         }
 
         pub fn merge(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: mrg.MergeInput(repo_kind, repo_opts.hash)) !mrg.Merge(repo_kind, repo_opts) {
@@ -1110,11 +1127,14 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
         ) !void {
             switch (repo_kind) {
                 .git => {
-                    while (try obj_iter.next()) |object| {
-                        defer object.deinit();
-                        var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-                        try obj.writeObject(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, &object.object_reader, object.object_reader.reader.reader(), object.object_reader.header, &oid);
-                    }
+                    try obj.copyObjects(
+                        repo_kind,
+                        repo_opts,
+                        .{ .core = &self.core, .extra = .{} },
+                        source_repo_kind,
+                        source_repo_opts,
+                        obj_iter,
+                    );
                 },
                 .xit => {
                     const Ctx = struct {
@@ -1124,11 +1144,14 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            while (try ctx.obj_iter.next()) |object| {
-                                defer object.deinit();
-                                var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-                                try obj.writeObject(repo_kind, repo_opts, state, &object.object_reader, object.object_reader.reader.reader(), object.object_reader.header, &oid);
-                            }
+                            try obj.copyObjects(
+                                repo_kind,
+                                repo_opts,
+                                state,
+                                source_repo_kind,
+                                source_repo_opts,
+                                ctx.obj_iter,
+                            );
                         }
                     };
 

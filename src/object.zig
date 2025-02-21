@@ -1135,3 +1135,26 @@ pub fn ObjectIterator(
         }
     };
 }
+
+pub fn copyObjects(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+    comptime source_repo_kind: rp.RepoKind,
+    comptime source_repo_opts: rp.RepoOpts(source_repo_kind),
+    obj_iter: *ObjectIterator(source_repo_kind, source_repo_opts, .raw),
+) !void {
+    while (try obj_iter.next()) |object| {
+        defer object.deinit();
+        var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
+        try writeObject(
+            repo_kind,
+            repo_opts,
+            state,
+            &object.object_reader,
+            object.object_reader.reader.reader(),
+            object.object_reader.header,
+            &oid,
+        );
+    }
+}
