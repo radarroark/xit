@@ -61,8 +61,7 @@ pub fn run(
             defer any_repo.deinit();
             switch (any_repo) {
                 .none => return error.HashKindNotFound,
-                .sha1 => |*repo| try ui.start(repo_kind, repo_opts.withHash(.sha1), repo, allocator, cmd_kind_maybe),
-                .sha256 => |*repo| try ui.start(repo_kind, repo_opts.withHash(.sha256), repo, allocator, cmd_kind_maybe),
+                inline else => |*repo| try ui.start(repo.self_repo_kind, repo.self_repo_opts, repo, allocator, cmd_kind_maybe),
             }
         } else {
             var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = cwd });
@@ -100,13 +99,9 @@ pub fn run(
                 defer any_repo.deinit();
                 switch (any_repo) {
                     .none => return error.HashKindNotFound,
-                    .sha1 => |*repo| {
-                        const cmd_maybe = try cmd.Command(repo_kind, .sha1).init(&cmd_args);
-                        try runCommand(repo_kind, repo_opts.withHash(.sha1), repo, allocator, cmd_maybe orelse return error.InvalidCommand, writers);
-                    },
-                    .sha256 => |*repo| {
-                        const cmd_maybe = try cmd.Command(repo_kind, .sha256).init(&cmd_args);
-                        try runCommand(repo_kind, repo_opts.withHash(.sha256), repo, allocator, cmd_maybe orelse return error.InvalidCommand, writers);
+                    inline else => |*repo| {
+                        const cmd_maybe = try cmd.Command(repo.self_repo_kind, repo.self_repo_opts.hash).init(&cmd_args);
+                        try runCommand(repo.self_repo_kind, repo.self_repo_opts, repo, allocator, cmd_maybe orelse return error.InvalidCommand, writers);
                     },
                 }
             } else {
