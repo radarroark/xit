@@ -538,7 +538,10 @@ fn printMergeResult(
 /// at least, not that i know of. i guess internally zig probably
 /// has an earlier entrypoint which is even mainier than this.
 pub fn main() !u8 {
-    const allocator = std.heap.page_allocator;
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
     var args = std.ArrayList([]const u8).init(allocator);
     defer args.deinit();
 
