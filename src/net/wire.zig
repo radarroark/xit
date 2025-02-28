@@ -584,10 +584,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                     };
 
                     var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-                    switch (pack_reader.internal) {
-                        .basic => try obj.writeObject(repo_kind, repo_opts, state, &stream, stream.reader(), pack_reader.internal.basic.header, &oid),
-                        .delta => return error.NotImplemented,
-                    }
+                    try obj.writeObject(repo_kind, repo_opts, state, &stream, stream.reader(), try pack_reader.header(), &oid);
                 }
             }
         }
