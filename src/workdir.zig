@@ -176,7 +176,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                         index_bools.*[entry_index] = true;
                         const entries_for_path = index.entries.values()[entry_index];
                         if (entries_for_path[0]) |entry| {
-                            if (try indexDiffersFromMount(repo_kind, repo_opts, &entry, file, meta)) {
+                            if (try indexDiffersFromWorkDir(repo_kind, repo_opts, &entry, file, meta)) {
                                 try modified.put(allocator, path, Status(repo_kind, repo_opts).Entry{ .path = path, .meta = meta });
                             }
                         }
@@ -257,7 +257,7 @@ pub const RemoveOptions = struct {
     update_work_dir: bool = true,
 };
 
-pub fn indexDiffersFromMount(
+pub fn indexDiffersFromWorkDir(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     entry: *const idx.Index(repo_kind, repo_opts).Entry,
@@ -395,7 +395,7 @@ pub fn removePaths(
 
                             const file = try state.core.work_dir.openFile(path, .{ .mode = .read_only });
                             defer file.close();
-                            if (try indexDiffersFromMount(repo_kind, repo_opts, &index_entry, file, meta)) {
+                            if (try indexDiffersFromWorkDir(repo_kind, repo_opts, &index_entry, file, meta)) {
                                 differs_from_work_dir = true;
                             }
                         }
@@ -490,22 +490,22 @@ pub fn objectToFile(
     }
 }
 
-pub const TreeToMountChange = enum {
+pub const TreeToWorkDirChange = enum {
     none,
     untracked,
     deleted,
     modified,
 };
 
-fn compareIndexToMount(
+fn compareIndexToWorkDir(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     entry_maybe: ?idx.Index(repo_kind, repo_opts).Entry,
     file_maybe: ?std.fs.File,
-) !TreeToMountChange {
+) !TreeToWorkDirChange {
     if (entry_maybe) |entry| {
         if (file_maybe) |file| {
-            if (try indexDiffersFromMount(repo_kind, repo_opts, &entry, file, try file.metadata())) {
+            if (try indexDiffersFromWorkDir(repo_kind, repo_opts, &entry, file, try file.metadata())) {
                 return .modified;
             } else {
                 return .none;
@@ -665,7 +665,7 @@ pub fn migrate(
                         const file = try state.core.work_dir.openFile(path, .{ .mode = .read_only });
                         defer file.close();
                         // if the path is a file that differs from the index
-                        if (try compareIndexToMount(repo_kind, repo_opts, entry_maybe, file) != .none) {
+                        if (try compareIndexToWorkDir(repo_kind, repo_opts, entry_maybe, file) != .none) {
                             switch_result.setConflict();
                             if (entry_maybe) |_| {
                                 try switch_result.result.conflict.stale_files.put(path, {});
