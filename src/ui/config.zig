@@ -100,7 +100,7 @@ pub fn ConfigList(comptime Widget: type, comptime repo_kind: rp.RepoKind, compti
         arena: *std.heap.ArenaAllocator,
 
         pub fn init(allocator: std.mem.Allocator, repo: *rp.Repo(repo_kind, repo_opts)) !ConfigList(Widget, repo_kind, repo_opts) {
-            var config = try repo.config(allocator);
+            var config = try repo.listConfig(allocator);
             errdefer config.deinit();
 
             const arena = try allocator.create(std.heap.ArenaAllocator);

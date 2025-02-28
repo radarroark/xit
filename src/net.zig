@@ -1,272 +1,668 @@
 const std = @import("std");
-const network = @import("network");
+const net_fetch = @import("./net/fetch.zig");
+const net_transport = @import("./net/transport.zig");
+const net_push = @import("./net/push.zig");
+const net_refspec = @import("./net/refspec.zig");
+const net_clone = @import("./net/clone.zig");
 const rp = @import("./repo.zig");
-const obj = @import("./object.zig");
-const hash = @import("./hash.zig");
-const fs = @import("./fs.zig");
-const pack = @import("./pack.zig");
 const rf = @import("./ref.zig");
+const hash = @import("./hash.zig");
+const cfg = @import("./config.zig");
+const obj = @import("./object.zig");
 
-const TIMEOUT_MICRO_SECS: u32 = 2_000_000;
-
-pub const FetchResult = struct {
-    object_count: u32,
+pub const Direction = enum {
+    fetch,
+    push,
 };
+
+pub const Opts = net_transport.Opts;
+
+pub fn RemoteHead(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
+    return struct {
+        oid: [hash.hexLen(repo_opts.hash)]u8,
+        loid: [hash.hexLen(repo_opts.hash)]u8,
+        is_local: bool,
+        name: []u8,
+        symref: ?[]u8,
+
+        pub fn init(name: []u8) RemoteHead(repo_kind, repo_opts) {
+            return .{
+                .oid = [_]u8{'0'} ** hash.hexLen(repo_opts.hash),
+                .loid = [_]u8{'0'} ** hash.hexLen(repo_opts.hash),
+                .is_local = false,
+                .name = name,
+                .symref = null,
+            };
+        }
+
+        pub fn deinit(self: *RemoteHead(repo_kind, repo_opts), allocator: std.mem.Allocator) void {
+            allocator.free(self.name);
+            if (self.symref) |target| allocator.free(target);
+        }
+    };
+}
+
+pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
+    return struct {
+        name: ?[]const u8,
+        url: ?[]const u8,
+        push_url: ?[]const u8,
+        heads: std.StringArrayHashMapUnmanaged(RemoteHead(repo_kind, repo_opts)),
+        refspecs: std.ArrayListUnmanaged(net_refspec.RefSpec),
+        active_refspecs: std.ArrayListUnmanaged(net_refspec.RefSpec),
+        transport: ?net_transport.Transport(repo_kind, repo_opts),
+        push: ?net_push.Push(repo_kind, repo_opts),
+        requires_fetch: bool,
+        nego: net_fetch.FetchNegotiation(repo_kind, repo_opts),
+
+        pub fn init(
+            allocator: std.mem.Allocator,
+            name: []const u8,
+            url: []const u8,
+        ) !Remote(repo_kind, repo_opts) {
+            var remote = std.mem.zeroInit(Remote(repo_kind, repo_opts), .{});
+
+            remote.heads = try std.StringArrayHashMapUnmanaged(RemoteHead(repo_kind, repo_opts)).init(allocator, &.{}, &.{});
+            remote.refspecs = std.ArrayListUnmanaged(net_refspec.RefSpec){};
+            remote.active_refspecs = std.ArrayListUnmanaged(net_refspec.RefSpec){};
+
+            remote.url = try allocator.dupe(u8, url);
+            remote.name = try allocator.dupe(u8, name);
+
+            {
+                var fetchspec = std.ArrayList(u8).init(allocator);
+                defer fetchspec.deinit();
+                try fetchspec.writer().print("+refs/heads/*:refs/remotes/{s}/*", .{name});
+
+                var spec = try net_refspec.RefSpec.init(allocator, fetchspec.items, .fetch);
+                errdefer spec.deinit(allocator);
+                try remote.refspecs.append(allocator, spec);
+            }
+
+            for (remote.refspecs.items) |*spec| {
+                var spec_dupe = try spec.dupe(allocator);
+                errdefer spec_dupe.deinit(allocator);
+                try remote.active_refspecs.append(allocator, spec_dupe);
+            }
+
+            return remote;
+        }
+
+        pub fn initFromConfig(
+            state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+            allocator: std.mem.Allocator,
+            name: []const u8,
+        ) !Remote(repo_kind, repo_opts) {
+            if (!rf.validateName(name)) {
+                return error.InvalidRemoteName;
+            }
+
+            var config = try cfg.Config(repo_kind, repo_opts).init(state, allocator);
+            defer config.deinit();
+
+            var remote = std.mem.zeroInit(Remote(repo_kind, repo_opts), .{});
+            errdefer remote.deinit(allocator);
+
+            remote.name = try allocator.dupe(u8, name);
+
+            remote.heads = try std.StringArrayHashMapUnmanaged(RemoteHead(repo_kind, repo_opts)).init(allocator, &.{}, &.{});
+            remote.refspecs = std.ArrayListUnmanaged(net_refspec.RefSpec){};
+            remote.active_refspecs = std.ArrayListUnmanaged(net_refspec.RefSpec){};
+
+            const remote_section_name = try std.fmt.allocPrint(allocator, "remote.{s}", .{name});
+            defer allocator.free(remote_section_name);
+
+            const remote_vars = config.sections.get(remote_section_name) orelse return error.ConfigNotFound;
+            var found_remote = false;
+
+            if (remote_vars.get("url")) |remote_url| {
+                found_remote = true;
+                remote.url = try allocator.dupe(u8, remote_url);
+            }
+
+            if (remote_vars.get("pushurl")) |remote_push_url| {
+                found_remote = true;
+                remote.push_url = try allocator.dupe(u8, remote_push_url);
+            }
+
+            if (!found_remote) {
+                return error.RemoteNotFound;
+            }
+
+            for (remote.refspecs.items) |*spec| {
+                var spec_dupe = try spec.dupe(allocator);
+                errdefer spec_dupe.deinit(allocator);
+                try remote.active_refspecs.append(allocator, spec_dupe);
+            }
+
+            return remote;
+        }
+
+        pub fn deinit(self: *Remote(repo_kind, repo_opts), allocator: std.mem.Allocator) void {
+            if (self.name) |name| allocator.free(name);
+            if (self.url) |url| allocator.free(url);
+            if (self.push_url) |push_url| allocator.free(push_url);
+
+            if (self.transport) |*transport| {
+                self.disconnect(allocator) catch {};
+
+                transport.deinit(allocator);
+
+                self.transport = null;
+            }
+
+            self.heads.deinit(allocator);
+
+            clearRefSpecs(allocator, &self.refspecs);
+            self.refspecs.deinit(allocator);
+
+            clearRefSpecs(allocator, &self.active_refspecs);
+            self.active_refspecs.deinit(allocator);
+
+            if (self.push) |*remote_push| {
+                remote_push.deinit(allocator);
+            }
+        }
+
+        pub fn dupe(self: *const Remote(repo_kind, repo_opts), allocator: std.mem.Allocator) !Remote(repo_kind, repo_opts) {
+            var remote = std.mem.zeroInit(Remote(repo_kind, repo_opts), .{});
+
+            if (self.name) |name| {
+                remote.name = try allocator.dupe(u8, name);
+            }
+
+            if (self.url) |url| {
+                remote.url = try allocator.dupe(u8, url);
+            }
+
+            if (self.push_url) |push_url| {
+                remote.push_url = try allocator.dupe(u8, push_url);
+            }
+
+            remote.heads = try std.StringArrayHashMapUnmanaged(RemoteHead(repo_kind, repo_opts)).init(allocator, &.{}, &.{});
+            remote.refspecs = std.ArrayListUnmanaged(net_refspec.RefSpec){};
+            remote.active_refspecs = std.ArrayListUnmanaged(net_refspec.RefSpec){};
+
+            for (self.refspecs.items) |*spec| {
+                var spec_dupe = try spec.dupe(allocator);
+                errdefer spec_dupe.deinit(allocator);
+                try remote.refspecs.append(allocator, spec_dupe);
+            }
+
+            return remote;
+        }
+
+        pub fn connected(self: *const Remote(repo_kind, repo_opts)) bool {
+            if (self.transport) |*transport| {
+                return transport.isConnected();
+            }
+
+            return false;
+        }
+
+        pub fn stop(self: *Remote(repo_kind, repo_opts)) void {
+            if (self.transport) |*transport| {
+                transport.cancel();
+            }
+        }
+
+        pub fn disconnect(self: *Remote(repo_kind, repo_opts), allocator: std.mem.Allocator) !void {
+            if (self.connected()) {
+                try self.transport.?.close(allocator);
+            }
+        }
+
+        pub fn setLocalHeads(
+            self: *Remote(repo_kind, repo_opts),
+            state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+            allocator: std.mem.Allocator,
+        ) !void {
+            for (self.heads.values()) |*head| {
+                var obj_exists = true;
+                var object_or_err = obj.Object(repo_kind, repo_opts, .raw).init(allocator, state, &head.oid);
+                if (object_or_err) |*object| {
+                    defer object.deinit();
+                } else |err| switch (err) {
+                    error.ObjectNotFound => obj_exists = false,
+                    else => |e| return e,
+                }
+
+                if (obj_exists) {
+                    head.is_local = true;
+                } else {
+                    self.requires_fetch = true;
+                }
+            }
+        }
+    };
+}
+
+pub fn matchingRefSpec(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    remote: *Remote(repo_kind, repo_opts),
+    comptime kind: enum { dst, src },
+    refname: []const u8,
+) ?*net_refspec.RefSpec {
+    for (remote.active_refspecs.items) |*spec| {
+        if (.push == spec.direction) {
+            continue;
+        }
+        const target = switch (kind) {
+            .dst => spec.dst,
+            .src => spec.src,
+        };
+        if (net_refspec.matches(target, refname)) {
+            return spec;
+        }
+    }
+    return null;
+}
+
+pub fn clearRefSpecs(allocator: std.mem.Allocator, arr: *std.ArrayListUnmanaged(net_refspec.RefSpec)) void {
+    for (arr.items) |*spec| {
+        spec.deinit(allocator);
+    }
+    arr.clearAndFree(allocator);
+}
+
+fn getHeads(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    remote: *Remote(repo_kind, repo_opts),
+    allocator: std.mem.Allocator,
+) !std.StringArrayHashMapUnmanaged(RemoteHead(repo_kind, repo_opts)) {
+    var refs = try std.StringArrayHashMapUnmanaged(RemoteHead(repo_kind, repo_opts)).init(allocator, &.{}, &.{});
+    errdefer refs.deinit(allocator);
+
+    const heads = if (remote.transport) |*transport| try transport.getHeads() else return error.RemoteNotConnected;
+
+    for (heads) |*head| {
+        try refs.put(allocator, head.name, head.*);
+    }
+
+    return refs;
+}
+
+fn download(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+    allocator: std.mem.Allocator,
+    remote: *Remote(repo_kind, repo_opts),
+    refspecs_maybe: ?[]const []const u8,
+) !void {
+    var refs = try getHeads(repo_kind, repo_opts, remote, allocator);
+    defer refs.deinit(allocator);
+
+    var specs = std.ArrayListUnmanaged(net_refspec.RefSpec){};
+    defer {
+        clearRefSpecs(allocator, &specs);
+        specs.deinit(allocator);
+    }
+
+    const new_active_refspecs: *std.ArrayListUnmanaged(net_refspec.RefSpec) =
+        if (refspecs_maybe) |refspecs|
+    blk: {
+        if (refspecs.len == 0) {
+            break :blk &remote.refspecs;
+        } else {
+            for (refspecs) |refspec| {
+                var spec = try net_refspec.RefSpec.init(allocator, refspec, .fetch);
+                errdefer spec.deinit(allocator);
+                try specs.append(allocator, spec);
+            }
+            break :blk &specs;
+        }
+    } else &remote.refspecs;
+
+    clearRefSpecs(allocator, &remote.active_refspecs);
+    for (new_active_refspecs.items) |*spec| {
+        var spec_dupe = try spec.dupe(allocator);
+        errdefer spec_dupe.deinit(allocator);
+        try remote.active_refspecs.append(allocator, spec_dupe);
+    }
+
+    if (remote.push) |*remote_push| {
+        remote_push.deinit(allocator);
+        remote.push = null;
+    }
+
+    try net_fetch.negotiate(repo_kind, repo_opts, state.readOnly(), allocator, remote);
+
+    try net_fetch.downloadPack(repo_kind, repo_opts, state, allocator, remote);
+}
+
+pub fn connect(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+    allocator: std.mem.Allocator,
+    remote: *Remote(repo_kind, repo_opts),
+    direction: Direction,
+    transport_opts: Opts,
+) !void {
+    const url = switch (direction) {
+        .fetch => remote.url,
+        .push => remote.push_url orelse remote.url,
+    } orelse return error.UrlNotFound;
+
+    if (remote.transport) |*transport| {
+        try transport.connect(state, allocator, url, direction);
+    } else {
+        var t = try net_transport.Transport(repo_kind, repo_opts).init(state, allocator, url, transport_opts);
+        errdefer t.deinit(allocator);
+        try t.connect(state, allocator, url, direction);
+        remote.transport = t;
+    }
+}
+
+fn updateRef(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+    ref_path: []const u8,
+    oid_hex: *const [hash.hexLen(repo_opts.hash)]u8,
+) !void {
+    const ref = rf.Ref.initFromPath(ref_path) orelse return error.InvalidRefPath;
+    const existing_oid_maybe = try rf.readRecur(repo_kind, repo_opts, state.readOnly(), .{ .ref = ref });
+
+    if (existing_oid_maybe) |*existing_oid| {
+        if (std.mem.eql(u8, existing_oid, oid_hex)) {
+            return;
+        }
+        // TODO: assert that `old_id` is the content of the ref.
+        // this will be unnecessary when repo_kind is .xit because
+        // everything will be in a transaction, but with git the
+        // file may have been modified after we read it.
+    }
+
+    try rf.write(repo_kind, repo_opts, state, ref_path, .{ .oid = oid_hex });
+}
+
+pub fn resolveRef(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+    allocator: std.mem.Allocator,
+    ref: rf.Ref,
+) !?[hash.hexLen(repo_opts.hash)]u8 {
+    const oid = try rf.readRecur(repo_kind, repo_opts, state, .{ .ref = ref }) orelse return null;
+    var object = obj.Object(repo_kind, repo_opts, .raw).init(allocator, state, &oid) catch |err| switch (err) {
+        error.ObjectNotFound => return null,
+        else => |e| return e,
+    };
+    defer object.deinit();
+    return oid;
+}
+
+pub fn resolveRefPath(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+    allocator: std.mem.Allocator,
+    ref_path: []const u8,
+) !?[hash.hexLen(repo_opts.hash)]u8 {
+    const ref = rf.Ref.initFromPath(ref_path) orelse return error.InvalidRefPath;
+    return try resolveRef(repo_kind, repo_opts, state, allocator, ref);
+}
+
+fn updateHead(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+    allocator: std.mem.Allocator,
+    spec: *net_refspec.RefSpec,
+    head: *RemoteHead(repo_kind, repo_opts),
+    tagspec: *net_refspec.RefSpec,
+) !void {
+    var ref_path = std.ArrayList(u8).init(allocator);
+    defer ref_path.deinit();
+
+    if (!net_refspec.validateName(head.name, false)) {
+        return;
+    }
+
+    if (net_refspec.matches(tagspec.src, head.name)) {
+        try ref_path.appendSlice(head.name);
+    }
+
+    if (net_refspec.matches(spec.src, head.name)) {
+        if (spec.dst.len > 0) {
+            try net_refspec.transform(&ref_path, spec, head.name);
+        } else {
+            return;
+        }
+    }
+
+    if (0 == ref_path.items.len) {
+        return;
+    }
+
+    const oid_maybe = try resolveRefPath(repo_kind, repo_opts, state.readOnly(), allocator, ref_path.items);
+
+    if (oid_maybe) |*oid| {
+        if (!spec.is_force) {
+            // TODO: return early if head.oid is a descendent of oid
+            _ = oid;
+        }
+    }
+
+    try rf.write(repo_kind, repo_opts, state, ref_path.items, .{ .oid = &head.oid });
+}
+
+fn updateRefs(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+    allocator: std.mem.Allocator,
+    spec: *net_refspec.RefSpec,
+    refs: *std.StringArrayHashMapUnmanaged(RemoteHead(repo_kind, repo_opts)),
+) !void {
+    var tagspec = try net_refspec.RefSpec.init(allocator, net_refspec.git_refspec_tags, .fetch);
+    defer tagspec.deinit(allocator);
+
+    for (refs.values()) |*head| {
+        try updateHead(repo_kind, repo_opts, state, allocator, spec, head, &tagspec);
+    }
+
+    if (rf.isOid(repo_opts.hash, spec.src)) {
+        if (spec.dst.len > 0) {
+            try updateRef(repo_kind, repo_opts, state, spec.dst, spec.src[0..comptime hash.hexLen(repo_opts.hash)]);
+        }
+    }
+}
+
+fn updateHeads(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+    allocator: std.mem.Allocator,
+    remote: *Remote(repo_kind, repo_opts),
+) !void {
+    // TODO: update heads on push
+    if (remote.push) |_| {
+        return;
+    }
+
+    var tagspec = try net_refspec.RefSpec.init(allocator, net_refspec.git_refspec_tags, .fetch);
+    defer tagspec.deinit(allocator);
+
+    var refs = try getHeads(repo_kind, repo_opts, remote, allocator);
+    defer refs.deinit(allocator);
+
+    try updateRefs(repo_kind, repo_opts, state, allocator, &tagspec, &refs);
+
+    for (remote.active_refspecs.items) |*spec| {
+        if (.push == spec.direction) {
+            continue;
+        }
+        try updateRefs(repo_kind, repo_opts, state, allocator, spec, &refs);
+    }
+}
 
 pub fn fetch(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
     allocator: std.mem.Allocator,
-    remote_name: []const u8,
-    uri: std.Uri,
-) !FetchResult {
-    try network.init();
-    defer network.deinit();
+    remote: *Remote(repo_kind, repo_opts),
+    transport_opts: Opts,
+) !void {
+    if (!remote.connected()) {
+        try connect(repo_kind, repo_opts, state.readOnly(), allocator, remote, .fetch, transport_opts);
+    }
+    defer remote.disconnect(allocator) catch {};
 
-    const host = (uri.host orelse return error.RemoteUriInvalid).percent_encoded;
-    const port = uri.port orelse return error.RemoteUriInvalid;
-    const path = uri.path.percent_encoded;
+    try download(repo_kind, repo_opts, state, allocator, remote, transport_opts.refspecs);
 
-    var sock = try network.connectToHost(allocator, host, port, .tcp);
-    defer sock.close();
-    try sock.setTimeouts(TIMEOUT_MICRO_SECS, TIMEOUT_MICRO_SECS);
+    try updateHeads(repo_kind, repo_opts, state, allocator, remote);
+}
 
-    const sock_reader = sock.reader();
-    const sock_writer = sock.writer();
-
-    // send command
-    {
-        var command_buf = [_]u8{0} ** 256;
-        const command = try std.fmt.bufPrint(&command_buf, "0000git-upload-pack {s}\x00host={s}\x00", .{ path, host });
-
-        var command_size_buf = [_]u8{0} ** 4;
-        const command_size = try std.fmt.bufPrint(&command_size_buf, "{x}", .{command.len});
-
-        @memcpy(command[command_size_buf.len - command_size.len .. command_size_buf.len], command_size);
-
-        try sock_writer.writeAll(command);
+fn upload(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+    allocator: std.mem.Allocator,
+    remote: *Remote(repo_kind, repo_opts),
+    transport_opts: Opts,
+) !void {
+    if (!remote.connected()) {
+        try connect(repo_kind, repo_opts, state.readOnly(), allocator, remote, .push, transport_opts);
     }
 
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
-
-    // read messages
-    var ref_to_oid = std.StringArrayHashMap(*const [hash.hexLen(repo_opts.hash)]u8).init(arena.allocator());
-    var capability_set = std.StringArrayHashMap(void).init(arena.allocator());
-    while (true) {
-        var size_buffer = [_]u8{0} ** 4;
-        try sock_reader.readNoEof(&size_buffer);
-
-        var msg_size: usize = try std.fmt.parseInt(u16, &size_buffer, 16);
-
-        // a flush packet has a size of 0
-        if (msg_size == 0) {
-            break;
-        }
-
-        // subtract the size of the hexadecimal size itself
-        // to get the rest of the message size
-        if (msg_size <= size_buffer.len) {
-            return error.UnexpectedMessageSize;
-        }
-        msg_size -= size_buffer.len;
-
-        // alloc the buffer that will hold the message
-        var msg_buffer = try arena.allocator().alloc(u8, msg_size);
-        try sock_reader.readNoEof(msg_buffer);
-
-        // ignore newline char
-        if (msg_buffer[msg_buffer.len - 1] == '\n') {
-            msg_buffer = msg_buffer[0 .. msg_buffer.len - 1];
-        } else {
-            return error.NewlineByteNotFound;
-        }
-
-        // the very first message should have a null byte
-        // and include the capabilities after
-        if (ref_to_oid.count() == 0) {
-            if (std.mem.indexOfScalar(u8, msg_buffer, 0)) |null_index| {
-                var iter = std.mem.splitScalar(u8, msg_buffer[null_index + 1 ..], ' ');
-                while (iter.next()) |cap| {
-                    try capability_set.put(cap, {});
-                }
-
-                msg_buffer = msg_buffer[0..null_index];
-            } else {
-                return error.NullByteNotFound;
-            }
-        }
-
-        // populate the map of refs
-        if (std.mem.indexOfScalar(u8, msg_buffer, ' ')) |space_index| {
-            if (space_index != hash.hexLen(repo_opts.hash)) {
-                return error.UnexpectedOidLength;
-            }
-            try ref_to_oid.put(msg_buffer[hash.hexLen(repo_opts.hash) + 1 ..], msg_buffer[0..comptime hash.hexLen(repo_opts.hash)]);
-        } else {
-            return error.SpaceByteNotFound;
-        }
+    clearRefSpecs(allocator, &remote.active_refspecs);
+    for (remote.refspecs.items) |*spec| {
+        var spec_dupe = try spec.dupe(allocator);
+        errdefer spec_dupe.deinit(allocator);
+        try remote.active_refspecs.append(allocator, spec_dupe);
     }
 
-    // build list of wanted oids
-    var wanted_oids = std.StringArrayHashMap(void).init(allocator);
-    defer wanted_oids.deinit();
-    for (ref_to_oid.values()) |oid| {
-        if (wanted_oids.contains(oid)) {
-            continue;
+    if (remote.push) |*remote_push| {
+        remote_push.deinit(allocator);
+        remote.push = null;
+    }
+
+    remote.push = try net_push.Push(repo_kind, repo_opts).init(state.readOnly(), remote, allocator);
+
+    var added_refspecs = false;
+    if (transport_opts.refspecs) |refspecs| {
+        for (refspecs) |refspec| {
+            try remote.push.?.addRefSpec(state.readOnly(), allocator, refspec);
+            added_refspecs = true;
         }
-        var object = obj.Object(repo_kind, repo_opts, .raw).init(allocator, state.readOnly(), oid) catch |err| switch (err) {
-            error.ObjectNotFound => {
-                try wanted_oids.put(oid, {});
+    }
+    if (!added_refspecs) {
+        for (remote.refspecs.items) |*spec| {
+            if (.fetch == spec.direction) {
                 continue;
-            },
-            else => |e| return e,
-        };
-        defer object.deinit();
-    }
-
-    // build list of capabilities
-    var capability_list = std.ArrayList([]const u8).init(allocator);
-    defer capability_list.deinit();
-    const allowed_caps = [_][]const u8{
-        "multi_ack",
-    };
-    for (allowed_caps) |allowed_cap| {
-        if (capability_set.contains(allowed_cap)) {
-            try capability_list.append(allowed_cap);
-        }
-    }
-    const caps = try std.mem.join(allocator, " ", capability_list.items);
-    defer allocator.free(caps);
-
-    // send want lines
-    for (wanted_oids.keys(), 0..) |oid, i| {
-        var command_buf = [_]u8{0} ** 256;
-        const command = if (i == 0)
-            try std.fmt.bufPrint(&command_buf, "0000want {s} {s}\n", .{ oid, caps })
-        else
-            try std.fmt.bufPrint(&command_buf, "0000want {s}\n", .{oid});
-
-        var command_size_buf = [_]u8{0} ** 4;
-        const command_size = try std.fmt.bufPrint(&command_size_buf, "{x}", .{command.len});
-
-        @memcpy(command[command_size_buf.len - command_size.len .. command_size_buf.len], command_size);
-
-        try sock_writer.writeAll(command);
-    }
-
-    // flush
-    try sock_writer.writeAll("0000");
-    try sock_writer.writeAll("0009done\n");
-
-    if (wanted_oids.count() == 0) {
-        return .{
-            .object_count = 0,
-        };
-    }
-
-    // read messages
-    while (true) {
-        var size_buffer = [_]u8{0} ** 4;
-        try sock_reader.readNoEof(&size_buffer);
-
-        var msg_size: usize = try std.fmt.parseInt(u16, &size_buffer, 16);
-
-        // a flush packet has a size of 0
-        if (msg_size == 0) {
-            break;
-        }
-
-        // subtract the size of the hexadecimal size itself
-        // to get the rest of the message size
-        if (msg_size <= size_buffer.len) {
-            return error.UnexpectedMessageSize;
-        }
-        msg_size -= size_buffer.len;
-
-        // alloc the buffer that will hold the message
-        var msg_buffer = try arena.allocator().alloc(u8, msg_size);
-        try sock_reader.readNoEof(msg_buffer);
-
-        // ignore newline char
-        if (msg_buffer[msg_buffer.len - 1] == '\n') {
-            msg_buffer = msg_buffer[0 .. msg_buffer.len - 1];
-        } else {
-            return error.NewlineByteNotFound;
-        }
-
-        if (std.mem.eql(u8, "NAK", msg_buffer)) {
-            break;
-        }
-    }
-
-    const dir = switch (repo_kind) {
-        .git => state.core.git_dir,
-        .xit => state.core.xit_dir,
-    };
-
-    // write pack file to temp file
-    {
-        var lock = try fs.LockFile.init(dir, "temp.pack");
-        defer lock.deinit();
-        while (true) {
-            var read_buffer = [_]u8{0} ** 1024;
-            const read_size = try sock_reader.read(&read_buffer);
-            if (read_size == 0) {
-                break;
             }
-            try lock.lock_file.writeAll(read_buffer[0..read_size]);
+            try remote.push.?.addRefSpec(state.readOnly(), allocator, spec.full);
         }
-        lock.success = true;
     }
 
-    // iterate over pack file
-    defer dir.deleteFile("temp.pack") catch {};
-    const pack_file_path = try dir.realpathAlloc(allocator, "temp.pack");
-    defer allocator.free(pack_file_path);
-    var iter = try pack.PackObjectIterator(repo_kind, repo_opts).init(allocator, pack_file_path);
-    defer iter.deinit();
-    while (try iter.next()) |pack_reader| {
-        defer pack_reader.deinit();
+    try remote.push.?.complete(state.readOnly(), allocator);
+}
 
-        const Stream = struct {
-            pack_reader: *pack.PackObjectReader(repo_kind, repo_opts),
+pub fn push(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+    allocator: std.mem.Allocator,
+    remote: *Remote(repo_kind, repo_opts),
+    transport_opts: Opts,
+) !void {
+    try upload(repo_kind, repo_opts, state, allocator, remote, transport_opts);
+    defer remote.disconnect(allocator) catch {};
+    try updateHeads(repo_kind, repo_opts, state, allocator, remote);
+}
 
-            pub fn reader(self: @This()) *pack.PackObjectReader(repo_kind, repo_opts) {
-                return self.pack_reader;
+pub fn clone(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    allocator: std.mem.Allocator,
+    url: []const u8,
+    cwd: std.fs.Dir,
+    local_path: []const u8,
+    transport_opts: Opts,
+) !rp.Repo(repo_kind, repo_opts) {
+    var remote = try Remote(repo_kind, repo_opts).init(allocator, "origin", url);
+    defer remote.deinit(allocator);
+
+    var repo_dir = try cwd.makeOpenPath(local_path, .{});
+    defer repo_dir.close();
+
+    var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir }, ".");
+    errdefer repo.deinit();
+
+    const transport_def = net_transport.TransportDefinition.init(url) orelse return error.UnsupportedUrl;
+
+    switch (repo_kind) {
+        .git => {
+            switch (transport_def.kind) {
+                .file => try net_clone.cloneFile(
+                    repo_kind,
+                    repo_opts,
+                    .{ .core = &repo.core, .extra = .{} },
+                    allocator,
+                    &remote,
+                    transport_opts,
+                ),
+                .wire => try net_clone.cloneWire(
+                    repo_kind,
+                    repo_opts,
+                    .{ .core = &repo.core, .extra = .{} },
+                    allocator,
+                    &remote,
+                    transport_opts,
+                ),
             }
+        },
+        .xit => {
+            const Ctx = struct {
+                core: *rp.Repo(repo_kind, repo_opts).Core,
+                transport_def: net_transport.TransportDefinition,
+                allocator: std.mem.Allocator,
+                remote: *Remote(repo_kind, repo_opts),
+                transport_opts: Opts,
 
-            pub fn seekTo(self: @This(), offset: usize) !void {
-                if (offset == 0) {
-                    try self.pack_reader.reset();
-                } else {
-                    return error.InvalidOffset;
+                pub fn run(ctx: @This(), cursor: *rp.Repo(repo_kind, repo_opts).DB.Cursor(.read_write)) !void {
+                    var moment = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(cursor.*);
+                    const state = rp.Repo(repo_kind, repo_opts).State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
+                    switch (ctx.transport_def.kind) {
+                        .file => try net_clone.cloneFile(
+                            repo_kind,
+                            repo_opts,
+                            state,
+                            ctx.allocator,
+                            ctx.remote,
+                            ctx.transport_opts,
+                        ),
+                        .wire => try net_clone.cloneWire(
+                            repo_kind,
+                            repo_opts,
+                            state,
+                            ctx.allocator,
+                            ctx.remote,
+                            ctx.transport_opts,
+                        ),
+                    }
                 }
-            }
-        };
-        const stream = Stream{
-            .pack_reader = pack_reader,
-        };
+            };
 
-        var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-        switch (pack_reader.internal) {
-            .basic => try obj.writeObject(repo_kind, repo_opts, state, &stream, stream.reader(), pack_reader.internal.basic.header, &oid),
-            .delta => return error.NotImplemented,
-        }
+            const history = try rp.Repo(repo_kind, repo_opts).DB.ArrayList(.read_write).init(repo.core.db.rootCursor());
+            try history.appendContext(
+                .{ .slot = try history.getSlot(-1) },
+                Ctx{
+                    .core = &repo.core,
+                    .transport_def = transport_def,
+                    .allocator = allocator,
+                    .remote = &remote,
+                    .transport_opts = transport_opts,
+                },
+            );
+        },
     }
 
-    // update refs
-    for (ref_to_oid.keys(), ref_to_oid.values()) |remote_ref_path, oid| {
-        var buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
-        const ref_path = if (rf.Ref.initFromPath(remote_ref_path)) |ref|
-            try std.fmt.bufPrint(&buffer, "refs/remotes/{s}/{s}", .{ remote_name, ref.name })
-        else
-            try std.fmt.bufPrint(&buffer, "refs/remotes/{s}/{s}", .{ remote_name, remote_ref_path });
-        try rf.writeRecur(repo_kind, repo_opts, state, ref_path, oid);
-    }
-
-    return .{
-        .object_count = iter.object_count,
-    };
+    return repo;
 }

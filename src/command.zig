@@ -33,8 +33,7 @@ pub const CommandKind = enum {
     cherry_pick,
     config,
     remote,
-    fetch,
-    pull,
+    clone,
 };
 
 const Help = struct {
@@ -297,22 +296,14 @@ fn commandHelp(command_kind: CommandKind) Help {
             \\    xit remote list
             ,
         },
-        .fetch => .{
-            .name = "fetch",
+        .clone => .{
+            .name = "clone",
             .descrip =
-            \\download objects and refs from another repo.
+            \\clone a repository into a new directory.
             ,
             .example =
-            \\xit fetch
-            ,
-        },
-        .pull => .{
-            .name = "pull",
-            .descrip =
-            \\fetch and merge from another repo.
-            ,
-            .example =
-            \\xit pull
+            \\clone with a url:
+            \\    xit clone https://github.com/... mydir
             ,
         },
     };
@@ -503,12 +494,9 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
         cherry_pick: mrg.MergeInput(repo_kind, hash_kind),
         config: cfg.ConfigCommand,
         remote: cfg.ConfigCommand,
-        fetch: struct {
-            remote_name: []const u8,
-        },
-        pull: struct {
-            remote_name: []const u8,
-            remote_ref_name: []const u8,
+        clone: struct {
+            url: []const u8,
+            local_path: []const u8,
         },
 
         pub fn init(cmd_args: *CommandArgs) !?Command(repo_kind, hash_kind) {
@@ -792,19 +780,12 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
 
                     return .{ .remote = cmd };
                 },
-                .fetch => {
-                    if (cmd_args.positional_args.len != 1) return null;
-
-                    return .{ .fetch = .{
-                        .remote_name = cmd_args.positional_args[0],
-                    } };
-                },
-                .pull => {
+                .clone => {
                     if (cmd_args.positional_args.len != 2) return null;
 
-                    return .{ .pull = .{
-                        .remote_name = cmd_args.positional_args[0],
-                        .remote_ref_name = cmd_args.positional_args[1],
+                    return .{ .clone = .{
+                        .url = cmd_args.positional_args[0],
+                        .local_path = cmd_args.positional_args[1],
                     } };
                 },
             }

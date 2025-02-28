@@ -167,12 +167,15 @@ pub const RefList = struct {
             .git => {
                 var refs_dir = try state.core.git_dir.openDir("refs", .{});
                 defer refs_dir.close();
-                var heads_dir = try refs_dir.openDir(dir_name, .{ .iterate = true });
-                defer heads_dir.close();
+                var ref_kind_dir = refs_dir.openDir(dir_name, .{ .iterate = true }) catch |err| switch (err) {
+                    error.FileNotFound => return ref_list,
+                    else => |e| return e,
+                };
+                defer ref_kind_dir.close();
 
                 var path = std.ArrayList([]const u8).init(allocator);
                 defer path.deinit();
-                try ref_list.addRefs(repo_opts, state, ref_kind, heads_dir, &path);
+                try ref_list.addRefs(repo_opts, state, ref_kind, ref_kind_dir, &path);
             },
             .xit => {
                 if (try state.extra.moment.cursor.readPath(void, &.{
@@ -465,6 +468,51 @@ pub fn writeRecur(
         .oid => try write(repo_kind, repo_opts, state, ref_path, .{ .oid = oid_hex }),
     } else {
         try write(repo_kind, repo_opts, state, ref_path, .{ .oid = oid_hex });
+    }
+}
+
+pub fn remove(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+    ref_path: []const u8,
+) !void {
+    switch (repo_kind) {
+        .git => {
+            state.core.git_dir.deleteFile(ref_path) catch |err| switch (err) {
+                error.FileNotFound => return error.RefNotFound,
+                else => |e| return e,
+            };
+        },
+        .xit => {
+            var map = state.extra.moment.*;
+            const ref = Ref.initFromPath(ref_path) orelse return error.InvalidRef;
+            const refs_cursor = try map.putCursor(hash.hashInt(repo_opts.hash, "refs"));
+            const refs = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(refs_cursor);
+
+            switch (ref.kind) {
+                .none => {},
+                .head => {
+                    const heads_cursor = try refs.putCursor(hash.hashInt(repo_opts.hash, "heads"));
+                    map = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(heads_cursor);
+                },
+                .tag => {
+                    const tags_cursor = try refs.putCursor(hash.hashInt(repo_opts.hash, "tags"));
+                    map = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(tags_cursor);
+                },
+                .remote => |remote_name| {
+                    const remotes_cursor = try refs.putCursor(hash.hashInt(repo_opts.hash, "remotes"));
+                    const remotes = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(remotes_cursor);
+                    const remote_cursor = try remotes.putCursor(hash.hashInt(repo_opts.hash, remote_name));
+                    map = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(remote_cursor);
+                },
+            }
+
+            const ref_name_hash = hash.hashInt(repo_opts.hash, ref.name);
+            if (!try map.remove(ref_name_hash)) {
+                return error.RefNotFound;
+            }
+        },
     }
 }
 

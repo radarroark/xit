@@ -10,10 +10,6 @@
             .url = "git+https://github.com/radarroark/xitui#41ad3e53ec75bdc3d46908645f47e2284b890859",
             .hash = "12208157611514822a7752c6d5a7eaa510e949fa5df7d36f4d539546395b79014409",
         },
-        .network = .{
-            .url = "git+https://github.com/radarroark/zig-network.git#bcf6cc8918d574f947b2647522d84a805c33f1c8",
-            .hash = "12203b3634f36570ffced059248bd429cd06dc89a98659c86569d890fdd99b5070bd",
-        },
     },
     .paths = .{
         "build.zig",

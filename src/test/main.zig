@@ -1407,7 +1407,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
             defer repo.deinit();
 
-            var config = try repo.config(allocator);
+            var config = try repo.listConfig(allocator);
             defer config.deinit();
 
             const core_section = config.sections.get("core").?;
@@ -1423,7 +1423,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
             defer repo.deinit();
 
-            var config = try repo.config(allocator);
+            var config = try repo.listConfig(allocator);
             defer config.deinit();
 
             try std.testing.expectEqual(null, config.sections.get("branch.master"));
@@ -1438,7 +1438,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
             defer repo.deinit();
 
-            var config = try repo.config(allocator);
+            var config = try repo.listConfig(allocator);
             defer config.deinit();
 
             const user_section = config.sections.get("user").?;
@@ -1451,7 +1451,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
             defer repo.deinit();
 
-            var config = try repo.config(allocator);
+            var config = try repo.listConfig(allocator);
             defer config.deinit();
 
             const branch_hi_section = config.sections.get("branch.\"hello.world\"").?;
@@ -1464,7 +1464,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
             defer repo.deinit();
 
-            var config = try repo.config(allocator);
+            var config = try repo.listConfig(allocator);
             defer config.deinit();
 
             const branch_master_section = config.sections.get("branch.MASTER").?;
@@ -1482,7 +1482,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
             defer repo.deinit();
 
-            var remote = try repo.remote(allocator);
+            var remote = try repo.listRemotes(allocator);
             defer remote.deinit();
 
             const origin_section = remote.sections.get("origin").?;
@@ -1494,7 +1494,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
             defer repo.deinit();
 
-            var remote = try repo.remote(allocator);
+            var remote = try repo.listRemotes(allocator);
             defer remote.deinit();
 
             try std.testing.expectEqual(null, remote.sections.get("origin"));

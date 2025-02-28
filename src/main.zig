@@ -93,6 +93,21 @@ pub fn run(
                     \\
                 , .{});
             },
+            .clone => |clone_cmd| {
+                const progress_text = struct {
+                    fn run(text: []const u8) !void {
+                        std.debug.print("{s}\n", .{text});
+                    }
+                }.run;
+                var repo = try rp.Repo(repo_kind, repo_opts).clone(
+                    allocator,
+                    clone_cmd.url,
+                    cwd,
+                    clone_cmd.local_path,
+                    .{ .wire = .{ .progress_text = progress_text } },
+                );
+                defer repo.deinit();
+            },
             else => if (.none == repo_opts.hash) {
                 // if no hash was specified, use AnyRepo to detect the hash being used
                 var any_repo = try rp.AnyRepo(repo_kind, repo_opts).open(allocator, .{ .cwd = cwd });
@@ -436,7 +451,7 @@ fn runCommand(
         .config => |config_cmd| {
             switch (config_cmd) {
                 .list => {
-                    var conf = try repo.config(allocator);
+                    var conf = try repo.listConfig(allocator);
                     defer conf.deinit();
 
                     for (conf.sections.keys(), conf.sections.values()) |section_name, variables| {
@@ -452,7 +467,7 @@ fn runCommand(
         .remote => |remote_cmd| {
             switch (remote_cmd) {
                 .list => {
-                    var rem = try repo.remote(allocator);
+                    var rem = try repo.listRemotes(allocator);
                     defer rem.deinit();
 
                     for (rem.sections.keys(), rem.sections.values()) |section_name, variables| {
@@ -465,12 +480,7 @@ fn runCommand(
                 .remove => |remote_remove_cmd| try repo.removeRemote(allocator, remote_remove_cmd),
             }
         },
-        .fetch => |fetch_cmd| _ = try repo.fetch(allocator, fetch_cmd.remote_name),
-        .pull => |pull_cmd| {
-            var result = try repo.pull(allocator, pull_cmd.remote_name, pull_cmd.remote_ref_name);
-            defer result.deinit();
-            try printMergeResult(repo_kind, repo_opts, &result.merge, writers);
-        },
+        .clone => {},
     }
 }
 

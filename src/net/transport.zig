@@ -1,0 +1,173 @@
+const std = @import("std");
+const net = @import("../net.zig");
+const net_wire = @import("./wire.zig");
+const net_file = @import("./file.zig");
+const net_push = @import("./push.zig");
+const net_fetch = @import("./fetch.zig");
+const rp = @import("../repo.zig");
+const hash = @import("../hash.zig");
+
+pub const Opts = struct {
+    refspecs: ?[]const []const u8 = null,
+    wire: net_wire.Opts = .{},
+};
+
+pub const TransportKind = enum {
+    file,
+    wire,
+};
+
+pub const Capabilities = struct {
+    fetch_by_oid: bool = false,
+    fetch_reachable: bool = false,
+    push_options: bool = false,
+};
+
+pub fn Transport(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+) type {
+    return union(TransportKind) {
+        file: net_file.FileTransport(repo_kind, repo_opts),
+        wire: net_wire.WireTransport(repo_kind, repo_opts),
+
+        pub fn init(
+            state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+            allocator: std.mem.Allocator,
+            url: []const u8,
+            opts: Opts,
+        ) !Transport(repo_kind, repo_opts) {
+            const transport_def = TransportDefinition.init(url) orelse return error.UnsupportedUrl;
+            return switch (transport_def.kind) {
+                .file => .{ .file = try net_file.FileTransport(repo_kind, repo_opts).init() },
+                .wire => |wire_kind| .{ .wire = try net_wire.WireTransport(repo_kind, repo_opts).init(state, allocator, wire_kind, opts.wire) },
+            };
+        }
+
+        pub fn deinit(self: *Transport(repo_kind, repo_opts), allocator: std.mem.Allocator) void {
+            switch (self.*) {
+                .file => |*file| file.deinit(allocator),
+                .wire => |*wire| wire.deinit(allocator),
+            }
+        }
+
+        pub fn connect(
+            self: *Transport(repo_kind, repo_opts),
+            state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+            allocator: std.mem.Allocator,
+            url: []const u8,
+            direction: net.Direction,
+        ) !void {
+            switch (self.*) {
+                .file => |*file| try file.connect(state, allocator, url, direction),
+                .wire => |*wire| try wire.connect(allocator, url, direction),
+            }
+        }
+
+        pub fn capabilities(self: *const Transport(repo_kind, repo_opts)) Capabilities {
+            return switch (self.*) {
+                .file => |*file| file.capabilities(),
+                .wire => |*wire| wire.capabilities(),
+            };
+        }
+
+        pub fn getHeads(self: *const Transport(repo_kind, repo_opts)) ![]net.RemoteHead(repo_kind, repo_opts) {
+            return switch (self.*) {
+                .file => |*file| try file.getHeads(),
+                .wire => |*wire| try wire.getHeads(),
+            };
+        }
+
+        pub fn push(
+            self: *Transport(repo_kind, repo_opts),
+            state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+            allocator: std.mem.Allocator,
+            git_push: *net_push.Push(repo_kind, repo_opts),
+        ) !void {
+            switch (self.*) {
+                .file => |*file| try file.push(state, allocator, git_push),
+                .wire => |*wire| try wire.push(allocator, git_push),
+            }
+        }
+
+        pub fn negotiateFetch(
+            self: *Transport(repo_kind, repo_opts),
+            state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+            allocator: std.mem.Allocator,
+            fetch_data: *const net_fetch.FetchNegotiation(repo_kind, repo_opts),
+        ) !void {
+            switch (self.*) {
+                .file => |*file| try file.negotiateFetch(state, allocator),
+                .wire => |*wire| try wire.negotiateFetch(state, allocator, fetch_data),
+            }
+        }
+
+        pub fn downloadPack(
+            self: *Transport(repo_kind, repo_opts),
+            state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+            allocator: std.mem.Allocator,
+        ) !void {
+            switch (self.*) {
+                .file => |*file| try file.downloadPack(state, allocator),
+                .wire => |*wire| try wire.downloadPack(state, allocator),
+            }
+        }
+
+        pub fn isConnected(self: *const Transport(repo_kind, repo_opts)) bool {
+            switch (self.*) {
+                .file => |*file| return file.isConnected(),
+                .wire => |*wire| return wire.isConnected(),
+            }
+        }
+
+        pub fn close(self: *Transport(repo_kind, repo_opts), allocator: std.mem.Allocator) !void {
+            switch (self.*) {
+                .file => |*file| file.close(allocator),
+                .wire => |*wire| try wire.close(allocator),
+            }
+        }
+    };
+}
+
+pub const TransportDefinitionKind = union(TransportKind) {
+    file,
+    wire: net_wire.WireKind,
+};
+
+const transports = [_]TransportDefinition{
+    .{ .prefix = "git://", .kind = .{ .wire = .raw } },
+    .{ .prefix = "http://", .kind = .{ .wire = .http } },
+    .{ .prefix = "https://", .kind = .{ .wire = .http } },
+    .{ .prefix = "file://", .kind = .file },
+    .{ .prefix = "ssh://", .kind = .{ .wire = .ssh } },
+};
+
+pub const TransportDefinition = struct {
+    prefix: []const u8,
+    kind: TransportDefinitionKind,
+
+    pub fn init(url: []const u8) ?TransportDefinition {
+        const url_slice = std.mem.sliceTo(url, 0);
+        if (initWithUrl(url_slice)) |def| {
+            return def;
+        }
+
+        if (null != std.mem.indexOfScalar(u8, url_slice, ':')) {
+            if (initWithUrl("ssh://")) |def| {
+                return def;
+            }
+        }
+
+        return null;
+    }
+
+    fn initWithUrl(url: []const u8) ?TransportDefinition {
+        for (transports) |def| {
+            if (std.mem.startsWith(u8, url, def.prefix)) {
+                return def;
+            }
+        }
+
+        return null;
+    }
+};

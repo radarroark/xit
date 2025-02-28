@@ -10,10 +10,10 @@ const fs = @import("./fs.zig");
 const df = @import("./diff.zig");
 const mrg = @import("./merge.zig");
 const cfg = @import("./config.zig");
-const net = @import("./net.zig");
 const chunk = @import("./chunk.zig");
 const tag = @import("./tag.zig");
 const tr = @import("./tree.zig");
+const net = @import("./net.zig");
 
 pub const RepoKind = enum {
     git,
@@ -27,6 +27,7 @@ pub fn RepoOpts(comptime repo_kind: RepoKind) type {
         max_read_size: usize = 2048,
         max_line_size: usize = 10_000,
         max_line_count: usize = 10_000_000,
+        net_read_size: usize = 65536,
         is_test: bool = false,
         extra: Extra = .{},
 
@@ -61,16 +62,17 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
         comptime self_repo_opts: RepoOpts(repo_kind) = repo_opts,
 
         core: Core,
-        init_opts: InitOpts,
 
         pub const Core = switch (repo_kind) {
             .git => struct {
+                init_opts: InitOpts,
                 work_dir: std.fs.Dir,
                 git_dir: std.fs.Dir,
 
                 pub fn latestMoment(_: *@This()) !void {}
             },
             .xit => struct {
+                init_opts: InitOpts,
                 work_dir: std.fs.Dir,
                 xit_dir: std.fs.Dir,
                 db_file: std.fs.File,
@@ -173,10 +175,10 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
                     var self = Repo(repo_kind, repo_opts){
                         .core = .{
+                            .init_opts = opts,
                             .work_dir = work_dir,
                             .git_dir = git_dir,
                         },
-                        .init_opts = opts,
                     };
 
                     // create default branch
@@ -206,12 +208,12 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     // make the db
                     var self = Repo(repo_kind, repo_opts){
                         .core = .{
+                            .init_opts = opts,
                             .work_dir = work_dir,
                             .xit_dir = xit_dir,
                             .db_file = db_file,
                             .db = try DB.init(allocator, .{ .file = db_file, .hash_id = .{ .id = hash.hashId(repo_opts.hash) } }),
                         },
-                        .init_opts = opts,
                     };
 
                     // create default branch
@@ -260,10 +262,10 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
                     return .{
                         .core = .{
+                            .init_opts = opts,
                             .work_dir = work_dir,
                             .git_dir = git_dir,
                         },
-                        .init_opts = opts,
                     };
                 },
                 .xit => {
@@ -278,6 +280,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
                     return .{
                         .core = .{
+                            .init_opts = opts,
                             .work_dir = work_dir,
                             .xit_dir = xit_dir,
                             .db_file = db_file,
@@ -291,7 +294,6 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                                 },
                             },
                         },
-                        .init_opts = opts,
                     };
                 },
             }
@@ -428,7 +430,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
             var normalized_paths = std.ArrayList([]const u8).init(arena.allocator());
             for (paths) |path| {
-                const rel_path = try fs.relativePath(allocator, self.core.work_dir, self.init_opts.cwd, path);
+                const rel_path = try fs.relativePath(allocator, self.core.work_dir, self.core.init_opts.cwd, path);
                 defer allocator.free(rel_path);
                 const path_parts = try fs.splitPath(allocator, rel_path);
                 defer allocator.free(path_parts);
@@ -450,7 +452,6 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     const Ctx = struct {
                         core: *Repo(repo_kind, repo_opts).Core,
                         allocator: std.mem.Allocator,
-                        cwd: std.fs.Dir,
                         paths: []const []const u8,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
@@ -463,7 +464,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
                     try history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
-                        Ctx{ .core = &self.core, .allocator = allocator, .cwd = self.init_opts.cwd, .paths = paths },
+                        Ctx{ .core = &self.core, .allocator = allocator, .paths = paths },
                     );
                 },
             }
@@ -480,7 +481,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
             var normalized_paths = std.ArrayList([]const u8).init(arena.allocator());
             for (paths) |path| {
-                const rel_path = try fs.relativePath(allocator, self.core.work_dir, self.init_opts.cwd, path);
+                const rel_path = try fs.relativePath(allocator, self.core.work_dir, self.core.init_opts.cwd, path);
                 defer allocator.free(rel_path);
                 const path_parts = try fs.splitPath(allocator, rel_path);
                 defer allocator.free(path_parts);
@@ -545,7 +546,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
             var normalized_paths = std.ArrayList([]const u8).init(arena.allocator());
             for (paths) |path| {
-                const rel_path = try fs.relativePath(allocator, self.core.work_dir, self.init_opts.cwd, path);
+                const rel_path = try fs.relativePath(allocator, self.core.work_dir, self.core.init_opts.cwd, path);
                 defer allocator.free(rel_path);
                 const path_parts = try fs.splitPath(allocator, rel_path);
                 defer allocator.free(path_parts);
@@ -772,12 +773,10 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
         pub fn restore(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, path: []const u8) !void {
             var moment = try self.core.latestMoment();
             const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
-
-            const rel_path = try fs.relativePath(allocator, self.core.work_dir, self.init_opts.cwd, path);
+            const rel_path = try fs.relativePath(allocator, self.core.work_dir, self.core.init_opts.cwd, path);
             defer allocator.free(rel_path);
             const path_parts = try fs.splitPath(allocator, rel_path);
             defer allocator.free(path_parts);
-
             try work.restore(repo_kind, repo_opts, state, allocator, path_parts);
         }
 
@@ -854,15 +853,16 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
-        pub fn config(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator) !cfg.Config(repo_kind, repo_opts) {
+        pub fn listConfig(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator) !cfg.Config(repo_kind, repo_opts) {
             var moment = try self.core.latestMoment();
             const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
             return try cfg.Config(repo_kind, repo_opts).init(state, allocator);
         }
 
         pub fn addConfig(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: cfg.AddConfigInput) !void {
-            var conf = try self.config(allocator);
+            var conf = try self.listConfig(allocator);
             defer conf.deinit();
+
             switch (repo_kind) {
                 .git => {
                     var lock = try fs.LockFile.init(self.core.git_dir, "config");
@@ -895,8 +895,9 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
         }
 
         pub fn removeConfig(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: cfg.RemoveConfigInput) !void {
-            var conf = try self.config(allocator);
+            var conf = try self.listConfig(allocator);
             defer conf.deinit();
+
             switch (repo_kind) {
                 .git => {
                     var lock = try fs.LockFile.init(self.core.git_dir, "config");
@@ -928,8 +929,8 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
-        pub fn remote(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator) !cfg.RemoteConfig {
-            var conf = try self.config(allocator);
+        pub fn listRemotes(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator) !cfg.RemoteConfig {
+            var conf = try self.listConfig(allocator);
             defer conf.deinit();
             return try cfg.RemoteConfig.init(repo_kind, repo_opts, &conf, allocator);
         }
@@ -943,8 +944,9 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                 .value = input.value,
             };
 
-            var conf = try self.config(allocator);
+            var conf = try self.listConfig(allocator);
             defer conf.deinit();
+
             switch (repo_kind) {
                 .git => {
                     var lock = try fs.LockFile.init(self.core.git_dir, "config");
@@ -983,8 +985,9 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                 .name = new_name,
             };
 
-            var conf = try self.config(allocator);
+            var conf = try self.listConfig(allocator);
             defer conf.deinit();
+
             switch (repo_kind) {
                 .git => {
                     var lock = try fs.LockFile.init(self.core.git_dir, "config");
@@ -1012,109 +1015,6 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         .{ .slot = try history.getSlot(-1) },
                         Ctx{ .core = &self.core, .conf = &conf, .input = new_input },
                     );
-                },
-            }
-        }
-
-        pub fn fetch(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, remote_name: []const u8) !net.FetchResult {
-            var rem = try self.remote(allocator);
-            defer rem.deinit();
-
-            const remote_section = rem.sections.get(remote_name) orelse return error.RemoteNotFound;
-            const remote_url = remote_section.get("url") orelse return error.RemoteNotFound;
-            const parsed_uri = try std.Uri.parse(remote_url);
-
-            switch (repo_kind) {
-                .git => {
-                    return try net.fetch(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, allocator, remote_name, parsed_uri);
-                },
-                .xit => {
-                    var fetch_result: net.FetchResult = undefined;
-                    const Ctx = struct {
-                        core: *Repo(repo_kind, repo_opts).Core,
-                        allocator: std.mem.Allocator,
-                        remote_name: []const u8,
-                        parsed_uri: std.Uri,
-                        fetch_result: *net.FetchResult,
-
-                        pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
-                            var moment = try DB.HashMap(.read_write).init(cursor.*);
-                            const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            ctx.fetch_result.* = try net.fetch(repo_kind, repo_opts, state, ctx.allocator, ctx.remote_name, ctx.parsed_uri);
-                        }
-                    };
-
-                    const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
-                    try history.appendContext(
-                        .{ .slot = try history.getSlot(-1) },
-                        Ctx{ .core = &self.core, .allocator = allocator, .remote_name = remote_name, .parsed_uri = parsed_uri, .fetch_result = &fetch_result },
-                    );
-                    return fetch_result;
-                },
-            }
-        }
-
-        pub const PullResult = struct {
-            fetch: net.FetchResult,
-            merge: mrg.Merge(repo_kind, repo_opts),
-
-            pub fn deinit(self: *PullResult) void {
-                self.merge.deinit();
-            }
-        };
-
-        pub fn pull(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, remote_name: []const u8, remote_ref_name: []const u8) !PullResult {
-            var rem = try self.remote(allocator);
-            defer rem.deinit();
-
-            const remote_section = rem.sections.get(remote_name) orelse return error.RemoteNotFound;
-            const remote_url = remote_section.get("url") orelse return error.RemoteNotFound;
-            const parsed_uri = try std.Uri.parse(remote_url);
-
-            switch (repo_kind) {
-                .git => {
-                    const fetch_result = try net.fetch(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, allocator, remote_name, parsed_uri);
-                    const remote_ref = rf.Ref{ .kind = .{ .remote = remote_name }, .name = remote_ref_name };
-                    var merge_result = try mrg.Merge(repo_kind, repo_opts).init(.{ .core = &self.core, .extra = .{} }, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = remote_ref }} } } });
-                    errdefer merge_result.deinit();
-
-                    return .{
-                        .fetch = fetch_result,
-                        .merge = merge_result,
-                    };
-                },
-                .xit => {
-                    var pull_result: PullResult = undefined;
-                    const Ctx = struct {
-                        core: *Repo(repo_kind, repo_opts).Core,
-                        allocator: std.mem.Allocator,
-                        remote_name: []const u8,
-                        remote_ref_name: []const u8,
-                        parsed_uri: std.Uri,
-                        pull_result: *PullResult,
-
-                        pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
-                            var moment = try DB.HashMap(.read_write).init(cursor.*);
-                            const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-
-                            const fetch_result = try net.fetch(repo_kind, repo_opts, state, ctx.allocator, ctx.remote_name, ctx.parsed_uri);
-                            const remote_ref = rf.Ref{ .kind = .{ .remote = ctx.remote_name }, .name = ctx.remote_ref_name };
-                            var merge_result = try mrg.Merge(repo_kind, repo_opts).init(state, ctx.allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = remote_ref }} } } });
-                            errdefer merge_result.deinit();
-
-                            ctx.pull_result.* = .{
-                                .fetch = fetch_result,
-                                .merge = merge_result,
-                            };
-                        }
-                    };
-
-                    const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
-                    try history.appendContext(
-                        .{ .slot = try history.getSlot(-1) },
-                        Ctx{ .core = &self.core, .allocator = allocator, .remote_name = remote_name, .remote_ref_name = remote_ref_name, .parsed_uri = parsed_uri, .pull_result = &pull_result },
-                    );
-                    return pull_result;
                 },
             }
         }
@@ -1159,6 +1059,93 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     try history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
                         Ctx{ .core = &self.core, .obj_iter = obj_iter },
+                    );
+                },
+            }
+        }
+
+        pub fn clone(
+            allocator: std.mem.Allocator,
+            url: []const u8,
+            cwd: std.fs.Dir,
+            local_path: []const u8,
+            opts: net.Opts,
+        ) !Repo(repo_kind, repo_opts) {
+            if (repo_opts.hash == .none) return error.UnsupportedHashKind;
+            return net.clone(repo_kind, repo_opts, allocator, url, cwd, local_path, opts);
+        }
+
+        pub fn fetch(
+            self: *Repo(repo_kind, repo_opts),
+            allocator: std.mem.Allocator,
+            remote_name: []const u8,
+            opts: net.Opts,
+        ) !void {
+            switch (repo_kind) {
+                .git => {
+                    const state = State(.read_write){ .core = &self.core, .extra = .{} };
+                    var remote = try net.Remote(repo_kind, repo_opts).initFromConfig(state.readOnly(), allocator, remote_name);
+                    defer remote.deinit(allocator);
+                    try net.fetch(repo_kind, repo_opts, state, allocator, &remote, opts);
+                },
+                .xit => {
+                    const Ctx = struct {
+                        core: *Repo(repo_kind, repo_opts).Core,
+                        allocator: std.mem.Allocator,
+                        remote_name: []const u8,
+                        opts: net.Opts,
+
+                        pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
+                            var moment = try DB.HashMap(.read_write).init(cursor.*);
+                            const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
+                            var remote = try net.Remote(repo_kind, repo_opts).initFromConfig(state.readOnly(), ctx.allocator, ctx.remote_name);
+                            defer remote.deinit(allocator);
+                            try net.fetch(repo_kind, repo_opts, state, ctx.allocator, &remote, ctx.opts);
+                        }
+                    };
+
+                    const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
+                    try history.appendContext(
+                        .{ .slot = try history.getSlot(-1) },
+                        Ctx{ .core = &self.core, .allocator = allocator, .remote_name = remote_name, .opts = opts },
+                    );
+                },
+            }
+        }
+
+        pub fn push(
+            self: *Repo(repo_kind, repo_opts),
+            allocator: std.mem.Allocator,
+            remote_name: []const u8,
+            opts: net.Opts,
+        ) !void {
+            switch (repo_kind) {
+                .git => {
+                    const state = State(.read_write){ .core = &self.core, .extra = .{} };
+                    var remote = try net.Remote(repo_kind, repo_opts).initFromConfig(state.readOnly(), allocator, remote_name);
+                    defer remote.deinit(allocator);
+                    try net.push(repo_kind, repo_opts, state, allocator, &remote, opts);
+                },
+                .xit => {
+                    const Ctx = struct {
+                        core: *Repo(repo_kind, repo_opts).Core,
+                        allocator: std.mem.Allocator,
+                        remote_name: []const u8,
+                        opts: net.Opts,
+
+                        pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
+                            var moment = try DB.HashMap(.read_write).init(cursor.*);
+                            const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
+                            var remote = try net.Remote(repo_kind, repo_opts).initFromConfig(state.readOnly(), ctx.allocator, ctx.remote_name);
+                            defer remote.deinit(allocator);
+                            try net.push(repo_kind, repo_opts, state, ctx.allocator, &remote, ctx.opts);
+                        }
+                    };
+
+                    const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
+                    try history.appendContext(
+                        .{ .slot = try history.getSlot(-1) },
+                        Ctx{ .core = &self.core, .allocator = allocator, .remote_name = remote_name, .opts = opts },
                     );
                 },
             }

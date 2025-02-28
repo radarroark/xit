@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
@@ -20,7 +21,9 @@ pub fn build(b: *std.Build) !void {
         //});
         exe.root_module.addImport("xitdb", b.dependency("xitdb", .{}).module("xitdb"));
         exe.root_module.addImport("xitui", b.dependency("xitui", .{}).module("xitui"));
-        exe.root_module.addImport("network", b.dependency("network", .{}).module("network"));
+        if (.windows == builtin.os.tag) {
+            exe.linkLibC();
+        }
         b.installArtifact(exe);
 
         const run_cmd = b.addRunArtifact(exe);
@@ -47,7 +50,6 @@ pub fn build(b: *std.Build) !void {
     //});
     xit.addImport("xitdb", b.dependency("xitdb", .{}).module("xitdb"));
     xit.addImport("xitui", b.dependency("xitui", .{}).module("xitui"));
-    xit.addImport("network", b.dependency("network", .{}).module("network"));
 
     // try
     {
@@ -58,6 +60,9 @@ pub fn build(b: *std.Build) !void {
             .optimize = optimize,
         });
         exe.root_module.addImport("xit", xit);
+        if (.windows == builtin.os.tag) {
+            exe.linkLibC();
+        }
         b.installArtifact(exe);
 
         const run_cmd = b.addRunArtifact(exe);
@@ -100,25 +105,20 @@ pub fn build(b: *std.Build) !void {
 
     // testnet
     {
-        const zlib = @import("deps/test/zlib.zig");
-        const mbedtls = @import("deps/test/mbedtls.zig");
-        const libgit2 = @import("deps/test/libgit2.zig");
-
-        const z = zlib.create(b, target, optimize);
-        const tls = mbedtls.create(b, target, optimize);
-
-        const git2 = try libgit2.create(b, target, optimize);
-        tls.link(git2.step);
-        z.link(git2.step);
-
         const unit_tests = b.addTest(.{
             .root_source_file = b.path("src/testnet.zig"),
             .optimize = optimize,
         });
+        //xit.addAnonymousImport("xitdb", .{
+        //    .root_source_file = b.path("../xitdb/src/lib.zig"),
+        //});
+        //xit.addAnonymousImport("xitui", .{
+        //    .root_source_file = b.path("../xitui/src/lib.zig"),
+        //});
         unit_tests.root_module.addImport("xit", xit);
-        unit_tests.linkLibC();
-        unit_tests.addIncludePath(b.path("deps/test/libgit2/include"));
-        unit_tests.linkLibrary(git2.step);
+        if (.windows == builtin.os.tag) {
+            unit_tests.linkLibC();
+        }
 
         const run_unit_tests = b.addRunArtifact(unit_tests);
         run_unit_tests.has_side_effects = true;

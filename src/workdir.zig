@@ -746,10 +746,26 @@ pub fn restore(
     allocator: std.mem.Allocator,
     path_parts: []const []const u8,
 ) !void {
-    const tree_entry = try tr.headTreeEntry(repo_kind, repo_opts, state, allocator, path_parts) orelse return error.ObjectNotFound;
-    const path = try fs.joinPath(allocator, path_parts);
-    defer allocator.free(path);
-    try objectToFile(repo_kind, repo_opts, state, allocator, path, tree_entry);
+    if (path_parts.len == 0) {
+        // get the current commit
+        const current_oid = try rf.readHeadRecur(repo_kind, repo_opts, state);
+        var commit_object = try obj.Object(repo_kind, repo_opts, .full).init(allocator, state, &current_oid);
+        defer commit_object.deinit();
+
+        // get the tree of the current commit
+        var tree_object = try obj.Object(repo_kind, repo_opts, .full).init(allocator, state, &commit_object.content.commit.tree);
+        defer tree_object.deinit();
+
+        const entries = &tree_object.content.tree.entries;
+        for (entries.keys(), entries.values()) |name, tree_entry| {
+            try objectToFile(repo_kind, repo_opts, state, allocator, name, tree_entry);
+        }
+    } else {
+        const tree_entry = try tr.headTreeEntry(repo_kind, repo_opts, state, allocator, path_parts) orelse return error.ObjectNotFound;
+        const path = try fs.joinPath(allocator, path_parts);
+        defer allocator.free(path);
+        try objectToFile(repo_kind, repo_opts, state, allocator, path, tree_entry);
+    }
 }
 
 pub fn ResetInput(comptime hash_kind: hash.HashKind) type {
