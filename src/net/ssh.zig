@@ -131,7 +131,24 @@ fn spawnSsh(
         try args.append(arg);
     }
 
-    const uri = try std.Uri.parse(url);
+    const uri = if (std.mem.startsWith(u8, url, "ssh://"))
+        try std.Uri.parse(url)
+    else blk: {
+        const colon_idx = std.mem.indexOfScalar(u8, url, ':') orelse return error.InvalidSshUrl;
+        const user_and_host = url[0..colon_idx];
+        const path = url[colon_idx + 1 ..];
+
+        const at_idx = std.mem.indexOfScalar(u8, user_and_host, '@') orelse return error.InvalidSshUrl;
+        const user = user_and_host[0..at_idx];
+        const host = user_and_host[at_idx + 1 ..];
+
+        break :blk std.Uri{
+            .scheme = "ssh://",
+            .user = .{ .percent_encoded = user },
+            .host = .{ .percent_encoded = host },
+            .path = .{ .percent_encoded = path },
+        };
+    };
 
     if (uri.port) |port| {
         try args.append("-p");
