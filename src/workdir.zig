@@ -45,7 +45,6 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
         index: idx.Index(repo_kind, repo_opts),
         head_tree: tr.Tree(repo_kind, repo_opts),
         arena: *std.heap.ArenaAllocator,
-        allocator: std.mem.Allocator,
 
         pub const Entry = struct {
             path: []const u8,
@@ -138,7 +137,6 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                 .index = index,
                 .head_tree = head_tree,
                 .arena = arena,
-                .allocator = allocator,
             };
         }
 
@@ -153,7 +151,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             self.index.deinit();
             self.head_tree.deinit();
             self.arena.deinit();
-            self.allocator.destroy(self.arena);
+            allocator.destroy(self.arena);
         }
 
         fn addEntries(
