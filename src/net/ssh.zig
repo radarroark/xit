@@ -114,6 +114,27 @@ pub const SshStream = struct {
     }
 };
 
+pub fn parseUri(str: []const u8) !std.Uri {
+    return if (std.mem.startsWith(u8, str, "ssh://"))
+        try std.Uri.parse(str)
+    else blk: {
+        const colon_idx = std.mem.indexOfScalar(u8, str, ':') orelse return error.InvalidSshUrl;
+        const user_and_host = str[0..colon_idx];
+        const path = str[colon_idx + 1 ..];
+
+        const at_idx = std.mem.indexOfScalar(u8, user_and_host, '@') orelse return error.InvalidSshUrl;
+        const user = user_and_host[0..at_idx];
+        const host = user_and_host[at_idx + 1 ..];
+
+        break :blk std.Uri{
+            .scheme = "ssh://",
+            .user = .{ .percent_encoded = user },
+            .host = .{ .percent_encoded = host },
+            .path = .{ .percent_encoded = path },
+        };
+    };
+}
+
 fn spawnSsh(
     wire_state: *SshState,
     wire_action: net_wire.WireAction,
@@ -131,24 +152,7 @@ fn spawnSsh(
         try args.append(arg);
     }
 
-    const uri = if (std.mem.startsWith(u8, url, "ssh://"))
-        try std.Uri.parse(url)
-    else blk: {
-        const colon_idx = std.mem.indexOfScalar(u8, url, ':') orelse return error.InvalidSshUrl;
-        const user_and_host = url[0..colon_idx];
-        const path = url[colon_idx + 1 ..];
-
-        const at_idx = std.mem.indexOfScalar(u8, user_and_host, '@') orelse return error.InvalidSshUrl;
-        const user = user_and_host[0..at_idx];
-        const host = user_and_host[at_idx + 1 ..];
-
-        break :blk std.Uri{
-            .scheme = "ssh://",
-            .user = .{ .percent_encoded = user },
-            .host = .{ .percent_encoded = host },
-            .path = .{ .percent_encoded = path },
-        };
-    };
+    const uri = try parseUri(url);
 
     if (uri.port) |port| {
         try args.append("-p");

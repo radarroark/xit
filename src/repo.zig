@@ -938,7 +938,11 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
         pub fn addRemote(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: cfg.AddConfigInput) !void {
             const new_name = try std.fmt.allocPrint(allocator, "remote.{s}.url", .{input.name});
             defer allocator.free(new_name);
-            _ = try std.Uri.parse(input.value); // validate url
+
+            if (!net.validateUrl(input.value)) {
+                return error.InvalidRemoteUrl;
+            }
+
             const new_input = cfg.AddConfigInput{
                 .name = new_name,
                 .value = input.value,

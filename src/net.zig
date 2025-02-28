@@ -237,6 +237,10 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
     };
 }
 
+pub fn validateUrl(url: []const u8) bool {
+    return net_transport.TransportDefinition.init(url) != null;
+}
+
 pub fn matchingRefSpec(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),

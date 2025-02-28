@@ -4,6 +4,7 @@ const net_wire = @import("./wire.zig");
 const net_file = @import("./file.zig");
 const net_push = @import("./push.zig");
 const net_fetch = @import("./fetch.zig");
+const net_ssh = @import("./ssh.zig");
 const rp = @import("../repo.zig");
 const hash = @import("../hash.zig");
 
@@ -152,11 +153,9 @@ pub const TransportDefinition = struct {
             return def;
         }
 
-        if (null != std.mem.indexOfScalar(u8, url_slice, ':')) {
-            if (initWithUrl("ssh://")) |def| {
-                return def;
-            }
-        }
+        if (net_ssh.parseUri(url)) |_| {
+            return .{ .prefix = "ssh://", .kind = .{ .wire = .ssh } };
+        } else |_| return null;
 
         return null;
     }
