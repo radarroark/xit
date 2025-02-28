@@ -66,7 +66,7 @@ pub fn main() !void {
         // restore all files in work dir
         // (they are all missing because we only copied the .git dir)
         var status = try git_repo.status(allocator);
-        defer status.deinit();
+        defer status.deinit(allocator);
         for (status.work_dir_deleted.keys()) |path| {
             if (std.mem.startsWith(u8, path, "deps/")) continue;
             try writers.out.print("Restoring: {s}\n", .{path});

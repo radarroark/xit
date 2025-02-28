@@ -394,7 +394,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
 
         // generate diff
         var status = try repo.status(allocator);
-        defer status.deinit();
+        defer status.deinit(allocator);
         var file_iter = try repo.filePairs(allocator, .{
             .work_dir = .{
                 .conflict_diff_kind = .target,
@@ -497,7 +497,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
 
         // generate diff
         var status = try repo.status(allocator);
-        defer status.deinit();
+        defer status.deinit(allocator);
         var file_iter = try repo.filePairs(allocator, .{
             .work_dir = .{
                 .conflict_diff_kind = .target,
@@ -559,7 +559,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
 
         // generate diff
         var status = try repo.status(allocator);
-        defer status.deinit();
+        defer status.deinit(allocator);
         var file_iter = try repo.filePairs(allocator, .{
             .work_dir = .{
                 .conflict_diff_kind = .target,
@@ -634,7 +634,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
 
         // generate diff
         var status = try repo.status(allocator);
-        defer status.deinit();
+        defer status.deinit(allocator);
         var file_iter = try repo.filePairs(allocator, .{
             .work_dir = .{
                 .conflict_diff_kind = .target,
@@ -707,7 +707,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
 
         // generate diff
         var status = try repo.status(allocator);
-        defer status.deinit();
+        defer status.deinit(allocator);
         var file_iter = try repo.filePairs(allocator, .{
             .work_dir = .{
                 .conflict_diff_kind = .target,
@@ -790,7 +790,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
 
         // generate diff
         var status = try repo.status(allocator);
-        defer status.deinit();
+        defer status.deinit(allocator);
         var file_iter = try repo.filePairs(allocator, .{
             .work_dir = .{
                 .conflict_diff_kind = .target,
@@ -939,7 +939,7 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind, comptime repo_op
         }
 
         var status = try repo.status(allocator);
-        defer status.deinit();
+        defer status.deinit(allocator);
         var file_iter = try repo.filePairs(allocator, .{
             .work_dir = .{
                 .conflict_diff_kind = .target,
@@ -1068,7 +1068,7 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
 
         // generate diff
         var status = try repo.status(allocator);
-        defer status.deinit();
+        defer status.deinit(allocator);
         var file_iter = try repo.filePairs(allocator, .{
             .work_dir = .{
                 .conflict_diff_kind = .target,
@@ -1445,7 +1445,7 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
 
     // generate diff
     var status = try repo.status(allocator);
-    defer status.deinit();
+    defer status.deinit(allocator);
     var file_iter = try repo.filePairs(allocator, .{
         .work_dir = .{
             .conflict_diff_kind = .target,

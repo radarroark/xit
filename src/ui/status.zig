@@ -533,7 +533,7 @@ pub fn Status(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime r
 
         pub fn init(allocator: std.mem.Allocator, repo: *rp.Repo(repo_kind, repo_opts)) !Status(Widget, repo_kind, repo_opts) {
             var status = try repo.status(allocator);
-            errdefer status.deinit();
+            errdefer status.deinit(allocator);
 
             // put Status object on the heap so the pointer is stable
             const status_ptr = try allocator.create(work.Status(repo_kind, repo_opts));
@@ -579,7 +579,7 @@ pub fn Status(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime r
 
         pub fn deinit(self: *Status(Widget, repo_kind, repo_opts)) void {
             self.box.deinit();
-            self.status.deinit();
+            self.status.deinit(self.allocator);
             self.allocator.destroy(self.status);
         }
 

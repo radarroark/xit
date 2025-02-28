@@ -35,13 +35,13 @@ pub const MergeConflictStatus = struct {
 
 pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return struct {
-        untracked: std.StringArrayHashMap(Entry),
-        work_dir_modified: std.StringArrayHashMap(Entry),
-        work_dir_deleted: std.StringArrayHashMap(void),
-        index_added: std.StringArrayHashMap(void),
-        index_modified: std.StringArrayHashMap(void),
-        index_deleted: std.StringArrayHashMap(void),
-        conflicts: std.StringArrayHashMap(MergeConflictStatus),
+        untracked: std.StringArrayHashMapUnmanaged(Entry),
+        work_dir_modified: std.StringArrayHashMapUnmanaged(Entry),
+        work_dir_deleted: std.StringArrayHashMapUnmanaged(void),
+        index_added: std.StringArrayHashMapUnmanaged(void),
+        index_modified: std.StringArrayHashMapUnmanaged(void),
+        index_deleted: std.StringArrayHashMapUnmanaged(void),
+        conflicts: std.StringArrayHashMapUnmanaged(MergeConflictStatus),
         index: idx.Index(repo_kind, repo_opts),
         head_tree: tr.Tree(repo_kind, repo_opts),
         arena: *std.heap.ArenaAllocator,
@@ -57,26 +57,26 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             state: rp.Repo(repo_kind, repo_opts).State(.read_only),
             oid_maybe: ?*const [hash.hexLen(repo_opts.hash)]u8,
         ) !Status(repo_kind, repo_opts) {
-            var untracked = std.StringArrayHashMap(Entry).init(allocator);
-            errdefer untracked.deinit();
+            var untracked = std.StringArrayHashMapUnmanaged(Entry){};
+            errdefer untracked.deinit(allocator);
 
-            var work_dir_modified = std.StringArrayHashMap(Entry).init(allocator);
-            errdefer work_dir_modified.deinit();
+            var work_dir_modified = std.StringArrayHashMapUnmanaged(Entry){};
+            errdefer work_dir_modified.deinit(allocator);
 
-            var work_dir_deleted = std.StringArrayHashMap(void).init(allocator);
-            errdefer work_dir_deleted.deinit();
+            var work_dir_deleted = std.StringArrayHashMapUnmanaged(void){};
+            errdefer work_dir_deleted.deinit(allocator);
 
-            var index_added = std.StringArrayHashMap(void).init(allocator);
-            errdefer index_added.deinit();
+            var index_added = std.StringArrayHashMapUnmanaged(void){};
+            errdefer index_added.deinit(allocator);
 
-            var index_modified = std.StringArrayHashMap(void).init(allocator);
-            errdefer index_modified.deinit();
+            var index_modified = std.StringArrayHashMapUnmanaged(void){};
+            errdefer index_modified.deinit(allocator);
 
-            var index_deleted = std.StringArrayHashMap(void).init(allocator);
-            errdefer index_deleted.deinit();
+            var index_deleted = std.StringArrayHashMapUnmanaged(void){};
+            errdefer index_deleted.deinit(allocator);
 
-            var conflicts = std.StringArrayHashMap(MergeConflictStatus).init(allocator);
-            errdefer conflicts.deinit();
+            var conflicts = std.StringArrayHashMapUnmanaged(MergeConflictStatus){};
+            errdefer conflicts.deinit(allocator);
 
             const arena = try allocator.create(std.heap.ArenaAllocator);
             arena.* = std.heap.ArenaAllocator.init(allocator);
@@ -91,7 +91,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             var index_bools = try allocator.alloc(bool, index.entries.count());
             defer allocator.free(index_bools);
 
-            _ = try addEntries(arena.allocator(), &untracked, &work_dir_modified, &index, &index_bools, state.core.work_dir, ".");
+            _ = try addEntries(allocator, arena, &untracked, &work_dir_modified, &index, &index_bools, state.core.work_dir, ".");
 
             var head_tree = try tr.Tree(repo_kind, repo_opts).init(allocator, state, oid_maybe);
             errdefer head_tree.deinit();
@@ -101,19 +101,19 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                 // if it is a non-conflict entry
                 if (index_entries_for_path[0]) |index_entry| {
                     if (!index_bools[i]) {
-                        try work_dir_deleted.put(path, {});
+                        try work_dir_deleted.put(allocator, path, {});
                     }
                     if (head_tree.entries.get(index_entry.path)) |head_entry| {
                         if (!index_entry.mode.eql(head_entry.mode) or !std.mem.eql(u8, &index_entry.oid, &head_entry.oid)) {
-                            try index_modified.put(index_entry.path, {});
+                            try index_modified.put(allocator, index_entry.path, {});
                         }
                     } else {
-                        try index_added.put(index_entry.path, {});
+                        try index_added.put(allocator, index_entry.path, {});
                     }
                 }
                 // add to conflicts
                 else {
-                    try conflicts.put(path, .{
+                    try conflicts.put(allocator, path, .{
                         .base = index_entries_for_path[1] != null,
                         .target = index_entries_for_path[2] != null,
                         .source = index_entries_for_path[3] != null,
@@ -123,7 +123,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
             for (head_tree.entries.keys()) |path| {
                 if (!index.entries.contains(path)) {
-                    try index_deleted.put(path, {});
+                    try index_deleted.put(allocator, path, {});
                 }
             }
 
@@ -142,14 +142,14 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             };
         }
 
-        pub fn deinit(self: *Status(repo_kind, repo_opts)) void {
-            self.untracked.deinit();
-            self.work_dir_modified.deinit();
-            self.work_dir_deleted.deinit();
-            self.index_added.deinit();
-            self.index_modified.deinit();
-            self.index_deleted.deinit();
-            self.conflicts.deinit();
+        pub fn deinit(self: *Status(repo_kind, repo_opts), allocator: std.mem.Allocator) void {
+            self.untracked.deinit(allocator);
+            self.work_dir_modified.deinit(allocator);
+            self.work_dir_deleted.deinit(allocator);
+            self.index_added.deinit(allocator);
+            self.index_modified.deinit(allocator);
+            self.index_deleted.deinit(allocator);
+            self.conflicts.deinit(allocator);
             self.index.deinit();
             self.head_tree.deinit();
             self.arena.deinit();
@@ -158,8 +158,9 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
         fn addEntries(
             allocator: std.mem.Allocator,
-            untracked: *std.StringArrayHashMap(Status(repo_kind, repo_opts).Entry),
-            modified: *std.StringArrayHashMap(Status(repo_kind, repo_opts).Entry),
+            arena: *std.heap.ArenaAllocator,
+            untracked: *std.StringArrayHashMapUnmanaged(Status(repo_kind, repo_opts).Entry),
+            modified: *std.StringArrayHashMapUnmanaged(Status(repo_kind, repo_opts).Entry),
             index: *const idx.Index(repo_kind, repo_opts),
             index_bools: *[]bool,
             work_dir: std.fs.Dir,
@@ -176,11 +177,11 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                         const entries_for_path = index.entries.values()[entry_index];
                         if (entries_for_path[0]) |entry| {
                             if (try indexDiffersFromMount(repo_kind, repo_opts, &entry, file, meta)) {
-                                try modified.put(path, Status(repo_kind, repo_opts).Entry{ .path = path, .meta = meta });
+                                try modified.put(allocator, path, Status(repo_kind, repo_opts).Entry{ .path = path, .meta = meta });
                             }
                         }
                     } else {
-                        try untracked.put(path, Status(repo_kind, repo_opts).Entry{ .path = path, .meta = meta });
+                        try untracked.put(allocator, path, Status(repo_kind, repo_opts).Entry{ .path = path, .meta = meta });
                     }
                     return true;
                 },
@@ -206,14 +207,14 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                         }
 
                         const subpath = if (std.mem.eql(u8, path, "."))
-                            try allocator.dupe(u8, entry.name)
+                            try arena.allocator().dupe(u8, entry.name)
                         else
-                            try fs.joinPath(allocator, &.{ path, entry.name });
+                            try fs.joinPath(arena.allocator(), &.{ path, entry.name });
 
-                        var grandchild_untracked = std.StringArrayHashMap(Status(repo_kind, repo_opts).Entry).init(allocator);
-                        defer grandchild_untracked.deinit();
+                        var grandchild_untracked = std.StringArrayHashMapUnmanaged(Status(repo_kind, repo_opts).Entry){};
+                        defer grandchild_untracked.deinit(allocator);
 
-                        const is_file = try addEntries(allocator, &grandchild_untracked, modified, index, index_bools, work_dir, subpath);
+                        const is_file = try addEntries(allocator, arena, &grandchild_untracked, modified, index, index_bools, work_dir, subpath);
                         contains_file = contains_file or is_file;
                         if (is_file and is_untracked) break; // no need to continue because child_untracked will be discarded anyway
 
@@ -223,13 +224,13 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     // add the dir if it isn't tracked and contains a file
                     if (is_untracked) {
                         if (contains_file) {
-                            try untracked.put(path, Status(repo_kind, repo_opts).Entry{ .path = path, .meta = meta });
+                            try untracked.put(allocator, path, Status(repo_kind, repo_opts).Entry{ .path = path, .meta = meta });
                         }
                     }
                     // add its children
                     else {
                         for (child_untracked.items) |entry| {
-                            try untracked.put(entry.path, entry);
+                            try untracked.put(allocator, entry.path, entry);
                         }
                     }
 

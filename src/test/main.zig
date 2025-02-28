@@ -95,7 +95,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
         defer repo.deinit();
         var status = try repo.status(allocator);
-        defer status.deinit();
+        defer status.deinit(allocator);
     }
 
     const hello_txt_content =
@@ -308,7 +308,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
             defer repo.deinit();
             var status = try repo.status(allocator);
-            defer status.deinit();
+            defer status.deinit(allocator);
             var file_iter = try repo.filePairs(allocator, .{
                 .work_dir = .{
                     .conflict_diff_kind = .target,
@@ -398,7 +398,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
             defer repo.deinit();
             var status = try repo.status(allocator);
-            defer status.deinit();
+            defer status.deinit(allocator);
             var file_iter = try repo.filePairs(allocator, .{
                 .index = .{ .status = &status },
             });
@@ -973,7 +973,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
             defer repo.deinit();
             var status = try repo.status(allocator);
-            defer status.deinit();
+            defer status.deinit(allocator);
 
             // check the untracked entries
             try std.testing.expectEqual(2, status.untracked.count());
@@ -1019,7 +1019,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
             defer repo.deinit();
             var status = try repo.status(allocator);
-            defer status.deinit();
+            defer status.deinit(allocator);
 
             // check the index_added entries
             try std.testing.expectEqual(1, status.index_added.count());
@@ -1043,7 +1043,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
             defer repo.deinit();
             var status = try repo.status(allocator);
-            defer status.deinit();
+            defer status.deinit(allocator);
 
             try std.testing.expectEqual(2, status.work_dir_modified.count());
             try std.testing.expectEqual(2, status.index_deleted.count());
@@ -1067,7 +1067,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
             defer repo.deinit();
             var status = try repo.status(allocator);
-            defer status.deinit();
+            defer status.deinit(allocator);
 
             try std.testing.expectEqual(0, status.work_dir_modified.count());
             try std.testing.expectEqual(0, status.index_deleted.count());

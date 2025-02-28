@@ -218,7 +218,7 @@ fn runCommand(
             }
 
             var stat = try repo.status(allocator);
-            defer stat.deinit();
+            defer stat.deinit(allocator);
 
             for (stat.untracked.values()) |entry| {
                 try writers.out.print("?? {s}\n", .{entry.path});
@@ -282,10 +282,10 @@ fn runCommand(
                 index: work.Status(repo_kind, repo_opts),
                 tree: tr.TreeDiff(repo_kind, repo_opts),
 
-                fn deinit(diff_state: *@This()) void {
+                fn deinit(diff_state: *@This(), inner_allocator: std.mem.Allocator) void {
                     switch (diff_state.*) {
-                        .work_dir => diff_state.work_dir.deinit(),
-                        .index => diff_state.index.deinit(),
+                        .work_dir => diff_state.work_dir.deinit(inner_allocator),
+                        .index => diff_state.index.deinit(inner_allocator),
                         .tree => diff_state.tree.deinit(),
                     }
                 }
@@ -297,7 +297,7 @@ fn runCommand(
                     .tree = try repo.treeDiff(allocator, if (tree.old) |old| &old else null, if (tree.new) |new| &new else null),
                 },
             };
-            defer diff_state.deinit();
+            defer diff_state.deinit(allocator);
             var diff_iter = try repo.filePairs(allocator, switch (diff_cmd) {
                 .work_dir => |work_dir| .{
                     .work_dir = .{
