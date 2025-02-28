@@ -207,7 +207,7 @@ pub fn PackObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
             switch (pack_reader.internal) {
                 .basic => {},
                 .delta => |delta| switch (delta.init) {
-                    .ofs => try pack_reader.initDelta(self.allocator, null),
+                    .ofs => try pack_reader.initDeltaAndCache(self.allocator, null),
                     .ref => return error.CannotIterateOverDeltaRefObject,
                 },
             }
@@ -299,36 +299,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
         pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind, repo_opts).Core, oid_hex: *const [hash.hexLen(repo_opts.hash)]u8) !PackObjectReader(repo_kind, repo_opts) {
             var pack_reader = try PackObjectReader(repo_kind, repo_opts).initWithIndex(allocator, core, oid_hex);
             errdefer pack_reader.deinit();
-
-            // make a list of the chain of deltified objects,
-            // and initialize each one. we can't do this during the initial
-            // creation of the PackObjectReader because it would cause them
-            // to be initialized recursively. since delta chains can get
-            // really long, that can lead to a stack overflow.
-            var delta_objects = std.ArrayList(*PackObjectReader(repo_kind, repo_opts)).init(allocator);
-            defer delta_objects.deinit();
-            var last_object = &pack_reader;
-            while (last_object.internal == .delta) {
-                try last_object.initDelta(allocator, core);
-                try delta_objects.append(last_object);
-                if (last_object.internal.delta.state) |state| {
-                    last_object = state.base_reader;
-                } else {
-                    return error.DeltaObjectNotInitialized;
-                }
-            }
-
-            // initialize the cache for each deltified object, starting
-            // with the one at the end of the chain. we need to cache
-            // "copy_from_base" delta transformations for performance.
-            // the base object could itself be a deltified object, so
-            // trying to read the data on the fly could lead to a very
-            // slow recursive descent into madness.
-            for (0..delta_objects.items.len) |i| {
-                const delta_object = delta_objects.items[delta_objects.items.len - i - 1];
-                try delta_object.initCache();
-            }
-
+            try pack_reader.initDeltaAndCache(allocator, core);
             return pack_reader;
         }
 
@@ -510,6 +481,37 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                         },
                     };
                 },
+            }
+        }
+
+        fn initDeltaAndCache(self: *PackObjectReader(repo_kind, repo_opts), allocator: std.mem.Allocator, core_maybe: ?*rp.Repo(repo_kind, repo_opts).Core) !void {
+            // make a list of the chain of deltified objects,
+            // and initialize each one. we can't do this during the initial
+            // creation of the PackObjectReader because it would cause them
+            // to be initialized recursively. since delta chains can get
+            // really long, that can lead to a stack overflow.
+            var delta_objects = std.ArrayList(*PackObjectReader(repo_kind, repo_opts)).init(allocator);
+            defer delta_objects.deinit();
+            var last_object = self;
+            while (last_object.internal == .delta) {
+                try last_object.initDelta(allocator, core_maybe);
+                try delta_objects.append(last_object);
+                if (last_object.internal.delta.state) |state| {
+                    last_object = state.base_reader;
+                } else {
+                    return error.DeltaObjectNotInitialized;
+                }
+            }
+
+            // initialize the cache for each deltified object, starting
+            // with the one at the end of the chain. we need to cache
+            // "copy_from_base" delta transformations for performance.
+            // the base object could itself be a deltified object, so
+            // trying to read the data on the fly could lead to a very
+            // slow recursive descent into madness.
+            for (0..delta_objects.items.len) |i| {
+                const delta_object = delta_objects.items[delta_objects.items.len - i - 1];
+                try delta_object.initCache();
             }
         }
 
