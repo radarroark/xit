@@ -204,6 +204,14 @@ pub fn PackObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
             var pack_reader = try PackObjectReader(repo_kind, repo_opts).initAtPosition(self.allocator, self.pack_file_path, start_position);
             errdefer pack_reader.deinit();
 
+            switch (pack_reader.internal) {
+                .basic => {},
+                .delta => |delta| switch (delta.init) {
+                    .ofs => try pack_reader.initDelta(self.allocator, null),
+                    .ref => return error.CannotIterateOverDeltaRefObject,
+                },
+            }
+
             // make sure the stream is at the end so the file position is correct
             while (try pack_reader.stream.next()) |_| {}
 
@@ -260,15 +268,16 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     },
                 },
                 allocator: std.mem.Allocator,
-                initialized: bool,
-                base_reader: *PackObjectReader(repo_kind, repo_opts),
-                chunk_index: usize,
-                chunk_position: u64,
-                real_position: u64,
-                chunks: std.ArrayList(Chunk),
-                cache: std.AutoArrayHashMap(Location, []const u8),
-                cache_arena: *std.heap.ArenaAllocator,
-                recon_size: u64,
+                state: ?struct {
+                    base_reader: *PackObjectReader(repo_kind, repo_opts),
+                    chunk_index: usize,
+                    chunk_position: u64,
+                    real_position: u64,
+                    chunks: std.ArrayList(Chunk),
+                    cache: std.AutoArrayHashMap(Location, []const u8),
+                    cache_arena: *std.heap.ArenaAllocator,
+                    recon_size: u64,
+                },
             },
         },
 
@@ -285,7 +294,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             },
         };
 
-        pub const Error = ZlibStream.Reader.Error || error{ Unseekable, UnexpectedEndOfStream, InvalidDeltaCache };
+        pub const Error = ZlibStream.Reader.Error || error{ Unseekable, UnexpectedEndOfStream, InvalidDeltaCache, DeltaObjectNotInitialized };
 
         pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind, repo_opts).Core, oid_hex: *const [hash.hexLen(repo_opts.hash)]u8) !PackObjectReader(repo_kind, repo_opts) {
             var pack_reader = try PackObjectReader(repo_kind, repo_opts).initWithIndex(allocator, core, oid_hex);
@@ -302,7 +311,11 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             while (last_object.internal == .delta) {
                 try last_object.initDelta(allocator, core);
                 try delta_objects.append(last_object);
-                last_object = last_object.internal.delta.base_reader;
+                if (last_object.internal.delta.state) |state| {
+                    last_object = state.base_reader;
+                } else {
+                    return error.DeltaObjectNotInitialized;
+                }
             }
 
             // initialize the cache for each deltified object, starting
@@ -329,7 +342,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
 
                     // serialize object header
                     var header_bytes = [_]u8{0} ** 32;
-                    const header_str = try obj.writeObjectHeader(pack_reader.header(), &header_bytes);
+                    const header_str = try obj.writeObjectHeader(try pack_reader.header(), &header_bytes);
 
                     var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
                     try hash.hashReader(repo_opts.hash, repo_opts.read_size, pack_reader, header_str, &oid);
@@ -468,15 +481,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                                     },
                                 },
                                 .allocator = allocator,
-                                .initialized = false,
-                                .base_reader = undefined,
-                                .chunk_index = 0,
-                                .chunk_position = 0,
-                                .real_position = 0,
-                                .chunks = undefined,
-                                .cache = undefined,
-                                .cache_arena = undefined,
-                                .recon_size = undefined,
+                                .state = null,
                             },
                         },
                     };
@@ -500,15 +505,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                                     },
                                 },
                                 .allocator = allocator,
-                                .initialized = false,
-                                .base_reader = undefined,
-                                .chunk_index = 0,
-                                .chunk_position = 0,
-                                .real_position = 0,
-                                .chunks = undefined,
-                                .cache = undefined,
-                                .cache_arena = undefined,
-                                .recon_size = undefined,
+                                .state = null,
                             },
                         },
                     };
@@ -516,14 +513,17 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             }
         }
 
-        fn initDelta(self: *PackObjectReader(repo_kind, repo_opts), allocator: std.mem.Allocator, core: *rp.Repo(repo_kind, repo_opts).Core) !void {
+        fn initDelta(self: *PackObjectReader(repo_kind, repo_opts), allocator: std.mem.Allocator, core_maybe: ?*rp.Repo(repo_kind, repo_opts).Core) !void {
             const reader = self.pack_file.reader();
 
             const base_reader = try allocator.create(PackObjectReader(repo_kind, repo_opts));
             errdefer allocator.destroy(base_reader);
             base_reader.* = switch (self.internal.delta.init) {
                 .ofs => |ofs| try PackObjectReader(repo_kind, repo_opts).initAtPosition(allocator, ofs.pack_file_path, ofs.position),
-                .ref => |ref| try PackObjectReader(repo_kind, repo_opts).initWithIndex(allocator, core, &ref.oid_hex),
+                .ref => |ref| switch (repo_kind) {
+                    .git => try PackObjectReader(repo_kind, repo_opts).initWithIndex(allocator, core_maybe orelse return error.CannotInitDeltaRefObject, &ref.oid_hex),
+                    .xit => return error.CannotInitDeltaRefObject,
+                },
             };
             errdefer base_reader.deinit();
 
@@ -654,23 +654,25 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     .delta = .{
                         .init = self.internal.delta.init,
                         .allocator = allocator,
-                        .initialized = true,
-                        .base_reader = base_reader,
-                        .chunk_index = 0,
-                        .chunk_position = 0,
-                        .real_position = bytes_read,
-                        .chunks = chunks,
-                        .cache = cache,
-                        .cache_arena = cache_arena,
-                        .recon_size = recon_size,
+                        .state = .{
+                            .base_reader = base_reader,
+                            .chunk_index = 0,
+                            .chunk_position = 0,
+                            .real_position = bytes_read,
+                            .chunks = chunks,
+                            .cache = cache,
+                            .cache_arena = cache_arena,
+                            .recon_size = recon_size,
+                        },
                     },
                 },
             };
         }
 
         fn initCache(self: *PackObjectReader(repo_kind, repo_opts)) !void {
-            const keys = self.internal.delta.cache.keys();
-            const values = self.internal.delta.cache.values();
+            const delta_state = if (self.internal.delta.state) |*state| state else return error.DeltaObjectNotInitialized;
+            const keys = delta_state.cache.keys();
+            const values = delta_state.cache.values();
             for (keys, values, 0..) |location, *value, i| {
                 // if the value is a subset of the previous value, just get a slice of it
                 if (i > 0 and location.offset == keys[i - 1].offset and location.size < keys[i - 1].size) {
@@ -685,20 +687,23 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                 // getting messed up in rare cases for some reason.
                 // currently, position is always 0 because we're always resetting,
                 // but maybe in the future i can make it reset only when necessary.
-                try self.internal.delta.base_reader.reset();
-                const position = switch (self.internal.delta.base_reader.internal) {
-                    .basic => self.internal.delta.base_reader.relative_position,
-                    .delta => |delta| delta.real_position,
+                try delta_state.base_reader.reset();
+                const position = switch (delta_state.base_reader.internal) {
+                    .basic => delta_state.base_reader.relative_position,
+                    .delta => |delta| if (delta.state) |base_delta_state|
+                        base_delta_state.real_position
+                    else
+                        return error.DeltaObjectNotInitialized,
                 };
                 const bytes_to_skip = location.offset - position;
-                try self.internal.delta.base_reader.skipBytes(bytes_to_skip);
+                try delta_state.base_reader.skipBytes(bytes_to_skip);
 
                 // read into the buffer and put it in the cache
-                const buffer = try self.internal.delta.cache_arena.allocator().alloc(u8, location.size);
+                const buffer = try delta_state.cache_arena.allocator().alloc(u8, location.size);
                 var read_so_far: usize = 0;
                 while (read_so_far < buffer.len) {
                     const amt = @min(buffer.len - read_so_far, 2048);
-                    const read_size = try self.internal.delta.base_reader.read(buffer[read_so_far .. read_so_far + amt]);
+                    const read_size = try delta_state.base_reader.read(buffer[read_so_far .. read_so_far + amt]);
                     if (read_size == 0) break;
                     read_so_far += read_size;
                 }
@@ -710,11 +715,12 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
 
             // now that the cache has been initialized, clear the cache in
             // the base object if necessary, because it won't be used anymore.
-            switch (self.internal.delta.base_reader.internal) {
+            switch (delta_state.base_reader.internal) {
                 .basic => {},
                 .delta => |*delta| {
-                    _ = delta.cache_arena.reset(.free_all);
-                    delta.cache.clearAndFree();
+                    const base_delta_state = if (delta.state) |*state| state else return error.DeltaObjectNotInitialized;
+                    _ = base_delta_state.cache_arena.reset(.free_all);
+                    base_delta_state.cache.clearAndFree();
                 },
             }
         }
@@ -728,25 +734,25 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                         .ofs => |ofs| delta.allocator.free(ofs.pack_file_path),
                         .ref => {},
                     }
-                    if (delta.initialized) {
-                        delta.base_reader.deinit();
-                        delta.allocator.destroy(delta.base_reader);
-                        delta.chunks.deinit();
-                        delta.cache.deinit();
-                        delta.cache_arena.deinit();
-                        delta.allocator.destroy(delta.cache_arena);
+                    if (delta.state) |*state| {
+                        state.base_reader.deinit();
+                        delta.allocator.destroy(state.base_reader);
+                        state.chunks.deinit();
+                        state.cache.deinit();
+                        state.cache_arena.deinit();
+                        delta.allocator.destroy(state.cache_arena);
                     }
                 },
             }
         }
 
-        pub fn header(self: PackObjectReader(repo_kind, repo_opts)) obj.ObjectHeader {
+        pub fn header(self: PackObjectReader(repo_kind, repo_opts)) !obj.ObjectHeader {
             return switch (self.internal) {
                 .basic => self.internal.basic.header,
-                .delta => |delta| .{
-                    .kind = delta.base_reader.header().kind,
-                    .size = delta.recon_size,
-                },
+                .delta => |delta| if (delta.state) |delta_state| .{
+                    .kind = (try delta_state.base_reader.header()).kind,
+                    .size = delta_state.recon_size,
+                } else return error.DeltaObjectNotInitialized,
             };
         }
 
@@ -758,10 +764,12 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             switch (self.internal) {
                 .basic => {},
                 .delta => |*delta| {
-                    delta.chunk_index = 0;
-                    delta.chunk_position = 0;
-                    delta.real_position = 0;
-                    try delta.base_reader.reset();
+                    if (delta.state) |*state| {
+                        state.chunk_index = 0;
+                        state.chunk_position = 0;
+                        state.real_position = 0;
+                        try state.base_reader.reset();
+                    }
                 },
             }
         }
@@ -775,17 +783,18 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     return size;
                 },
                 .delta => |*delta| {
+                    const delta_state = if (delta.state) |*state| state else return error.DeltaObjectNotInitialized;
                     var bytes_read: usize = 0;
                     while (bytes_read < dest.len) {
-                        if (delta.chunk_index == delta.chunks.items.len) {
+                        if (delta_state.chunk_index == delta_state.chunks.items.len) {
                             break;
                         }
-                        const chunk = delta.chunks.items[delta.chunk_index];
+                        const chunk = delta_state.chunks.items[delta_state.chunk_index];
                         var dest_slice = dest[bytes_read..];
-                        const bytes_to_read = @min(chunk.location.size - delta.chunk_position, dest_slice.len);
+                        const bytes_to_read = @min(chunk.location.size - delta_state.chunk_position, dest_slice.len);
                         switch (chunk.kind) {
                             .add_new => {
-                                const offset = chunk.location.offset + delta.chunk_position;
+                                const offset = chunk.location.offset + delta_state.chunk_position;
                                 if (self.relative_position > offset) {
                                     try self.pack_file.seekTo(self.start_position);
                                     self.stream = std.compress.zlib.decompressor(self.pack_file.reader());
@@ -801,20 +810,20 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                                 //if (size != bytes_to_read) return error.UnexpectedEndOfStream;
                                 self.relative_position += size;
                                 bytes_read += size;
-                                delta.chunk_position += size;
-                                delta.real_position += size;
+                                delta_state.chunk_position += size;
+                                delta_state.real_position += size;
                             },
                             .copy_from_base => {
-                                const buffer = delta.cache.get(chunk.location) orelse return error.InvalidDeltaCache;
-                                @memcpy(dest_slice[0..bytes_to_read], buffer[delta.chunk_position .. delta.chunk_position + bytes_to_read]);
+                                const buffer = delta_state.cache.get(chunk.location) orelse return error.InvalidDeltaCache;
+                                @memcpy(dest_slice[0..bytes_to_read], buffer[delta_state.chunk_position .. delta_state.chunk_position + bytes_to_read]);
                                 bytes_read += bytes_to_read;
-                                delta.chunk_position += bytes_to_read;
-                                delta.real_position += bytes_to_read;
+                                delta_state.chunk_position += bytes_to_read;
+                                delta_state.real_position += bytes_to_read;
                             },
                         }
-                        if (delta.chunk_position == chunk.location.size) {
-                            delta.chunk_index += 1;
-                            delta.chunk_position = 0;
+                        if (delta_state.chunk_position == chunk.location.size) {
+                            delta_state.chunk_index += 1;
+                            delta_state.chunk_position = 0;
                         }
                     }
                     return bytes_read;
@@ -918,10 +927,10 @@ pub fn LooseOrPackObjectReader(comptime repo_opts: rp.RepoOpts(.git)) type {
             }
         }
 
-        pub fn header(self: LooseOrPackObjectReader(repo_opts)) obj.ObjectHeader {
+        pub fn header(self: LooseOrPackObjectReader(repo_opts)) !obj.ObjectHeader {
             return switch (self) {
                 .loose => self.loose.header,
-                .pack => self.pack.header(),
+                .pack => try self.pack.header(),
             };
         }
 

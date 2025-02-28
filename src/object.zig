@@ -620,7 +620,7 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                     const reader = try pack.LooseOrPackObjectReader(repo_opts).init(allocator, state.core, oid);
                     return .{
                         .allocator = allocator,
-                        .header = reader.header(),
+                        .header = try reader.header(),
                         .reader = std.io.bufferedReaderSize(repo_opts.read_size, reader),
                         .internal = {},
                     };
