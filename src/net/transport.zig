@@ -38,8 +38,8 @@ pub fn Transport(
             url: []const u8,
             opts: Opts,
         ) !Transport(repo_kind, repo_opts) {
-            const transport_def = TransportDefinition.init(url) orelse return error.UnsupportedUrl;
-            return switch (transport_def.kind) {
+            const transport_def_kind = TransportDefinition.init(url) orelse return error.UnsupportedUrl;
+            return switch (transport_def_kind) {
                 .file => .{ .file = try net_file.FileTransport(repo_kind, repo_opts).init() },
                 .wire => |wire_kind| .{ .wire = try net_wire.WireTransport(repo_kind, repo_opts).init(state, allocator, wire_kind, opts.wire) },
             };
@@ -130,22 +130,17 @@ pub fn Transport(
     };
 }
 
-pub const TransportDefinitionKind = union(TransportKind) {
+const transports = std.StaticStringMap(TransportDefinition).initComptime(.{
+    .{ "git://", .{ .wire = .raw } },
+    .{ "http://", .{ .wire = .http } },
+    .{ "https://", .{ .wire = .http } },
+    .{ "file://", .file },
+    .{ "ssh://", .{ .wire = .ssh } },
+});
+
+pub const TransportDefinition = union(TransportKind) {
     file,
     wire: net_wire.WireKind,
-};
-
-const transports = [_]TransportDefinition{
-    .{ .prefix = "git://", .kind = .{ .wire = .raw } },
-    .{ .prefix = "http://", .kind = .{ .wire = .http } },
-    .{ .prefix = "https://", .kind = .{ .wire = .http } },
-    .{ .prefix = "file://", .kind = .file },
-    .{ .prefix = "ssh://", .kind = .{ .wire = .ssh } },
-};
-
-pub const TransportDefinition = struct {
-    prefix: []const u8,
-    kind: TransportDefinitionKind,
 
     pub fn init(url: []const u8) ?TransportDefinition {
         const url_slice = std.mem.sliceTo(url, 0);
@@ -154,15 +149,16 @@ pub const TransportDefinition = struct {
         }
 
         if (net_ssh.parseUri(url)) |_| {
-            return .{ .prefix = "ssh://", .kind = .{ .wire = .ssh } };
+            return .{ .wire = .ssh };
         } else |_| return null;
 
         return null;
     }
 
     fn initWithUrl(url: []const u8) ?TransportDefinition {
-        for (transports) |def| {
-            if (std.mem.startsWith(u8, url, def.prefix)) {
+        const scheme_suffix = "://";
+        if (std.mem.indexOf(u8, url, scheme_suffix)) |idx| {
+            if (transports.get(url[0 .. idx + scheme_suffix.len])) |def| {
                 return def;
             }
         }

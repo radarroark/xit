@@ -37,11 +37,11 @@ test "clone" {
     try testClone(.git, .{ .is_test = true }, .file, 0, allocator);
 }
 
-fn Server(comptime transport_def_kind: net_transport.TransportDefinitionKind) type {
+fn Server(comptime transport_def: net_transport.TransportDefinition) type {
     return struct {
         core: Core,
 
-        const Core = switch (transport_def_kind) {
+        const Core = switch (transport_def) {
             .file => void,
             .wire => |wire_kind| switch (wire_kind) {
                 .http => struct {
@@ -60,8 +60,8 @@ fn Server(comptime transport_def_kind: net_transport.TransportDefinitionKind) ty
             },
         };
 
-        fn init(allocator: std.mem.Allocator, comptime temp_dir_name: []const u8, comptime port: u16) !Server(transport_def_kind) {
-            switch (transport_def_kind) {
+        fn init(allocator: std.mem.Allocator, comptime temp_dir_name: []const u8, comptime port: u16) !Server(transport_def) {
+            switch (transport_def) {
                 .file => return .{ .core = {} },
                 .wire => |wire_kind| switch (wire_kind) {
                     .http => {
@@ -210,8 +210,8 @@ fn Server(comptime transport_def_kind: net_transport.TransportDefinitionKind) ty
             }
         }
 
-        fn start(self: *Server(transport_def_kind)) !void {
-            switch (transport_def_kind) {
+        fn start(self: *Server(transport_def)) !void {
+            switch (transport_def) {
                 .file => {},
                 .wire => |wire_kind| switch (wire_kind) {
                     .http => {
@@ -345,8 +345,8 @@ fn Server(comptime transport_def_kind: net_transport.TransportDefinitionKind) ty
             std.time.sleep(std.time.ns_per_s * 0.5);
         }
 
-        fn stop(self: *Server(transport_def_kind)) void {
-            switch (transport_def_kind) {
+        fn stop(self: *Server(transport_def)) void {
+            switch (transport_def) {
                 .file => {},
                 .wire => |wire_kind| switch (wire_kind) {
                     .http => {
@@ -366,7 +366,7 @@ fn Server(comptime transport_def_kind: net_transport.TransportDefinitionKind) ty
 fn testFetch(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
-    comptime transport_def_kind: net_transport.TransportDefinitionKind,
+    comptime transport_def: net_transport.TransportDefinition,
     comptime port: u16,
     allocator: std.mem.Allocator,
 ) !void {
@@ -384,7 +384,7 @@ fn testFetch(
     defer temp_dir.close();
 
     // init server
-    var server = try Server(transport_def_kind).init(allocator, temp_dir_name, port);
+    var server = try Server(transport_def).init(allocator, temp_dir_name, port);
     try server.start();
     defer server.stop();
 
@@ -435,7 +435,7 @@ fn testFetch(
         }
         const separator = if (repo_path[0] == '/') "" else "/";
 
-        const remote_url = switch (transport_def_kind) {
+        const remote_url = switch (transport_def) {
             .file => try std.fmt.allocPrint(allocator, "file://{s}{s}", .{ separator, repo_path }),
             .wire => |wire_kind| switch (wire_kind) {
                 .http => try std.fmt.allocPrint(allocator, "http://localhost:{}/server", .{port}),
@@ -461,7 +461,7 @@ fn testFetch(
     var remote = try net.Remote(repo_kind, repo_opts).initFromConfig(.{ .core = &client_repo.core, .extra = .{} }, allocator, "origin");
     defer remote.deinit(allocator);
 
-    const is_ssh = switch (transport_def_kind) {
+    const is_ssh = switch (transport_def) {
         .file => false,
         .wire => |wire_kind| .ssh == wire_kind,
     };
@@ -563,7 +563,7 @@ fn testFetch(
 fn testPush(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
-    comptime transport_def_kind: net_transport.TransportDefinitionKind,
+    comptime transport_def: net_transport.TransportDefinition,
     comptime port: u16,
     allocator: std.mem.Allocator,
 ) !void {
@@ -581,7 +581,7 @@ fn testPush(
     defer temp_dir.close();
 
     // init server
-    var server = try Server(transport_def_kind).init(allocator, temp_dir_name, port);
+    var server = try Server(transport_def).init(allocator, temp_dir_name, port);
     try server.start();
     defer server.stop();
 
@@ -592,7 +592,7 @@ fn testPush(
     // init server repo
     var server_repo = try rp.Repo(.git, .{ .is_test = true }).init(allocator, .{ .cwd = server_dir }, ".");
     defer server_repo.deinit();
-    switch (transport_def_kind) {
+    switch (transport_def) {
         .file => try server_repo.addConfig(allocator, .{ .name = "core.bare", .value = "true" }),
         .wire => {
             try server_repo.addConfig(allocator, .{ .name = "core.bare", .value = "false" });
@@ -638,7 +638,7 @@ fn testPush(
         }
         const separator = if (repo_path[0] == '/') "" else "/";
 
-        const remote_url = switch (transport_def_kind) {
+        const remote_url = switch (transport_def) {
             .file => try std.fmt.allocPrint(allocator, "file://{s}{s}", .{ separator, repo_path }),
             .wire => |wire_kind| switch (wire_kind) {
                 .http => try std.fmt.allocPrint(allocator, "http://localhost:{}/server", .{port}),
@@ -657,7 +657,7 @@ fn testPush(
         "refs/tags/1.0.0:refs/tags/1.0.0",
     };
 
-    const is_ssh = switch (transport_def_kind) {
+    const is_ssh = switch (transport_def) {
         .file => false,
         .wire => |wire_kind| .ssh == wire_kind,
     };
@@ -787,7 +787,7 @@ fn testPush(
 fn testClone(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
-    comptime transport_def_kind: net_transport.TransportDefinitionKind,
+    comptime transport_def: net_transport.TransportDefinition,
     comptime port: u16,
     allocator: std.mem.Allocator,
 ) !void {
@@ -805,7 +805,7 @@ fn testClone(
     defer temp_dir.close();
 
     // init server
-    var server = try Server(transport_def_kind).init(allocator, temp_dir_name, port);
+    var server = try Server(transport_def).init(allocator, temp_dir_name, port);
     try server.start();
     defer server.stop();
 
@@ -847,7 +847,7 @@ fn testClone(
         }
         const separator = if (repo_path[0] == '/') "" else "/";
 
-        break :blk switch (transport_def_kind) {
+        break :blk switch (transport_def) {
             .file => try std.fmt.allocPrint(allocator, "file://{s}{s}", .{ separator, repo_path }),
             .wire => |wire_kind| switch (wire_kind) {
                 .http => try std.fmt.allocPrint(allocator, "http://localhost:{}/server", .{port}),
@@ -861,7 +861,7 @@ fn testClone(
     var repo_path_buffer = [_]u8{0} ** std.fs.MAX_PATH_BYTES;
     const repo_path: []const u8 = @ptrCast(try client_dir.realpath(".", &repo_path_buffer));
 
-    const is_ssh = switch (transport_def_kind) {
+    const is_ssh = switch (transport_def) {
         .file => false,
         .wire => |wire_kind| .ssh == wire_kind,
     };

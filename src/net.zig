@@ -603,7 +603,7 @@ pub fn clone(
 
     switch (repo_kind) {
         .git => {
-            switch (transport_def.kind) {
+            switch (transport_def) {
                 .file => try net_clone.cloneFile(
                     repo_kind,
                     repo_opts,
@@ -633,7 +633,7 @@ pub fn clone(
                 pub fn run(ctx: @This(), cursor: *rp.Repo(repo_kind, repo_opts).DB.Cursor(.read_write)) !void {
                     var moment = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(cursor.*);
                     const state = rp.Repo(repo_kind, repo_opts).State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                    switch (ctx.transport_def.kind) {
+                    switch (ctx.transport_def) {
                         .file => try net_clone.cloneFile(
                             repo_kind,
                             repo_opts,
