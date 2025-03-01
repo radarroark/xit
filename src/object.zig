@@ -99,32 +99,35 @@ pub fn writeObject(
 
 const Tree = struct {
     entries: std.StringArrayHashMap([]const u8),
+    arena: *std.heap.ArenaAllocator,
     allocator: std.mem.Allocator,
 
-    fn init(allocator: std.mem.Allocator) Tree {
+    fn init(allocator: std.mem.Allocator) !Tree {
+        const arena = try allocator.create(std.heap.ArenaAllocator);
+        errdefer allocator.destroy(arena);
+        arena.* = std.heap.ArenaAllocator.init(allocator);
         return .{
-            .entries = std.StringArrayHashMap([]const u8).init(allocator),
+            .entries = std.StringArrayHashMap([]const u8).init(arena.allocator()),
+            .arena = arena,
             .allocator = allocator,
         };
     }
 
     fn deinit(self: *Tree) void {
-        for (self.entries.values()) |entry| {
-            self.allocator.free(entry);
-        }
-        self.entries.deinit();
+        self.arena.deinit();
+        self.allocator.destroy(self.arena);
     }
 
     fn addBlobEntry(self: *Tree, mode: fs.Mode, name: []const u8, oid: []const u8) !void {
-        const entry = try std.fmt.allocPrint(self.allocator, "{s} {s}\x00{s}", .{ mode.toStr(), name, oid });
-        errdefer self.allocator.free(entry);
+        const entry = try std.fmt.allocPrint(self.arena.allocator(), "{s} {s}\x00{s}", .{ mode.toStr(), name, oid });
         try self.entries.put(name, entry);
     }
 
     fn addTreeEntry(self: *Tree, name: []const u8, oid: []const u8) !void {
-        const entry = try std.fmt.allocPrint(self.allocator, "40000 {s}\x00{s}", .{ name, oid });
-        errdefer self.allocator.free(entry);
-        try self.entries.put(name, entry);
+        const entry = try std.fmt.allocPrint(self.arena.allocator(), "40000 {s}\x00{s}", .{ name, oid });
+        // git sorts tree names as if they had a trailing slash
+        const sort_name = try std.fmt.allocPrint(self.arena.allocator(), "{s}/", .{name});
+        try self.entries.put(sort_name, entry);
     }
 
     fn addIndexEntries(
@@ -140,11 +143,12 @@ const Tree = struct {
         for (entries) |name| {
             const path = try fs.joinPath(allocator, &.{ prefix, name });
             defer allocator.free(path);
+
             if (index.entries.get(path)) |*entries_for_path| {
                 const entry = entries_for_path[0] orelse return error.NullEntry;
                 try self.addBlobEntry(entry.mode, name, &entry.oid);
             } else if (index.dir_to_children.get(path)) |children| {
-                var subtree = Tree.init(allocator);
+                var subtree = try Tree.init(allocator);
                 defer subtree.deinit();
 
                 var child_names = std.ArrayList([]const u8).init(allocator);
@@ -182,20 +186,14 @@ fn writeTree(
     tree: *Tree,
     hash_bytes_buffer: *[hash.byteLen(repo_opts.hash)]u8,
 ) !void {
-    // sort the entries. this is needed for xit,
-    // because its index entries are stored as a
-    // hash map, thus making their order random.
-    // sorting them allows the hashes to be the
-    // same as they are in git.
-    if (repo_kind == .xit) {
-        const SortCtx = struct {
-            keys: [][]const u8,
-            pub fn lessThan(ctx: @This(), a_index: usize, b_index: usize) bool {
-                return std.mem.lessThan(u8, ctx.keys[a_index], ctx.keys[b_index]);
-            }
-        };
-        tree.entries.sort(SortCtx{ .keys = tree.entries.keys() });
-    }
+    // sort the entries so the tree hashes the same way it would from git
+    const SortCtx = struct {
+        keys: [][]const u8,
+        pub fn lessThan(ctx: @This(), a_index: usize, b_index: usize) bool {
+            return std.mem.lessThan(u8, ctx.keys[a_index], ctx.keys[b_index]);
+        }
+    };
+    tree.entries.sort(SortCtx{ .keys = tree.entries.keys() });
 
     // create tree contents
     const tree_contents = try std.mem.join(allocator, "", tree.entries.values());
@@ -341,7 +339,7 @@ pub fn writeCommit(
     defer index.deinit();
 
     // create tree and add index entries
-    var tree = Tree.init(allocator);
+    var tree = try Tree.init(allocator);
     defer tree.deinit();
     try tree.addIndexEntries(repo_kind, repo_opts, state, allocator, &index, "", index.root_children.keys());
 
