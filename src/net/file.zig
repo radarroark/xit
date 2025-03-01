@@ -117,7 +117,7 @@ pub fn FileTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
 
                 switch (any_repo) {
                     .none => return error.HashKindNotFound,
-                    inline else => |*repo| try repo.copyObjects(repo_kind, repo_opts, obj_iter),
+                    inline else => |*repo| try repo.copyObjects(allocator, repo_kind, repo_opts, obj_iter),
                 }
             }
 
@@ -177,10 +177,11 @@ pub fn FileTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                 try obj_iter.include(&head.oid);
             }
 
-            try obj.copyObjects(
+            try obj.copyFromObjectIterator(
                 repo_kind,
                 repo_opts,
                 state,
+                allocator,
                 repo.self_repo_kind,
                 repo.self_repo_opts,
                 &obj_iter,

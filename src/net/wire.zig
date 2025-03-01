@@ -559,33 +559,9 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                 defer dir.deleteFile(temp_pack_name) catch {};
                 const pack_file_path = try dir.realpathAlloc(allocator, temp_pack_name);
                 defer allocator.free(pack_file_path);
-                var iter = try pack.PackObjectIterator(repo_kind, repo_opts).init(allocator, pack_file_path);
-                defer iter.deinit();
-                while (try iter.next()) |pack_reader| {
-                    defer pack_reader.deinit();
-
-                    const Stream = struct {
-                        pack_reader: *pack.PackObjectReader(repo_kind, repo_opts),
-
-                        pub fn reader(stream_self: @This()) *pack.PackObjectReader(repo_kind, repo_opts) {
-                            return stream_self.pack_reader;
-                        }
-
-                        pub fn seekTo(stream_self: @This(), offset: usize) !void {
-                            if (offset == 0) {
-                                try stream_self.pack_reader.reset();
-                            } else {
-                                return error.InvalidOffset;
-                            }
-                        }
-                    };
-                    const stream = Stream{
-                        .pack_reader = pack_reader,
-                    };
-
-                    var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-                    try obj.writeObject(repo_kind, repo_opts, state, &stream, stream.reader(), try pack_reader.header(), &oid);
-                }
+                var pack_iter = try pack.PackObjectIterator(repo_kind, repo_opts).init(allocator, pack_file_path);
+                defer pack_iter.deinit();
+                try obj.copyFromPackObjectIterator(repo_kind, repo_opts, state, allocator, &pack_iter);
             }
         }
 

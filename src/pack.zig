@@ -313,7 +313,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
 
                     // serialize object header
                     var header_bytes = [_]u8{0} ** 32;
-                    const header_str = try obj.writeObjectHeader(try pack_reader.header(), &header_bytes);
+                    const header_str = try obj.writeObjectHeader(pack_reader.header(), &header_bytes);
 
                     var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
                     try hash.hashReader(repo_opts.hash, repo_opts.read_size, pack_reader, header_str, &oid);
@@ -748,13 +748,13 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             }
         }
 
-        pub fn header(self: PackObjectReader(repo_kind, repo_opts)) !obj.ObjectHeader {
+        pub fn header(self: PackObjectReader(repo_kind, repo_opts)) obj.ObjectHeader {
             return switch (self.internal) {
                 .basic => self.internal.basic.header,
                 .delta => |delta| if (delta.state) |delta_state| .{
-                    .kind = (try delta_state.base_reader.header()).kind,
+                    .kind = delta_state.base_reader.header().kind,
                     .size = delta_state.recon_size,
-                } else return error.DeltaObjectNotInitialized,
+                } else unreachable,
             };
         }
 
@@ -929,10 +929,10 @@ pub fn LooseOrPackObjectReader(comptime repo_opts: rp.RepoOpts(.git)) type {
             }
         }
 
-        pub fn header(self: LooseOrPackObjectReader(repo_opts)) !obj.ObjectHeader {
+        pub fn header(self: LooseOrPackObjectReader(repo_opts)) obj.ObjectHeader {
             return switch (self) {
                 .loose => self.loose.header,
-                .pack => try self.pack.header(),
+                .pack => self.pack.header(),
             };
         }
 
