@@ -20,11 +20,6 @@ fn addFile(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo
     try repo.add(allocator, &.{path});
 }
 
-fn removeFile(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind), repo: *rp.Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, path: []const u8) !void {
-    try repo.core.work_dir.deleteFile(path);
-    try repo.add(allocator, &.{path});
-}
-
 test "simple" {
     try testSimple(.git, .{ .is_test = true });
     try testSimple(.xit, .{ .is_test = true });
@@ -60,7 +55,7 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
     const commit_a = try repo.commit(allocator, .{ .message = "a" });
     try addFile(repo_kind, repo_opts, &repo, allocator, "README.md", "Goodbye, world!");
     const commit_b = try repo.commit(allocator, .{ .message = "b" });
-    try removeFile(repo_kind, repo_opts, &repo, allocator, "README.md");
+    try repo.remove(allocator, &.{"README.md"}, .{});
     const commit_c = try repo.commit(allocator, .{ .message = "c" });
 
     // can't add path that is outside repo
@@ -545,7 +540,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
             defer result.deinit();
         }
-        try removeFile(repo_kind, repo_opts, &repo, allocator, "f.txt");
+        try repo.remove(allocator, &.{"f.txt"}, .{});
         _ = try repo.commit(allocator, .{ .message = "c" });
         {
             var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
@@ -614,7 +609,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt", "1");
         _ = try repo.commit(allocator, .{ .message = "a" });
         try repo.addBranch(.{ .name = "foo" });
-        try removeFile(repo_kind, repo_opts, &repo, allocator, "f.txt");
+        try repo.remove(allocator, &.{"f.txt"}, .{});
         _ = try repo.commit(allocator, .{ .message = "b" });
         {
             var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
