@@ -294,7 +294,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             },
         };
 
-        pub const Error = ZlibStream.Reader.Error || error{ Unseekable, UnexpectedEndOfStream, InvalidDeltaCache, DeltaObjectNotInitialized };
+        pub const Error = ZlibStream.Reader.Error || error{ Unseekable, UnexpectedEndOfStream, InvalidDeltaCache };
 
         pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind, repo_opts).Core, oid_hex: *const [hash.hexLen(repo_opts.hash)]u8) !PackObjectReader(repo_kind, repo_opts) {
             var pack_reader = try PackObjectReader(repo_kind, repo_opts).initWithIndex(allocator, core, oid_hex);
@@ -496,11 +496,10 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             while (last_object.internal == .delta) {
                 try last_object.initDelta(allocator, core_maybe);
                 try delta_objects.append(last_object);
-                if (last_object.internal.delta.state) |state| {
-                    last_object = state.base_reader;
-                } else {
-                    return error.DeltaObjectNotInitialized;
-                }
+                last_object = if (last_object.internal.delta.state) |state|
+                    state.base_reader
+                else
+                    unreachable;
             }
 
             // initialize the cache for each deltified object, starting
@@ -672,7 +671,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
         }
 
         fn initCache(self: *PackObjectReader(repo_kind, repo_opts)) !void {
-            const delta_state = if (self.internal.delta.state) |*state| state else return error.DeltaObjectNotInitialized;
+            const delta_state = if (self.internal.delta.state) |*state| state else unreachable;
             const keys = delta_state.cache.keys();
             const values = delta_state.cache.values();
             for (keys, values, 0..) |location, *value, i| {
@@ -695,7 +694,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     .delta => |delta| if (delta.state) |base_delta_state|
                         base_delta_state.real_position
                     else
-                        return error.DeltaObjectNotInitialized,
+                        unreachable,
                 };
                 const bytes_to_skip = location.offset - position;
                 try delta_state.base_reader.skipBytes(bytes_to_skip);
@@ -720,7 +719,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             switch (delta_state.base_reader.internal) {
                 .basic => {},
                 .delta => |*delta| {
-                    const base_delta_state = if (delta.state) |*state| state else return error.DeltaObjectNotInitialized;
+                    const base_delta_state = if (delta.state) |*state| state else unreachable;
                     _ = base_delta_state.cache_arena.reset(.free_all);
                     base_delta_state.cache.clearAndFree();
                 },
@@ -765,13 +764,11 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
 
             switch (self.internal) {
                 .basic => {},
-                .delta => |*delta| {
-                    if (delta.state) |*state| {
-                        state.chunk_index = 0;
-                        state.chunk_position = 0;
-                        state.real_position = 0;
-                        try state.base_reader.reset();
-                    }
+                .delta => |*delta| if (delta.state) |*state| {
+                    state.chunk_index = 0;
+                    state.chunk_position = 0;
+                    state.real_position = 0;
+                    try state.base_reader.reset();
                 },
             }
         }
@@ -785,7 +782,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     return size;
                 },
                 .delta => |*delta| {
-                    const delta_state = if (delta.state) |*state| state else return error.DeltaObjectNotInitialized;
+                    const delta_state = if (delta.state) |*state| state else unreachable;
                     var bytes_read: usize = 0;
                     while (bytes_read < dest.len) {
                         if (delta_state.chunk_index == delta_state.chunks.items.len) {

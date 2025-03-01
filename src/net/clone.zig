@@ -73,6 +73,9 @@ fn checkoutBranch(
         .target = .{ .oid = &target_oid },
     });
     defer switch_result.deinit();
+    if (.conflict == switch_result.result) {
+        return error.UnexpectedFilesInTargetDirectory;
+    }
 }
 
 pub fn cloneFile(
