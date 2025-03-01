@@ -47,12 +47,18 @@ pub fn writeAndApplyPatches(
     // init snapshot
     const commit_id_to_snapshot_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "commit-id->snapshot"));
     const commit_id_to_snapshot = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(commit_id_to_snapshot_cursor);
-    var snapshot_cursor = try commit_id_to_snapshot.putCursor(try hash.hexToInt(repo_opts.hash, commit_oid));
+    const commit_id_int = try hash.hexToInt(repo_opts.hash, commit_oid);
+    if (try commit_id_to_snapshot.getCursor(commit_id_int)) |_| {
+        return; // exit early if patches have already been created for this commit
+    }
+    var snapshot_cursor = try commit_id_to_snapshot.putCursor(commit_id_int);
 
     // if there is a parent commit, set the initial value of the snapshot to the one from that commit
     if (parent_commit_oid_maybe) |*parent_commit_oid| {
         if (try commit_id_to_snapshot.getCursor(try hash.hexToInt(repo_opts.hash, parent_commit_oid))) |parent_snapshot_cursor| {
             try snapshot_cursor.write(.{ .slot = parent_snapshot_cursor.slot() });
+        } else {
+            return error.ParentCommitSnapshotNotFound;
         }
     }
 
