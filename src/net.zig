@@ -16,6 +16,7 @@ pub const Direction = enum {
 };
 
 pub const Opts = net_transport.Opts;
+pub const TransportDefinition = net_transport.TransportDefinition;
 
 pub fn RemoteHead(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return struct {

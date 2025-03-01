@@ -13,12 +13,8 @@ pub fn build(b: *std.Build) !void {
             .target = target,
             .optimize = optimize,
         });
-        //exe.root_module.addAnonymousImport("xitdb", .{
-        //    .root_source_file = b.path("../xitdb/src/lib.zig"),
-        //});
-        //exe.root_module.addAnonymousImport("xitui", .{
-        //    .root_source_file = b.path("../xitui/src/lib.zig"),
-        //});
+        //exe.root_module.addAnonymousImport("xitdb", .{ .root_source_file = b.path("../xitdb/src/lib.zig") });
+        //exe.root_module.addAnonymousImport("xitui", .{ .root_source_file = b.path("../xitui/src/lib.zig") });
         exe.root_module.addImport("xitdb", b.dependency("xitdb", .{}).module("xitdb"));
         exe.root_module.addImport("xitui", b.dependency("xitui", .{}).module("xitui"));
         if (.windows == builtin.os.tag) {
@@ -38,16 +34,11 @@ pub fn build(b: *std.Build) !void {
 
     // module for using xit as a library
     // (the commands below consume xit this way)
-
     const xit = b.addModule("xit", .{
         .root_source_file = b.path("src/lib.zig"),
     });
-    //xit.addAnonymousImport("xitdb", .{
-    //    .root_source_file = b.path("../xitdb/src/lib.zig"),
-    //});
-    //xit.addAnonymousImport("xitui", .{
-    //    .root_source_file = b.path("../xitui/src/lib.zig"),
-    //});
+    //xit.addAnonymousImport("xitdb", .{ .root_source_file = b.path("../xitdb/src/lib.zig") });
+    //xit.addAnonymousImport("xitui", .{ .root_source_file = b.path("../xitui/src/lib.zig") });
     xit.addImport("xitdb", b.dependency("xitdb", .{}).module("xitdb"));
     xit.addImport("xitui", b.dependency("xitui", .{}).module("xitui"));
 
@@ -109,12 +100,6 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = b.path("src/testnet.zig"),
             .optimize = optimize,
         });
-        //xit.addAnonymousImport("xitdb", .{
-        //    .root_source_file = b.path("../xitdb/src/lib.zig"),
-        //});
-        //xit.addAnonymousImport("xitui", .{
-        //    .root_source_file = b.path("../xitui/src/lib.zig"),
-        //});
         unit_tests.root_module.addImport("xit", xit);
         if (.windows == builtin.os.tag) {
             unit_tests.linkLibC();

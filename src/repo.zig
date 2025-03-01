@@ -631,6 +631,12 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             return try rf.readHead(repo_kind, repo_opts, state, buffer) orelse return error.HeadNotFound;
         }
 
+        pub fn readRef(self: *Repo(repo_kind, repo_opts), ref: rf.Ref) !?[hash.hexLen(repo_opts.hash)]u8 {
+            var moment = try self.core.latestMoment();
+            const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
+            return try rf.readRecur(repo_kind, repo_opts, state, .{ .ref = ref });
+        }
+
         pub fn listBranches(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator) !rf.RefList {
             var moment = try self.core.latestMoment();
             const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
@@ -1107,7 +1113,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
                             var remote = try net.Remote(repo_kind, repo_opts).initFromConfig(state.readOnly(), ctx.allocator, ctx.remote_name);
-                            defer remote.deinit(allocator);
+                            defer remote.deinit(ctx.allocator);
                             try net.fetch(repo_kind, repo_opts, state, ctx.allocator, &remote, ctx.opts);
                         }
                     };
@@ -1145,7 +1151,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
                             var remote = try net.Remote(repo_kind, repo_opts).initFromConfig(state.readOnly(), ctx.allocator, ctx.remote_name);
-                            defer remote.deinit(allocator);
+                            defer remote.deinit(ctx.allocator);
                             try net.push(repo_kind, repo_opts, state, ctx.allocator, &remote, ctx.opts);
                         }
                     };

@@ -1,43 +1,73 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const rp = @import("../repo.zig");
-const rf = @import("../ref.zig");
-const work = @import("../workdir.zig");
-const hash = @import("../hash.zig");
-const net = @import("../net.zig");
-const net_transport = @import("../net/transport.zig");
+const xit = @import("xit");
+const rp = xit.repo;
+const rf = xit.ref;
+const work = xit.workdir;
+const hash = xit.hash;
+const net = xit.net;
 
-test "fetch" {
+test "git fetch" {
     const allocator = std.testing.allocator;
-    try testFetch(.git, .{ .is_test = true }, .{ .wire = .http }, 3002, allocator);
+    try testFetch(.git, .{ .is_test = true }, .{ .wire = .http }, 3001, allocator);
     if (.windows != builtin.os.tag) {
-        try testFetch(.git, .{ .is_test = true }, .{ .wire = .raw }, 3000, allocator);
-        try testFetch(.git, .{ .is_test = true }, .{ .wire = .ssh }, 3001, allocator);
+        try testFetch(.git, .{ .is_test = true }, .{ .wire = .raw }, 3002, allocator);
+        try testFetch(.git, .{ .is_test = true }, .{ .wire = .ssh }, 3003, allocator);
     }
     try testFetch(.git, .{ .is_test = true }, .file, 0, allocator);
 }
 
-test "push" {
+test "xit fetch" {
     const allocator = std.testing.allocator;
-    try testPush(.git, .{ .is_test = true }, .{ .wire = .http }, 3005, allocator);
+    try testFetch(.xit, .{ .is_test = true }, .{ .wire = .http }, 3004, allocator);
     if (.windows != builtin.os.tag) {
-        try testPush(.git, .{ .is_test = true }, .{ .wire = .raw }, 3003, allocator);
-        try testPush(.git, .{ .is_test = true }, .{ .wire = .ssh }, 3004, allocator);
+        try testFetch(.xit, .{ .is_test = true }, .{ .wire = .raw }, 3005, allocator);
+        try testFetch(.xit, .{ .is_test = true }, .{ .wire = .ssh }, 3006, allocator);
+    }
+    try testFetch(.xit, .{ .is_test = true }, .file, 0, allocator);
+}
+
+test "git push" {
+    const allocator = std.testing.allocator;
+    try testPush(.git, .{ .is_test = true }, .{ .wire = .http }, 3007, allocator);
+    if (.windows != builtin.os.tag) {
+        try testPush(.git, .{ .is_test = true }, .{ .wire = .raw }, 3008, allocator);
+        try testPush(.git, .{ .is_test = true }, .{ .wire = .ssh }, 3009, allocator);
     }
     try testPush(.git, .{ .is_test = true }, .file, 0, allocator);
 }
 
-test "clone" {
+test "xit push" {
     const allocator = std.testing.allocator;
-    try testClone(.git, .{ .is_test = true }, .{ .wire = .http }, 3008, allocator);
+    try testPush(.xit, .{ .is_test = true }, .{ .wire = .http }, 3010, allocator);
     if (.windows != builtin.os.tag) {
-        try testClone(.git, .{ .is_test = true }, .{ .wire = .raw }, 3006, allocator);
-        try testClone(.git, .{ .is_test = true }, .{ .wire = .ssh }, 3007, allocator);
+        try testPush(.xit, .{ .is_test = true }, .{ .wire = .raw }, 3011, allocator);
+        try testPush(.xit, .{ .is_test = true }, .{ .wire = .ssh }, 3012, allocator);
+    }
+    try testPush(.xit, .{ .is_test = true }, .file, 0, allocator);
+}
+
+test "git clone" {
+    const allocator = std.testing.allocator;
+    try testClone(.git, .{ .is_test = true }, .{ .wire = .http }, 3013, allocator);
+    if (.windows != builtin.os.tag) {
+        try testClone(.git, .{ .is_test = true }, .{ .wire = .raw }, 3014, allocator);
+        try testClone(.git, .{ .is_test = true }, .{ .wire = .ssh }, 3015, allocator);
     }
     try testClone(.git, .{ .is_test = true }, .file, 0, allocator);
 }
 
-fn Server(comptime transport_def: net_transport.TransportDefinition) type {
+test "xit clone" {
+    const allocator = std.testing.allocator;
+    try testClone(.xit, .{ .is_test = true }, .{ .wire = .http }, 3016, allocator);
+    if (.windows != builtin.os.tag) {
+        try testClone(.xit, .{ .is_test = true }, .{ .wire = .raw }, 3017, allocator);
+        try testClone(.xit, .{ .is_test = true }, .{ .wire = .ssh }, 3018, allocator);
+    }
+    try testClone(.xit, .{ .is_test = true }, .file, 0, allocator);
+}
+
+fn Server(comptime transport_def: net.TransportDefinition) type {
     return struct {
         core: Core,
 
@@ -366,7 +396,7 @@ fn Server(comptime transport_def: net_transport.TransportDefinition) type {
 fn testFetch(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
-    comptime transport_def: net_transport.TransportDefinition,
+    comptime transport_def: net.TransportDefinition,
     comptime port: u16,
     allocator: std.mem.Allocator,
 ) !void {
@@ -458,9 +488,6 @@ fn testFetch(
         oid_refspec,
     };
 
-    var remote = try net.Remote(repo_kind, repo_opts).initFromConfig(.{ .core = &client_repo.core, .extra = .{} }, allocator, "origin");
-    defer remote.deinit(allocator);
-
     const is_ssh = switch (transport_def) {
         .file => false,
         .wire => |wire_kind| .ssh == wire_kind,
@@ -500,15 +527,11 @@ fn testFetch(
     {
         const hello_txt = try temp_dir.openFile("client/hello.txt", .{});
         defer hello_txt.close();
-        const ref_1_0_0 = try temp_dir.openFile("client/.git/refs/tags/1.0.0", .{});
-        defer ref_1_0_0.close();
-        const ref_foo = try temp_dir.openFile("client/.git/refs/heads/foo", .{});
-        defer ref_foo.close();
 
-        const ref_master = try temp_dir.openFile("client/.git/refs/heads/master", .{});
-        defer ref_master.close();
-        var oid_master = [_]u8{0} ** hash.hexLen(repo_opts.hash);
-        try ref_master.reader().readNoEof(&oid_master);
+        try std.testing.expect(null != try client_repo.readRef(.{ .kind = .tag, .name = "1.0.0" }));
+        try std.testing.expect(null != try client_repo.readRef(.{ .kind = .head, .name = "foo" }));
+
+        const oid_master = (try client_repo.readRef(.{ .kind = .head, .name = "master" })).?;
         try std.testing.expectEqualStrings(&commit1, &oid_master);
     }
 
@@ -552,10 +575,7 @@ fn testFetch(
         const goodbye_txt = try temp_dir.openFile("client/goodbye.txt", .{});
         defer goodbye_txt.close();
 
-        const ref_master = try temp_dir.openFile("client/.git/refs/heads/master", .{});
-        defer ref_master.close();
-        var oid_master = [_]u8{0} ** hash.hexLen(repo_opts.hash);
-        try ref_master.reader().readNoEof(&oid_master);
+        const oid_master = (try client_repo.readRef(.{ .kind = .head, .name = "master" })).?;
         try std.testing.expectEqualStrings(&commit2, &oid_master);
     }
 }
@@ -563,7 +583,7 @@ fn testFetch(
 fn testPush(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
-    comptime transport_def: net_transport.TransportDefinition,
+    comptime transport_def: net.TransportDefinition,
     comptime port: u16,
     allocator: std.mem.Allocator,
 ) !void {
@@ -691,13 +711,9 @@ fn testPush(
 
     // make sure push was successful
     {
-        const ref_1_0_0 = try temp_dir.openFile("server/.git/refs/tags/1.0.0", .{});
-        defer ref_1_0_0.close();
+        try std.testing.expect(null != try server_repo.readRef(.{ .kind = .tag, .name = "1.0.0" }));
 
-        const ref_master = try temp_dir.openFile("server/.git/refs/heads/master", .{});
-        defer ref_master.close();
-        var oid_master = [_]u8{0} ** hash.hexLen(repo_opts.hash);
-        try ref_master.reader().readNoEof(&oid_master);
+        const oid_master = (try server_repo.readRef(.{ .kind = .head, .name = "master" })).?;
         try std.testing.expectEqualStrings(&commit1, &oid_master);
     }
 
@@ -735,10 +751,7 @@ fn testPush(
 
     // make sure push was successful
     {
-        const ref_master = try temp_dir.openFile("server/.git/refs/heads/master", .{});
-        defer ref_master.close();
-        var oid_master = [_]u8{0} ** hash.hexLen(repo_opts.hash);
-        try ref_master.reader().readNoEof(&oid_master);
+        const oid_master = (try server_repo.readRef(.{ .kind = .head, .name = "master" })).?;
         try std.testing.expectEqualStrings(&commit2, &oid_master);
     }
 
@@ -773,21 +786,13 @@ fn testPush(
     }
 
     // make sure push was successful
-    {
-        if (temp_dir.openFile("server/.git/refs/tags/1.0.0", .{})) |ref_1_0_0| {
-            defer ref_1_0_0.close();
-            return error.UnexpectedFile;
-        } else |err| switch (err) {
-            error.FileNotFound => {},
-            else => |e| return e,
-        }
-    }
+    try std.testing.expect(null == try server_repo.readRef(.{ .kind = .tag, .name = "1.0.0" }));
 }
 
 fn testClone(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
-    comptime transport_def: net_transport.TransportDefinition,
+    comptime transport_def: net.TransportDefinition,
     comptime port: u16,
     allocator: std.mem.Allocator,
 ) !void {

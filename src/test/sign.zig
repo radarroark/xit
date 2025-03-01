@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const rp = @import("../repo.zig");
+const xit = @import("xit");
+const rp = xit.repo;
 
 test "sign commit and tag" {
     const allocator = std.testing.allocator;
