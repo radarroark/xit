@@ -817,6 +817,11 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                                 else => |e| return e,
                             };
                             const entry_mode: fs.Mode = @bitCast(try std.fmt.parseInt(u32, entry_mode_str, 8));
+                            switch (entry_mode.object_type) {
+                                .symbolic_link => return error.SymLinksNotSupported,
+                                .gitlink => return error.SubmodulesNotSupported,
+                                else => {},
+                            }
                             const entry_name = try reader.readUntilDelimiterAlloc(arena.allocator(), 0, repo_opts.max_read_size);
                             var entry_oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
                             try reader.readNoEof(&entry_oid);

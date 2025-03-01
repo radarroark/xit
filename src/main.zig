@@ -193,6 +193,14 @@ pub fn runPrint(
             , .{});
             return error.PrintedError;
         },
+        error.SymLinksNotSupported => {
+            try writers.err.print("repos with symbolic links aren't supported right now, sowwy\n", .{});
+            return error.PrintedError;
+        },
+        error.SubmodulesNotSupported => {
+            try writers.err.print("repos with submodules aren't supported right now, sowwy\n", .{});
+            return error.PrintedError;
+        },
         else => |e| return e,
     };
 }
