@@ -121,9 +121,7 @@ pub fn hexToInt(comptime hash_kind: HashKind, hex_buffer: *const [hexLen(hash_ki
 }
 
 pub fn bytesToInt(comptime hash_kind: HashKind, bytes_buffer: *const [byteLen(hash_kind)]u8) HashInt(hash_kind) {
-    var stream = std.io.fixedBufferStream(bytes_buffer);
-    const reader = stream.reader();
-    return reader.readInt(HashInt(hash_kind), .big) catch unreachable;
+    return std.mem.readInt(HashInt(hash_kind), bytes_buffer, .big);
 }
 
 pub fn hexToBytes(comptime hash_kind: HashKind, hex_buffer: [hexLen(hash_kind)]u8) ![byteLen(hash_kind)]u8 {
@@ -132,10 +130,8 @@ pub fn hexToBytes(comptime hash_kind: HashKind, hex_buffer: [hexLen(hash_kind)]u
     return bytes;
 }
 
-pub fn intToBytes(comptime T: type, num: T) ![@bitSizeOf(T) / 8]u8 {
+pub fn intToBytes(comptime T: type, num: T) [@bitSizeOf(T) / 8]u8 {
     var bytes = [_]u8{0} ** (@bitSizeOf(T) / 8);
-    var stream = std.io.fixedBufferStream(&bytes);
-    var writer = stream.writer();
-    try writer.writeInt(T, num, .big);
+    std.mem.writeInt(T, &bytes, num, .big);
     return bytes;
 }

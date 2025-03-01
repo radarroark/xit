@@ -185,7 +185,7 @@ pub fn applyPatch(
                 const line_id_int = try change_list_reader.readInt(LineId(repo_opts.hash).Int, .big);
                 const parent_line_id_int = try change_list_reader.readInt(LineId(repo_opts.hash).Int, .big);
 
-                const line_id_bytes = try hash.intToBytes(LineId(repo_opts.hash).Int, line_id_int);
+                const line_id_bytes = hash.intToBytes(LineId(repo_opts.hash).Int, line_id_int);
                 const line_id_hash = hash.hashInt(repo_opts.hash, &line_id_bytes);
 
                 // if child has an existing parent, remove it
@@ -207,7 +207,7 @@ pub fn applyPatch(
 
                 // add to parent's children
                 {
-                    var parent_line_id_bytes = try hash.intToBytes(LineId(repo_opts.hash).Int, parent_line_id_int);
+                    var parent_line_id_bytes = hash.intToBytes(LineId(repo_opts.hash).Int, parent_line_id_int);
                     var parent_line_id_hash = hash.hashInt(repo_opts.hash, &parent_line_id_bytes);
 
                     try parent_to_added_child.put(parent_line_id_hash, line_id_bytes);
@@ -231,7 +231,7 @@ pub fn applyPatch(
             },
             .delete_line => {
                 const line_id_int = try change_list_reader.readInt(LineId(repo_opts.hash).Int, .big);
-                const line_id_bytes = try hash.intToBytes(LineId(repo_opts.hash).Int, line_id_int);
+                const line_id_bytes = hash.intToBytes(LineId(repo_opts.hash).Int, line_id_int);
                 const line_id_hash = hash.hashInt(repo_opts.hash, &line_id_bytes);
 
                 // remove from live-parent->children
@@ -276,7 +276,7 @@ pub fn applyPatch(
     var current_line_id_int = LineId(repo_opts.hash).first_int;
 
     while (true) {
-        const current_line_id_bytes = try hash.intToBytes(LineId(repo_opts.hash).Int, current_line_id_int);
+        const current_line_id_bytes = hash.intToBytes(LineId(repo_opts.hash).Int, current_line_id_int);
         const current_line_id_hash = hash.hashInt(repo_opts.hash, &current_line_id_bytes);
 
         if (try live_parent_to_children.getCursor(current_line_id_hash)) |children_cursor| {

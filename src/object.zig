@@ -1238,7 +1238,7 @@ fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
 
             while (try iter.next()) |*next_cursor| {
                 const kv_pair = try next_cursor.readKeyValuePair();
-                const oid = try hash.intToBytes(hash.HashInt(repo_opts.hash), kv_pair.hash);
+                const oid = hash.intToBytes(hash.HashInt(repo_opts.hash), kv_pair.hash);
                 try oid_queue.put(oid, {});
             }
 
@@ -1269,7 +1269,7 @@ fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
 
                     while (try children_iter.next()) |*next_cursor| {
                         const kv_pair = try next_cursor.readKeyValuePair();
-                        const child_oid = try hash.intToBytes(hash.HashInt(repo_opts.hash), kv_pair.hash);
+                        const child_oid = hash.intToBytes(hash.HashInt(repo_opts.hash), kv_pair.hash);
                         try oid_queue.put(child_oid, {});
                     }
                 }
