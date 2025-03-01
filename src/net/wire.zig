@@ -17,7 +17,6 @@ const hash = @import("../hash.zig");
 const fs = @import("../fs.zig");
 
 pub const Opts = struct {
-    progress_text: ?*const fn (text: []const u8) anyerror!void = null,
     ssh: net_ssh.Opts = .{},
 };
 
@@ -154,20 +153,20 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         have_refs: bool,
         connected: bool,
         buffer: Buffer(repo_kind, repo_opts),
-        opts: Opts,
+        opts: net_transport.Opts,
 
         pub fn init(
             state: rp.Repo(repo_kind, repo_opts).State(.read_only),
             allocator: std.mem.Allocator,
             wire_kind: WireKind,
-            opts: Opts,
+            opts: net_transport.Opts,
         ) !WireTransport(repo_kind, repo_opts) {
             const wire_state = try allocator.create(WireState);
             errdefer allocator.destroy(wire_state);
             wire_state.* = switch (wire_kind) {
                 .http => .{ .http = try net_http.HttpState.init(allocator) },
                 .raw => .{ .raw = net_raw.RawState.init() },
-                .ssh => .{ .ssh = try net_ssh.SshState.init(repo_kind, repo_opts, state, allocator, opts.ssh) },
+                .ssh => .{ .ssh = try net_ssh.SshState.init(repo_kind, repo_opts, state, allocator, opts.wire.ssh) },
             };
             errdefer wire_state.deinit();
 
@@ -561,7 +560,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                 defer allocator.free(pack_file_path);
                 var pack_iter = try pack.PackObjectIterator(repo_kind, repo_opts).init(allocator, pack_file_path);
                 defer pack_iter.deinit();
-                try obj.copyFromPackObjectIterator(repo_kind, repo_opts, state, allocator, &pack_iter);
+                try obj.copyFromPackObjectIterator(repo_kind, repo_opts, state, allocator, &pack_iter, self.opts.progress_text);
             }
         }
 

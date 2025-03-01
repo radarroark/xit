@@ -1147,6 +1147,7 @@ fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
         db: *DB,
         parent_to_children: DB.HashMap(.read_write),
         base_oids: DB.HashMap(.read_write),
+        commit_count: usize,
 
         fn init(state: rp.Repo(.xit, repo_opts).State(.read_only), allocator: std.mem.Allocator) !PatchWriter(repo_opts) {
             const db_file = try state.core.xit_dir.createFile(db_name, .{ .truncate = true, .lock = .exclusive, .read = true });
@@ -1173,6 +1174,7 @@ fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
                 .db = db_ptr,
                 .parent_to_children = parent_to_children,
                 .base_oids = base_oids,
+                .commit_count = 0,
             };
         }
 
@@ -1215,12 +1217,15 @@ fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
             if (is_base_oid) {
                 _ = try self.base_oids.putCursor(commit_id_int);
             }
+
+            self.commit_count += 1;
         }
 
         fn write(
             self: *PatchWriter(repo_opts),
             state: rp.Repo(.xit, repo_opts).State(.read_write),
             allocator: std.mem.Allocator,
+            progress_text_maybe: ?*const fn (text: []const u8) anyerror!void,
         ) !void {
             var oid_queue = std.AutoArrayHashMap([hash.byteLen(repo_opts.hash)]u8, void).init(allocator);
             defer oid_queue.deinit();
@@ -1236,9 +1241,18 @@ fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
 
             const patch = @import("./patch.zig");
 
+            var patch_count: usize = 0;
+
             while (oid_queue.count() > 0) {
                 const oid = oid_queue.keys()[0];
                 const oid_hex = std.fmt.bytesToHex(&oid, .lower);
+
+                patch_count += 1;
+                if (progress_text_maybe) |progress_text| {
+                    var buffer = [_]u8{0} ** 32;
+                    const text = try std.fmt.bufPrint(&buffer, "writing patches for commit {}/{}", .{ patch_count, self.commit_count });
+                    try progress_text(text);
+                }
 
                 try patch.writeAndApplyPatches(repo_opts, state, allocator, &oid_hex);
                 oid_queue.swapRemoveAt(0);
@@ -1269,12 +1283,23 @@ pub fn copyFromObjectIterator(
     comptime source_repo_kind: rp.RepoKind,
     comptime source_repo_opts: rp.RepoOpts(source_repo_kind),
     obj_iter: *ObjectIterator(source_repo_kind, source_repo_opts, .raw),
+    progress_text_maybe: ?*const fn (text: []const u8) anyerror!void,
 ) !void {
     var patch_writer = if (repo_kind == .xit) try PatchWriter(repo_opts).init(state.readOnly(), allocator) else {};
     defer if (repo_kind == .xit) patch_writer.deinit(allocator);
 
+    var object_count: usize = 0;
+
     while (try obj_iter.next()) |object| {
         defer object.deinit();
+
+        object_count += 1;
+        if (progress_text_maybe) |progress_text| {
+            var buffer = [_]u8{0} ** 32;
+            const text = try std.fmt.bufPrint(&buffer, "writing object {}", .{object_count});
+            try progress_text(text);
+        }
+
         var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
         try writeObject(
             repo_kind,
@@ -1291,7 +1316,7 @@ pub fn copyFromObjectIterator(
     }
 
     if (repo_kind == .xit) {
-        try patch_writer.write(state, allocator);
+        try patch_writer.write(state, allocator, progress_text_maybe);
     }
 }
 
@@ -1301,9 +1326,12 @@ pub fn copyFromPackObjectIterator(
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
     allocator: std.mem.Allocator,
     pack_iter: *pack.PackObjectIterator(repo_kind, repo_opts),
+    progress_text_maybe: ?*const fn (text: []const u8) anyerror!void,
 ) !void {
     var patch_writer = if (repo_kind == .xit) try PatchWriter(repo_opts).init(state.readOnly(), allocator) else {};
     defer if (repo_kind == .xit) patch_writer.deinit(allocator);
+
+    var object_count: usize = 0;
 
     while (try pack_iter.next()) |pack_reader| {
         defer pack_reader.deinit();
@@ -1327,6 +1355,13 @@ pub fn copyFromPackObjectIterator(
             .pack_reader = pack_reader,
         };
 
+        object_count += 1;
+        if (progress_text_maybe) |progress_text| {
+            var buffer = [_]u8{0} ** 32;
+            const text = try std.fmt.bufPrint(&buffer, "writing object {}", .{object_count});
+            try progress_text(text);
+        }
+
         var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
         const header = pack_reader.header();
         try writeObject(repo_kind, repo_opts, state, &stream, stream.reader(), header, &oid);
@@ -1336,6 +1371,6 @@ pub fn copyFromPackObjectIterator(
     }
 
     if (repo_kind == .xit) {
-        try patch_writer.write(state, allocator);
+        try patch_writer.write(state, allocator, progress_text_maybe);
     }
 }

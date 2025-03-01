@@ -10,6 +10,7 @@ const hash = @import("../hash.zig");
 
 pub const Opts = struct {
     refspecs: ?[]const []const u8 = null,
+    progress_text: ?*const fn (text: []const u8) anyerror!void = null,
     wire: net_wire.Opts = .{},
 };
 
@@ -40,8 +41,8 @@ pub fn Transport(
         ) !Transport(repo_kind, repo_opts) {
             const transport_def_kind = TransportDefinition.init(url) orelse return error.UnsupportedUrl;
             return switch (transport_def_kind) {
-                .file => .{ .file = try net_file.FileTransport(repo_kind, repo_opts).init() },
-                .wire => |wire_kind| .{ .wire = try net_wire.WireTransport(repo_kind, repo_opts).init(state, allocator, wire_kind, opts.wire) },
+                .file => .{ .file = try net_file.FileTransport(repo_kind, repo_opts).init(opts) },
+                .wire => |wire_kind| .{ .wire = try net_wire.WireTransport(repo_kind, repo_opts).init(state, allocator, wire_kind, opts) },
             };
         }
 

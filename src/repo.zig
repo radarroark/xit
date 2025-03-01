@@ -1035,6 +1035,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             comptime source_repo_kind: RepoKind,
             comptime source_repo_opts: RepoOpts(source_repo_kind),
             obj_iter: *obj.ObjectIterator(source_repo_kind, source_repo_opts, .raw),
+            progress_text_maybe: ?*const fn (text: []const u8) anyerror!void,
         ) !void {
             switch (repo_kind) {
                 .git => {
@@ -1046,6 +1047,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         source_repo_kind,
                         source_repo_opts,
                         obj_iter,
+                        progress_text_maybe,
                     );
                 },
                 .xit => {
@@ -1053,6 +1055,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         core: *Repo(repo_kind, repo_opts).Core,
                         allocator: std.mem.Allocator,
                         obj_iter: *obj.ObjectIterator(source_repo_kind, source_repo_opts, .raw),
+                        progress_text_maybe: ?*const fn (text: []const u8) anyerror!void,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
@@ -1065,6 +1068,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                                 source_repo_kind,
                                 source_repo_opts,
                                 ctx.obj_iter,
+                                ctx.progress_text_maybe,
                             );
                         }
                     };
@@ -1072,7 +1076,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
                     try history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
-                        Ctx{ .core = &self.core, .allocator = allocator, .obj_iter = obj_iter },
+                        Ctx{ .core = &self.core, .allocator = allocator, .obj_iter = obj_iter, .progress_text_maybe = progress_text_maybe },
                     );
                 },
             }

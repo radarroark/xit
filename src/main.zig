@@ -104,7 +104,7 @@ pub fn run(
                     clone_cmd.url,
                     cwd,
                     clone_cmd.local_path,
-                    .{ .wire = .{ .progress_text = progress_text } },
+                    .{ .progress_text = progress_text },
                 );
                 defer repo.deinit();
             },
