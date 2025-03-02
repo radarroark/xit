@@ -128,8 +128,15 @@ pub fn RefOrOid(comptime hash_kind: hash.HashKind) type {
         pub fn initFromUser(content: []const u8) ?RefOrOid(hash_kind) {
             if (isOid(hash_kind, content)) {
                 return .{ .oid = content[0..comptime hash.hexLen(hash_kind)] };
+            } else if (Ref.initFromPath(content)) |ref| {
+                if (.none == ref.kind) {
+                    // an unqualified ref from the user was probably intended to be a branch name
+                    return .{ .ref = .{ .kind = .head, .name = ref.name } };
+                } else {
+                    return .{ .ref = ref };
+                }
             } else {
-                return .{ .ref = .{ .kind = .head, .name = content } };
+                return null;
             }
         }
     };
