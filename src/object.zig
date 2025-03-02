@@ -1149,7 +1149,7 @@ fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
         db_file: std.fs.File,
         db: *DB,
         parent_to_children: DB.HashMap(.read_write),
-        base_oids: DB.HashMap(.read_write),
+        oid_queue: std.AutoArrayHashMapUnmanaged([hash.byteLen(repo_opts.hash)]u8, void),
         commit_count: usize,
 
         fn init(state: rp.Repo(.xit, repo_opts).State(.read_only), allocator: std.mem.Allocator) !PatchWriter(repo_opts) {
@@ -1168,15 +1168,12 @@ fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
             const parent_to_children_cursor = try map.putCursor(hash.hashInt(repo_opts.hash, "parent->children"));
             const parent_to_children = try DB.HashMap(.read_write).init(parent_to_children_cursor);
 
-            const base_oids_cursor = try map.putCursor(hash.hashInt(repo_opts.hash, "base-oids"));
-            const base_oids = try DB.HashMap(.read_write).init(base_oids_cursor);
-
             return .{
                 .xit_dir = state.core.xit_dir,
                 .db_file = db_file,
                 .db = db_ptr,
                 .parent_to_children = parent_to_children,
-                .base_oids = base_oids,
+                .oid_queue = std.AutoArrayHashMapUnmanaged([hash.byteLen(repo_opts.hash)]u8, void){},
                 .commit_count = 0,
             };
         }
@@ -1185,6 +1182,7 @@ fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
             self.db_file.close();
             self.xit_dir.deleteFile(db_name) catch {};
             allocator.destroy(self.db);
+            self.oid_queue.deinit(allocator);
         }
 
         fn add(
@@ -1218,7 +1216,7 @@ fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
             }
 
             if (is_base_oid) {
-                _ = try self.base_oids.putCursor(commit_id_int);
+                try self.oid_queue.put(allocator, oid.*, {});
             }
 
             self.commit_count += 1;
@@ -1230,24 +1228,12 @@ fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
             allocator: std.mem.Allocator,
             progress_text_maybe: ?*const fn (text: []const u8) anyerror!void,
         ) !void {
-            var oid_queue = std.AutoArrayHashMap([hash.byteLen(repo_opts.hash)]u8, void).init(allocator);
-            defer oid_queue.deinit();
-
-            var iter = try self.base_oids.iterator();
-            defer iter.deinit();
-
-            while (try iter.next()) |*next_cursor| {
-                const kv_pair = try next_cursor.readKeyValuePair();
-                const oid = hash.intToBytes(hash.HashInt(repo_opts.hash), kv_pair.hash);
-                try oid_queue.put(oid, {});
-            }
-
             const patch = @import("./patch.zig");
 
             var patch_count: usize = 0;
 
-            while (oid_queue.count() > 0) {
-                const oid = oid_queue.keys()[0];
+            while (self.oid_queue.count() > 0) {
+                const oid = self.oid_queue.keys()[0];
                 const oid_hex = std.fmt.bytesToHex(&oid, .lower);
 
                 patch_count += 1;
@@ -1258,7 +1244,7 @@ fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
                 }
 
                 try patch.writeAndApplyPatches(repo_opts, state, allocator, &oid_hex);
-                oid_queue.swapRemoveAt(0);
+                self.oid_queue.swapRemoveAt(0);
 
                 const commit_id_int = try hash.hexToInt(repo_opts.hash, &oid_hex);
                 if (try self.parent_to_children.getCursor(commit_id_int)) |children_cursor| {
@@ -1270,7 +1256,7 @@ fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
                     while (try children_iter.next()) |*next_cursor| {
                         const kv_pair = try next_cursor.readKeyValuePair();
                         const child_oid = hash.intToBytes(hash.HashInt(repo_opts.hash), kv_pair.hash);
-                        try oid_queue.put(child_oid, {});
+                        try self.oid_queue.put(allocator, child_oid, {});
                     }
                 }
             }
