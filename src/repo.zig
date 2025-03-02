@@ -1117,7 +1117,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             switch (repo_kind) {
                 .git => {
                     const state = State(.read_write){ .core = &self.core, .extra = .{} };
-                    var remote = try net.Remote(repo_kind, repo_opts).initFromConfig(state.readOnly(), allocator, remote_name);
+                    var remote = try net.Remote(repo_kind, repo_opts).open(state.readOnly(), allocator, remote_name);
                     defer remote.deinit(allocator);
                     try net.fetch(repo_kind, repo_opts, state, allocator, &remote, opts);
                 },
@@ -1131,7 +1131,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            var remote = try net.Remote(repo_kind, repo_opts).initFromConfig(state.readOnly(), ctx.allocator, ctx.remote_name);
+                            var remote = try net.Remote(repo_kind, repo_opts).open(state.readOnly(), ctx.allocator, ctx.remote_name);
                             defer remote.deinit(ctx.allocator);
                             try net.fetch(repo_kind, repo_opts, state, ctx.allocator, &remote, ctx.opts);
                         }
@@ -1155,7 +1155,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             switch (repo_kind) {
                 .git => {
                     const state = State(.read_write){ .core = &self.core, .extra = .{} };
-                    var remote = try net.Remote(repo_kind, repo_opts).initFromConfig(state.readOnly(), allocator, remote_name);
+                    var remote = try net.Remote(repo_kind, repo_opts).open(state.readOnly(), allocator, remote_name);
                     defer remote.deinit(allocator);
                     try net.push(repo_kind, repo_opts, state, allocator, &remote, opts);
                 },
@@ -1169,7 +1169,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            var remote = try net.Remote(repo_kind, repo_opts).initFromConfig(state.readOnly(), ctx.allocator, ctx.remote_name);
+                            var remote = try net.Remote(repo_kind, repo_opts).open(state.readOnly(), ctx.allocator, ctx.remote_name);
                             defer remote.deinit(ctx.allocator);
                             try net.push(repo_kind, repo_opts, state, ctx.allocator, &remote, ctx.opts);
                         }

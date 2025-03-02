@@ -63,55 +63,22 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             name: []const u8,
             url: []const u8,
         ) !Remote(repo_kind, repo_opts) {
-            var config = try cfg.Config(repo_kind, repo_opts).init(state.readOnly(), allocator);
-            defer config.deinit();
+            switch (repo_kind) {
+                .git => {
+                    var lock = try fs.LockFile.init(state.core.git_dir, "config");
+                    defer lock.deinit();
 
-            {
-                const config_name = try std.fmt.allocPrint(allocator, "remote.{s}.url", .{name});
-                defer allocator.free(config_name);
+                    try initConfig(.{ .core = state.core, .extra = .{ .lock_file_maybe = lock.lock_file } }, allocator, name, url);
 
-                try config.add(state, .{ .name = config_name, .value = url });
+                    lock.success = true;
+                },
+                .xit => try initConfig(state, allocator, name, url),
             }
 
-            {
-                const config_name = try std.fmt.allocPrint(allocator, "remote.{s}.fetch", .{name});
-                defer allocator.free(config_name);
-
-                const config_value = try std.fmt.allocPrint(allocator, "+refs/heads/*:refs/remotes/{s}/*", .{name});
-                defer allocator.free(config_value);
-
-                try config.add(state, .{ .name = config_name, .value = config_value });
-            }
-
-            var remote = std.mem.zeroInit(Remote(repo_kind, repo_opts), .{});
-
-            remote.heads = try std.StringArrayHashMapUnmanaged(RemoteHead(repo_kind, repo_opts)).init(allocator, &.{}, &.{});
-            remote.refspecs = std.ArrayListUnmanaged(net_refspec.RefSpec){};
-            remote.active_refspecs = std.ArrayListUnmanaged(net_refspec.RefSpec){};
-
-            remote.url = try allocator.dupe(u8, url);
-            remote.name = try allocator.dupe(u8, name);
-
-            {
-                var fetchspec = std.ArrayList(u8).init(allocator);
-                defer fetchspec.deinit();
-                try fetchspec.writer().print("+refs/heads/*:refs/remotes/{s}/*", .{name});
-
-                var spec = try net_refspec.RefSpec.init(allocator, fetchspec.items, .fetch);
-                errdefer spec.deinit(allocator);
-                try remote.refspecs.append(allocator, spec);
-            }
-
-            for (remote.refspecs.items) |*spec| {
-                var spec_dupe = try spec.dupe(allocator);
-                errdefer spec_dupe.deinit(allocator);
-                try remote.active_refspecs.append(allocator, spec_dupe);
-            }
-
-            return remote;
+            return try open(state.readOnly(), allocator, name);
         }
 
-        pub fn initFromConfig(
+        pub fn open(
             state: rp.Repo(repo_kind, repo_opts).State(.read_only),
             allocator: std.mem.Allocator,
             name: []const u8,
@@ -165,6 +132,33 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             }
 
             return remote;
+        }
+
+        fn initConfig(
+            state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+            allocator: std.mem.Allocator,
+            name: []const u8,
+            url: []const u8,
+        ) !void {
+            var config = try cfg.Config(repo_kind, repo_opts).init(state.readOnly(), allocator);
+            defer config.deinit();
+
+            {
+                const config_name = try std.fmt.allocPrint(allocator, "remote.{s}.url", .{name});
+                defer allocator.free(config_name);
+
+                try config.add(state, .{ .name = config_name, .value = url });
+            }
+
+            {
+                const config_name = try std.fmt.allocPrint(allocator, "remote.{s}.fetch", .{name});
+                defer allocator.free(config_name);
+
+                const config_value = try std.fmt.allocPrint(allocator, "+refs/heads/*:refs/remotes/{s}/*", .{name});
+                defer allocator.free(config_value);
+
+                try config.add(state, .{ .name = config_name, .value = config_value });
+            }
         }
 
         pub fn deinit(self: *Remote(repo_kind, repo_opts), allocator: std.mem.Allocator) void {
@@ -629,11 +623,8 @@ pub fn clone(
 
     switch (repo_kind) {
         .git => {
-            var lock = try fs.LockFile.init(repo.core.git_dir, "config");
-            defer lock.deinit();
-
             var remote = try Remote(repo_kind, repo_opts).init(
-                .{ .core = &repo.core, .extra = .{ .lock_file_maybe = lock.lock_file } },
+                .{ .core = &repo.core, .extra = .{} },
                 allocator,
                 "origin",
                 url,
@@ -658,8 +649,6 @@ pub fn clone(
                     transport_opts,
                 ),
             }
-
-            lock.success = true;
         },
         .xit => {
             const Ctx = struct {
