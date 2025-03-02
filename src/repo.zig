@@ -946,99 +946,73 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                 return error.InvalidRemoteUrl;
             }
 
-            const config_url_name = try std.fmt.allocPrint(allocator, "remote.{s}.url", .{input.name});
-            defer allocator.free(config_url_name);
-
-            const config_url = cfg.AddConfigInput{ .name = config_url_name, .value = input.value };
-
-            const config_fetch_name = try std.fmt.allocPrint(allocator, "remote.{s}.fetch", .{input.name});
-            defer allocator.free(config_fetch_name);
-
-            const config_fetch_value = try std.fmt.allocPrint(allocator, "+refs/heads/*:refs/remotes/{s}/*", .{input.name});
-            defer allocator.free(config_fetch_value);
-
-            const config_fetch = cfg.AddConfigInput{ .name = config_fetch_name, .value = config_fetch_value };
-
-            var config = try self.listConfig(allocator);
-            defer config.deinit();
-
             switch (repo_kind) {
                 .git => {
                     var lock = try fs.LockFile.init(self.core.git_dir, "config");
                     defer lock.deinit();
 
-                    try config.add(.{ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } }, config_url);
-                    try config.add(.{ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } }, config_fetch);
+                    try net.Remote(repo_kind, repo_opts).addConfig(
+                        .{ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } },
+                        allocator,
+                        input.name,
+                        input.value,
+                    );
 
                     lock.success = true;
                 },
                 .xit => {
                     const Ctx = struct {
                         core: *Repo(repo_kind, repo_opts).Core,
-                        config: *cfg.Config(repo_kind, repo_opts),
-                        config_url: cfg.AddConfigInput,
-                        config_fetch: cfg.AddConfigInput,
+                        allocator: std.mem.Allocator,
+                        input: cfg.AddConfigInput,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            try ctx.config.add(state, ctx.config_url);
-                            try ctx.config.add(state, ctx.config_fetch);
+                            try net.Remote(repo_kind, repo_opts).addConfig(state, ctx.allocator, ctx.input.name, ctx.input.value);
                         }
                     };
 
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
                     try history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
-                        Ctx{ .core = &self.core, .config = &config, .config_url = config_url, .config_fetch = config_fetch },
+                        Ctx{ .core = &self.core, .allocator = allocator, .input = input },
                     );
                 },
             }
         }
 
         pub fn removeRemote(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: cfg.RemoveConfigInput) !void {
-            const config_url_name = try std.fmt.allocPrint(allocator, "remote.{s}.url", .{input.name});
-            defer allocator.free(config_url_name);
-
-            const config_url = cfg.RemoveConfigInput{ .name = config_url_name };
-
-            const config_fetch_name = try std.fmt.allocPrint(allocator, "remote.{s}.fetch", .{input.name});
-            defer allocator.free(config_fetch_name);
-
-            const config_fetch = cfg.RemoveConfigInput{ .name = config_fetch_name };
-
-            var config = try self.listConfig(allocator);
-            defer config.deinit();
-
             switch (repo_kind) {
                 .git => {
                     var lock = try fs.LockFile.init(self.core.git_dir, "config");
                     defer lock.deinit();
 
-                    try config.remove(.{ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } }, config_url);
-                    try config.remove(.{ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } }, config_fetch);
+                    try net.Remote(repo_kind, repo_opts).removeConfig(
+                        .{ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } },
+                        allocator,
+                        input.name,
+                    );
 
                     lock.success = true;
                 },
                 .xit => {
                     const Ctx = struct {
                         core: *Repo(repo_kind, repo_opts).Core,
-                        config: *cfg.Config(repo_kind, repo_opts),
-                        config_url: cfg.RemoveConfigInput,
-                        config_fetch: cfg.RemoveConfigInput,
+                        allocator: std.mem.Allocator,
+                        input: cfg.RemoveConfigInput,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            try ctx.config.remove(state, ctx.config_url);
-                            try ctx.config.remove(state, ctx.config_fetch);
+                            try net.Remote(repo_kind, repo_opts).removeConfig(state, ctx.allocator, ctx.input.name);
                         }
                     };
 
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
                     try history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
-                        Ctx{ .core = &self.core, .config = &config, .config_url = config_url, .config_fetch = config_fetch },
+                        Ctx{ .core = &self.core, .allocator = allocator, .input = input },
                     );
                 },
             }

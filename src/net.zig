@@ -68,11 +68,11 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     var lock = try fs.LockFile.init(state.core.git_dir, "config");
                     defer lock.deinit();
 
-                    try initConfig(.{ .core = state.core, .extra = .{ .lock_file_maybe = lock.lock_file } }, allocator, name, url);
+                    try addConfig(.{ .core = state.core, .extra = .{ .lock_file_maybe = lock.lock_file } }, allocator, name, url);
 
                     lock.success = true;
                 },
-                .xit => try initConfig(state, allocator, name, url),
+                .xit => try addConfig(state, allocator, name, url),
             }
 
             return try open(state.readOnly(), allocator, name);
@@ -134,7 +134,7 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             return remote;
         }
 
-        fn initConfig(
+        pub fn addConfig(
             state: rp.Repo(repo_kind, repo_opts).State(.read_write),
             allocator: std.mem.Allocator,
             name: []const u8,
@@ -158,6 +158,43 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                 defer allocator.free(config_value);
 
                 try config.add(state, .{ .name = config_name, .value = config_value });
+            }
+
+            {
+                const config_name = try std.fmt.allocPrint(allocator, "remote.{s}.push", .{name});
+                defer allocator.free(config_name);
+
+                try config.add(state, .{ .name = config_name, .value = "refs/heads/master:refs/heads/master" });
+            }
+        }
+
+        pub fn removeConfig(
+            state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+            allocator: std.mem.Allocator,
+            name: []const u8,
+        ) !void {
+            var config = try cfg.Config(repo_kind, repo_opts).init(state.readOnly(), allocator);
+            defer config.deinit();
+
+            {
+                const config_name = try std.fmt.allocPrint(allocator, "remote.{s}.url", .{name});
+                defer allocator.free(config_name);
+
+                try config.remove(state, .{ .name = config_name });
+            }
+
+            {
+                const config_name = try std.fmt.allocPrint(allocator, "remote.{s}.fetch", .{name});
+                defer allocator.free(config_name);
+
+                try config.remove(state, .{ .name = config_name });
+            }
+
+            {
+                const config_name = try std.fmt.allocPrint(allocator, "remote.{s}.push", .{name});
+                defer allocator.free(config_name);
+
+                try config.remove(state, .{ .name = config_name });
             }
         }
 
