@@ -34,6 +34,7 @@ pub const CommandKind = enum {
     config,
     remote,
     clone,
+    fetch,
 };
 
 const Help = struct {
@@ -306,6 +307,16 @@ fn commandHelp(command_kind: CommandKind) Help {
             \\    xit clone https://github.com/... mydir
             ,
         },
+        .fetch => .{
+            .name = "fetch",
+            .descrip =
+            \\download objects and refs from another repository.
+            ,
+            .example =
+            \\fetch a specific remote:
+            \\    xit fetch origin
+            ,
+        },
     };
 }
 
@@ -497,6 +508,9 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
         clone: struct {
             url: []const u8,
             local_path: []const u8,
+        },
+        fetch: struct {
+            remote_name: []const u8,
         },
 
         pub fn init(cmd_args: *CommandArgs) !?Command(repo_kind, hash_kind) {
@@ -786,6 +800,13 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                     return .{ .clone = .{
                         .url = cmd_args.positional_args[0],
                         .local_path = cmd_args.positional_args[1],
+                    } };
+                },
+                .fetch => {
+                    if (cmd_args.positional_args.len != 1) return null;
+
+                    return .{ .fetch = .{
+                        .remote_name = cmd_args.positional_args[0],
                     } };
                 },
             }

@@ -456,39 +456,43 @@ fn runCommand(
             defer result.deinit();
             try printMergeResult(repo_kind, repo_opts, &result, writers);
         },
-        .config => |config_cmd| {
-            switch (config_cmd) {
-                .list => {
-                    var conf = try repo.listConfig(allocator);
-                    defer conf.deinit();
+        .config => |config_cmd| switch (config_cmd) {
+            .list => {
+                var conf = try repo.listConfig(allocator);
+                defer conf.deinit();
 
-                    for (conf.sections.keys(), conf.sections.values()) |section_name, variables| {
-                        for (variables.keys(), variables.values()) |name, value| {
-                            try writers.out.print("{s}.{s}={s}\n", .{ section_name, name, value });
-                        }
+                for (conf.sections.keys(), conf.sections.values()) |section_name, variables| {
+                    for (variables.keys(), variables.values()) |name, value| {
+                        try writers.out.print("{s}.{s}={s}\n", .{ section_name, name, value });
                     }
-                },
-                .add => |config_add_cmd| try repo.addConfig(allocator, config_add_cmd),
-                .remove => |config_remove_cmd| try repo.removeConfig(allocator, config_remove_cmd),
-            }
+                }
+            },
+            .add => |config_add_cmd| try repo.addConfig(allocator, config_add_cmd),
+            .remove => |config_remove_cmd| try repo.removeConfig(allocator, config_remove_cmd),
         },
-        .remote => |remote_cmd| {
-            switch (remote_cmd) {
-                .list => {
-                    var rem = try repo.listRemotes(allocator);
-                    defer rem.deinit();
+        .remote => |remote_cmd| switch (remote_cmd) {
+            .list => {
+                var rem = try repo.listRemotes(allocator);
+                defer rem.deinit();
 
-                    for (rem.sections.keys(), rem.sections.values()) |section_name, variables| {
-                        for (variables.keys(), variables.values()) |name, value| {
-                            try writers.out.print("{s}.{s}={s}\n", .{ section_name, name, value });
-                        }
+                for (rem.sections.keys(), rem.sections.values()) |section_name, variables| {
+                    for (variables.keys(), variables.values()) |name, value| {
+                        try writers.out.print("{s}.{s}={s}\n", .{ section_name, name, value });
                     }
-                },
-                .add => |remote_add_cmd| try repo.addRemote(allocator, remote_add_cmd),
-                .remove => |remote_remove_cmd| try repo.removeRemote(allocator, remote_remove_cmd),
-            }
+                }
+            },
+            .add => |remote_add_cmd| try repo.addRemote(allocator, remote_add_cmd),
+            .remove => |remote_remove_cmd| try repo.removeRemote(allocator, remote_remove_cmd),
         },
         .clone => {},
+        .fetch => |fetch_cmd| {
+            const progress_text = struct {
+                fn run(text: []const u8) !void {
+                    std.debug.print("{s}\n", .{text});
+                }
+            }.run;
+            try repo.fetch(allocator, fetch_cmd.remote_name, .{ .progress_text = progress_text });
+        },
     }
 }
 

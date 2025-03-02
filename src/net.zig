@@ -9,6 +9,7 @@ const rf = @import("./ref.zig");
 const hash = @import("./hash.zig");
 const cfg = @import("./config.zig");
 const obj = @import("./object.zig");
+const fs = @import("./fs.zig");
 
 pub const Direction = enum {
     fetch,
@@ -57,10 +58,21 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
         nego: net_fetch.FetchNegotiation(repo_kind, repo_opts),
 
         pub fn init(
+            state: rp.Repo(repo_kind, repo_opts).State(.read_write),
             allocator: std.mem.Allocator,
             name: []const u8,
             url: []const u8,
         ) !Remote(repo_kind, repo_opts) {
+            {
+                const config_name = try std.fmt.allocPrint(allocator, "remote.{s}.url", .{name});
+                defer allocator.free(config_name);
+
+                var config = try cfg.Config(repo_kind, repo_opts).init(state.readOnly(), allocator);
+                defer config.deinit();
+
+                try config.add(state, .{ .name = config_name, .value = url });
+            }
+
             var remote = std.mem.zeroInit(Remote(repo_kind, repo_opts), .{});
 
             remote.heads = try std.StringArrayHashMapUnmanaged(RemoteHead(repo_kind, repo_opts)).init(allocator, &.{}, &.{});
@@ -591,9 +603,6 @@ pub fn clone(
     local_path: []const u8,
     transport_opts: Opts,
 ) !rp.Repo(repo_kind, repo_opts) {
-    var remote = try Remote(repo_kind, repo_opts).init(allocator, "origin", url);
-    defer remote.deinit(allocator);
-
     var repo_dir = try cwd.makeOpenPath(local_path, .{});
     defer repo_dir.close();
 
@@ -604,6 +613,17 @@ pub fn clone(
 
     switch (repo_kind) {
         .git => {
+            var lock = try fs.LockFile.init(repo.core.git_dir, "config");
+            defer lock.deinit();
+
+            var remote = try Remote(repo_kind, repo_opts).init(
+                .{ .core = &repo.core, .extra = .{ .lock_file_maybe = lock.lock_file } },
+                allocator,
+                "origin",
+                url,
+            );
+            defer remote.deinit(allocator);
+
             switch (transport_def) {
                 .file => try net_clone.cloneFile(
                     repo_kind,
@@ -622,25 +642,31 @@ pub fn clone(
                     transport_opts,
                 ),
             }
+
+            lock.success = true;
         },
         .xit => {
             const Ctx = struct {
                 core: *rp.Repo(repo_kind, repo_opts).Core,
                 transport_def: net_transport.TransportDefinition,
                 allocator: std.mem.Allocator,
-                remote: *Remote(repo_kind, repo_opts),
+                url: []const u8,
                 transport_opts: Opts,
 
                 pub fn run(ctx: @This(), cursor: *rp.Repo(repo_kind, repo_opts).DB.Cursor(.read_write)) !void {
                     var moment = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(cursor.*);
                     const state = rp.Repo(repo_kind, repo_opts).State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
+
+                    var remote = try Remote(repo_kind, repo_opts).init(state, ctx.allocator, "origin", ctx.url);
+                    defer remote.deinit(ctx.allocator);
+
                     switch (ctx.transport_def) {
                         .file => try net_clone.cloneFile(
                             repo_kind,
                             repo_opts,
                             state,
                             ctx.allocator,
-                            ctx.remote,
+                            &remote,
                             ctx.transport_opts,
                         ),
                         .wire => try net_clone.cloneWire(
@@ -648,7 +674,7 @@ pub fn clone(
                             repo_opts,
                             state,
                             ctx.allocator,
-                            ctx.remote,
+                            &remote,
                             ctx.transport_opts,
                         ),
                     }
@@ -662,7 +688,7 @@ pub fn clone(
                     .core = &repo.core,
                     .transport_def = transport_def,
                     .allocator = allocator,
-                    .remote = &remote,
+                    .url = url,
                     .transport_opts = transport_opts,
                 },
             );
