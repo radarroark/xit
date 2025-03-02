@@ -866,79 +866,79 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
         }
 
         pub fn addConfig(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: cfg.AddConfigInput) !void {
-            var conf = try self.listConfig(allocator);
-            defer conf.deinit();
+            var config = try self.listConfig(allocator);
+            defer config.deinit();
 
             switch (repo_kind) {
                 .git => {
                     var lock = try fs.LockFile.init(self.core.git_dir, "config");
                     defer lock.deinit();
 
-                    try conf.add(.{ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } }, input);
+                    try config.add(.{ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } }, input);
 
                     lock.success = true;
                 },
                 .xit => {
                     const Ctx = struct {
                         core: *Repo(repo_kind, repo_opts).Core,
-                        conf: *cfg.Config(repo_kind, repo_opts),
+                        config: *cfg.Config(repo_kind, repo_opts),
                         input: cfg.AddConfigInput,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            try ctx.conf.add(state, ctx.input);
+                            try ctx.config.add(state, ctx.input);
                         }
                     };
 
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
                     try history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
-                        Ctx{ .core = &self.core, .conf = &conf, .input = input },
+                        Ctx{ .core = &self.core, .config = &config, .input = input },
                     );
                 },
             }
         }
 
         pub fn removeConfig(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: cfg.RemoveConfigInput) !void {
-            var conf = try self.listConfig(allocator);
-            defer conf.deinit();
+            var config = try self.listConfig(allocator);
+            defer config.deinit();
 
             switch (repo_kind) {
                 .git => {
                     var lock = try fs.LockFile.init(self.core.git_dir, "config");
                     defer lock.deinit();
 
-                    try conf.remove(.{ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } }, input);
+                    try config.remove(.{ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } }, input);
 
                     lock.success = true;
                 },
                 .xit => {
                     const Ctx = struct {
                         core: *Repo(repo_kind, repo_opts).Core,
-                        conf: *cfg.Config(repo_kind, repo_opts),
+                        config: *cfg.Config(repo_kind, repo_opts),
                         input: cfg.RemoveConfigInput,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            try ctx.conf.remove(state, ctx.input);
+                            try ctx.config.remove(state, ctx.input);
                         }
                     };
 
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
                     try history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
-                        Ctx{ .core = &self.core, .conf = &conf, .input = input },
+                        Ctx{ .core = &self.core, .config = &config, .input = input },
                     );
                 },
             }
         }
 
         pub fn listRemotes(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator) !cfg.RemoteConfig {
-            var conf = try self.listConfig(allocator);
-            defer conf.deinit();
-            return try cfg.RemoteConfig.init(repo_kind, repo_opts, &conf, allocator);
+            var config = try self.listConfig(allocator);
+            defer config.deinit();
+            return try cfg.RemoteConfig.init(repo_kind, repo_opts, &config, allocator);
         }
 
         pub fn addRemote(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: cfg.AddConfigInput) !void {
@@ -959,38 +959,38 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
             const config_fetch = cfg.AddConfigInput{ .name = config_fetch_name, .value = config_fetch_value };
 
-            var conf = try self.listConfig(allocator);
-            defer conf.deinit();
+            var config = try self.listConfig(allocator);
+            defer config.deinit();
 
             switch (repo_kind) {
                 .git => {
                     var lock = try fs.LockFile.init(self.core.git_dir, "config");
                     defer lock.deinit();
 
-                    try conf.add(.{ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } }, config_url);
-                    try conf.add(.{ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } }, config_fetch);
+                    try config.add(.{ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } }, config_url);
+                    try config.add(.{ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } }, config_fetch);
 
                     lock.success = true;
                 },
                 .xit => {
                     const Ctx = struct {
                         core: *Repo(repo_kind, repo_opts).Core,
-                        conf: *cfg.Config(repo_kind, repo_opts),
+                        config: *cfg.Config(repo_kind, repo_opts),
                         config_url: cfg.AddConfigInput,
                         config_fetch: cfg.AddConfigInput,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            try ctx.conf.add(state, ctx.config_url);
-                            try ctx.conf.add(state, ctx.config_fetch);
+                            try ctx.config.add(state, ctx.config_url);
+                            try ctx.config.add(state, ctx.config_fetch);
                         }
                     };
 
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
                     try history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
-                        Ctx{ .core = &self.core, .conf = &conf, .config_url = config_url, .config_fetch = config_fetch },
+                        Ctx{ .core = &self.core, .config = &config, .config_url = config_url, .config_fetch = config_fetch },
                     );
                 },
             }
@@ -1007,38 +1007,38 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
             const config_fetch = cfg.RemoveConfigInput{ .name = config_fetch_name };
 
-            var conf = try self.listConfig(allocator);
-            defer conf.deinit();
+            var config = try self.listConfig(allocator);
+            defer config.deinit();
 
             switch (repo_kind) {
                 .git => {
                     var lock = try fs.LockFile.init(self.core.git_dir, "config");
                     defer lock.deinit();
 
-                    try conf.remove(.{ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } }, config_url);
-                    try conf.remove(.{ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } }, config_fetch);
+                    try config.remove(.{ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } }, config_url);
+                    try config.remove(.{ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } }, config_fetch);
 
                     lock.success = true;
                 },
                 .xit => {
                     const Ctx = struct {
                         core: *Repo(repo_kind, repo_opts).Core,
-                        conf: *cfg.Config(repo_kind, repo_opts),
+                        config: *cfg.Config(repo_kind, repo_opts),
                         config_url: cfg.RemoveConfigInput,
                         config_fetch: cfg.RemoveConfigInput,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            try ctx.conf.remove(state, ctx.config_url);
-                            try ctx.conf.remove(state, ctx.config_fetch);
+                            try ctx.config.remove(state, ctx.config_url);
+                            try ctx.config.remove(state, ctx.config_fetch);
                         }
                     };
 
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
                     try history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
-                        Ctx{ .core = &self.core, .conf = &conf, .config_url = config_url, .config_fetch = config_fetch },
+                        Ctx{ .core = &self.core, .config = &config, .config_url = config_url, .config_fetch = config_fetch },
                     );
                 },
             }
