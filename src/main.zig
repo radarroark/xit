@@ -434,7 +434,7 @@ fn runCommand(
                 defer commit_object.deinit();
                 try writers.out.print("commit {s}\n", .{commit_object.oid});
                 if (commit_object.content.commit.metadata.author) |author| {
-                    try writers.out.print("Author {s}\n", .{author});
+                    try writers.out.print("author: {s}\n", .{author});
                 }
                 try writers.out.print("\n", .{});
 
@@ -504,16 +504,16 @@ fn printMergeResult(
 ) !void {
     for (merge_result.auto_resolved_conflicts.keys()) |path| {
         if (merge_result.changes.contains(path)) {
-            try writers.out.print("Auto-merging {s}\n", .{path});
+            try writers.out.print("auto-merging {s}\n", .{path});
         }
     }
     switch (merge_result.result) {
         .success => {},
         .nothing => {
-            try writers.out.print("Already up to date.\n", .{});
+            try writers.out.print("already up to date.\n", .{});
         },
         .fast_forward => {
-            try writers.out.print("Fast-forward\n", .{});
+            try writers.out.print("fast-forward\n", .{});
         },
         .conflict => |result_conflict| {
             for (result_conflict.conflicts.keys(), result_conflict.conflicts.values()) |path, conflict| {
@@ -526,17 +526,17 @@ fn printMergeResult(
                         merge_result.source_name
                     else
                         merge_result.target_name;
-                    try writers.err.print("CONFLICT ({s}): There is a directory with name {s} in {s}. Adding {s} as {s}\n", .{ conflict_type, path, dir_branch_name, path, renamed.path });
+                    try writers.err.print("CONFLICT ({s}): there is a directory with name {s} in {s}. adding {s} as {s}\n", .{ conflict_type, path, dir_branch_name, path, renamed.path });
                 } else {
                     if (merge_result.changes.contains(path)) {
-                        try writers.out.print("Auto-merging {s}\n", .{path});
+                        try writers.out.print("auto-merging {s}\n", .{path});
                     }
                     if (conflict.target != null and conflict.source != null) {
                         const conflict_type = if (conflict.base != null)
                             "content"
                         else
                             "add/add";
-                        try writers.err.print("CONFLICT ({s}): Merge conflict in {s}\n", .{ conflict_type, path });
+                        try writers.err.print("CONFLICT ({s}): merge conflict in {s}\n", .{ conflict_type, path });
                     } else {
                         const conflict_type = if (conflict.target != null)
                             "modify/delete"
