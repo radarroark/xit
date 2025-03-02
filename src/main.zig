@@ -493,6 +493,14 @@ fn runCommand(
             }.run;
             try repo.fetch(allocator, fetch_cmd.remote_name, .{ .progress_text = progress_text });
         },
+        .push => |push_cmd| {
+            const progress_text = struct {
+                fn run(text: []const u8) !void {
+                    std.debug.print("{s}\n", .{text});
+                }
+            }.run;
+            try repo.push(allocator, push_cmd.remote_name, .{ .progress_text = progress_text });
+        },
     }
 }
 
