@@ -119,8 +119,14 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                 return error.RemoteNotFound;
             }
 
-            if (remote_vars.get("fetch")) |fetch_spec| {
-                var spec = try net_refspec.RefSpec.init(allocator, fetch_spec, .fetch);
+            if (remote_vars.get("fetch")) |spec_str| {
+                var spec = try net_refspec.RefSpec.init(allocator, spec_str, .fetch);
+                errdefer spec.deinit(allocator);
+                try remote.refspecs.append(allocator, spec);
+            }
+
+            if (remote_vars.get("push")) |spec_str| {
+                var spec = try net_refspec.RefSpec.init(allocator, spec_str, .push);
                 errdefer spec.deinit(allocator);
                 try remote.refspecs.append(allocator, spec);
             }
