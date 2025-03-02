@@ -1486,7 +1486,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             defer remote.deinit();
 
             const origin_section = remote.sections.get("origin").?;
-            try std.testing.expectEqual(1, origin_section.count());
+            try std.testing.expectEqual(2, origin_section.count());
         }
 
         try main.run(repo_kind, repo_opts, allocator, &.{ "remote", "rm", "origin" }, work_dir, .{});

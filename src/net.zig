@@ -63,14 +63,24 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             name: []const u8,
             url: []const u8,
         ) !Remote(repo_kind, repo_opts) {
+            var config = try cfg.Config(repo_kind, repo_opts).init(state.readOnly(), allocator);
+            defer config.deinit();
+
             {
                 const config_name = try std.fmt.allocPrint(allocator, "remote.{s}.url", .{name});
                 defer allocator.free(config_name);
 
-                var config = try cfg.Config(repo_kind, repo_opts).init(state.readOnly(), allocator);
-                defer config.deinit();
-
                 try config.add(state, .{ .name = config_name, .value = url });
+            }
+
+            {
+                const config_name = try std.fmt.allocPrint(allocator, "remote.{s}.fetch", .{name});
+                defer allocator.free(config_name);
+
+                const config_value = try std.fmt.allocPrint(allocator, "+refs/heads/*:refs/remotes/{s}/*", .{name});
+                defer allocator.free(config_value);
+
+                try config.add(state, .{ .name = config_name, .value = config_value });
             }
 
             var remote = std.mem.zeroInit(Remote(repo_kind, repo_opts), .{});
@@ -140,6 +150,12 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
             if (!found_remote) {
                 return error.RemoteNotFound;
+            }
+
+            if (remote_vars.get("fetch")) |fetch_spec| {
+                var spec = try net_refspec.RefSpec.init(allocator, fetch_spec, .fetch);
+                errdefer spec.deinit(allocator);
+                try remote.refspecs.append(allocator, spec);
             }
 
             for (remote.refspecs.items) |*spec| {
