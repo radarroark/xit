@@ -165,13 +165,6 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
                 try config.add(state, .{ .name = config_name, .value = config_value });
             }
-
-            {
-                const config_name = try std.fmt.allocPrint(allocator, "remote.{s}.push", .{name});
-                defer allocator.free(config_name);
-
-                try config.add(state, .{ .name = config_name, .value = "refs/heads/master:refs/heads/master" });
-            }
         }
 
         pub fn removeConfig(
@@ -191,13 +184,6 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
             {
                 const config_name = try std.fmt.allocPrint(allocator, "remote.{s}.fetch", .{name});
-                defer allocator.free(config_name);
-
-                try config.remove(state, .{ .name = config_name });
-            }
-
-            {
-                const config_name = try std.fmt.allocPrint(allocator, "remote.{s}.push", .{name});
                 defer allocator.free(config_name);
 
                 try config.remove(state, .{ .name = config_name });

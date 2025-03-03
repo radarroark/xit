@@ -322,8 +322,10 @@ fn commandHelp(command_kind: CommandKind) Help {
             \\update remote refs along with associated objects.
             ,
             .example =
-            \\push to a specific remote:
-            \\    xit push origin
+            \\push to a specific remote and branch:
+            \\    xit push origin master
+            \\delete a remote branch:
+            \\    xit push origin :master
             ,
         },
     };
@@ -523,6 +525,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
         },
         push: struct {
             remote_name: []const u8,
+            refspec: []const u8,
         },
 
         pub fn init(cmd_args: *CommandArgs) !?Command(repo_kind, hash_kind) {
@@ -824,10 +827,11 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                     } };
                 },
                 .push => {
-                    if (cmd_args.positional_args.len != 1) return null;
+                    if (cmd_args.positional_args.len != 2) return null;
 
                     return .{ .push = .{
                         .remote_name = cmd_args.positional_args[0],
+                        .refspec = cmd_args.positional_args[1],
                     } };
                 },
             }

@@ -178,6 +178,40 @@ pub const RefSpec = struct {
             .is_matching = self.is_matching,
         };
     }
+
+    pub fn normalize(self: *RefSpec, allocator: std.mem.Allocator) ![]const u8 {
+        const src_ref_maybe = if (rf.Ref.initFromPath(self.src)) |ref| blk: {
+            if (ref.name.len == 0) {
+                break :blk null;
+            } else if (.none == ref.kind) {
+                break :blk rf.Ref{ .kind = .head, .name = ref.name };
+            } else {
+                break :blk ref;
+            }
+        } else {
+            return error.InvalidRef;
+        };
+
+        var src_ref_path_buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
+        const src_ref_path = if (src_ref_maybe) |src_ref| try src_ref.toPath(&src_ref_path_buffer) else "";
+
+        const dst_ref_maybe = if (rf.Ref.initFromPath(self.dst)) |ref| blk: {
+            if (ref.name.len == 0) {
+                break :blk null;
+            } else if (.none == ref.kind) {
+                break :blk rf.Ref{ .kind = .head, .name = ref.name };
+            } else {
+                break :blk ref;
+            }
+        } else {
+            return error.InvalidRef;
+        };
+
+        var dst_ref_path_buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
+        const dst_ref_path = if (dst_ref_maybe) |dst_ref| try dst_ref.toPath(&dst_ref_path_buffer) else "";
+
+        return try std.fmt.allocPrint(allocator, "{s}{s}:{s}", .{ if (self.is_force) "+" else "", src_ref_path, dst_ref_path });
+    }
 };
 
 pub fn transform(out: *std.ArrayList(u8), spec: *const RefSpec, name: []const u8) !void {

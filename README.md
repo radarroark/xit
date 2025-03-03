@@ -57,7 +57,7 @@ cd myrepo
 echo hello > readme.md
 xit add readme.md
 xit commit -m "test commit"
-xit push origin
+xit push origin master
 ```
 
 I still need to implement `pull` but for now you can combine `fetch` and `merge` to get the same effect:

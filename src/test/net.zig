@@ -673,7 +673,6 @@ fn testPush(
     }
 
     const refspecs = &.{
-        "+refs/heads/master:refs/heads/master",
         "refs/tags/1.0.0:refs/tags/1.0.0",
     };
 
@@ -695,6 +694,7 @@ fn testPush(
     client_repo.push(
         allocator,
         "origin",
+        "master",
         .{ .refspecs = refspecs, .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
     ) catch |err| {
         if (false) {
@@ -735,7 +735,8 @@ fn testPush(
     client_repo.push(
         allocator,
         "origin",
-        .{ .refspecs = refspecs, .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
+        "master",
+        .{ .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
     ) catch |err| {
         if (false) {
             var stdout = std.ArrayList(u8).init(allocator);
@@ -762,28 +763,23 @@ fn testPush(
     }
 
     // remove the remote tag
-    {
-        const del_refspecs = &.{
-            ":refs/tags/1.0.0",
-        };
-
-        client_repo.push(
-            allocator,
-            "origin",
-            .{ .refspecs = del_refspecs, .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
-        ) catch |err| {
-            if (false) {
-                var stdout = std.ArrayList(u8).init(allocator);
-                defer stdout.deinit();
-                var stderr = std.ArrayList(u8).init(allocator);
-                defer stderr.deinit();
-                try server.core.process.collectOutput(&stdout, &stderr, 1024 * 1024);
-                if (stdout.items.len > 0) std.debug.print("server output:\n{s}\n", .{stdout.items});
-                if (stderr.items.len > 0) std.debug.print("server error:\n{s}\n", .{stderr.items});
-            }
-            return err;
-        };
-    }
+    client_repo.push(
+        allocator,
+        "origin",
+        ":refs/tags/1.0.0",
+        .{ .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
+    ) catch |err| {
+        if (false) {
+            var stdout = std.ArrayList(u8).init(allocator);
+            defer stdout.deinit();
+            var stderr = std.ArrayList(u8).init(allocator);
+            defer stderr.deinit();
+            try server.core.process.collectOutput(&stdout, &stderr, 1024 * 1024);
+            if (stdout.items.len > 0) std.debug.print("server output:\n{s}\n", .{stdout.items});
+            if (stderr.items.len > 0) std.debug.print("server error:\n{s}\n", .{stderr.items});
+        }
+        return err;
+    };
 
     // make sure push was successful
     try std.testing.expect(null == try server_repo.readRef(.{ .kind = .tag, .name = "1.0.0" }));

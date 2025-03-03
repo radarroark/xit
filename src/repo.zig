@@ -14,6 +14,7 @@ const chunk = @import("./chunk.zig");
 const tag = @import("./tag.zig");
 const tr = @import("./tree.zig");
 const net = @import("./net.zig");
+const net_refspec = @import("./net/refspec.zig");
 
 pub const RepoKind = enum {
     git,
@@ -1117,14 +1118,32 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             self: *Repo(repo_kind, repo_opts),
             allocator: std.mem.Allocator,
             remote_name: []const u8,
+            refspec_str: []const u8,
             opts: net.Opts,
         ) !void {
+            var refspecs = std.ArrayList([]const u8).init(allocator);
+            defer refspecs.deinit();
+            if (opts.refspecs) |opts_refspecs| {
+                try refspecs.appendSlice(opts_refspecs);
+            }
+
+            var refspec = try net_refspec.RefSpec.init(allocator, refspec_str, .push);
+            defer refspec.deinit(allocator);
+
+            const refspec_normalized = try refspec.normalize(allocator);
+            defer allocator.free(refspec_normalized);
+
+            try refspecs.append(refspec_normalized);
+
+            var new_opts = opts;
+            new_opts.refspecs = refspecs.items;
+
             switch (repo_kind) {
                 .git => {
                     const state = State(.read_write){ .core = &self.core, .extra = .{} };
                     var remote = try net.Remote(repo_kind, repo_opts).open(state.readOnly(), allocator, remote_name);
                     defer remote.deinit(allocator);
-                    try net.push(repo_kind, repo_opts, state, allocator, &remote, opts);
+                    try net.push(repo_kind, repo_opts, state, allocator, &remote, new_opts);
                 },
                 .xit => {
                     const Ctx = struct {
@@ -1145,7 +1164,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
                     try history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
-                        Ctx{ .core = &self.core, .allocator = allocator, .remote_name = remote_name, .opts = opts },
+                        Ctx{ .core = &self.core, .allocator = allocator, .remote_name = remote_name, .opts = new_opts },
                     );
                 },
             }

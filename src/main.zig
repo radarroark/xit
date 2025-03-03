@@ -500,7 +500,7 @@ fn runCommand(
                     std.debug.print("{s}\n", .{text});
                 }
             }.run;
-            try repo.push(allocator, push_cmd.remote_name, .{ .progress_text = progress_text });
+            try repo.push(allocator, push_cmd.remote_name, push_cmd.refspec, .{ .progress_text = progress_text });
         },
     }
 }
