@@ -1012,7 +1012,7 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             finished,
         },
 
-        pub fn init(allocator: std.mem.Allocator, obj_iter: *obj.ObjectIterator(repo_kind, repo_opts, .raw)) !PackObjectWriter(repo_kind, repo_opts) {
+        pub fn init(allocator: std.mem.Allocator, obj_iter: *obj.ObjectIterator(repo_kind, repo_opts, .raw)) !?PackObjectWriter(repo_kind, repo_opts) {
             var self = PackObjectWriter(repo_kind, repo_opts){
                 .allocator = allocator,
                 .objects = std.ArrayList(obj.Object(repo_kind, repo_opts, .raw)).init(allocator),
@@ -1029,14 +1029,16 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                 try self.objects.append(object.*);
             }
 
+            if (self.objects.items.len == 0) {
+                return null;
+            }
+
             const writer = self.out_bytes.writer();
             _ = try writer.write("PACK");
             try writer.writeInt(u32, 2, .big); // version
             try writer.writeInt(u32, @intCast(self.objects.items.len), .big);
 
-            if (self.objects.items.len > 0) {
-                try self.writeObjectHeader();
-            }
+            try self.writeObjectHeader();
 
             return self;
         }

@@ -218,7 +218,7 @@ test "pack" {
         defer obj_iter.deinit();
         try obj_iter.include(&head_oid);
 
-        var pack_writer = try pack.PackObjectWriter(.git, repo_opts).init(allocator, &obj_iter);
+        var pack_writer = try pack.PackObjectWriter(.git, repo_opts).init(allocator, &obj_iter) orelse return error.PackWriterIsEmpty;
         defer pack_writer.deinit();
 
         var pack_file = try temp_dir.createFile("test.pack", .{});

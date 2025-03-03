@@ -315,18 +315,21 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             try stream.write(allocator, buffer.items.ptr, buffer.items.len);
 
             if (need_pack) {
-                const obj_iter: *obj.ObjectIterator(repo_kind, repo_opts, .raw) = &git_push.obj_iter;
+                var pack_writer_maybe = try pack.PackObjectWriter(repo_kind, repo_opts).init(allocator, &git_push.obj_iter);
+                if (pack_writer_maybe) |*pack_writer| {
+                    defer pack_writer.deinit();
 
-                var pack_writer = try pack.PackObjectWriter(repo_kind, repo_opts).init(allocator, obj_iter);
-                defer pack_writer.deinit();
-
-                var read_buffer = [_]u8{0} ** repo_opts.read_size;
-                while (true) {
-                    const size = try pack_writer.read(&read_buffer);
-                    if (size == 0) {
-                        break;
+                    var read_buffer = [_]u8{0} ** repo_opts.read_size;
+                    while (true) {
+                        const size = try pack_writer.read(&read_buffer);
+                        if (size == 0) {
+                            break;
+                        }
+                        try stream.write(allocator, &read_buffer, size);
                     }
-                    try stream.write(allocator, &read_buffer, size);
+                } else {
+                    git_push.unpack_ok = true;
+                    return;
                 }
             }
 
