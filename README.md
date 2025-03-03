@@ -48,6 +48,25 @@ xit switch master
 xit merge stuff
 ```
 
+The networking commands are a work in progress, but they're good enough to try out. You can use http or ssh, though ssh works better at the moment. Here's what a clone and push look like:
+
+```
+xit clone git@github.com:radarroark/xitstarter.git myrepo
+cd myrepo
+
+echo hello > readme.md
+xit add readme.md
+xit commit -m "test commit"
+xit push origin
+```
+
+I still need to implement `pull` but for now you can combine `fetch` and `merge` to get the same effect:
+
+```
+xit fetch origin
+xit merge refs/remotes/origin/master
+```
+
 Here's the output of `xit --help` to give you an idea of what's supported so far:
 
 ```
@@ -84,6 +103,9 @@ merge        join two or more development histories together.
 cherry-pick  apply the changes introduced by an existing commit.
 config       add, remove, and list config options.
 remote       add, remove, and list remotes.
+clone        clone a repository into a new directory.
+fetch        download objects and refs from another repository.
+push         update remote refs along with associated objects.
 ```
 
 To launch the TUI, just run `xit` without arguments. Press `q` to quit the TUI. In the repo created above, it'll look like this:

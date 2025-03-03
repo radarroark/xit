@@ -31,11 +31,16 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    const cwd = try std.fs.cwd();
-    var repo = try rp.Repo(.xit, .{}).init(allocator, .{ .cwd = cwd }, ".");
+    var work_dir = try std.fs.cwd().makeOpenPath("myrepo", .{});
+    defer work_dir.close();
+
+    var repo = try rp.Repo(.xit, .{}).init(allocator, .{ .cwd = work_dir }, ".");
     defer repo.deinit();
 
-    const readme = try cwd.createFile("README.md", .{});
+    try repo.addConfig(allocator, .{ .name = "user.name", .value = "mr magoo" });
+    try repo.addConfig(allocator, .{ .name = "user.email", .value = "mister@magoo" });
+
+    const readme = try work_dir.createFile("README.md", .{});
     defer readme.close();
     try readme.writeAll("hello, world!");
     try repo.add(allocator, &.{"README.md"});
