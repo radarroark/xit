@@ -222,8 +222,6 @@ fn commandHelp(command_kind: CommandKind) Help {
             \\similar to `git reset --soft`.
             ,
             .example =
-            \\reset current branch to match another branch:
-            \\    xit reset-add mybranch
             \\reset current branch to point to a new commit id:
             \\    xit reset-add 1a2b3c...
             ,
@@ -691,8 +689,9 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                 .reset_add => {
                     if (cmd_args.positional_args.len != 1) return null;
                     const target = cmd_args.positional_args[0];
-
-                    return .{ .reset_add = rf.RefOrOid(hash_kind).initFromUser(target) orelse return null };
+                    const ref_or_oid = rf.RefOrOid(hash_kind).initFromUser(target) orelse return null;
+                    if (ref_or_oid != .oid) return null;
+                    return .{ .reset_add = ref_or_oid };
                 },
                 .restore => {
                     if (cmd_args.positional_args.len != 1) return null;

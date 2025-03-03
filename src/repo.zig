@@ -741,7 +741,10 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
         pub fn resetAdd(self: *Repo(repo_kind, repo_opts), target: rf.RefOrOid(repo_opts.hash)) !void {
             switch (repo_kind) {
-                .git => try rf.replaceHead(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, target),
+                .git => switch (target) {
+                    .ref => try rf.replaceHead(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, target),
+                    .oid => |oid| try rf.updateHead(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, oid),
+                },
                 .xit => {
                     // update HEAD
                     const Ctx = struct {
@@ -751,20 +754,10 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-
-                            // make sure the ref exists.
-                            // for now we're only doing this check in xit mode, because
-                            // in git mode the ref created by `Repo.init` for the
-                            // default branch doesn't exist until the first commit is made.
-                            // in xit mode, it'll exist right away.
                             switch (ctx.target) {
-                                .ref => |ref| if (!try rf.exists(repo_kind, repo_opts, state.readOnly(), ref)) {
-                                    return error.RefNotFound;
-                                },
-                                .oid => {},
+                                .ref => try rf.replaceHead(repo_kind, repo_opts, state, ctx.target),
+                                .oid => |oid| try rf.updateHead(repo_kind, repo_opts, state, oid),
                             }
-
-                            try rf.replaceHead(repo_kind, repo_opts, state, ctx.target);
                         }
                     };
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
