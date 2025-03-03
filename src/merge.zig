@@ -1419,7 +1419,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     });
 
                     // get the source and target oid
-                    const source_oid = try rf.readRecur(repo_kind, repo_opts, state.readOnly(), source_ref_or_oid) orelse return error.InvalidTarget;
+                    const source_oid = try rf.readRecur(repo_kind, repo_opts, state.readOnly(), source_ref_or_oid) orelse return error.InvalidMergeSource;
                     const target_oid = target_oid_maybe orelse {
                         // the target branch is completely empty, so just set it to the source oid
                         try rf.writeRecur(repo_kind, repo_opts, state, "HEAD", &source_oid);

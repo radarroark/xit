@@ -143,6 +143,7 @@ pub fn runPrint(
                 \\repo not found, dummy.
                 \\either you're in the wrong place or you need to make a new one like this:
                 \\
+                \\
             , .{});
             try cmd.printHelp(.init, writers.err);
             return error.PrintedError;
@@ -199,6 +200,10 @@ pub fn runPrint(
         },
         error.SubmodulesNotSupported => {
             try writers.err.print("repos with submodules aren't supported right now, sowwy\n", .{});
+            return error.PrintedError;
+        },
+        error.InvalidMergeSource => {
+            try writers.err.print("your merge source doesn't look right and you should feel bad\n", .{});
             return error.PrintedError;
         },
         else => |e| return e,
@@ -416,11 +421,7 @@ fn runCommand(
                     for (conflict.untracked_removed.keys()) |path| {
                         try writers.err.print("  {s}\n", .{path});
                     }
-                    try writers.err.print(
-                        \\if you really want to continue, throw caution
-                        \\into the wind by adding the -f flag.
-                        \\
-                    , .{});
+                    try writers.err.print("if you really want to continue, throw caution into the wind by adding the -f flag\n", .{});
                     return error.PrintedError;
                 },
             }
@@ -518,7 +519,7 @@ fn printMergeResult(
     switch (merge_result.result) {
         .success => {},
         .nothing => {
-            try writers.out.print("already up to date.\n", .{});
+            try writers.out.print("already up to date\n", .{});
         },
         .fast_forward => {
             try writers.out.print("fast-forward\n", .{});
