@@ -8,8 +8,8 @@ pub const Opts = struct {
 };
 
 pub const SshState = struct {
-    process: ?*std.process.Child,
-    allocator: *std.mem.Allocator,
+    process: ?std.process.Child,
+    allocator: std.mem.Allocator,
     arena: *std.heap.ArenaAllocator,
     command: ?[]const u8,
 
@@ -20,10 +20,6 @@ pub const SshState = struct {
         allocator: std.mem.Allocator,
         opts: Opts,
     ) !SshState {
-        const allocator_ptr = try allocator.create(std.mem.Allocator);
-        errdefer allocator.destroy(allocator_ptr);
-        allocator_ptr.* = allocator;
-
         const arena_ptr = try allocator.create(std.heap.ArenaAllocator);
         errdefer allocator.destroy(arena_ptr);
         arena_ptr.* = std.heap.ArenaAllocator.init(allocator);
@@ -53,7 +49,7 @@ pub const SshState = struct {
 
         return .{
             .process = null,
-            .allocator = allocator_ptr,
+            .allocator = allocator,
             .arena = arena_ptr,
             .command = command,
         };
@@ -62,13 +58,11 @@ pub const SshState = struct {
     pub fn deinit(self: *SshState) void {
         self.arena.deinit();
         self.allocator.destroy(self.arena);
-        self.allocator.destroy(self.allocator);
     }
 
     pub fn close(self: *SshState) !void {
-        if (self.process) |process| {
+        if (self.process) |*process| {
             _ = try process.kill();
-            self.allocator.destroy(process);
             self.process = null;
         }
     }
@@ -98,7 +92,7 @@ pub const SshStream = struct {
         buffer: [*]u8,
         buf_size: usize,
     ) !usize {
-        const process = self.wire_state.process orelse return error.ProcessNotFound;
+        const process = &(self.wire_state.process orelse return error.ProcessNotFound);
         const stdout = process.stdout orelse return error.StdoutNotFound;
         return try stdout.read(buffer[0..buf_size]);
     }
@@ -108,7 +102,7 @@ pub const SshStream = struct {
         buffer: [*]const u8,
         len: usize,
     ) !void {
-        const process = self.wire_state.process orelse return error.ProcessNotFound;
+        const process = &(self.wire_state.process orelse return error.ProcessNotFound);
         const stdin = process.stdin orelse return error.StdinNotFound;
         try stdin.writeAll(buffer[0..len]);
     }
@@ -146,7 +140,7 @@ fn spawnSsh(
     const command = if (command_maybe) |cmd| cmd else "ssh";
 
     // TODO: fix paths that have spaces
-    var arg_iter = try std.process.ArgIteratorGeneral(.{ .single_quotes = true }).init(wire_state.allocator.*, command);
+    var arg_iter = try std.process.ArgIteratorGeneral(.{ .single_quotes = true }).init(wire_state.allocator, command);
     defer arg_iter.deinit();
     while (arg_iter.next()) |arg| {
         try args.append(arg);
@@ -196,12 +190,12 @@ fn spawnSsh(
 
     const ssh_cmdline = try args.toOwnedSlice();
 
-    const process = try wire_state.allocator.create(std.process.Child);
-    process.* = std.process.Child.init(ssh_cmdline, wire_state.allocator.*);
+    var process = std.process.Child.init(ssh_cmdline, wire_state.allocator);
     process.stdin_behavior = .Pipe;
     process.stdout_behavior = .Pipe;
     process.stderr_behavior = .Ignore;
-    wire_state.process = process;
 
     try process.spawn();
+
+    wire_state.process = process;
 }
