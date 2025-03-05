@@ -48,10 +48,10 @@ xit switch master
 xit merge stuff
 ```
 
-The networking commands are a work in progress, but they're good enough to try out. You can use http or ssh, though ssh works better at the moment. Here's what a clone and push look like:
+The networking commands are a work in progress, but they're good enough to try out. You can use http or ssh. Here's what a clone and push look like:
 
 ```
-xit clone git@github.com:radarroark/xitstarter.git myrepo
+xit clone https://github.com/radarroark/xitstarter.git myrepo
 cd myrepo
 
 echo hello > readme.md
