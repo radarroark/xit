@@ -1238,8 +1238,8 @@ fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
 
                 patch_count += 1;
                 if (progress_text_maybe) |progress_text| {
-                    var buffer = [_]u8{0} ** 32;
-                    const text = try std.fmt.bufPrint(&buffer, "writing patches for commit {}/{}", .{ patch_count, self.commit_count });
+                    const text = try std.fmt.allocPrint(allocator, "writing patches for commit {}/{}", .{ patch_count, self.commit_count });
+                    defer allocator.free(text);
                     try progress_text(text);
                 }
 
@@ -1284,8 +1284,8 @@ pub fn copyFromObjectIterator(
 
         object_count += 1;
         if (progress_text_maybe) |progress_text| {
-            var buffer = [_]u8{0} ** 32;
-            const text = try std.fmt.bufPrint(&buffer, "writing object {}", .{object_count});
+            const text = try std.fmt.allocPrint(allocator, "writing object {}", .{object_count});
+            defer allocator.free(text);
             try progress_text(text);
         }
 
@@ -1346,8 +1346,8 @@ pub fn copyFromPackObjectIterator(
 
         object_count += 1;
         if (progress_text_maybe) |progress_text| {
-            var buffer = [_]u8{0} ** 32;
-            const text = try std.fmt.bufPrint(&buffer, "writing object {}", .{object_count});
+            const text = try std.fmt.allocPrint(allocator, "writing object {}", .{object_count});
+            defer allocator.free(text);
             try progress_text(text);
         }
 
