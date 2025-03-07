@@ -257,6 +257,8 @@ fn commandHelp(command_kind: CommandKind) Help {
             \\    xit merge mybranch
             \\merge commit id:
             \\    xit merge a1b2c3...
+            \\continue after merge conflict resolution:
+            \\    xit merge --continue
             ,
         },
         .cherry_pick => .{
@@ -265,7 +267,10 @@ fn commandHelp(command_kind: CommandKind) Help {
             \\apply the changes introduced by an existing commit.
             ,
             .example =
-            \\xit cherry-pick a1b2c3...
+            \\cherry pick a commit:
+            \\    xit cherry-pick a1b2c3...
+            \\continue after merge conflict resolution:
+            \\    xit merge --continue
             ,
         },
         .config => .{
@@ -621,13 +626,13 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                 .diff_dir => {
                     const conflict_diff_kind: df.ConflictDiffKind =
                         if (cmd_args.contains("--base"))
-                        .base
-                    else if (cmd_args.contains("--target"))
-                        .target
-                    else if (cmd_args.contains("--source"))
-                        .source
-                    else
-                        .target;
+                            .base
+                        else if (cmd_args.contains("--target"))
+                            .target
+                        else if (cmd_args.contains("--source"))
+                            .source
+                        else
+                            .target;
                     return .{ .diff_dir = .{ .work_dir = .{ .conflict_diff_kind = conflict_diff_kind } } };
                 },
                 .diff_added => return .{ .diff_added = .index },
@@ -707,18 +712,19 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                     return .log;
                 },
                 .merge => {
-                    if (cmd_args.positional_args.len == 0) return null;
+                    var merge_action: mrg.MergeAction(repo_kind, hash_kind) = undefined;
 
-                    const merge_action: mrg.MergeAction(repo_kind, hash_kind) =
-                        if (cmd_args.contains("--continue"))
-                        .cont
-                    else blk: {
+                    if (cmd_args.contains("--continue")) {
+                        if (cmd_args.positional_args.len != 0) return null;
+                        merge_action = .cont;
+                    } else {
+                        if (cmd_args.positional_args.len == 0) return null;
                         var source = std.ArrayList(rf.RefOrOid(hash_kind)).init(cmd_args.arena.allocator());
                         for (cmd_args.positional_args) |arg| {
                             try source.append(rf.RefOrOid(hash_kind).initFromUser(arg) orelse return error.InvalidRefOrOid);
                         }
-                        break :blk .{ .new = .{ .source = try source.toOwnedSlice() } };
-                    };
+                        merge_action = .{ .new = .{ .source = try source.toOwnedSlice() } };
+                    }
 
                     return .{
                         .merge = .{
@@ -728,18 +734,19 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                     };
                 },
                 .cherry_pick => {
-                    if (cmd_args.positional_args.len == 0) return null;
+                    var merge_action: mrg.MergeAction(repo_kind, hash_kind) = undefined;
 
-                    const merge_action: mrg.MergeAction(repo_kind, hash_kind) =
-                        if (cmd_args.contains("--continue"))
-                        .cont
-                    else blk: {
+                    if (cmd_args.contains("--continue")) {
+                        if (cmd_args.positional_args.len != 0) return null;
+                        merge_action = .cont;
+                    } else {
+                        if (cmd_args.positional_args.len == 0) return null;
                         var source = std.ArrayList(rf.RefOrOid(hash_kind)).init(cmd_args.arena.allocator());
                         for (cmd_args.positional_args) |arg| {
                             try source.append(rf.RefOrOid(hash_kind).initFromUser(arg) orelse return error.InvalidRefOrOid);
                         }
-                        break :blk .{ .new = .{ .source = try source.toOwnedSlice() } };
-                    };
+                        merge_action = .{ .new = .{ .source = try source.toOwnedSlice() } };
+                    }
 
                     return .{
                         .merge = .{
