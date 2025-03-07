@@ -26,6 +26,19 @@ pub const Writers = struct {
     err: std.io.AnyWriter = std.io.null_writer.any(),
 };
 
+const ProgressCtx = struct {
+    writers: Writers,
+    print_count: *usize,
+
+    pub fn run(self: @This(), text: []const u8) !void {
+        if (self.print_count.* > 0) {
+            try self.writers.out.print("\x1B[F", .{});
+        }
+        try self.writers.out.print("{s}\n", .{text});
+        self.print_count.* += 1;
+    }
+};
+
 /// this is meant to be the main entry point if you wanted to use xit
 /// as a CLI tool. to use xit programmatically, build a Repo struct
 /// and call methods on it directly. to use xit subconsciously, just
@@ -94,23 +107,21 @@ pub fn run(
                 , .{});
             },
             .clone => |clone_cmd| {
-                const progress_text = struct {
-                    fn run(text: []const u8) !void {
-                        std.debug.print("{s}\n", .{text});
-                    }
-                }.run;
-                var repo = try rp.Repo(repo_kind, repo_opts).clone(
+                const repo_opts_with_ctx = repo_opts.withProgressCtx(ProgressCtx);
+                var print_count: usize = 0;
+                var repo = try rp.Repo(repo_kind, repo_opts_with_ctx).clone(
                     allocator,
                     clone_cmd.url,
                     cwd,
                     clone_cmd.local_path,
-                    .{ .progress_text = progress_text },
+                    .{ .progress_ctx = ProgressCtx{ .writers = writers, .print_count = &print_count } },
                 );
                 defer repo.deinit();
             },
             else => if (.none == repo_opts.hash) {
                 // if no hash was specified, use AnyRepo to detect the hash being used
-                var any_repo = try rp.AnyRepo(repo_kind, repo_opts).open(allocator, .{ .cwd = cwd });
+                const repo_opts_with_ctx = repo_opts.withProgressCtx(ProgressCtx);
+                var any_repo = try rp.AnyRepo(repo_kind, repo_opts_with_ctx).open(allocator, .{ .cwd = cwd });
                 defer any_repo.deinit();
                 switch (any_repo) {
                     .none => return error.HashKindNotFound,
@@ -120,9 +131,10 @@ pub fn run(
                     },
                 }
             } else {
-                var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = cwd });
+                const repo_opts_with_ctx = repo_opts.withProgressCtx(ProgressCtx);
+                var repo = try rp.Repo(repo_kind, repo_opts_with_ctx).open(allocator, .{ .cwd = cwd });
                 defer repo.deinit();
-                try runCommand(repo_kind, repo_opts, &repo, allocator, cli_cmd, writers);
+                try runCommand(repo_kind, repo_opts_with_ctx, &repo, allocator, cli_cmd, writers);
             },
         },
     }
@@ -487,20 +499,12 @@ fn runCommand(
         },
         .clone => {},
         .fetch => |fetch_cmd| {
-            const progress_text = struct {
-                fn run(text: []const u8) !void {
-                    std.debug.print("{s}\n", .{text});
-                }
-            }.run;
-            try repo.fetch(allocator, fetch_cmd.remote_name, .{ .progress_text = progress_text });
+            var print_count: usize = 0;
+            try repo.fetch(allocator, fetch_cmd.remote_name, .{ .progress_ctx = ProgressCtx{ .writers = writers, .print_count = &print_count } });
         },
         .push => |push_cmd| {
-            const progress_text = struct {
-                fn run(text: []const u8) !void {
-                    std.debug.print("{s}\n", .{text});
-                }
-            }.run;
-            try repo.push(allocator, push_cmd.remote_name, push_cmd.refspec, .{ .progress_text = progress_text });
+            var print_count: usize = 0;
+            try repo.push(allocator, push_cmd.remote_name, push_cmd.refspec, .{ .progress_ctx = ProgressCtx{ .writers = writers, .print_count = &print_count } });
         },
     }
 }

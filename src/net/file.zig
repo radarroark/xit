@@ -16,11 +16,11 @@ pub fn FileTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         heads: std.ArrayListUnmanaged(net.RemoteHead(repo_kind, repo_opts)),
         connected: bool,
         remote_repo: ?rp.Repo(.git, remote_repo_opts),
-        opts: net_transport.Opts,
+        opts: net_transport.Opts(repo_opts.ProgressCtx),
 
         const remote_repo_opts: rp.RepoOpts(.git) = .{ .hash = repo_opts.hash };
 
-        pub fn init(opts: net_transport.Opts) !FileTransport(repo_kind, repo_opts) {
+        pub fn init(opts: net_transport.Opts(repo_opts.ProgressCtx)) !FileTransport(repo_kind, repo_opts) {
             return .{
                 .url = null,
                 .direction = .fetch,
@@ -112,14 +112,14 @@ pub fn FileTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                 var repo_dir = try state.core.init_opts.cwd.openDir(path, .{});
                 defer repo_dir.close();
 
-                var any_repo = try rp.AnyRepo(.git, .{ .hash = .none }).open(allocator, .{ .cwd = repo_dir });
+                var any_repo = try rp.AnyRepo(.git, .{ .hash = .none, .ProgressCtx = repo_opts.ProgressCtx }).open(allocator, .{ .cwd = repo_dir });
                 defer any_repo.deinit();
 
                 const obj_iter: *obj.ObjectIterator(repo_kind, repo_opts, .raw) = &git_push.obj_iter;
 
                 switch (any_repo) {
                     .none => return error.HashKindNotFound,
-                    inline else => |*repo| try repo.copyObjects(allocator, repo_kind, repo_opts, obj_iter, self.opts.progress_text),
+                    inline else => |*repo| try repo.copyObjects(allocator, repo_kind, repo_opts, obj_iter, self.opts.progress_ctx),
                 }
             }
 
@@ -187,7 +187,7 @@ pub fn FileTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                 repo.self_repo_kind,
                 repo.self_repo_opts,
                 &obj_iter,
-                self.opts.progress_text,
+                self.opts.progress_ctx,
             );
         }
 

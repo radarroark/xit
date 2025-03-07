@@ -8,11 +8,13 @@ const net_ssh = @import("./ssh.zig");
 const rp = @import("../repo.zig");
 const hash = @import("../hash.zig");
 
-pub const Opts = struct {
-    refspecs: ?[]const []const u8 = null,
-    progress_text: ?*const fn (text: []const u8) anyerror!void = null,
-    wire: net_wire.Opts = .{},
-};
+pub fn Opts(comptime ProgressCtx: type) type {
+    return struct {
+        refspecs: ?[]const []const u8 = null,
+        progress_ctx: ?ProgressCtx = null,
+        wire: net_wire.Opts = .{},
+    };
+}
 
 pub const TransportKind = enum {
     file,
@@ -25,10 +27,7 @@ pub const Capabilities = struct {
     push_options: bool = false,
 };
 
-pub fn Transport(
-    comptime repo_kind: rp.RepoKind,
-    comptime repo_opts: rp.RepoOpts(repo_kind),
-) type {
+pub fn Transport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return union(TransportKind) {
         file: net_file.FileTransport(repo_kind, repo_opts),
         wire: net_wire.WireTransport(repo_kind, repo_opts),
@@ -37,7 +36,7 @@ pub fn Transport(
             state: rp.Repo(repo_kind, repo_opts).State(.read_only),
             allocator: std.mem.Allocator,
             url: []const u8,
-            opts: Opts,
+            opts: Opts(repo_opts.ProgressCtx),
         ) !Transport(repo_kind, repo_opts) {
             const transport_def_kind = TransportDefinition.init(url) orelse return error.UnsupportedUrl;
             return switch (transport_def_kind) {

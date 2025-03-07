@@ -153,13 +153,13 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         have_refs: bool,
         connected: bool,
         buffer: Buffer(repo_kind, repo_opts),
-        opts: net_transport.Opts,
+        opts: net_transport.Opts(repo_opts.ProgressCtx),
 
         pub fn init(
             state: rp.Repo(repo_kind, repo_opts).State(.read_only),
             allocator: std.mem.Allocator,
             wire_kind: WireKind,
-            opts: net_transport.Opts,
+            opts: net_transport.Opts(repo_opts.ProgressCtx),
         ) !WireTransport(repo_kind, repo_opts) {
             const wire_state = try allocator.create(WireState);
             errdefer allocator.destroy(wire_state);
@@ -541,8 +541,10 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                         defer pkt.deinit(allocator);
 
                         switch (pkt) {
-                            .progress => |progress| if (self.opts.progress_text) |progress_text| {
-                                try progress_text(progress);
+                            .progress => |progress| if (repo_opts.ProgressCtx != void) {
+                                if (self.opts.progress_ctx) |progress_ctx| {
+                                    try progress_ctx.run(progress);
+                                }
                             },
                             .data => |data| if (data.len > 0) {
                                 try temp_pack.lock_file.writeAll(data);
@@ -563,7 +565,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                 defer allocator.free(pack_file_path);
                 var pack_iter = try pack.PackObjectIterator(repo_kind, repo_opts).init(allocator, pack_file_path);
                 defer pack_iter.deinit();
-                try obj.copyFromPackObjectIterator(repo_kind, repo_opts, state, allocator, &pack_iter, self.opts.progress_text);
+                try obj.copyFromPackObjectIterator(repo_kind, repo_opts, state, allocator, &pack_iter, self.opts.progress_ctx);
             }
         }
 
@@ -778,8 +780,10 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                     switch (pkt.*) {
                         .data => |data| try handlePushSidebandPkt(allocator, git_push, data),
                         .err => return error.ServerReportedError,
-                        .progress => |progress| if (self.opts.progress_text) |progress_text| {
-                            try progress_text(progress);
+                        .progress => |progress| if (repo_opts.ProgressCtx != void) {
+                            if (self.opts.progress_ctx) |progress_ctx| {
+                                try progress_ctx.run(progress);
+                            }
                         },
                         else => iter_over = try handlePushPkt(git_push, pkt),
                     }

@@ -84,7 +84,7 @@ pub fn cloneFile(
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
     allocator: std.mem.Allocator,
     remote: *net.Remote(repo_kind, repo_opts),
-    transport_opts: net_transport.Opts,
+    transport_opts: net_transport.Opts(repo_opts.ProgressCtx),
 ) !void {
     if (try net.resolveRefPath(repo_kind, repo_opts, state.readOnly(), allocator, "HEAD")) |_| {
         return error.RepoIsNotEmpty;
@@ -101,7 +101,7 @@ pub fn cloneWire(
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
     allocator: std.mem.Allocator,
     remote: *net.Remote(repo_kind, repo_opts),
-    transport_opts: net_transport.Opts,
+    transport_opts: net_transport.Opts(repo_opts.ProgressCtx),
 ) !void {
     if (try net.resolveRefPath(repo_kind, repo_opts, state.readOnly(), allocator, "HEAD")) |_| {
         return error.RepoIsNotEmpty;

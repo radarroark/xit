@@ -30,6 +30,7 @@ pub fn RepoOpts(comptime repo_kind: RepoKind) type {
         max_line_count: usize = 10_000_000,
         net_read_size: usize = 65536,
         is_test: bool = false,
+        ProgressCtx: type = void,
         extra: Extra = .{},
 
         pub const Extra = switch (repo_kind) {
@@ -48,6 +49,12 @@ pub fn RepoOpts(comptime repo_kind: RepoKind) type {
         pub fn withHash(self: RepoOpts(repo_kind), hash_kind: hash.HashKind) RepoOpts(repo_kind) {
             var new_self = self;
             new_self.hash = hash_kind;
+            return new_self;
+        }
+
+        pub fn withProgressCtx(self: RepoOpts(repo_kind), ProgressCtx: type) RepoOpts(repo_kind) {
+            var new_self = self;
+            new_self.ProgressCtx = ProgressCtx;
             return new_self;
         }
     };
@@ -1018,7 +1025,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             comptime source_repo_kind: RepoKind,
             comptime source_repo_opts: RepoOpts(source_repo_kind),
             obj_iter: *obj.ObjectIterator(source_repo_kind, source_repo_opts, .raw),
-            progress_text_maybe: ?*const fn (text: []const u8) anyerror!void,
+            progress_ctx_maybe: ?repo_opts.ProgressCtx,
         ) !void {
             switch (repo_kind) {
                 .git => {
@@ -1030,7 +1037,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         source_repo_kind,
                         source_repo_opts,
                         obj_iter,
-                        progress_text_maybe,
+                        progress_ctx_maybe,
                     );
                 },
                 .xit => {
@@ -1038,7 +1045,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         core: *Repo(repo_kind, repo_opts).Core,
                         allocator: std.mem.Allocator,
                         obj_iter: *obj.ObjectIterator(source_repo_kind, source_repo_opts, .raw),
-                        progress_text_maybe: ?*const fn (text: []const u8) anyerror!void,
+                        progress_ctx_maybe: ?repo_opts.ProgressCtx,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
@@ -1051,7 +1058,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                                 source_repo_kind,
                                 source_repo_opts,
                                 ctx.obj_iter,
-                                ctx.progress_text_maybe,
+                                ctx.progress_ctx_maybe,
                             );
                         }
                     };
@@ -1059,7 +1066,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
                     try history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
-                        Ctx{ .core = &self.core, .allocator = allocator, .obj_iter = obj_iter, .progress_text_maybe = progress_text_maybe },
+                        Ctx{ .core = &self.core, .allocator = allocator, .obj_iter = obj_iter, .progress_ctx_maybe = progress_ctx_maybe },
                     );
                 },
             }
@@ -1070,7 +1077,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             url: []const u8,
             cwd: std.fs.Dir,
             local_path: []const u8,
-            opts: net.Opts,
+            opts: net.Opts(repo_opts.ProgressCtx),
         ) !Repo(repo_kind, repo_opts) {
             if (repo_opts.hash == .none) return error.UnsupportedHashKind;
             return net.clone(repo_kind, repo_opts, allocator, url, cwd, local_path, opts);
@@ -1080,7 +1087,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             self: *Repo(repo_kind, repo_opts),
             allocator: std.mem.Allocator,
             remote_name: []const u8,
-            opts: net.Opts,
+            opts: net.Opts(repo_opts.ProgressCtx),
         ) !void {
             switch (repo_kind) {
                 .git => {
@@ -1094,7 +1101,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         core: *Repo(repo_kind, repo_opts).Core,
                         allocator: std.mem.Allocator,
                         remote_name: []const u8,
-                        opts: net.Opts,
+                        opts: net.Opts(repo_opts.ProgressCtx),
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
@@ -1119,7 +1126,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             allocator: std.mem.Allocator,
             remote_name: []const u8,
             refspec_str: []const u8,
-            opts: net.Opts,
+            opts: net.Opts(repo_opts.ProgressCtx),
         ) !void {
             var refspecs = std.ArrayList([]const u8).init(allocator);
             defer refspecs.deinit();
@@ -1150,7 +1157,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         core: *Repo(repo_kind, repo_opts).Core,
                         allocator: std.mem.Allocator,
                         remote_name: []const u8,
-                        opts: net.Opts,
+                        opts: net.Opts(repo_opts.ProgressCtx),
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);

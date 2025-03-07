@@ -358,19 +358,18 @@ fn download(
     }
 
     const new_active_refspecs: *std.ArrayListUnmanaged(net_refspec.RefSpec) =
-        if (refspecs_maybe) |refspecs|
-    blk: {
-        if (refspecs.len == 0) {
-            break :blk &remote.refspecs;
-        } else {
-            for (refspecs) |refspec| {
-                var spec = try net_refspec.RefSpec.init(allocator, refspec, .fetch);
-                errdefer spec.deinit(allocator);
-                try specs.append(allocator, spec);
+        if (refspecs_maybe) |refspecs| blk: {
+            if (refspecs.len == 0) {
+                break :blk &remote.refspecs;
+            } else {
+                for (refspecs) |refspec| {
+                    var spec = try net_refspec.RefSpec.init(allocator, refspec, .fetch);
+                    errdefer spec.deinit(allocator);
+                    try specs.append(allocator, spec);
+                }
+                break :blk &specs;
             }
-            break :blk &specs;
-        }
-    } else &remote.refspecs;
+        } else &remote.refspecs;
 
     clearRefSpecs(allocator, &remote.active_refspecs);
     for (new_active_refspecs.items) |*spec| {
@@ -396,7 +395,7 @@ pub fn connect(
     allocator: std.mem.Allocator,
     remote: *Remote(repo_kind, repo_opts),
     direction: Direction,
-    transport_opts: Opts,
+    transport_opts: Opts(repo_opts.ProgressCtx),
 ) !void {
     const url = switch (direction) {
         .fetch => remote.url,
@@ -563,7 +562,7 @@ pub fn fetch(
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
     allocator: std.mem.Allocator,
     remote: *Remote(repo_kind, repo_opts),
-    transport_opts: Opts,
+    transport_opts: Opts(repo_opts.ProgressCtx),
 ) !void {
     if (!remote.connected()) {
         try connect(repo_kind, repo_opts, state.readOnly(), allocator, remote, .fetch, transport_opts);
@@ -581,7 +580,7 @@ fn upload(
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
     allocator: std.mem.Allocator,
     remote: *Remote(repo_kind, repo_opts),
-    transport_opts: Opts,
+    transport_opts: Opts(repo_opts.ProgressCtx),
 ) !void {
     if (!remote.connected()) {
         try connect(repo_kind, repo_opts, state.readOnly(), allocator, remote, .push, transport_opts);
@@ -626,7 +625,7 @@ pub fn push(
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
     allocator: std.mem.Allocator,
     remote: *Remote(repo_kind, repo_opts),
-    transport_opts: Opts,
+    transport_opts: Opts(repo_opts.ProgressCtx),
 ) !void {
     try upload(repo_kind, repo_opts, state, allocator, remote, transport_opts);
     defer remote.disconnect(allocator) catch {};
@@ -640,7 +639,7 @@ pub fn clone(
     url: []const u8,
     cwd: std.fs.Dir,
     local_path: []const u8,
-    transport_opts: Opts,
+    transport_opts: Opts(repo_opts.ProgressCtx),
 ) !rp.Repo(repo_kind, repo_opts) {
     var repo_dir = try cwd.makeOpenPath(local_path, .{});
     defer repo_dir.close();
@@ -685,7 +684,7 @@ pub fn clone(
                 transport_def: net_transport.TransportDefinition,
                 allocator: std.mem.Allocator,
                 url: []const u8,
-                transport_opts: Opts,
+                transport_opts: Opts(repo_opts.ProgressCtx),
 
                 pub fn run(ctx: @This(), cursor: *rp.Repo(repo_kind, repo_opts).DB.Cursor(.read_write)) !void {
                     var moment = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(cursor.*);
