@@ -44,20 +44,6 @@ pub fn writeAndApplyPatches(
         }
     };
 
-    // this will force xitdb consider the start of the transaction
-    // to be at the very end of the file. this is necessary because
-    // by default all data created during the current transaction
-    // is considered temporarily mutable. we don't want that,
-    // because the snapshot we are copying below may have been
-    // created during this transaction. specifically if we are doing
-    // a clone/fetch, we are running this fn many times -- once for
-    // each commit object -- and we don't want to mutate the
-    // snapshot objects we are copying.
-    // TODO: this should definitely be a feature in it xitdb because
-    // doing it manually like this is pretty hacky.
-    try state.core.db.core.seekFromEnd(0);
-    state.core.db.tx_start = try state.core.db.core.getPos();
-
     // init snapshot
     const commit_id_to_snapshot_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "commit-id->snapshot"));
     const commit_id_to_snapshot = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(commit_id_to_snapshot_cursor);
@@ -114,6 +100,19 @@ pub fn writeAndApplyPatches(
             try path_to_patch_id.put(path_hash, .{ .bytes = &patch_hash_bytes });
         }
     }
+
+    // this will force xitdb consider the start of the transaction
+    // to be at the very end of the file. this is necessary in case
+    // this function is called again in this transaction, which can
+    // happen during a clone or fetch. this could be bad because,
+    // as you can see above, we are getting the snapshot from the
+    // parent commit and copying it. we don't want that snapshot to
+    // be mutable, so we have to make xitdb think the transaction
+    // just started.
+    // TODO: this should definitely be a feature in it xitdb because
+    // doing it manually like this is pretty hacky.
+    try state.core.db.core.seekFromEnd(0);
+    state.core.db.tx_start = try state.core.db.core.getPos();
 }
 
 fn removePatch(comptime repo_opts: rp.RepoOpts(.xit), snapshot: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write), path: []const u8) !void {
