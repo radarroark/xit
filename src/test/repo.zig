@@ -82,25 +82,6 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
         try std.testing.expectEqual(0, oid_set.count());
     }
 
-    // copy all objects to a new repo
-    {
-        var moment = try repo.core.latestMoment();
-        const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-
-        var obj_iter = try obj.ObjectIterator(repo_kind, repo_opts, .raw).init(allocator, state, .{ .recursive = true });
-        defer obj_iter.deinit();
-        try obj_iter.include(&commit_c);
-
-        var dest_repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "dest_repo");
-        defer dest_repo.deinit();
-        try dest_repo.copyObjects(allocator, repo_kind, repo_opts, &obj_iter, null);
-
-        var dest_obj_iter = try dest_repo.log(allocator, &.{commit_c});
-        defer dest_obj_iter.deinit();
-        const dest_commit_c = (try dest_obj_iter.next()) orelse return error.ExpectedObject;
-        defer dest_commit_c.deinit();
-    }
-
     {
         var result = try repo.resetDir(allocator, .{ .target = .{ .oid = &commit_b } });
         defer result.deinit();
@@ -263,6 +244,28 @@ fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
         const master_md_content = try master_md.readToEndAlloc(allocator, 1024);
         defer allocator.free(master_md_content);
         try std.testing.expectEqualStrings("k", master_md_content);
+    }
+
+    // copy all objects to a new repo.
+    // this will fail if we are not correctly resetting tx_start
+    // in `writeAndApplyPatches`, because we'll end up mutating
+    // the snapshot of the base commit due to the fact that it has
+    // more than one child commits. if that explanation doesn't
+    // make sense to you, you're not alone...my future self won't
+    // know what it means either probably.
+    {
+        var obj_iter = try obj.ObjectIterator(repo_kind, repo_opts, .raw).init(allocator, state, .{ .recursive = true });
+        defer obj_iter.deinit();
+        try obj_iter.include(&commit_k);
+
+        var dest_repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "dest_repo");
+        defer dest_repo.deinit();
+        try dest_repo.copyObjects(allocator, repo_kind, repo_opts, &obj_iter, null);
+
+        var dest_obj_iter = try dest_repo.log(allocator, &.{commit_k});
+        defer dest_obj_iter.deinit();
+        const dest_commit_k = (try dest_obj_iter.next()) orelse return error.ExpectedObject;
+        defer dest_commit_k.deinit();
     }
 }
 
