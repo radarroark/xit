@@ -806,7 +806,7 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
         ) !Switch(repo_kind, repo_opts) {
             // get the current commit and target oid
             const current_oid_maybe = try rf.readHeadRecurMaybe(repo_kind, repo_opts, state.readOnly());
-            const target_oid = try rf.readRecur(repo_kind, repo_opts, state.readOnly(), input.target) orelse return error.InvalidTarget;
+            const target_oid = try rf.readRecur(repo_kind, repo_opts, state.readOnly(), input.target) orelse return error.InvalidSwitchTarget;
 
             const arena = try allocator.create(std.heap.ArenaAllocator);
             arena.* = std.heap.ArenaAllocator.init(allocator);

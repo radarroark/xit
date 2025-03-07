@@ -218,6 +218,10 @@ pub fn runPrint(
             try writers.err.print("your merge source doesn't look right and you should feel bad\n", .{});
             return error.PrintedError;
         },
+        error.InvalidSwitchTarget => {
+            try writers.err.print("your switch target doesn't look right and you should feel bad\n", .{});
+            return error.PrintedError;
+        },
         else => |e| return e,
     };
 }
