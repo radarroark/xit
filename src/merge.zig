@@ -499,7 +499,6 @@ fn writeBlobWithDiff3(
                 }
                 n += size;
             }
-            try self.seekTo(0);
             return n;
         }
     };
@@ -527,9 +526,12 @@ fn writeBlobWithDiff3(
         .has_conflict = false,
     };
 
-    var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-    try obj.writeObject(repo_kind, repo_opts, state, &stream, stream.reader(), .{ .kind = .blob, .size = try stream.count() }, &oid);
+    const header = obj.ObjectHeader{ .kind = .blob, .size = try stream.count() };
     has_conflict.* = stream.has_conflict;
+    try stream.seekTo(0);
+
+    var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
+    try obj.writeObject(repo_kind, repo_opts, state, &stream, stream.reader(), header, &oid);
     return oid;
 }
 
@@ -1087,7 +1089,6 @@ fn writeBlobWithPatches(
                 }
                 n += size;
             }
-            try self.seekTo(0);
             return n;
         }
     };
@@ -1118,9 +1119,12 @@ fn writeBlobWithPatches(
         .has_conflict = false,
     };
 
-    var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-    try obj.writeObject(.xit, repo_opts, state, &stream, stream.reader(), .{ .kind = .blob, .size = try stream.count() }, &oid);
+    const header = obj.ObjectHeader{ .kind = .blob, .size = try stream.count() };
     has_conflict.* = stream.has_conflict;
+    try stream.seekTo(0);
+
+    var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
+    try obj.writeObject(.xit, repo_opts, state, &stream, stream.reader(), header, &oid);
     return oid;
 }
 
