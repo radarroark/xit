@@ -1764,13 +1764,6 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                         },
                     }
 
-                    // commit the change
-                    commit_metadata.parent_oids = switch (merge_input.kind) {
-                        .full => &.{ target_oid, source_oid },
-                        .pick => &.{target_oid},
-                    };
-                    const commit_oid = try obj.writeCommit(repo_kind, repo_opts, state, allocator, commit_metadata);
-
                     // clean up the stored merge state
                     switch (repo_kind) {
                         .git => {
@@ -1781,6 +1774,13 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                             _ = try state.extra.moment.remove(hash.hashInt(repo_opts.hash, "merge-in-progress"));
                         },
                     }
+
+                    // commit the change
+                    commit_metadata.parent_oids = switch (merge_input.kind) {
+                        .full => &.{ target_oid, source_oid },
+                        .pick => &.{target_oid},
+                    };
+                    const commit_oid = try obj.writeCommit(repo_kind, repo_opts, state, allocator, commit_metadata);
 
                     return .{
                         .arena = arena,

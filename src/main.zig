@@ -222,6 +222,10 @@ pub fn runPrint(
             try writers.err.print("your switch target doesn't look right and you should feel bad\n", .{});
             return error.PrintedError;
         },
+        error.UnfinishedMergeInProgress => {
+            try writers.err.print("there is an unfinished merge in progress! run the command with `--continue` to finish.\n", .{});
+            return error.PrintedError;
+        },
         else => |e| return e,
     };
 }
