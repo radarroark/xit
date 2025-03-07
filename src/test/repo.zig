@@ -426,6 +426,113 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         }
     }
 
+    // same file conflict (empty base commit)
+    {
+        {
+            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "same-file-conflict-empty-base");
+            defer repo.deinit();
+        }
+
+        var work_dir = try temp_dir.openDir("same-file-conflict-empty-base", .{});
+        defer work_dir.close();
+
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+        defer repo.deinit();
+
+        // A --- B --- D [master]
+        //  \         /
+        //   \       /
+        //    `---- C [foo]
+
+        // commit A (base commit) is empty
+        _ = try repo.commit(allocator, .{ .message = "a", .allow_empty = true });
+
+        try repo.addBranch(.{ .name = "foo" });
+        try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt",
+            \\a
+            \\x
+            \\c
+        );
+        _ = try repo.commit(allocator, .{ .message = "b" });
+        {
+            var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
+            defer result.deinit();
+        }
+        try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt",
+            \\a
+            \\y
+            \\c
+        );
+        _ = try repo.commit(allocator, .{ .message = "c" });
+        {
+            var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
+            defer result.deinit();
+        }
+        {
+            var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } });
+            defer merge.deinit();
+            try std.testing.expect(.conflict == merge.result);
+
+            // verify f.txt has conflict markers
+            const f_txt = try repo.core.work_dir.openFile("f.txt", .{ .mode = .read_only });
+            defer f_txt.close();
+            const f_txt_content = try f_txt.readToEndAlloc(allocator, 1024);
+            defer allocator.free(f_txt_content);
+            const expected_f_txt_content = try std.fmt.allocPrint(allocator,
+                \\<<<<<<< target (master)
+                \\a
+                \\x
+                \\c
+                \\||||||| base ({s})
+                \\=======
+                \\a
+                \\y
+                \\c
+                \\>>>>>>> source (foo)
+            , .{merge.base_oid});
+            defer allocator.free(expected_f_txt_content);
+            try std.testing.expectEqualStrings(expected_f_txt_content, f_txt_content);
+        }
+
+        // generate diff
+        var status = try repo.status(allocator);
+        defer status.deinit(allocator);
+        var file_iter = try repo.filePairs(allocator, .{
+            .work_dir = .{
+                .conflict_diff_kind = .target,
+                .status = &status,
+            },
+        });
+        if (try file_iter.next()) |*line_iter_pair_ptr| {
+            var line_iter_pair = line_iter_pair_ptr.*;
+            defer line_iter_pair.deinit();
+        } else {
+            return error.DiffResultExpected;
+        }
+
+        // ensure merge cannot be run again while there are unresolved conflicts
+        try checkMergeAbort(&repo);
+
+        // resolve conflict
+        try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt",
+            \\a
+            \\y
+            \\c
+        );
+        {
+            var merge = try repo.merge(allocator, .{ .kind = .full, .action = .cont });
+            defer merge.deinit();
+            try std.testing.expect(.success == merge.result);
+        }
+
+        // if we try merging foo again, it does nothing
+        {
+            var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } });
+            defer merge.deinit();
+            try std.testing.expect(.nothing == merge.result);
+        }
+    }
+
     // same file conflict (autoresolved)
     {
         {

@@ -623,10 +623,13 @@ fn writeBlobWithPatches(
     const merge_live_parent_to_children_cursor = (try merge_path_to_live_parent_to_children.getCursor(path_hash)) orelse return error.KeyNotFound;
     const merge_live_parent_to_children = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(merge_live_parent_to_children_cursor);
 
-    const base_path_to_live_parent_to_children_cursor = (try base_snapshot.getCursor(hash.hashInt(repo_opts.hash, "path->live-parent->children"))) orelse return error.KeyNotFound;
-    const base_path_to_live_parent_to_children = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(base_path_to_live_parent_to_children_cursor);
-    const base_live_parent_to_children_cursor = (try base_path_to_live_parent_to_children.getCursor(path_hash)) orelse return error.KeyNotFound;
-    const base_live_parent_to_children = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(base_live_parent_to_children_cursor);
+    var base_live_parent_to_children_maybe: ?rp.Repo(.xit, repo_opts).DB.HashMap(.read_only) = null;
+    if (try base_snapshot.getCursor(hash.hashInt(repo_opts.hash, "path->live-parent->children"))) |base_path_to_live_parent_to_children_cursor| {
+        const base_path_to_live_parent_to_children = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(base_path_to_live_parent_to_children_cursor);
+        if (try base_path_to_live_parent_to_children.getCursor(path_hash)) |base_live_parent_to_children_cursor| {
+            base_live_parent_to_children_maybe = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(base_live_parent_to_children_cursor);
+        }
+    }
 
     const target_path_to_live_parent_to_children_cursor = (try target_snapshot.getCursor(hash.hashInt(repo_opts.hash, "path->live-parent->children"))) orelse return error.KeyNotFound;
     const target_path_to_live_parent_to_children = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(target_path_to_live_parent_to_children_cursor);
@@ -737,7 +740,7 @@ fn writeBlobWithPatches(
         separate_marker: []u8,
         source_marker: []u8,
         merge_live_parent_to_children: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_only),
-        base_live_parent_to_children: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_only),
+        base_live_parent_to_children: ?*const rp.Repo(.xit, repo_opts).DB.HashMap(.read_only),
         target_live_parent_to_children: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_only),
         source_live_parent_to_children: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_only),
         patch_id_to_offset_list: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_only),
@@ -844,9 +847,9 @@ fn writeBlobWithPatches(
 
                         const target_line_id, const target_line_id_hash, const source_line_id, const source_line_id_hash =
                             if (try self.parent.target_live_parent_to_children.getCursor(first_line_id_hash) != null)
-                            .{ first_line_id, first_line_id_hash, second_line_id, second_line_id_hash }
-                        else
-                            .{ second_line_id, second_line_id_hash, first_line_id, first_line_id_hash };
+                                .{ first_line_id, first_line_id_hash, second_line_id, second_line_id_hash }
+                            else
+                                .{ second_line_id, second_line_id_hash, first_line_id, first_line_id_hash };
 
                         var target_line_ids = std.ArrayList(patch.LineId(repo_opts.hash)).init(self.parent.allocator);
                         defer target_line_ids.deinit();
@@ -918,31 +921,33 @@ fn writeBlobWithPatches(
                         // find the base line ids up to (but not including) the join line id if it exists,
                         // or until the end of the file
                         next_line_id_hash = current_line_id_hash;
-                        while (try self.parent.base_live_parent_to_children.getCursor(next_line_id_hash)) |next_children_cursor| {
-                            var next_children_iter = try next_children_cursor.iterator();
-                            defer next_children_iter.deinit();
-                            if (try next_children_iter.next()) |next_child_cursor| {
-                                if (try next_children_iter.next() != null) return error.ExpectedOneChild;
-                                const next_kv_pair = try next_child_cursor.readKeyValuePair();
-                                var next_child_bytes = [_]u8{0} ** patch.LineId(repo_opts.hash).byte_size;
-                                const next_child_slice = try next_kv_pair.key_cursor.readBytes(&next_child_bytes);
-                                next_line_id = blk: {
-                                    var stream = std.io.fixedBufferStream(next_child_slice);
-                                    var line_id_reader = stream.reader();
-                                    break :blk @bitCast(try line_id_reader.readInt(patch.LineId(repo_opts.hash).Int, .big));
-                                };
-                                next_line_id_hash = hash.hashInt(repo_opts.hash, next_child_slice);
-                                if (join_line_id_hash_maybe) |join_line_id_hash| {
-                                    if (next_line_id_hash != join_line_id_hash) {
-                                        try base_line_ids.append(next_line_id);
+                        if (self.parent.base_live_parent_to_children) |base_live_parent_to_children| {
+                            while (try base_live_parent_to_children.getCursor(next_line_id_hash)) |next_children_cursor| {
+                                var next_children_iter = try next_children_cursor.iterator();
+                                defer next_children_iter.deinit();
+                                if (try next_children_iter.next()) |next_child_cursor| {
+                                    if (try next_children_iter.next() != null) return error.ExpectedOneChild;
+                                    const next_kv_pair = try next_child_cursor.readKeyValuePair();
+                                    var next_child_bytes = [_]u8{0} ** patch.LineId(repo_opts.hash).byte_size;
+                                    const next_child_slice = try next_kv_pair.key_cursor.readBytes(&next_child_bytes);
+                                    next_line_id = blk: {
+                                        var stream = std.io.fixedBufferStream(next_child_slice);
+                                        var line_id_reader = stream.reader();
+                                        break :blk @bitCast(try line_id_reader.readInt(patch.LineId(repo_opts.hash).Int, .big));
+                                    };
+                                    next_line_id_hash = hash.hashInt(repo_opts.hash, next_child_slice);
+                                    if (join_line_id_hash_maybe) |join_line_id_hash| {
+                                        if (next_line_id_hash != join_line_id_hash) {
+                                            try base_line_ids.append(next_line_id);
+                                        } else {
+                                            break;
+                                        }
                                     } else {
-                                        break;
+                                        try base_line_ids.append(next_line_id);
                                     }
                                 } else {
-                                    try base_line_ids.append(next_line_id);
+                                    break;
                                 }
-                            } else {
-                                break;
                             }
                         }
 
@@ -961,7 +966,9 @@ fn writeBlobWithPatches(
                             self.parent.current_line_id_hash = join_parent_line_id_hash;
 
                             // TODO: is it actually guaranteed that the join line is in base?
-                            if (null == try self.parent.base_live_parent_to_children.getCursor(join_line_id_hash)) return error.ExpectedBaseToContainJoinLine;
+                            if (self.parent.base_live_parent_to_children) |base_live_parent_to_children| {
+                                if (null == try base_live_parent_to_children.getCursor(join_line_id_hash)) return error.ExpectedBaseToContainJoinLine;
+                            }
                         } else {
                             self.parent.current_line_id_hash = null;
                         }
@@ -1101,7 +1108,7 @@ fn writeBlobWithPatches(
         .separate_marker = separate_marker,
         .source_marker = source_marker,
         .merge_live_parent_to_children = &merge_live_parent_to_children,
-        .base_live_parent_to_children = &base_live_parent_to_children,
+        .base_live_parent_to_children = if (base_live_parent_to_children_maybe) |*map| map else null,
         .target_live_parent_to_children = &target_live_parent_to_children,
         .source_live_parent_to_children = &source_live_parent_to_children,
         .patch_id_to_offset_list = &patch_id_to_offset_list,
