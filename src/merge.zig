@@ -677,8 +677,8 @@ fn writeBlobWithPatches(
             if (try obj_rdr.reader.reader().readUntilDelimiterOrEofAlloc(inner_allocator, '\n', repo_opts.max_line_size)) |line| {
                 return line;
             } else {
-                // this should never happen because we only call the read function once
-                return error.LineNotFound;
+                // empty line at the end of the file
+                return try inner_allocator.dupe(u8, "");
             }
         }
     }.readLine;

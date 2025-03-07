@@ -452,6 +452,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             \\a
             \\x
             \\c
+            \\
         );
         _ = try repo.commit(allocator, .{ .message = "b" });
         {
@@ -462,6 +463,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             \\a
             \\y
             \\c
+            \\
         );
         _ = try repo.commit(allocator, .{ .message = "c" });
         {
@@ -483,11 +485,13 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                 \\a
                 \\x
                 \\c
+                \\
                 \\||||||| base ({s})
                 \\=======
                 \\a
                 \\y
                 \\c
+                \\
                 \\>>>>>>> source (foo)
             , .{merge.base_oid});
             defer allocator.free(expected_f_txt_content);
