@@ -395,7 +395,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                             var pkt = try self.recvPkt(allocator);
                             if (pkt != .ack) {
                                 pkt.deinit(allocator);
-                                return;
+                                break;
                             } else {
                                 errdefer pkt.deinit(allocator);
                                 try self.common.append(allocator, pkt);
