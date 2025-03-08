@@ -55,6 +55,10 @@ pub fn Pkt(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo
         ) !?Pkt(repo_kind, repo_opts) {
             var line = buffer;
 
+            if (line.len < PKT_LEN_SIZE) {
+                return null;
+            }
+
             var len = try std.fmt.parseInt(u16, line[0..PKT_LEN_SIZE], 16);
 
             if (line.len < len or (len != 0 and len < PKT_LEN_SIZE)) {
@@ -320,13 +324,13 @@ fn ackPkt(
 
         pkt.ack.status =
             if (std.mem.startsWith(u8, line[0..len], "continue"))
-            .cont
-        else if (std.mem.startsWith(u8, line[0..len], "common"))
-            .common
-        else if (std.mem.startsWith(u8, line[0..len], "ready"))
-            .ready
-        else
-            return error.InvalidPacket;
+                .cont
+            else if (std.mem.startsWith(u8, line[0..len], "common"))
+                .common
+            else if (std.mem.startsWith(u8, line[0..len], "ready"))
+                .ready
+            else
+                return error.InvalidPacket;
     }
 
     return pkt;
