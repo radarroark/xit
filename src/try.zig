@@ -57,6 +57,22 @@ pub fn main() !void {
         try copyDir(src_git_dir, dest_git_dir);
     }
 
+    var args = std.ArrayList([]const u8).init(allocator);
+    defer args.deinit();
+
+    var patch_enabled = false;
+
+    var arg_it = try std.process.argsWithAllocator(allocator);
+    defer arg_it.deinit();
+    _ = arg_it.skip();
+    while (arg_it.next()) |arg| {
+        if (std.mem.eql(u8, "--patch", arg)) {
+            patch_enabled = true;
+        } else {
+            try args.append(arg);
+        }
+    }
+
     const writers = xit.main.Writers{ .out = std.io.getStdOut().writer().any(), .err = std.io.getStdErr().writer().any() };
 
     {
@@ -101,6 +117,10 @@ pub fn main() !void {
         var xit_repo = try rp.Repo(.xit, .{}).init(allocator, .{ .cwd = temp_dir }, ".");
         defer xit_repo.deinit();
 
+        if (patch_enabled) {
+            try xit_repo.patchOn(allocator, null);
+        }
+
         for (0..commits.items.len) |i| {
             var commit_object = commits.items[commits.items.len - i - 1];
             try writers.out.print("Creating commit: {s}\n", .{commit_object.content.commit.metadata.message orelse ""});
@@ -133,16 +153,6 @@ pub fn main() !void {
         // set some config values
         try xit_repo.addConfig(allocator, .{ .name = "core.editor", .value = "vim" });
         try xit_repo.addConfig(allocator, .{ .name = "branch.master.remote", .value = "origin" });
-    }
-
-    var args = std.ArrayList([]const u8).init(allocator);
-    defer args.deinit();
-
-    var arg_it = try std.process.argsWithAllocator(allocator);
-    defer arg_it.deinit();
-    _ = arg_it.skip();
-    while (arg_it.next()) |arg| {
-        try args.append(arg);
     }
 
     try xit.main.run(.xit, .{}, allocator, args.items, temp_dir, writers);
