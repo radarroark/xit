@@ -620,7 +620,6 @@ pub const ObjectKind = enum {
 pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return struct {
         allocator: std.mem.Allocator,
-        header: ObjectHeader,
         reader: std.io.BufferedReader(repo_opts.read_size, Reader),
 
         pub const Reader = switch (repo_kind) {
@@ -638,7 +637,6 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                     const reader = try pack.LooseOrPackObjectReader(repo_opts).init(allocator, state, oid);
                     return .{
                         .allocator = allocator,
-                        .header = reader.header(),
                         .reader = std.io.bufferedReaderSize(repo_opts.read_size, reader),
                     };
                 },
@@ -646,7 +644,6 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                     const reader = try chunk.ChunkObjectReader(repo_opts).init(allocator, state, oid);
                     return .{
                         .allocator = allocator,
-                        .header = reader.header,
                         .reader = std.io.bufferedReaderSize(repo_opts.read_size, reader),
                     };
                 },
@@ -654,10 +651,7 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
         }
 
         pub fn deinit(self: *ObjectReader(repo_kind, repo_opts)) void {
-            switch (repo_kind) {
-                .git => self.reader.unbuffered_reader.deinit(self.allocator),
-                .xit => self.reader.unbuffered_reader.deinit(self.allocator),
-            }
+            self.reader.unbuffered_reader.deinit(self.allocator);
         }
 
         pub fn reset(self: *ObjectReader(repo_kind, repo_opts)) !void {
@@ -671,6 +665,13 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                 .git => try self.reader.unbuffered_reader.skipBytes(position),
                 .xit => try self.reader.unbuffered_reader.seekTo(position),
             }
+        }
+
+        pub fn header(self: *const ObjectReader(repo_kind, repo_opts)) ObjectHeader {
+            return switch (repo_kind) {
+                .git => self.reader.unbuffered_reader.header(),
+                .xit => self.reader.unbuffered_reader.header,
+            };
         }
     };
 }
@@ -766,7 +767,9 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                 allocator.destroy(arena);
             }
 
-            switch (obj_rdr.header.kind) {
+            const header = obj_rdr.header();
+
+            switch (header.kind) {
                 .blob => return .{
                     .allocator = allocator,
                     .arena = arena,
@@ -775,7 +778,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                         .full => .{ .blob = {} },
                     },
                     .oid = oid.*,
-                    .len = obj_rdr.header.size,
+                    .len = header.size,
                     .object_reader = obj_rdr,
                 },
                 .tree => switch (load_kind) {
@@ -784,7 +787,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                         .arena = arena,
                         .content = .tree,
                         .oid = oid.*,
-                        .len = obj_rdr.header.size,
+                        .len = header.size,
                         .object_reader = obj_rdr,
                     },
                     .full => {
@@ -812,7 +815,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                             .arena = arena,
                             .content = ObjectContent(repo_opts.hash){ .tree = .{ .entries = entries } },
                             .oid = oid.*,
-                            .len = obj_rdr.header.size,
+                            .len = header.size,
                             .object_reader = obj_rdr,
                         };
                     },
@@ -823,7 +826,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                         .arena = arena,
                         .content = .commit,
                         .oid = oid.*,
-                        .len = obj_rdr.header.size,
+                        .len = header.size,
                         .object_reader = obj_rdr,
                     },
                     .full => {
@@ -898,7 +901,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                                 },
                             },
                             .oid = oid.*,
-                            .len = obj_rdr.header.size,
+                            .len = header.size,
                             .object_reader = obj_rdr,
                         };
                     },
@@ -909,7 +912,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                         .arena = arena,
                         .content = .tag,
                         .oid = oid.*,
-                        .len = obj_rdr.header.size,
+                        .len = header.size,
                         .object_reader = obj_rdr,
                     },
                     .full => {
@@ -965,7 +968,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                             .arena = arena,
                             .content = content,
                             .oid = oid.*,
-                            .len = obj_rdr.header.size,
+                            .len = header.size,
                             .object_reader = obj_rdr,
                         };
                     },
@@ -1309,7 +1312,7 @@ pub fn copyFromObjectIterator(
             state,
             &object.object_reader,
             object.object_reader.reader.reader(),
-            object.object_reader.header,
+            object.object_reader.header(),
             &oid,
         );
 
