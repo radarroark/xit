@@ -971,7 +971,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
 
                     if (try cfg.patchEnabled(repo_opts, state.readOnly(), ctx.allocator)) {
-                        return;
+                        return error.CancelTransaction;
                     }
 
                     {
@@ -1021,10 +1021,13 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             };
 
             const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
-            try history.appendContext(
+            history.appendContext(
                 .{ .slot = try history.getSlot(-1) },
                 Ctx{ .core = &self.core, .allocator = allocator, .progress_ctx_maybe = progress_ctx_maybe },
-            );
+            ) catch |err| switch (err) {
+                error.CancelTransaction => {},
+                else => |e| return e,
+            };
         }
 
         pub fn patchOff(self: *Repo(.xit, repo_opts), allocator: std.mem.Allocator) !void {
@@ -1037,7 +1040,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
 
                     if (!try cfg.patchEnabled(repo_opts, state.readOnly(), ctx.allocator)) {
-                        return;
+                        return error.CancelTransaction;
                     }
 
                     var config = try cfg.Config(.xit, repo_opts).init(state.readOnly(), ctx.allocator);
@@ -1047,10 +1050,13 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             };
 
             const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
-            try history.appendContext(
+            history.appendContext(
                 .{ .slot = try history.getSlot(-1) },
                 Ctx{ .core = &self.core, .allocator = allocator },
-            );
+            ) catch |err| switch (err) {
+                error.CancelTransaction => {},
+                else => |e| return e,
+            };
         }
 
         pub fn listRemotes(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator) !cfg.RemoteConfig {
