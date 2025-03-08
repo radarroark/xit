@@ -628,10 +628,14 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
             .xit => chunk.ChunkObjectReader(repo_opts),
         };
 
-        pub fn init(allocator: std.mem.Allocator, state: rp.Repo(repo_kind, repo_opts).State(.read_only), oid: *const [hash.hexLen(repo_opts.hash)]u8) !@This() {
+        pub fn init(
+            allocator: std.mem.Allocator,
+            state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+            oid: *const [hash.hexLen(repo_opts.hash)]u8,
+        ) !@This() {
             switch (repo_kind) {
                 .git => {
-                    const reader = try pack.LooseOrPackObjectReader(repo_opts).init(allocator, state.core, oid);
+                    const reader = try pack.LooseOrPackObjectReader(repo_opts).init(allocator, state, oid);
                     return .{
                         .allocator = allocator,
                         .header = reader.header(),
@@ -651,7 +655,7 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
 
         pub fn deinit(self: *ObjectReader(repo_kind, repo_opts)) void {
             switch (repo_kind) {
-                .git => self.reader.unbuffered_reader.deinit(),
+                .git => self.reader.unbuffered_reader.deinit(self.allocator),
                 .xit => self.reader.unbuffered_reader.deinit(self.allocator),
             }
         }
@@ -1338,8 +1342,8 @@ pub fn copyFromPackObjectIterator(
 
     var object_count: usize = 0;
 
-    while (try pack_iter.next()) |pack_reader| {
-        defer pack_reader.deinit();
+    while (try pack_iter.next(state.readOnly())) |pack_reader| {
+        defer pack_reader.deinit(allocator);
 
         const Stream = struct {
             pack_reader: *pack.PackObjectReader(repo_kind, repo_opts),

@@ -240,8 +240,8 @@ test "pack" {
             var commit_oid_hex = [_]u8{0} ** hash.hexLen(repo_opts.hash);
             try std.testing.expectEqual(0, c.git_oid_fmt(@ptrCast(&commit_oid_hex), commit_oid));
 
-            var pack_reader = try pack.PackObjectReader(.git, repo_opts).initWithPath(allocator, pack_file_path, &commit_oid_hex);
-            defer pack_reader.deinit();
+            var pack_reader = try pack.PackObjectReader(.git, repo_opts).initWithPath(allocator, .{ .core = &r.core, .extra = .{} }, pack_file_path, &commit_oid_hex);
+            defer pack_reader.deinit(allocator);
 
             // make sure the reader's position is at the beginning
             try std.testing.expectEqual(0, pack_reader.relative_position);

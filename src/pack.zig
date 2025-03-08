@@ -2,6 +2,7 @@ const std = @import("std");
 const hash = @import("./hash.zig");
 const rp = @import("./repo.zig");
 const obj = @import("./object.zig");
+const chunk = @import("./chunk.zig");
 
 fn findOid(
     comptime hash_kind: hash.HashKind,
@@ -194,7 +195,7 @@ pub fn PackObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
             };
         }
 
-        pub fn next(self: *PackObjectIterator(repo_kind, repo_opts)) !?*PackObjectReader(repo_kind, repo_opts) {
+        pub fn next(self: *PackObjectIterator(repo_kind, repo_opts), state: rp.Repo(repo_kind, repo_opts).State(.read_only)) !?*PackObjectReader(repo_kind, repo_opts) {
             if (self.object_index == self.object_count) {
                 return null;
             }
@@ -202,14 +203,11 @@ pub fn PackObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
             const start_position = self.start_position;
 
             var pack_reader = try PackObjectReader(repo_kind, repo_opts).initAtPosition(self.allocator, self.pack_file_path, start_position);
-            errdefer pack_reader.deinit();
+            errdefer pack_reader.deinit(self.allocator);
 
             switch (pack_reader.internal) {
                 .basic => {},
-                .delta => |delta| switch (delta.init) {
-                    .ofs => try pack_reader.initDeltaAndCache(self.allocator, null),
-                    .ref => return error.CannotIterateOverDeltaRefObject,
-                },
+                .delta => try pack_reader.initDeltaAndCache(self.allocator, state),
             }
 
             // make sure the stream is at the end so the file position is correct
@@ -225,6 +223,63 @@ pub fn PackObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
 
         pub fn deinit(self: *PackObjectIterator(repo_kind, repo_opts)) void {
             self.pack_file.close();
+        }
+    };
+}
+
+fn PackOrChunkObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
+    return union(enum) {
+        pack: PackObjectReader(repo_kind, repo_opts),
+        chunk: ChunkObjectReader,
+
+        const ChunkObjectReader = chunk.ChunkObjectReader(if (.xit == repo_kind) repo_opts else .{});
+
+        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+            switch (self.*) {
+                .pack => |*pack| pack.deinit(allocator),
+                .chunk => |*chunk_reader| chunk_reader.deinit(allocator),
+            }
+        }
+
+        pub fn header(self: *const @This()) obj.ObjectHeader {
+            return switch (self.*) {
+                .pack => |*pack| pack.header(),
+                .chunk => |*chunk_reader| chunk_reader.header,
+            };
+        }
+
+        pub fn reset(self: *@This()) anyerror!void {
+            switch (self.*) {
+                .pack => |*pack| try pack.reset(),
+                .chunk => |*chunk_reader| try chunk_reader.reset(),
+            }
+        }
+
+        pub fn position(self: *const @This()) u64 {
+            return switch (self.*) {
+                .pack => |*pack| switch (pack.internal) {
+                    .basic => pack.relative_position,
+                    .delta => |delta| if (delta.state) |base_delta_state|
+                        base_delta_state.real_position
+                    else
+                        unreachable,
+                },
+                .chunk => |*chunk_reader| chunk_reader.position,
+            };
+        }
+
+        pub fn skipBytes(self: *@This(), num_bytes: u64) !void {
+            switch (self.*) {
+                .pack => |*pack| try pack.skipBytes(num_bytes),
+                .chunk => |*chunk_reader| try chunk_reader.skipBytes(num_bytes),
+            }
+        }
+
+        pub fn read(self: *@This(), buf: []u8) !usize {
+            return switch (self.*) {
+                .pack => |*pack| try pack.read(buf),
+                .chunk => |*chunk_reader| try chunk_reader.read(buf),
+            };
         }
     };
 }
@@ -267,13 +322,12 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                         oid_hex: [hash.hexLen(repo_opts.hash)]u8,
                     },
                 },
-                allocator: std.mem.Allocator,
                 state: ?struct {
-                    base_reader: *PackObjectReader(repo_kind, repo_opts),
+                    base_reader: *PackOrChunkObjectReader(repo_kind, repo_opts),
                     chunk_index: usize,
                     chunk_position: u64,
                     real_position: u64,
-                    chunks: std.ArrayList(Chunk),
+                    chunks: std.ArrayList(DeltaChunk),
                     cache: std.AutoArrayHashMap(Location, []const u8),
                     cache_arena: *std.heap.ArenaAllocator,
                     recon_size: u64,
@@ -286,7 +340,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             size: usize,
         };
 
-        const Chunk = struct {
+        const DeltaChunk = struct {
             location: Location,
             kind: enum {
                 add_new,
@@ -294,22 +348,31 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             },
         };
 
-        pub const Error = ZlibStream.Reader.Error || error{ Unseekable, UnexpectedEndOfStream, InvalidDeltaCache };
+        pub const Error = ZlibStream.Reader.Error || PackOrChunkObjectReader(repo_kind, repo_opts).ChunkObjectReader.Error || error{ Unseekable, UnexpectedEndOfStream, InvalidDeltaCache };
 
-        pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind, repo_opts).Core, oid_hex: *const [hash.hexLen(repo_opts.hash)]u8) !PackObjectReader(repo_kind, repo_opts) {
-            var pack_reader = try PackObjectReader(repo_kind, repo_opts).initWithIndex(allocator, core, oid_hex);
-            errdefer pack_reader.deinit();
-            try pack_reader.initDeltaAndCache(allocator, core);
+        pub fn init(
+            allocator: std.mem.Allocator,
+            state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+            oid_hex: *const [hash.hexLen(repo_opts.hash)]u8,
+        ) !PackObjectReader(repo_kind, repo_opts) {
+            var pack_reader = try PackObjectReader(repo_kind, repo_opts).initWithIndex(allocator, state.core, oid_hex);
+            errdefer pack_reader.deinit(allocator);
+            try pack_reader.initDeltaAndCache(allocator, state);
             return pack_reader;
         }
 
-        pub fn initWithPath(allocator: std.mem.Allocator, pack_file_path: []const u8, oid_hex: *const [hash.hexLen(repo_opts.hash)]u8) !PackObjectReader(repo_kind, repo_opts) {
+        pub fn initWithPath(
+            allocator: std.mem.Allocator,
+            state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+            pack_file_path: []const u8,
+            oid_hex: *const [hash.hexLen(repo_opts.hash)]u8,
+        ) !PackObjectReader(repo_kind, repo_opts) {
             var iter = try PackObjectIterator(repo_kind, repo_opts).init(allocator, pack_file_path);
             defer iter.deinit();
 
-            while (try iter.next()) |pack_reader| {
+            while (try iter.next(state)) |pack_reader| {
                 {
-                    errdefer pack_reader.deinit();
+                    errdefer pack_reader.deinit(allocator);
 
                     // serialize object header
                     var header_bytes = [_]u8{0} ** 32;
@@ -324,7 +387,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     }
                 }
 
-                pack_reader.deinit();
+                pack_reader.deinit(allocator);
             }
 
             return error.ObjectNotFound;
@@ -451,7 +514,6 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                                         .position = position - offset,
                                     },
                                 },
-                                .allocator = allocator,
                                 .state = null,
                             },
                         },
@@ -475,7 +537,6 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                                         .oid_hex = std.fmt.bytesToHex(base_oid, .lower),
                                     },
                                 },
-                                .allocator = allocator,
                                 .state = null,
                             },
                         },
@@ -484,7 +545,11 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             }
         }
 
-        fn initDeltaAndCache(self: *PackObjectReader(repo_kind, repo_opts), allocator: std.mem.Allocator, core_maybe: ?*rp.Repo(repo_kind, repo_opts).Core) !void {
+        fn initDeltaAndCache(
+            self: *PackObjectReader(repo_kind, repo_opts),
+            allocator: std.mem.Allocator,
+            state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+        ) !void {
             // make a list of the chain of deltified objects,
             // and initialize each one. we can't do this during the initial
             // creation of the PackObjectReader because it would cause them
@@ -494,11 +559,15 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             defer delta_objects.deinit();
             var last_object = self;
             while (last_object.internal == .delta) {
-                try last_object.initDelta(allocator, core_maybe);
+                try last_object.initDelta(allocator, state);
                 try delta_objects.append(last_object);
-                last_object = if (last_object.internal.delta.state) |state|
-                    state.base_reader
+                last_object = if (last_object.internal.delta.state) |delta_state|
+                    switch (delta_state.base_reader.*) {
+                        .pack => |*pack| pack,
+                        .chunk => break,
+                    }
                 else
+                    // delta object wasn't initialized
                     unreachable;
             }
 
@@ -514,19 +583,24 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             }
         }
 
-        fn initDelta(self: *PackObjectReader(repo_kind, repo_opts), allocator: std.mem.Allocator, core_maybe: ?*rp.Repo(repo_kind, repo_opts).Core) !void {
+        fn initDelta(
+            self: *PackObjectReader(repo_kind, repo_opts),
+            allocator: std.mem.Allocator,
+            state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+        ) !void {
             const reader = self.pack_file.reader();
 
-            const base_reader = try allocator.create(PackObjectReader(repo_kind, repo_opts));
+            const base_reader = try allocator.create(PackOrChunkObjectReader(repo_kind, repo_opts));
             errdefer allocator.destroy(base_reader);
+
             base_reader.* = switch (self.internal.delta.init) {
-                .ofs => |ofs| try PackObjectReader(repo_kind, repo_opts).initAtPosition(allocator, ofs.pack_file_path, ofs.position),
+                .ofs => |ofs| .{ .pack = try PackObjectReader(repo_kind, repo_opts).initAtPosition(allocator, ofs.pack_file_path, ofs.position) },
                 .ref => |ref| switch (repo_kind) {
-                    .git => try PackObjectReader(repo_kind, repo_opts).initWithIndex(allocator, core_maybe orelse return error.CannotInitDeltaRefObject, &ref.oid_hex),
-                    .xit => return error.CannotInitDeltaRefObject,
+                    .git => .{ .pack = try PackObjectReader(repo_kind, repo_opts).initWithIndex(allocator, state.core, &ref.oid_hex) },
+                    .xit => .{ .chunk = try chunk.ChunkObjectReader(repo_opts).init(allocator, state, &ref.oid_hex) },
                 },
             };
-            errdefer base_reader.deinit();
+            errdefer base_reader.deinit(allocator);
 
             var bytes_read: u64 = 0;
 
@@ -569,7 +643,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                 }
             }
 
-            var chunks = std.ArrayList(Chunk).init(allocator);
+            var chunks = std.ArrayList(DeltaChunk).init(allocator);
             errdefer chunks.deinit();
 
             var cache = std.AutoArrayHashMap(Location, []const u8).init(allocator);
@@ -654,7 +728,6 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                 .internal = .{
                     .delta = .{
                         .init = self.internal.delta.init,
-                        .allocator = allocator,
                         .state = .{
                             .base_reader = base_reader,
                             .chunk_index = 0,
@@ -689,13 +762,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                 // currently, position is always 0 because we're always resetting,
                 // but maybe in the future i can make it reset only when necessary.
                 try delta_state.base_reader.reset();
-                const position = switch (delta_state.base_reader.internal) {
-                    .basic => delta_state.base_reader.relative_position,
-                    .delta => |delta| if (delta.state) |base_delta_state|
-                        base_delta_state.real_position
-                    else
-                        unreachable,
-                };
+                const position = delta_state.base_reader.position();
                 const bytes_to_skip = location.offset - position;
                 try delta_state.base_reader.skipBytes(bytes_to_skip);
 
@@ -716,32 +783,35 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
 
             // now that the cache has been initialized, clear the cache in
             // the base object if necessary, because it won't be used anymore.
-            switch (delta_state.base_reader.internal) {
-                .basic => {},
-                .delta => |*delta| {
-                    const base_delta_state = if (delta.state) |*state| state else unreachable;
-                    _ = base_delta_state.cache_arena.reset(.free_all);
-                    base_delta_state.cache.clearAndFree();
+            switch (delta_state.base_reader.*) {
+                .pack => |*pack| switch (pack.internal) {
+                    .basic => {},
+                    .delta => |*delta| {
+                        const base_delta_state = if (delta.state) |*state| state else unreachable;
+                        _ = base_delta_state.cache_arena.reset(.free_all);
+                        base_delta_state.cache.clearAndFree();
+                    },
                 },
+                .chunk => {},
             }
         }
 
-        pub fn deinit(self: *PackObjectReader(repo_kind, repo_opts)) void {
+        pub fn deinit(self: *PackObjectReader(repo_kind, repo_opts), allocator: std.mem.Allocator) void {
             self.pack_file.close();
             switch (self.internal) {
                 .basic => {},
                 .delta => |*delta| {
                     switch (delta.init) {
-                        .ofs => |ofs| delta.allocator.free(ofs.pack_file_path),
+                        .ofs => |ofs| allocator.free(ofs.pack_file_path),
                         .ref => {},
                     }
                     if (delta.state) |*state| {
-                        state.base_reader.deinit();
-                        delta.allocator.destroy(state.base_reader);
+                        state.base_reader.deinit(allocator);
+                        allocator.destroy(state.base_reader);
                         state.chunks.deinit();
                         state.cache.deinit();
                         state.cache_arena.deinit();
-                        delta.allocator.destroy(state.cache_arena);
+                        allocator.destroy(state.cache_arena);
                     }
                 },
             }
@@ -788,12 +858,12 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                         if (delta_state.chunk_index == delta_state.chunks.items.len) {
                             break;
                         }
-                        const chunk = delta_state.chunks.items[delta_state.chunk_index];
+                        const delta_chunk = delta_state.chunks.items[delta_state.chunk_index];
                         var dest_slice = dest[bytes_read..];
-                        const bytes_to_read = @min(chunk.location.size - delta_state.chunk_position, dest_slice.len);
-                        switch (chunk.kind) {
+                        const bytes_to_read = @min(delta_chunk.location.size - delta_state.chunk_position, dest_slice.len);
+                        switch (delta_chunk.kind) {
                             .add_new => {
-                                const offset = chunk.location.offset + delta_state.chunk_position;
+                                const offset = delta_chunk.location.offset + delta_state.chunk_position;
                                 if (self.relative_position > offset) {
                                     try self.pack_file.seekTo(self.start_position);
                                     self.stream = std.compress.zlib.decompressor(self.pack_file.reader());
@@ -813,14 +883,14 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                                 delta_state.real_position += size;
                             },
                             .copy_from_base => {
-                                const buffer = delta_state.cache.get(chunk.location) orelse return error.InvalidDeltaCache;
+                                const buffer = delta_state.cache.get(delta_chunk.location) orelse return error.InvalidDeltaCache;
                                 @memcpy(dest_slice[0..bytes_to_read], buffer[delta_state.chunk_position .. delta_state.chunk_position + bytes_to_read]);
                                 bytes_read += bytes_to_read;
                                 delta_state.chunk_position += bytes_to_read;
                                 delta_state.real_position += bytes_to_read;
                             },
                         }
-                        if (delta_state.chunk_position == chunk.location.size) {
+                        if (delta_state.chunk_position == delta_chunk.location.size) {
                             delta_state.chunk_index += 1;
                             delta_state.chunk_position = 0;
                         }
@@ -891,9 +961,13 @@ pub fn LooseOrPackObjectReader(comptime repo_opts: rp.RepoOpts(.git)) type {
 
         pub const Error = PackObjectReader(.git, repo_opts).Error;
 
-        pub fn init(allocator: std.mem.Allocator, core: *rp.Repo(.git, repo_opts).Core, oid_hex: *const [hash.hexLen(repo_opts.hash)]u8) !LooseOrPackObjectReader(repo_opts) {
+        pub fn init(
+            allocator: std.mem.Allocator,
+            state: rp.Repo(.git, repo_opts).State(.read_only),
+            oid_hex: *const [hash.hexLen(repo_opts.hash)]u8,
+        ) !LooseOrPackObjectReader(repo_opts) {
             // open the objects dir
-            var objects_dir = try core.git_dir.openDir("objects", .{});
+            var objects_dir = try state.core.git_dir.openDir("objects", .{});
             defer objects_dir.close();
 
             // open the object file
@@ -901,7 +975,7 @@ pub fn LooseOrPackObjectReader(comptime repo_opts: rp.RepoOpts(.git)) type {
             const path = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ oid_hex[0..2], oid_hex[2..] });
             var object_file = objects_dir.openFile(path, .{ .mode = .read_only }) catch |err| switch (err) {
                 error.FileNotFound => return .{
-                    .pack = try PackObjectReader(.git, repo_opts).init(allocator, core, oid_hex),
+                    .pack = try PackObjectReader(.git, repo_opts).init(allocator, state, oid_hex),
                 },
                 else => |e| return e,
             };
@@ -919,10 +993,10 @@ pub fn LooseOrPackObjectReader(comptime repo_opts: rp.RepoOpts(.git)) type {
             };
         }
 
-        pub fn deinit(self: *LooseOrPackObjectReader(repo_opts)) void {
+        pub fn deinit(self: *LooseOrPackObjectReader(repo_opts), allocator: std.mem.Allocator) void {
             switch (self.*) {
                 .loose => self.loose.file.close(),
-                .pack => self.pack.deinit(),
+                .pack => self.pack.deinit(allocator),
             }
         }
 

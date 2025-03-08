@@ -560,7 +560,7 @@ pub fn ChunkObjectReader(comptime repo_opts: rp.RepoOpts(.xit)) type {
             allocator.destroy(self.cursor);
         }
 
-        pub fn read(self: *@This(), buf: []u8) !usize {
+        pub fn read(self: *ChunkObjectReader(repo_opts), buf: []u8) !usize {
             var size: usize = 0;
             while (size < buf.len) {
                 const read_size = try self.readStep(buf[size..]);
@@ -573,44 +573,51 @@ pub fn ChunkObjectReader(comptime repo_opts: rp.RepoOpts(.xit)) type {
             return size;
         }
 
-        fn readStep(self: *@This(), buf: []u8) !usize {
+        fn readStep(self: *ChunkObjectReader(repo_opts), buf: []u8) !usize {
             return try readChunk(repo_opts, self.xit_dir, &self.chunk_info_reader, self.position, buf);
         }
 
-        pub fn reset(self: *@This()) !void {
+        pub fn reset(self: *ChunkObjectReader(repo_opts)) !void {
             try self.seekTo(0);
         }
 
-        pub fn seekTo(self: *@This(), offset: u64) !void {
+        pub fn seekTo(self: *ChunkObjectReader(repo_opts), offset: u64) !void {
             self.position = offset;
         }
 
-        pub fn readNoEof(self: *@This(), dest: []u8) !void {
-            var reader = std.io.GenericReader(*@This(), Error, @This().read){
+        pub fn readNoEof(self: *ChunkObjectReader(repo_opts), dest: []u8) !void {
+            var reader = std.io.GenericReader(*ChunkObjectReader(repo_opts), Error, ChunkObjectReader(repo_opts).read){
                 .context = self,
             };
             try reader.readNoEof(dest);
         }
 
-        pub fn readUntilDelimiter(self: *@This(), dest: []u8, delimiter: u8) ![]u8 {
-            var reader = std.io.GenericReader(*@This(), Error, @This().read){
+        pub fn readUntilDelimiter(self: *ChunkObjectReader(repo_opts), dest: []u8, delimiter: u8) ![]u8 {
+            var reader = std.io.GenericReader(*ChunkObjectReader(repo_opts), Error, ChunkObjectReader(repo_opts).read){
                 .context = self,
             };
             return try reader.readUntilDelimiter(dest, delimiter);
         }
 
-        pub fn readUntilDelimiterAlloc(self: *@This(), allocator: std.mem.Allocator, delimiter: u8, max_size: usize) ![]u8 {
-            var reader = std.io.GenericReader(*@This(), Error, @This().read){
+        pub fn readUntilDelimiterAlloc(self: *ChunkObjectReader(repo_opts), allocator: std.mem.Allocator, delimiter: u8, max_size: usize) ![]u8 {
+            var reader = std.io.GenericReader(*ChunkObjectReader(repo_opts), Error, ChunkObjectReader(repo_opts).read){
                 .context = self,
             };
             return try reader.readUntilDelimiterAlloc(allocator, delimiter, max_size);
         }
 
-        pub fn readAllAlloc(self: *@This(), allocator: std.mem.Allocator, max_size: usize) ![]u8 {
-            var reader = std.io.GenericReader(*@This(), Error, @This().read){
+        pub fn readAllAlloc(self: *ChunkObjectReader(repo_opts), allocator: std.mem.Allocator, max_size: usize) ![]u8 {
+            var reader = std.io.GenericReader(*ChunkObjectReader(repo_opts), Error, ChunkObjectReader(repo_opts).read){
                 .context = self,
             };
             return try reader.readAllAlloc(allocator, max_size);
+        }
+
+        pub fn skipBytes(self: *ChunkObjectReader(repo_opts), num_bytes: u64) !void {
+            var reader = std.io.GenericReader(*ChunkObjectReader(repo_opts), Error, ChunkObjectReader(repo_opts).read){
+                .context = self,
+            };
+            try reader.skipBytes(num_bytes, .{});
         }
     };
 }
