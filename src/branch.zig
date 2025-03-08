@@ -49,7 +49,7 @@ pub fn add(
             // why? i have no idea! what is the point of this, linus!
             var leaf_name = name;
             var subdir_maybe = blk: {
-                if (std.mem.lastIndexOf(u8, name, "/")) |last_slash| {
+                if (std.mem.lastIndexOfScalar(u8, name, '/')) |last_slash| {
                     leaf_name = name[last_slash + 1 ..];
                     break :blk try heads_dir.makeOpenPath(name[0..last_slash], .{});
                 } else {
@@ -129,12 +129,6 @@ pub fn remove(
             var heads_dir = try refs_dir.makeOpenPath("heads", .{});
             defer heads_dir.close();
 
-            // get absolute paths
-            var heads_dir_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-            const heads_dir_path = try heads_dir.realpath(".", &heads_dir_buffer);
-            var ref_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-            const ref_path = try heads_dir.realpath(input.name, &ref_buffer);
-
             // create lock file for HEAD
             var head_lock = try fs.LockFile.init(state.core.git_dir, "HEAD");
             defer head_lock.deinit();
@@ -145,13 +139,9 @@ pub fn remove(
             // delete parent dirs
             // this is only necessary because branches with a slash
             // in their name are stored on disk as subdirectories
-            var parent_path_maybe = std.fs.path.dirname(ref_path);
+            var parent_path_maybe = std.fs.path.dirname(input.name);
             while (parent_path_maybe) |parent_path| {
-                if (std.mem.eql(u8, heads_dir_path, parent_path)) {
-                    break;
-                }
-
-                std.fs.deleteDirAbsolute(parent_path) catch |err| switch (err) {
+                heads_dir.deleteDir(parent_path) catch |err| switch (err) {
                     error.DirNotEmpty => break,
                     else => |e| return e,
                 };
