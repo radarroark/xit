@@ -2,6 +2,7 @@ const std = @import("std");
 const hash = @import("./hash.zig");
 const rp = @import("./repo.zig");
 const fs = @import("./fs.zig");
+const obj = @import("./object.zig");
 
 // reordering is a breaking change
 const CompressKind = enum(u8) {
@@ -507,10 +508,57 @@ const ZlibStream = std.compress.flate.inflate.Decompressor(.zlib, std.fs.File.Re
 pub fn ChunkObjectReader(comptime repo_opts: rp.RepoOpts(.xit)) type {
     return struct {
         xit_dir: std.fs.Dir,
+        cursor: *rp.Repo(.xit, repo_opts).DB.Cursor(.read_only),
         chunk_info_reader: rp.Repo(.xit, repo_opts).DB.Cursor(.read_only).Reader,
         position: u64,
+        header: obj.ObjectHeader,
 
         pub const Error = ZlibStream.Reader.Error || std.fs.File.OpenError || rp.Repo(.xit, repo_opts).DB.Cursor(.read_only).Reader.Error || error{ InvalidOffset, InvalidEnumTag, WrongChunkChecksum };
+
+        pub fn init(allocator: std.mem.Allocator, state: rp.Repo(.xit, repo_opts).State(.read_only), oid: *const [hash.hexLen(repo_opts.hash)]u8) !ChunkObjectReader(repo_opts) {
+            // chunk info map
+            const object_id_to_chunk_info_cursor = (try state.extra.moment.getCursor(hash.hashInt(repo_opts.hash, "object-id->chunk-info"))) orelse return error.ObjectNotFound;
+            const object_id_to_chunk_info = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(object_id_to_chunk_info_cursor);
+            var chunk_info_kv_pair = (try object_id_to_chunk_info.getKeyValuePair(try hash.hexToInt(repo_opts.hash, oid))) orelse return error.ObjectNotFound;
+
+            // object kind name
+            var object_kind_name_buffer = [_]u8{0} ** 8;
+            const object_kind_name = try chunk_info_kv_pair.key_cursor.readBytes(&object_kind_name_buffer);
+
+            // object size
+            const object_size = blk: {
+                var reader = try chunk_info_kv_pair.value_cursor.reader();
+                if (reader.size == 0) {
+                    break :blk 0;
+                } else {
+                    // the last 8 bytes in the chunk info contain the object size
+                    try reader.seekFromEnd(-@sizeOf(u64));
+                    const size = try reader.readInt(u64, .big);
+                    try reader.seekTo(0);
+                    break :blk size;
+                }
+            };
+
+            // put cursor on the heap so the pointer is stable (the reader uses it internally)
+            const chunk_info_ptr = try allocator.create(rp.Repo(.xit, repo_opts).DB.Cursor(.read_only));
+            errdefer allocator.destroy(chunk_info_ptr);
+            chunk_info_ptr.* = chunk_info_kv_pair.value_cursor;
+
+            return .{
+                .xit_dir = state.core.xit_dir,
+                .cursor = chunk_info_ptr,
+                .chunk_info_reader = try chunk_info_ptr.reader(),
+                .position = 0,
+                .header = .{
+                    .kind = try obj.ObjectKind.init(object_kind_name),
+                    .size = object_size,
+                },
+            };
+        }
+
+        pub fn deinit(self: *ChunkObjectReader(repo_opts), allocator: std.mem.Allocator) void {
+            allocator.destroy(self.cursor);
+        }
 
         pub fn read(self: *@This(), buf: []u8) !usize {
             var size: usize = 0;

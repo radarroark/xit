@@ -622,12 +622,6 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
         allocator: std.mem.Allocator,
         header: ObjectHeader,
         reader: std.io.BufferedReader(repo_opts.read_size, Reader),
-        internal: switch (repo_kind) {
-            .git => void,
-            .xit => struct {
-                cursor: *rp.Repo(repo_kind, repo_opts).DB.Cursor(.read_only),
-            },
-        },
 
         pub const Reader = switch (repo_kind) {
             .git => pack.LooseOrPackObjectReader(repo_opts),
@@ -642,52 +636,14 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                         .allocator = allocator,
                         .header = reader.header(),
                         .reader = std.io.bufferedReaderSize(repo_opts.read_size, reader),
-                        .internal = {},
                     };
                 },
                 .xit => {
-                    // chunk info map
-                    const object_id_to_chunk_info_cursor = (try state.extra.moment.getCursor(hash.hashInt(repo_opts.hash, "object-id->chunk-info"))) orelse return error.ObjectNotFound;
-                    const object_id_to_chunk_info = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(object_id_to_chunk_info_cursor);
-                    var chunk_info_kv_pair = (try object_id_to_chunk_info.getKeyValuePair(try hash.hexToInt(repo_opts.hash, oid))) orelse return error.ObjectNotFound;
-
-                    // object kind name
-                    var object_kind_name_buffer = [_]u8{0} ** 8;
-                    const object_kind_name = try chunk_info_kv_pair.key_cursor.readBytes(&object_kind_name_buffer);
-
-                    // object size
-                    const object_size = blk: {
-                        var reader = try chunk_info_kv_pair.value_cursor.reader();
-                        if (reader.size == 0) {
-                            break :blk 0;
-                        } else {
-                            // the last 8 bytes in the chunk info contain the object size
-                            try reader.seekFromEnd(-@sizeOf(u64));
-                            const size = try reader.readInt(u64, .big);
-                            try reader.seekTo(0);
-                            break :blk size;
-                        }
-                    };
-
-                    // put cursor on the heap so the pointer is stable (the reader uses it internally)
-                    const chunk_info_ptr = try allocator.create(rp.Repo(repo_kind, repo_opts).DB.Cursor(.read_only));
-                    errdefer allocator.destroy(chunk_info_ptr);
-                    chunk_info_ptr.* = chunk_info_kv_pair.value_cursor;
-
+                    const reader = try chunk.ChunkObjectReader(repo_opts).init(allocator, state, oid);
                     return .{
                         .allocator = allocator,
-                        .header = ObjectHeader{
-                            .kind = try ObjectKind.init(object_kind_name),
-                            .size = object_size,
-                        },
-                        .reader = std.io.bufferedReaderSize(repo_opts.read_size, Reader{
-                            .xit_dir = state.core.xit_dir,
-                            .chunk_info_reader = try chunk_info_ptr.reader(),
-                            .position = 0,
-                        }),
-                        .internal = .{
-                            .cursor = chunk_info_ptr,
-                        },
+                        .header = reader.header,
+                        .reader = std.io.bufferedReaderSize(repo_opts.read_size, reader),
                     };
                 },
             }
@@ -696,7 +652,7 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
         pub fn deinit(self: *ObjectReader(repo_kind, repo_opts)) void {
             switch (repo_kind) {
                 .git => self.reader.unbuffered_reader.deinit(),
-                .xit => self.allocator.destroy(self.internal.cursor),
+                .xit => self.reader.unbuffered_reader.deinit(self.allocator),
             }
         }
 
