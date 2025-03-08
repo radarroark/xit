@@ -2,7 +2,6 @@ const std = @import("std");
 const hash = @import("./hash.zig");
 const rp = @import("./repo.zig");
 const obj = @import("./object.zig");
-const chunk = @import("./chunk.zig");
 
 fn findOid(
     comptime hash_kind: hash.HashKind,
@@ -227,31 +226,53 @@ pub fn PackObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
     };
 }
 
+/// used as the type for base objects within delta objects. this is necessary
+/// because ref delta objects just contain an oid and must be looked up in
+/// the backend's object store. for the xit backend, that means it needs to
+/// look it up in the chunk object store. the git backend will never do that,
+/// which is why you see all those `unreachable`s.
 fn PackOrChunkObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return union(enum) {
         pack: PackObjectReader(repo_kind, repo_opts),
         chunk: ChunkObjectReader,
 
-        const ChunkObjectReader = chunk.ChunkObjectReader(if (.xit == repo_kind) repo_opts else .{});
+        const ChunkObjectReader = switch (repo_kind) {
+            .git => void,
+            .xit => @import("./chunk.zig").ChunkObjectReader(repo_opts),
+        };
+
+        const Error = switch (repo_kind) {
+            .git => error{},
+            .xit => ChunkObjectReader.Error,
+        };
 
         pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
             switch (self.*) {
                 .pack => |*pack| pack.deinit(allocator),
-                .chunk => |*chunk_reader| chunk_reader.deinit(allocator),
+                .chunk => |*chunk_reader| switch (repo_kind) {
+                    .git => unreachable,
+                    .xit => chunk_reader.deinit(allocator),
+                },
             }
         }
 
         pub fn header(self: *const @This()) obj.ObjectHeader {
             return switch (self.*) {
                 .pack => |*pack| pack.header(),
-                .chunk => |*chunk_reader| chunk_reader.header,
+                .chunk => |*chunk_reader| switch (repo_kind) {
+                    .git => unreachable,
+                    .xit => chunk_reader.header,
+                },
             };
         }
 
         pub fn reset(self: *@This()) anyerror!void {
             switch (self.*) {
                 .pack => |*pack| try pack.reset(),
-                .chunk => |*chunk_reader| try chunk_reader.reset(),
+                .chunk => |*chunk_reader| switch (repo_kind) {
+                    .git => unreachable,
+                    .xit => try chunk_reader.reset(),
+                },
             }
         }
 
@@ -264,21 +285,30 @@ fn PackOrChunkObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: 
                     else
                         unreachable,
                 },
-                .chunk => |*chunk_reader| chunk_reader.position,
+                .chunk => |*chunk_reader| switch (repo_kind) {
+                    .git => unreachable,
+                    .xit => chunk_reader.position,
+                },
             };
         }
 
         pub fn skipBytes(self: *@This(), num_bytes: u64) !void {
             switch (self.*) {
                 .pack => |*pack| try pack.skipBytes(num_bytes),
-                .chunk => |*chunk_reader| try chunk_reader.skipBytes(num_bytes),
+                .chunk => |*chunk_reader| switch (repo_kind) {
+                    .git => unreachable,
+                    .xit => try chunk_reader.skipBytes(num_bytes),
+                },
             }
         }
 
         pub fn read(self: *@This(), buf: []u8) !usize {
             return switch (self.*) {
                 .pack => |*pack| try pack.read(buf),
-                .chunk => |*chunk_reader| try chunk_reader.read(buf),
+                .chunk => |*chunk_reader| switch (repo_kind) {
+                    .git => unreachable,
+                    .xit => try chunk_reader.read(buf),
+                },
             };
         }
     };
@@ -348,7 +378,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             },
         };
 
-        pub const Error = ZlibStream.Reader.Error || PackOrChunkObjectReader(repo_kind, repo_opts).ChunkObjectReader.Error || error{ Unseekable, UnexpectedEndOfStream, InvalidDeltaCache };
+        pub const Error = ZlibStream.Reader.Error || PackOrChunkObjectReader(repo_kind, repo_opts).Error || error{ Unseekable, UnexpectedEndOfStream, InvalidDeltaCache };
 
         pub fn init(
             allocator: std.mem.Allocator,
@@ -597,7 +627,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                 .ofs => |ofs| .{ .pack = try PackObjectReader(repo_kind, repo_opts).initAtPosition(allocator, ofs.pack_file_path, ofs.position) },
                 .ref => |ref| switch (repo_kind) {
                     .git => .{ .pack = try PackObjectReader(repo_kind, repo_opts).initWithIndex(allocator, state.core, &ref.oid_hex) },
-                    .xit => .{ .chunk = try chunk.ChunkObjectReader(repo_opts).init(allocator, state, &ref.oid_hex) },
+                    .xit => .{ .chunk = try PackOrChunkObjectReader(repo_kind, repo_opts).ChunkObjectReader.init(allocator, state, &ref.oid_hex) },
                 },
             };
             errdefer base_reader.deinit(allocator);
