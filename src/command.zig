@@ -283,7 +283,7 @@ fn commandHelp(command_kind: CommandKind) Help {
             \\cherry pick a commit:
             \\    xit cherry-pick a1b2c3...
             \\continue after merge conflict resolution:
-            \\    xit merge --continue
+            \\    xit cherry-pick --continue
             ,
         },
         .config => .{
