@@ -28,14 +28,14 @@ pub const Writers = struct {
 
 const ProgressCtx = struct {
     writers: Writers,
-    print_count: *usize,
+    clear_line: *bool,
 
     pub fn run(self: @This(), text: []const u8) !void {
-        if (self.print_count.* > 0) {
+        if (self.clear_line.*) {
             try self.writers.out.print("\x1B[F", .{});
         }
         try self.writers.out.print("{s}\n", .{text});
-        self.print_count.* += 1;
+        self.clear_line.* = true;
     }
 };
 
@@ -108,15 +108,23 @@ pub fn run(
             },
             .clone => |clone_cmd| {
                 const repo_opts_with_ctx = repo_opts.withProgressCtx(ProgressCtx);
-                var print_count: usize = 0;
+                var clear_line = false;
                 var repo = try rp.Repo(repo_kind, repo_opts_with_ctx).clone(
                     allocator,
                     clone_cmd.url,
                     cwd,
                     clone_cmd.local_path,
-                    .{ .progress_ctx = ProgressCtx{ .writers = writers, .print_count = &print_count } },
+                    .{ .progress_ctx = ProgressCtx{ .writers = writers, .clear_line = &clear_line } },
                 );
                 defer repo.deinit();
+
+                if (repo_kind == .xit) {
+                    try writers.out.print(
+                        \\
+                        \\clone complete! here's how to enable patch-based merging:
+                        \\    xit patch on
+                    , .{});
+                }
             },
             else => if (.none == repo_opts.hash) {
                 // if no hash was specified, use AnyRepo to detect the hash being used
@@ -507,12 +515,24 @@ fn runCommand(
         },
         .clone => {},
         .fetch => |fetch_cmd| {
-            var print_count: usize = 0;
-            try repo.fetch(allocator, fetch_cmd.remote_name, .{ .progress_ctx = ProgressCtx{ .writers = writers, .print_count = &print_count } });
+            var clear_line = false;
+            try repo.fetch(allocator, fetch_cmd.remote_name, .{ .progress_ctx = ProgressCtx{ .writers = writers, .clear_line = &clear_line } });
         },
         .push => |push_cmd| {
-            var print_count: usize = 0;
-            try repo.push(allocator, push_cmd.remote_name, push_cmd.refspec, .{ .progress_ctx = ProgressCtx{ .writers = writers, .print_count = &print_count } });
+            var clear_line = false;
+            try repo.push(allocator, push_cmd.remote_name, push_cmd.refspec, .{ .progress_ctx = ProgressCtx{ .writers = writers, .clear_line = &clear_line } });
+        },
+        .patch => |patch_cmd| switch (repo_kind) {
+            .git => {
+                try writers.err.print("command not valid for this backend\n", .{});
+                return error.PrintedError;
+            },
+            .xit => if (patch_cmd) {
+                var clear_line = false;
+                try repo.patchOn(allocator, ProgressCtx{ .writers = writers, .clear_line = &clear_line });
+            } else {
+                try repo.patchOff(allocator);
+            },
         },
     }
 }

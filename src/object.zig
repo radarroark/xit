@@ -1161,129 +1161,153 @@ pub fn ObjectIterator(
     };
 }
 
-fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
-    return struct {
-        const DB = rp.Repo(.xit, repo_opts).DB;
-        const db_name = "temp.db";
+pub fn PatchWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
+    return switch (repo_kind) {
+        .git => struct {
+            pub fn deinit(
+                _: *PatchWriter(repo_kind, repo_opts),
+                _: std.mem.Allocator,
+            ) void {}
 
-        xit_dir: std.fs.Dir,
-        db_file: std.fs.File,
-        db: *DB,
-        parent_to_children: DB.HashMap(.read_write),
-        oid_queue: std.AutoArrayHashMapUnmanaged([hash.byteLen(repo_opts.hash)]u8, void),
-        commit_count: usize,
+            pub fn add(
+                _: *PatchWriter(repo_kind, repo_opts),
+                _: rp.Repo(repo_kind, repo_opts).State(.read_only),
+                _: std.mem.Allocator,
+                _: *const [hash.byteLen(repo_opts.hash)]u8,
+            ) !void {}
 
-        fn init(state: rp.Repo(.xit, repo_opts).State(.read_only), allocator: std.mem.Allocator) !PatchWriter(repo_opts) {
-            const db_file = try state.core.xit_dir.createFile(db_name, .{ .truncate = true, .lock = .exclusive, .read = true });
-            errdefer {
-                db_file.close();
-                state.core.xit_dir.deleteFile(db_name) catch {};
-            }
+            pub fn write(
+                _: *PatchWriter(repo_kind, repo_opts),
+                _: rp.Repo(repo_kind, repo_opts).State(.read_write),
+                _: std.mem.Allocator,
+                _: ?repo_opts.ProgressCtx,
+            ) !void {}
+        },
+        .xit => struct {
+            const DB = rp.Repo(.xit, repo_opts).DB;
+            const db_name = "temp.db";
 
-            const db_ptr = try allocator.create(DB);
-            errdefer allocator.destroy(db_ptr);
-            db_ptr.* = try DB.init(allocator, .{ .file = db_file });
+            xit_dir: std.fs.Dir,
+            db_file: std.fs.File,
+            db: *DB,
+            parent_to_children: DB.HashMap(.read_write),
+            oid_queue: std.AutoArrayHashMapUnmanaged([hash.byteLen(repo_opts.hash)]u8, void),
+            commit_count: usize,
 
-            const map = try DB.HashMap(.read_write).init(db_ptr.rootCursor());
-
-            const parent_to_children_cursor = try map.putCursor(hash.hashInt(repo_opts.hash, "parent->children"));
-            const parent_to_children = try DB.HashMap(.read_write).init(parent_to_children_cursor);
-
-            return .{
-                .xit_dir = state.core.xit_dir,
-                .db_file = db_file,
-                .db = db_ptr,
-                .parent_to_children = parent_to_children,
-                .oid_queue = std.AutoArrayHashMapUnmanaged([hash.byteLen(repo_opts.hash)]u8, void){},
-                .commit_count = 0,
-            };
-        }
-
-        fn deinit(self: *PatchWriter(repo_opts), allocator: std.mem.Allocator) void {
-            self.db_file.close();
-            self.xit_dir.deleteFile(db_name) catch {};
-            allocator.destroy(self.db);
-            self.oid_queue.deinit(allocator);
-        }
-
-        fn add(
-            self: *PatchWriter(repo_opts),
-            state: rp.Repo(.xit, repo_opts).State(.read_only),
-            allocator: std.mem.Allocator,
-            oid: *const [hash.byteLen(repo_opts.hash)]u8,
-        ) !void {
-            const oid_hex = std.fmt.bytesToHex(oid, .lower);
-            const commit_id_int = try hash.hexToInt(repo_opts.hash, &oid_hex);
-
-            var object = try Object(.xit, repo_opts, .full).init(allocator, state, &oid_hex);
-            defer object.deinit();
-
-            var is_base_oid = false;
-            if (object.content.commit.metadata.firstParent()) |parent_oid| {
-                const parent_commit_id_int = try hash.hexToInt(repo_opts.hash, parent_oid);
-
-                const children_cursor = try self.parent_to_children.putCursor(parent_commit_id_int);
-                const children = try DB.HashMap(.read_write).init(children_cursor);
-                _ = try children.putCursor(commit_id_int);
-
-                if (try state.extra.moment.getCursor(hash.hashInt(repo_opts.hash, "commit-id->snapshot"))) |commit_id_to_snapshot_cursor| {
-                    const commit_id_to_snapshot = try DB.HashMap(.read_only).init(commit_id_to_snapshot_cursor);
-                    if (try commit_id_to_snapshot.getCursor(parent_commit_id_int)) |_| {
-                        is_base_oid = true;
-                    }
-                }
-            } else {
-                is_base_oid = true;
-            }
-
-            if (is_base_oid) {
-                try self.oid_queue.put(allocator, oid.*, {});
-            }
-
-            self.commit_count += 1;
-        }
-
-        fn write(
-            self: *PatchWriter(repo_opts),
-            state: rp.Repo(.xit, repo_opts).State(.read_write),
-            allocator: std.mem.Allocator,
-            progress_ctx_maybe: ?repo_opts.ProgressCtx,
-        ) !void {
-            const patch = @import("./patch.zig");
-
-            var patch_count: usize = 0;
-
-            while (self.oid_queue.count() > 0) {
-                const oid = self.oid_queue.keys()[0];
-                const oid_hex = std.fmt.bytesToHex(&oid, .lower);
-
-                patch_count += 1;
-                if (repo_opts.ProgressCtx != void) {
-                    if (progress_ctx_maybe) |progress_ctx| {
-                        const text = try std.fmt.allocPrint(allocator, "Writing patches for commit {}/{}", .{ patch_count, self.commit_count });
-                        defer allocator.free(text);
-                        try progress_ctx.run(text);
-                    }
+            pub fn init(state: rp.Repo(.xit, repo_opts).State(.read_only), allocator: std.mem.Allocator) !PatchWriter(repo_kind, repo_opts) {
+                const db_file = try state.core.xit_dir.createFile(db_name, .{ .truncate = true, .lock = .exclusive, .read = true });
+                errdefer {
+                    db_file.close();
+                    state.core.xit_dir.deleteFile(db_name) catch {};
                 }
 
-                try patch.writeAndApplyPatches(repo_opts, state, allocator, &oid_hex);
-                self.oid_queue.swapRemoveAt(0);
+                const db_ptr = try allocator.create(DB);
+                errdefer allocator.destroy(db_ptr);
+                db_ptr.* = try DB.init(allocator, .{ .file = db_file });
 
+                const map = try DB.HashMap(.read_write).init(db_ptr.rootCursor());
+
+                const parent_to_children_cursor = try map.putCursor(hash.hashInt(repo_opts.hash, "parent->children"));
+                const parent_to_children = try DB.HashMap(.read_write).init(parent_to_children_cursor);
+
+                return .{
+                    .xit_dir = state.core.xit_dir,
+                    .db_file = db_file,
+                    .db = db_ptr,
+                    .parent_to_children = parent_to_children,
+                    .oid_queue = std.AutoArrayHashMapUnmanaged([hash.byteLen(repo_opts.hash)]u8, void){},
+                    .commit_count = 0,
+                };
+            }
+
+            pub fn deinit(self: *PatchWriter(repo_kind, repo_opts), allocator: std.mem.Allocator) void {
+                self.db_file.close();
+                self.xit_dir.deleteFile(db_name) catch {};
+                allocator.destroy(self.db);
+                self.oid_queue.deinit(allocator);
+            }
+
+            pub fn add(
+                self: *PatchWriter(repo_kind, repo_opts),
+                state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+                allocator: std.mem.Allocator,
+                oid: *const [hash.byteLen(repo_opts.hash)]u8,
+            ) !void {
+                const oid_hex = std.fmt.bytesToHex(oid, .lower);
                 const commit_id_int = try hash.hexToInt(repo_opts.hash, &oid_hex);
-                if (try self.parent_to_children.getCursor(commit_id_int)) |children_cursor| {
-                    const children = try DB.HashMap(.read_only).init(children_cursor);
 
-                    var children_iter = try children.iterator();
-                    defer children_iter.deinit();
+                var object = try Object(.xit, repo_opts, .full).init(allocator, state, &oid_hex);
+                defer object.deinit();
 
-                    while (try children_iter.next()) |*next_cursor| {
-                        const kv_pair = try next_cursor.readKeyValuePair();
-                        const child_oid = hash.intToBytes(hash.HashInt(repo_opts.hash), kv_pair.hash);
-                        try self.oid_queue.put(allocator, child_oid, {});
+                var is_base_oid = false;
+                if (object.content.commit.metadata.firstParent()) |parent_oid| {
+                    const parent_commit_id_int = try hash.hexToInt(repo_opts.hash, parent_oid);
+
+                    if (try state.extra.moment.getCursor(hash.hashInt(repo_opts.hash, "commit-id->snapshot"))) |commit_id_to_snapshot_cursor| {
+                        const commit_id_to_snapshot = try DB.HashMap(.read_only).init(commit_id_to_snapshot_cursor);
+                        if (try commit_id_to_snapshot.getCursor(parent_commit_id_int)) |_| {
+                            is_base_oid = true;
+                        }
+                    }
+
+                    if (!is_base_oid) {
+                        const children_cursor = try self.parent_to_children.putCursor(parent_commit_id_int);
+                        const children = try DB.HashMap(.read_write).init(children_cursor);
+                        _ = try children.putCursor(commit_id_int);
+                    }
+                } else {
+                    is_base_oid = true;
+                }
+
+                if (is_base_oid) {
+                    try self.oid_queue.put(allocator, oid.*, {});
+                }
+
+                self.commit_count += 1;
+            }
+
+            pub fn write(
+                self: *PatchWriter(repo_kind, repo_opts),
+                state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+                allocator: std.mem.Allocator,
+                progress_ctx_maybe: ?repo_opts.ProgressCtx,
+            ) !void {
+                const patch = @import("./patch.zig");
+
+                var patch_count: usize = 0;
+
+                while (self.oid_queue.count() > 0) {
+                    const oid = self.oid_queue.keys()[0];
+                    const oid_hex = std.fmt.bytesToHex(&oid, .lower);
+
+                    patch_count += 1;
+                    if (repo_opts.ProgressCtx != void) {
+                        if (progress_ctx_maybe) |progress_ctx| {
+                            const text = try std.fmt.allocPrint(allocator, "Writing patches for commit {}/{}", .{ patch_count, self.commit_count });
+                            defer allocator.free(text);
+                            try progress_ctx.run(text);
+                        }
+                    }
+
+                    try patch.writeAndApplyPatches(repo_opts, state, allocator, &oid_hex);
+                    self.oid_queue.swapRemoveAt(0);
+
+                    const commit_id_int = try hash.hexToInt(repo_opts.hash, &oid_hex);
+                    if (try self.parent_to_children.getCursor(commit_id_int)) |children_cursor| {
+                        const children = try DB.HashMap(.read_only).init(children_cursor);
+
+                        var children_iter = try children.iterator();
+                        defer children_iter.deinit();
+
+                        while (try children_iter.next()) |*next_cursor| {
+                            const kv_pair = try next_cursor.readKeyValuePair();
+                            const child_oid = hash.intToBytes(hash.HashInt(repo_opts.hash), kv_pair.hash);
+                            try self.oid_queue.put(allocator, child_oid, {});
+                        }
                     }
                 }
             }
-        }
+        },
     };
 }
 
@@ -1297,8 +1321,12 @@ pub fn copyFromObjectIterator(
     obj_iter: *ObjectIterator(source_repo_kind, source_repo_opts, .raw),
     progress_ctx_maybe: ?repo_opts.ProgressCtx,
 ) !void {
-    var patch_writer = if (repo_kind == .xit) try PatchWriter(repo_opts).init(state.readOnly(), allocator) else {};
-    defer if (repo_kind == .xit) patch_writer.deinit(allocator);
+    var patch_writer_maybe: ?PatchWriter(repo_kind, repo_opts) =
+        if (repo_kind == .xit and try cfg.patchEnabled(repo_opts, state.readOnly(), allocator))
+            try PatchWriter(repo_kind, repo_opts).init(state.readOnly(), allocator)
+        else
+            null;
+    defer if (patch_writer_maybe) |*patch_writer| patch_writer.deinit(allocator);
 
     var object_count: usize = 0;
 
@@ -1324,12 +1352,15 @@ pub fn copyFromObjectIterator(
             object.object_reader.header,
             &oid,
         );
-        if (repo_kind == .xit and object.content == .commit) {
-            try patch_writer.add(state.readOnly(), allocator, &oid);
+
+        if (patch_writer_maybe) |*patch_writer| {
+            if (object.content == .commit) {
+                try patch_writer.add(state.readOnly(), allocator, &oid);
+            }
         }
     }
 
-    if (repo_kind == .xit) {
+    if (patch_writer_maybe) |*patch_writer| {
         try patch_writer.write(state, allocator, progress_ctx_maybe);
     }
 }
@@ -1342,8 +1373,12 @@ pub fn copyFromPackObjectIterator(
     pack_iter: *pack.PackObjectIterator(repo_kind, repo_opts),
     progress_ctx_maybe: ?repo_opts.ProgressCtx,
 ) !void {
-    var patch_writer = if (repo_kind == .xit) try PatchWriter(repo_opts).init(state.readOnly(), allocator) else {};
-    defer if (repo_kind == .xit) patch_writer.deinit(allocator);
+    var patch_writer_maybe: ?PatchWriter(repo_kind, repo_opts) =
+        if (repo_kind == .xit and try cfg.patchEnabled(repo_opts, state.readOnly(), allocator))
+            try PatchWriter(repo_kind, repo_opts).init(state.readOnly(), allocator)
+        else
+            null;
+    defer if (patch_writer_maybe) |*patch_writer| patch_writer.deinit(allocator);
 
     var object_count: usize = 0;
 
@@ -1381,12 +1416,15 @@ pub fn copyFromPackObjectIterator(
         var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
         const header = pack_reader.header();
         try writeObject(repo_kind, repo_opts, state, &stream, stream.reader(), header, &oid);
-        if (repo_kind == .xit and header.kind == .commit) {
-            try patch_writer.add(state.readOnly(), allocator, &oid);
+
+        if (patch_writer_maybe) |*patch_writer| {
+            if (header.kind == .commit) {
+                try patch_writer.add(state.readOnly(), allocator, &oid);
+            }
         }
     }
 
-    if (repo_kind == .xit) {
+    if (patch_writer_maybe) |*patch_writer| {
         try patch_writer.write(state, allocator, progress_ctx_maybe);
     }
 }

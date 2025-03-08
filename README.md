@@ -60,8 +60,6 @@ xit commit -m "test commit"
 xit push origin master
 ```
 
-NOTE: right now, clone will take much longer than with git, because we are generating patches for every commit in the repo's history in order to do [patch-based merging](docs/patch.md). I will change this soon so patches are generated as an optional step after cloning; if you choose not to generate patches, it will use the git-style three-way merge instead of patch-based merging.
-
 I still need to implement `pull` but for now you can combine `fetch` and `merge` to get the same effect:
 
 ```
@@ -75,6 +73,7 @@ Here's the output of `xit --help` to give you an idea of what's supported so far
 help: xit <command> [<args>]
 
 init         create an empty xit repository.
+patch        enable or disable patch-based merging.
 add          add file contents to the index.
 unadd        remove any changes to a file that were added to the index.
              similar to `git reset HEAD`.

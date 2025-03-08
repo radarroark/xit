@@ -13,6 +13,7 @@ const tag = @import("./tag.zig");
 
 pub const CommandKind = enum {
     init,
+    patch,
     add,
     unadd,
     untrack,
@@ -56,6 +57,18 @@ fn commandHelp(command_kind: CommandKind) Help {
             \\    xit init
             \\in a new dir:
             \\    xit init myproject
+            ,
+        },
+        .patch => .{
+            .name = "patch",
+            .descrip =
+            \\enable or disable patch-based merging.
+            ,
+            .example =
+            \\enable:
+            \\    xit patch on
+            \\disable:
+            \\    xit patch off
             ,
         },
         .add => .{
@@ -488,6 +501,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
         init: struct {
             dir: []const u8,
         },
+        patch: bool,
         add: struct {
             paths: []const []const u8,
         },
@@ -517,8 +531,8 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
             path: []const u8,
         },
         log,
-        merge: mrg.MergeInput(repo_kind, hash_kind),
-        cherry_pick: mrg.MergeInput(repo_kind, hash_kind),
+        merge: mrg.MergeInput(hash_kind),
+        cherry_pick: mrg.MergeInput(hash_kind),
         config: cfg.ConfigCommand,
         remote: cfg.ConfigCommand,
         clone: struct {
@@ -544,6 +558,11 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                     } else {
                         return null;
                     }
+                },
+                .patch => {
+                    if (cmd_args.positional_args.len != 1) return null;
+
+                    return .{ .patch = if (std.mem.eql(u8, "on", cmd_args.positional_args[0])) true else if (std.mem.eql(u8, "off", cmd_args.positional_args[0])) false else return null };
                 },
                 .add => {
                     if (cmd_args.positional_args.len == 0) return null;
@@ -712,7 +731,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                     return .log;
                 },
                 .merge => {
-                    var merge_action: mrg.MergeAction(repo_kind, hash_kind) = undefined;
+                    var merge_action: mrg.MergeAction(hash_kind) = undefined;
 
                     if (cmd_args.contains("--continue")) {
                         if (cmd_args.positional_args.len != 0) return null;
@@ -734,7 +753,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                     };
                 },
                 .cherry_pick => {
-                    var merge_action: mrg.MergeAction(repo_kind, hash_kind) = undefined;
+                    var merge_action: mrg.MergeAction(hash_kind) = undefined;
 
                     if (cmd_args.contains("--continue")) {
                         if (cmd_args.positional_args.len != 0) return null;

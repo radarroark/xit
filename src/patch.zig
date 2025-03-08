@@ -4,6 +4,7 @@ const hash = @import("./hash.zig");
 const df = @import("./diff.zig");
 const obj = @import("./object.zig");
 const tr = @import("./tree.zig");
+const cfg = @import("./config.zig");
 
 // a globally-unique id representing a line.
 // it's just the hash of the patch it came from,
@@ -33,6 +34,11 @@ pub fn writeAndApplyPatches(
     allocator: std.mem.Allocator,
     commit_oid: *const [hash.hexLen(repo_opts.hash)]u8,
 ) !void {
+    // if the merge algo isn't set to patch, exit early
+    if (!try cfg.patchEnabled(repo_opts, state.readOnly(), allocator)) {
+        return;
+    }
+
     const parent_commit_oid_maybe = blk: {
         var commit_object = try obj.Object(.xit, repo_opts, .full).init(allocator, state.readOnly(), commit_oid);
         defer commit_object.deinit();

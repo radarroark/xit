@@ -8,6 +8,7 @@ const fs = @import("./fs.zig");
 const rp = @import("./repo.zig");
 const df = @import("./diff.zig");
 const tr = @import("./tree.zig");
+const cfg = @import("./config.zig");
 
 fn getDescendent(
     comptime repo_kind: rp.RepoKind,
@@ -1317,23 +1318,20 @@ pub const MergeAlgorithm = enum {
     patch, // patch-based (xit only)
 };
 
-pub fn MergeAction(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
+pub fn MergeAction(comptime hash_kind: hash.HashKind) type {
     return union(enum) {
         new: struct {
             source: []const rf.RefOrOid(hash_kind),
-            algo: MergeAlgorithm = switch (repo_kind) {
-                .git => .diff3,
-                .xit => .patch,
-            },
+            algo: ?MergeAlgorithm = null,
         },
         cont,
     };
 }
 
-pub fn MergeInput(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKind) type {
+pub fn MergeInput(comptime hash_kind: hash.HashKind) type {
     return struct {
         kind: MergeKind,
-        action: MergeAction(repo_kind, hash_kind),
+        action: MergeAction(hash_kind),
         commit_metadata: ?obj.CommitMetadata(hash_kind) = null,
     };
 }
@@ -1361,7 +1359,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
         pub fn init(
             state: rp.Repo(repo_kind, repo_opts).State(.read_write),
             allocator: std.mem.Allocator,
-            merge_input: MergeInput(repo_kind, repo_opts.hash),
+            merge_input: MergeInput(repo_opts.hash),
         ) !Merge(repo_kind, repo_opts) {
             // TODO: exit early if work dir is dirty
 
@@ -1421,6 +1419,28 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                             }
                         },
                     }
+
+                    const merge_algo: MergeAlgorithm = action.algo orelse switch (repo_kind) {
+                        .git => .diff3,
+                        .xit => blk: {
+                            var config = try cfg.Config(repo_kind, repo_opts).init(state.readOnly(), allocator);
+                            defer config.deinit();
+
+                            if (config.sections.get("merge")) |merge_section| {
+                                if (merge_section.get("algorithm")) |algo| {
+                                    if (std.mem.eql(u8, "diff3", algo)) {
+                                        break :blk .diff3;
+                                    } else if (std.mem.eql(u8, "patch", algo)) {
+                                        break :blk .patch;
+                                    } else {
+                                        return error.InvalidMergeAlgorithm;
+                                    }
+                                }
+                            }
+
+                            break :blk .diff3;
+                        },
+                    };
 
                     // we need to return the source name so copy it into a new buffer
                     // so we an ensure it lives as long as the rest of the return struct
@@ -1496,7 +1516,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 
                     // look for same path conflicts while populating the clean diff
                     for (source_diff.changes.keys(), source_diff.changes.values()) |path, source_change| {
-                        const same_path_result = try samePathConflict(repo_kind, repo_opts, state, allocator, &base_oid, &target_oid, &source_oid, target_name, source_name, target_diff.changes.get(path), source_change, path, action.algo);
+                        const same_path_result = try samePathConflict(repo_kind, repo_opts, state, allocator, &base_oid, &target_oid, &source_oid, target_name, source_name, target_diff.changes.get(path), source_change, path, merge_algo);
                         if (same_path_result.change) |change| {
                             try clean_diff.changes.put(path, change);
                         }

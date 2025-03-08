@@ -43,6 +43,7 @@ pub fn RepoOpts(comptime repo_kind: RepoKind) type {
                     .max_size = 4096,
                     .normalization = .level1,
                 },
+                enable_patches: bool = false,
             },
         };
 
@@ -228,6 +229,10 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     try self.addBranch(.{ .name = default_branch_name });
                     try self.resetAdd(.{ .ref = .{ .kind = .head, .name = default_branch_name } });
 
+                    if (repo_opts.extra.enable_patches) {
+                        try self.patchOn(allocator, null);
+                    }
+
                     return self;
                 },
             }
@@ -286,7 +291,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     };
                     errdefer db_file.close();
 
-                    return .{
+                    var self = Repo(repo_kind, repo_opts){
                         .core = .{
                             .init_opts = opts,
                             .work_dir = work_dir,
@@ -303,6 +308,12 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             },
                         },
                     };
+
+                    if (repo_opts.extra.enable_patches) {
+                        try self.patchOn(allocator, null);
+                    }
+
+                    return self;
                 },
             }
         }
@@ -815,7 +826,11 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             return try obj.ObjectIterator(repo_kind, repo_opts, .raw).init(allocator, state, opts);
         }
 
-        pub fn merge(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: mrg.MergeInput(repo_kind, repo_opts.hash)) !mrg.Merge(repo_kind, repo_opts) {
+        pub fn merge(
+            self: *Repo(repo_kind, repo_opts),
+            allocator: std.mem.Allocator,
+            input: mrg.MergeInput(repo_opts.hash),
+        ) !mrg.Merge(repo_kind, repo_opts) {
             switch (repo_kind) {
                 .git => return try mrg.Merge(repo_kind, repo_opts).init(.{ .core = &self.core, .extra = .{} }, allocator, input),
                 .xit => {
@@ -826,7 +841,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     const Ctx = struct {
                         core: *Repo(repo_kind, repo_opts).Core,
                         allocator: std.mem.Allocator,
-                        input: mrg.MergeInput(repo_kind, repo_opts.hash),
+                        input: mrg.MergeInput(repo_opts.hash),
                         merge_result: *mrg.Merge(repo_kind, repo_opts),
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
@@ -880,6 +895,11 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     lock.success = true;
                 },
                 .xit => {
+                    // this config option may not be enabled here
+                    if (std.ascii.eqlIgnoreCase("merge.algorithm", input.name)) {
+                        return error.InvalidConfig;
+                    }
+
                     const Ctx = struct {
                         core: *Repo(repo_kind, repo_opts).Core,
                         config: *cfg.Config(repo_kind, repo_opts),
@@ -934,6 +954,103 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     );
                 },
             }
+        }
+
+        pub fn patchOn(
+            self: *Repo(.xit, repo_opts),
+            allocator: std.mem.Allocator,
+            progress_ctx_maybe: ?repo_opts.ProgressCtx,
+        ) !void {
+            const Ctx = struct {
+                core: *Repo(repo_kind, repo_opts).Core,
+                allocator: std.mem.Allocator,
+                progress_ctx_maybe: ?repo_opts.ProgressCtx,
+
+                pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
+                    var moment = try DB.HashMap(.read_write).init(cursor.*);
+                    const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
+
+                    if (try cfg.patchEnabled(repo_opts, state.readOnly(), ctx.allocator)) {
+                        return;
+                    }
+
+                    {
+                        var config = try cfg.Config(.xit, repo_opts).init(state.readOnly(), ctx.allocator);
+                        defer config.deinit();
+                        try config.add(state, .{ .name = "merge.algorithm", .value = "patch" });
+                    }
+
+                    var obj_iter = try obj.ObjectIterator(repo_kind, repo_opts, .full).init(ctx.allocator, state.readOnly(), .{ .recursive = false });
+                    defer obj_iter.deinit();
+
+                    // add heads
+                    {
+                        var ref_list = try rf.RefList.init(repo_kind, repo_opts, state.readOnly(), ctx.allocator, .head);
+                        defer ref_list.deinit();
+
+                        for (ref_list.refs.values()) |ref| {
+                            if (try rf.readRecur(repo_kind, repo_opts, state.readOnly(), .{ .ref = ref })) |oid| {
+                                try obj_iter.include(&oid);
+                            }
+                        }
+                    }
+
+                    // add tags
+                    {
+                        var ref_list = try rf.RefList.init(repo_kind, repo_opts, state.readOnly(), ctx.allocator, .tag);
+                        defer ref_list.deinit();
+
+                        for (ref_list.refs.values()) |ref| {
+                            if (try rf.readRecur(repo_kind, repo_opts, state.readOnly(), .{ .ref = ref })) |oid| {
+                                try obj_iter.include(&oid);
+                            }
+                        }
+                    }
+
+                    var patch_writer = try obj.PatchWriter(repo_kind, repo_opts).init(state.readOnly(), ctx.allocator);
+                    defer patch_writer.deinit(ctx.allocator);
+
+                    while (try obj_iter.next()) |commit_object| {
+                        defer commit_object.deinit();
+                        const oid = try hash.hexToBytes(repo_opts.hash, commit_object.oid);
+                        try patch_writer.add(state.readOnly(), ctx.allocator, &oid);
+                    }
+
+                    try patch_writer.write(state, ctx.allocator, ctx.progress_ctx_maybe);
+                }
+            };
+
+            const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
+            try history.appendContext(
+                .{ .slot = try history.getSlot(-1) },
+                Ctx{ .core = &self.core, .allocator = allocator, .progress_ctx_maybe = progress_ctx_maybe },
+            );
+        }
+
+        pub fn patchOff(self: *Repo(.xit, repo_opts), allocator: std.mem.Allocator) !void {
+            const Ctx = struct {
+                core: *Repo(repo_kind, repo_opts).Core,
+                allocator: std.mem.Allocator,
+
+                pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
+                    var moment = try DB.HashMap(.read_write).init(cursor.*);
+                    const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
+
+                    if (!try cfg.patchEnabled(repo_opts, state.readOnly(), ctx.allocator)) {
+                        return;
+                    }
+
+                    var config = try cfg.Config(.xit, repo_opts).init(state.readOnly(), ctx.allocator);
+                    defer config.deinit();
+                    try config.remove(state, .{ .name = "merge.algorithm" });
+                }
+            };
+
+            const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
+            try history.appendContext(
+                .{ .slot = try history.getSlot(-1) },
+                Ctx{ .core = &self.core, .allocator = allocator },
+            );
         }
 
         pub fn listRemotes(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator) !cfg.RemoteConfig {
