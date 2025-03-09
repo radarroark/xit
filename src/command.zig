@@ -272,6 +272,8 @@ fn commandHelp(command_kind: CommandKind) Help {
             \\    xit merge a1b2c3...
             \\continue after merge conflict resolution:
             \\    xit merge --continue
+            \\abort merge:
+            \\    xit merge --abort
             ,
         },
         .cherry_pick => .{
@@ -284,6 +286,8 @@ fn commandHelp(command_kind: CommandKind) Help {
             \\    xit cherry-pick a1b2c3...
             \\continue after merge conflict resolution:
             \\    xit cherry-pick --continue
+            \\abort cherry-pick:
+            \\    xit cherry-pick --abort
             ,
         },
         .config => .{
@@ -736,6 +740,14 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                     if (cmd_args.contains("--continue")) {
                         if (cmd_args.positional_args.len != 0) return null;
                         merge_action = .cont;
+                    } else if (cmd_args.contains("--abort")) {
+                        if (cmd_args.positional_args.len != 0) return null;
+                        return .{ .reset_dir = .{
+                            .kind = .reset,
+                            .target = null,
+                            .update_work_dir = true,
+                            .force = true,
+                        } };
                     } else {
                         if (cmd_args.positional_args.len == 0) return null;
                         var source = std.ArrayList(rf.RefOrOid(hash_kind)).init(cmd_args.arena.allocator());
@@ -758,6 +770,14 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                     if (cmd_args.contains("--continue")) {
                         if (cmd_args.positional_args.len != 0) return null;
                         merge_action = .cont;
+                    } else if (cmd_args.contains("--abort")) {
+                        if (cmd_args.positional_args.len != 0) return null;
+                        return .{ .reset_dir = .{
+                            .kind = .reset,
+                            .target = null,
+                            .update_work_dir = true,
+                            .force = true,
+                        } };
                     } else {
                         if (cmd_args.positional_args.len == 0) return null;
                         var source = std.ArrayList(rf.RefOrOid(hash_kind)).init(cmd_args.arena.allocator());

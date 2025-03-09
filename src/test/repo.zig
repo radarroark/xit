@@ -298,14 +298,14 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
-    const checkMergeAbort = struct {
+    const checkMergeNotFinish = struct {
         fn run(repo: *rp.Repo(repo_kind, repo_opts)) !void {
             // can't merge again with an unresolved merge
             {
                 var result_or_err = repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } });
                 if (result_or_err) |*result| {
                     defer result.deinit();
-                    return error.ExpectedMergeToAbort;
+                    return error.ExpectedMergeToNotFinish;
                 } else |err| switch (err) {
                     error.UnfinishedMergeInProgress => {},
                     else => |e| return e,
@@ -317,7 +317,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                 var result_or_err = repo.merge(allocator, .{ .kind = .full, .action = .cont });
                 if (result_or_err) |*result| {
                     defer result.deinit();
-                    return error.ExpectedMergeToAbort;
+                    return error.ExpectedMergeToNotFinish;
                 } else |err| switch (err) {
                     error.CannotContinueMergeWithUnresolvedConflicts => {},
                     else => |e| return e,
@@ -413,7 +413,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         }
 
         // ensure merge cannot be run again while there are unresolved conflicts
-        try checkMergeAbort(&repo);
+        try checkMergeNotFinish(&repo);
 
         // resolve conflict
         try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt",
@@ -524,7 +524,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         }
 
         // ensure merge cannot be run again while there are unresolved conflicts
-        try checkMergeAbort(&repo);
+        try checkMergeNotFinish(&repo);
 
         // resolve conflict
         try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt",
@@ -690,7 +690,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         }
 
         // ensure merge cannot be run again while there are unresolved conflicts
-        try checkMergeAbort(&repo);
+        try checkMergeNotFinish(&repo);
 
         // resolve conflict
         try repo.add(allocator, &.{"f.txt"});
@@ -763,7 +763,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         }
 
         // ensure merge cannot be run again while there are unresolved conflicts
-        try checkMergeAbort(&repo);
+        try checkMergeNotFinish(&repo);
 
         // resolve conflict
         try repo.add(allocator, &.{"f.txt"});
@@ -838,7 +838,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         }
 
         // ensure merge cannot be run again while there are unresolved conflicts
-        try checkMergeAbort(&repo);
+        try checkMergeNotFinish(&repo);
 
         // make sure renamed file exists
         var renamed_file = try repo.core.work_dir.openFile("f.txt~master", .{});
@@ -919,7 +919,7 @@ fn testMergeConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         }
 
         // ensure merge cannot be run again while there are unresolved conflicts
-        try checkMergeAbort(&repo);
+        try checkMergeNotFinish(&repo);
 
         // resolve conflict
         try repo.add(allocator, &.{"f.txt"});
@@ -1475,14 +1475,14 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
-    const checkCherryPickAbort = struct {
+    const checkCherryPickNotFinish = struct {
         fn run(repo: *rp.Repo(repo_kind, repo_opts)) !void {
             // can't cherry-pick again with an unresolved cherry-pick
             {
                 var result_or_err = repo.merge(allocator, .{ .kind = .pick, .action = .{ .new = .{ .source = &.{.{ .oid = &([_]u8{0} ** hash.hexLen(repo_opts.hash)) }} } } });
                 if (result_or_err) |*result| {
                     defer result.deinit();
-                    return error.ExpectedMergeToAbort;
+                    return error.ExpectedMergeToNotFinish;
                 } else |err| switch (err) {
                     error.UnfinishedMergeInProgress => {},
                     else => |e| return e,
@@ -1494,7 +1494,7 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
                 var result_or_err = repo.merge(allocator, .{ .kind = .pick, .action = .cont });
                 if (result_or_err) |*result| {
                     defer result.deinit();
-                    return error.ExpectedMergeToAbort;
+                    return error.ExpectedMergeToNotFinish;
                 } else |err| switch (err) {
                     error.CannotContinueMergeWithUnresolvedConflicts => {},
                     else => |e| return e,
@@ -1578,7 +1578,7 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
     }
 
     // ensure cherry-pick cannot be run again while there are unresolved conflicts
-    try checkCherryPickAbort(&repo);
+    try checkCherryPickNotFinish(&repo);
 
     // resolve conflict
     try addFile(repo_kind, repo_opts, &repo, allocator, "readme.md",
@@ -1590,7 +1590,7 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
         var result_or_err = repo.merge(allocator, .{ .kind = .full, .action = .cont });
         if (result_or_err) |*result| {
             defer result.deinit();
-            return error.ExpectedMergeToAbort;
+            return error.ExpectedMergeToNotFinish;
         } else |err| switch (err) {
             error.OtherMergeInProgress => {},
             else => |e| return e,

@@ -1218,12 +1218,12 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         // make a commit
         try main.run(repo_kind, repo_opts, allocator, &.{ "commit", "-m", "third commit" }, work_dir, .{});
 
-        try hello_txt.seekTo(0);
-        try hello_txt.writeAll("hello, world on the stuff branch, commit 4!");
-        try hello_txt.setEndPos(try hello_txt.getPos());
+        var stuff_txt = try work_dir.createFile("stuff.txt", .{});
+        defer stuff_txt.close();
+        try stuff_txt.writeAll("this was made on the stuff branch, commit 4!");
 
         // add the files
-        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "hello.txt" }, work_dir, .{});
+        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "stuff.txt" }, work_dir, .{});
 
         // make a commit
         try main.run(repo_kind, repo_opts, allocator, &.{ "commit", "-m", "fourth commit" }, work_dir, .{});
@@ -1272,14 +1272,24 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     // switch to master
     try main.run(repo_kind, repo_opts, allocator, &.{ "switch", "master" }, work_dir, .{});
 
-    // modify file and commit
+    // modify files and commit
     {
+        const hello_txt = try work_dir.openFile("hello.txt", .{ .mode = .read_write });
+        defer hello_txt.close();
+
+        try hello_txt.seekTo(0);
+        try hello_txt.writeAll("hello, world once again!");
+        try hello_txt.setEndPos(try hello_txt.getPos());
+
         const goodbye_txt = try work_dir.openFile("goodbye.txt", .{ .mode = .read_write });
         defer goodbye_txt.close();
+
+        try goodbye_txt.seekTo(0);
         try goodbye_txt.writeAll("goodbye, world once again!");
+        try goodbye_txt.setEndPos(try goodbye_txt.getPos());
 
         // add the files
-        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "goodbye.txt" }, work_dir, .{});
+        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "hello.txt", "goodbye.txt" }, work_dir, .{});
 
         // make a commit
         try main.run(repo_kind, repo_opts, allocator, &.{ "commit", "-m", "fourth commit" }, work_dir, .{});
@@ -1369,15 +1379,54 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // merge
     {
-        try main.run(repo_kind, repo_opts, allocator, &.{ "merge", "stuff" }, work_dir, .{});
+        // both branches modified hello.txt, so there is a conflict
+        try std.testing.expectError(error.PrintedError, main.run(repo_kind, repo_opts, allocator, &.{ "merge", "stuff" }, work_dir, .{}));
+
+        // there are conflicts in the index
+        {
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+            defer repo.deinit();
+            var status = try repo.status(allocator);
+            defer status.deinit(allocator);
+            try std.testing.expect(status.conflicts.count() > 0);
+        }
+
+        // abort the merge
+        try main.run(repo_kind, repo_opts, allocator, &.{ "merge", "--abort" }, work_dir, .{});
+
+        // there are no conflicts in the index
+        {
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+            defer repo.deinit();
+            var status = try repo.status(allocator);
+            defer status.deinit(allocator);
+            try std.testing.expectEqual(0, status.conflicts.count());
+        }
+
+        // merge again
+        try std.testing.expectError(error.PrintedError, main.run(repo_kind, repo_opts, allocator, &.{ "merge", "stuff" }, work_dir, .{}));
+
+        // solve the conflict
+        {
+            const hello_txt = try work_dir.openFile("hello.txt", .{ .mode = .read_write });
+            defer hello_txt.close();
+
+            try hello_txt.seekTo(0);
+            try hello_txt.writeAll("hello, world once again!");
+            try hello_txt.setEndPos(try hello_txt.getPos());
+
+            try main.run(repo_kind, repo_opts, allocator, &.{ "add", "hello.txt" }, work_dir, .{});
+
+            try main.run(repo_kind, repo_opts, allocator, &.{ "merge", "--continue" }, work_dir, .{});
+        }
 
         // change from stuff exists
         {
-            const hello_txt = try work_dir.openFile("hello.txt", .{ .mode = .read_only });
-            defer hello_txt.close();
-            const content = try hello_txt.readToEndAlloc(allocator, 1024);
+            const stuff_txt = try work_dir.openFile("stuff.txt", .{ .mode = .read_only });
+            defer stuff_txt.close();
+            const content = try stuff_txt.readToEndAlloc(allocator, 1024);
             defer allocator.free(content);
-            try std.testing.expectEqualStrings("hello, world on the stuff branch, commit 4!", content);
+            try std.testing.expectEqualStrings("this was made on the stuff branch, commit 4!", content);
         }
 
         // change from master still exists

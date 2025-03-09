@@ -234,6 +234,10 @@ pub fn runPrint(
             try writers.err.print("there is an unfinished merge in progress! run the command with `--continue` to finish.\n", .{});
             return error.PrintedError;
         },
+        error.CannotContinueMergeWithUnresolvedConflicts => {
+            try writers.err.print("you haven't resolved all the conflicts! after fixing, run `xit add` on them.\n", .{});
+            return error.PrintedError;
+        },
         else => |e| return e,
     };
 }

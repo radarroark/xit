@@ -613,8 +613,6 @@ pub fn migrate(
 ) !void {
     var add_files = std.StringArrayHashMap(tr.TreeEntry(repo_opts.hash)).init(allocator);
     defer add_files.deinit();
-    var edit_files = std.StringArrayHashMap(tr.TreeEntry(repo_opts.hash)).init(allocator);
-    defer edit_files.deinit();
     var remove_files = std.StringArrayHashMap(void).init(allocator);
     defer remove_files.deinit();
 
@@ -630,7 +628,7 @@ pub fn migrate(
         } else {
             // otherwise, it's an edited file
             if (change.new) |new| {
-                try edit_files.put(path, new);
+                try add_files.put(path, new);
             }
         }
         // check for conflicts
@@ -691,6 +689,27 @@ pub fn migrate(
         }
     }
 
+    // if there are any unresolved conflicts, either exit with an error
+    // or (if -f is being used) replace the conflicting index entries
+    for (index.entries.keys(), index.entries.values()) |path, *index_entries_for_path| {
+        // ignore non-conflict entries
+        if (index_entries_for_path[0]) |_| {
+            continue;
+        }
+        // we can't switch if there is an unresolved merge conflict
+        else if (switch_result_maybe) |switch_result| {
+            switch_result.setConflict();
+            try switch_result.result.conflict.stale_files.put(path, {});
+        }
+        // if we are using -f, and the conflicting file isn't being removed,
+        // just add it so the index is updated (making it non-conflicting)
+        // and the work dir is (optionally) updated
+        else if (!remove_files.contains(path)) {
+            const target_entry = index_entries_for_path[2] orelse return error.ExpectedIndexEntry;
+            try add_files.put(path, .{ .oid = target_entry.oid, .mode = target_entry.mode });
+        }
+    }
+
     if (switch_result_maybe) |switch_result| {
         if (.conflict == switch_result.result) {
             return;
@@ -719,15 +738,6 @@ pub fn migrate(
     }
 
     for (add_files.keys(), add_files.values()) |path, tree_entry| {
-        // update work dir
-        if (update_work_dir) {
-            try objectToFile(repo_kind, repo_opts, state.readOnly(), allocator, path, tree_entry);
-        }
-        // update index
-        try index.addPath(state, path);
-    }
-
-    for (edit_files.keys(), edit_files.values()) |path, tree_entry| {
         // update work dir
         if (update_work_dir) {
             try objectToFile(repo_kind, repo_opts, state.readOnly(), allocator, path, tree_entry);
@@ -768,7 +778,7 @@ pub fn restore(
 
 pub fn ResetInput(comptime hash_kind: hash.HashKind) type {
     return struct {
-        target: rf.RefOrOid(hash_kind),
+        target: ?rf.RefOrOid(hash_kind),
         force: bool = false,
     };
 }
@@ -779,7 +789,7 @@ pub fn SwitchInput(comptime hash_kind: hash.HashKind) type {
             @"switch",
             reset,
         } = .@"switch",
-        target: rf.RefOrOid(hash_kind),
+        target: ?rf.RefOrOid(hash_kind),
         update_work_dir: bool = true,
         force: bool = false,
     };
@@ -804,9 +814,13 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             allocator: std.mem.Allocator,
             input: SwitchInput(repo_opts.hash),
         ) !Switch(repo_kind, repo_opts) {
-            // get the current commit and target oid
+            // get the current oid
             const current_oid_maybe = try rf.readHeadRecurMaybe(repo_kind, repo_opts, state.readOnly());
-            const target_oid = try rf.readRecur(repo_kind, repo_opts, state.readOnly(), input.target) orelse return error.InvalidSwitchTarget;
+
+            // get the target oid
+            var head_buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
+            const target = input.target orelse try rf.readHead(repo_kind, repo_opts, state.readOnly(), &head_buffer) orelse return error.HeadNotFound;
+            const target_oid = try rf.readRecur(repo_kind, repo_opts, state.readOnly(), target) orelse return error.InvalidSwitchTarget;
 
             const arena = try allocator.create(std.heap.ArenaAllocator);
             arena.* = std.heap.ArenaAllocator.init(allocator);
@@ -849,7 +863,7 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
                     // update HEAD
                     switch (input.kind) {
-                        .@"switch" => try rf.replaceHead(repo_kind, repo_opts, state, input.target),
+                        .@"switch" => try rf.replaceHead(repo_kind, repo_opts, state, target),
                         .reset => try rf.updateHead(repo_kind, repo_opts, state, &target_oid),
                     }
 
@@ -874,10 +888,33 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
                     // update HEAD
                     switch (input.kind) {
-                        .@"switch" => try rf.replaceHead(repo_kind, repo_opts, state, input.target),
+                        .@"switch" => try rf.replaceHead(repo_kind, repo_opts, state, target),
                         .reset => try rf.updateHead(repo_kind, repo_opts, state, &target_oid),
                     }
                 },
+            }
+
+            // if -f, we need to clean up stored merge state as well
+            if (input.force) {
+                switch (repo_kind) {
+                    .git => {
+                        const merge_head_names = &[_][]const u8{ "MERGE_HEAD", "CHERRY_PICK_HEAD" };
+                        const merge_msg_name = "MERGE_MSG";
+                        for (merge_head_names) |merge_head_name| {
+                            state.core.git_dir.deleteFile(merge_head_name) catch |err| switch (err) {
+                                error.FileNotFound => {},
+                                else => |e| return e,
+                            };
+                        }
+                        state.core.git_dir.deleteFile(merge_msg_name) catch |err| switch (err) {
+                            error.FileNotFound => {},
+                            else => |e| return e,
+                        };
+                    },
+                    .xit => {
+                        _ = try state.extra.moment.remove(hash.hashInt(repo_opts.hash, "merge-in-progress"));
+                    },
+                }
             }
 
             return switch_result;
