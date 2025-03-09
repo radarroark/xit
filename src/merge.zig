@@ -1308,6 +1308,96 @@ fn fileDirConflict(
     }
 }
 
+const merge_head_names = &[_][]const u8{ "MERGE_HEAD", "CHERRY_PICK_HEAD" };
+const merge_msg_name = "MERGE_MSG";
+
+pub fn checkForUnfinishedMerge(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+) !void {
+    switch (repo_kind) {
+        .git => {
+            for (merge_head_names) |head_name| {
+                if (state.core.git_dir.openFile(head_name, .{ .mode = .read_only })) |merge_head| {
+                    defer merge_head.close();
+                    return error.UnfinishedMergeInProgress;
+                } else |err| switch (err) {
+                    error.FileNotFound => {},
+                    else => |e| return e,
+                }
+            }
+        },
+        .xit => {
+            if (try state.extra.moment.getCursor(hash.hashInt(repo_opts.hash, "merge-in-progress"))) |_| {
+                return error.UnfinishedMergeInProgress;
+            }
+        },
+    }
+}
+
+pub fn checkForOtherMerge(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+    merge_head_name: []const u8,
+) !void {
+    switch (repo_kind) {
+        .git => {
+            for (merge_head_names) |head_name| {
+                if (std.mem.eql(u8, merge_head_name, head_name)) {
+                    continue;
+                }
+                if (state.core.git_dir.openFile(head_name, .{ .mode = .read_only })) |merge_head| {
+                    defer merge_head.close();
+                    return error.OtherMergeInProgress;
+                } else |err| switch (err) {
+                    error.FileNotFound => {},
+                    else => |e| return e,
+                }
+            }
+        },
+        .xit => {
+            if (try state.extra.moment.getCursor(hash.hashInt(repo_opts.hash, "merge-in-progress"))) |merge_in_progress_cursor| {
+                const merge_in_progress = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(merge_in_progress_cursor);
+
+                for (merge_head_names) |head_name| {
+                    if (std.mem.eql(u8, merge_head_name, head_name)) {
+                        continue;
+                    }
+                    if (null != try merge_in_progress.getCursor(hash.hashInt(repo_opts.hash, head_name))) {
+                        return error.OtherMergeInProgress;
+                    }
+                }
+            }
+        },
+    }
+}
+
+pub fn removeMergeState(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+) !void {
+    switch (repo_kind) {
+        .git => {
+            for (merge_head_names) |merge_head_name| {
+                state.core.git_dir.deleteFile(merge_head_name) catch |err| switch (err) {
+                    error.FileNotFound => {},
+                    else => |e| return e,
+                };
+            }
+            state.core.git_dir.deleteFile(merge_msg_name) catch |err| switch (err) {
+                error.FileNotFound => {},
+                else => |e| return e,
+            };
+        },
+        .xit => {
+            _ = try state.extra.moment.remove(hash.hashInt(repo_opts.hash, "merge-in-progress"));
+        },
+    }
+}
+
 pub const MergeKind = enum {
     full, // merge
     pick, // cherry-pick
@@ -1385,12 +1475,10 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
             var auto_resolved_conflicts = std.StringArrayHashMap(void).init(arena.allocator());
             var conflicts = std.StringArrayHashMap(MergeConflict(repo_opts.hash)).init(arena.allocator());
 
-            const merge_head_names = &[_][]const u8{ "MERGE_HEAD", "CHERRY_PICK_HEAD" };
             const merge_head_name = switch (merge_input.kind) {
                 .full => merge_head_names[0],
                 .pick => merge_head_names[1],
             };
-            const merge_msg_name = "MERGE_MSG";
 
             switch (merge_input.action) {
                 .new => |action| {
@@ -1401,24 +1489,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     };
 
                     // make sure there is no unfinished merge in progress
-                    switch (repo_kind) {
-                        .git => {
-                            for (merge_head_names) |head_name| {
-                                if (state.core.git_dir.openFile(head_name, .{ .mode = .read_only })) |merge_head| {
-                                    defer merge_head.close();
-                                    return error.UnfinishedMergeInProgress;
-                                } else |err| switch (err) {
-                                    error.FileNotFound => {},
-                                    else => |e| return e,
-                                }
-                            }
-                        },
-                        .xit => {
-                            if (try state.extra.moment.getCursor(hash.hashInt(repo_opts.hash, "merge-in-progress"))) |_| {
-                                return error.UnfinishedMergeInProgress;
-                            }
-                        },
-                    }
+                    try checkForUnfinishedMerge(repo_kind, repo_opts, state.readOnly());
 
                     const merge_algo: MergeAlgorithm = action.algo orelse switch (repo_kind) {
                         .git => .diff3,
@@ -1651,7 +1722,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                                 };
                             } else {
                                 // if any file conflicts were auto-resolved, there will be temporary state that must be cleaned up
-                                _ = try state.extra.moment.remove(hash.hashInt(repo_opts.hash, "merge-in-progress"));
+                                try removeMergeState(repo_kind, repo_opts, state);
                             }
                         },
                     }
@@ -1709,18 +1780,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     switch (repo_kind) {
                         .git => {
                             // make sure there isn't another kind of merge in progress
-                            for (merge_head_names) |head_name| {
-                                if (std.mem.eql(u8, merge_head_name, head_name)) {
-                                    continue;
-                                }
-                                if (state.core.git_dir.openFile(head_name, .{ .mode = .read_only })) |merge_head| {
-                                    defer merge_head.close();
-                                    return error.OtherMergeInProgress;
-                                } else |err| switch (err) {
-                                    error.FileNotFound => {},
-                                    else => |e| return e,
-                                }
-                            }
+                            try checkForOtherMerge(repo_kind, repo_opts, state.readOnly(), merge_head_name);
 
                             const merge_head = state.core.git_dir.openFile(merge_head_name, .{ .mode = .read_only }) catch |err| switch (err) {
                                 error.FileNotFound => return error.MergeHeadNotFound,
@@ -1740,18 +1800,11 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                             commit_metadata.message = try merge_msg.readToEndAlloc(arena.allocator(), repo_opts.max_read_size);
                         },
                         .xit => {
+                            // make sure there isn't another kind of merge in progress
+                            try checkForOtherMerge(repo_kind, repo_opts, state.readOnly(), merge_head_name);
+
                             const merge_in_progress_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "merge-in-progress"));
                             const merge_in_progress = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(merge_in_progress_cursor);
-
-                            // make sure there isn't another kind of merge in progress
-                            for (merge_head_names) |head_name| {
-                                if (std.mem.eql(u8, merge_head_name, head_name)) {
-                                    continue;
-                                }
-                                if (null != try merge_in_progress.getCursor(hash.hashInt(repo_opts.hash, head_name))) {
-                                    return error.OtherMergeInProgress;
-                                }
-                            }
 
                             const source_oid_cursor = (try merge_in_progress.getCursor(hash.hashInt(repo_opts.hash, merge_head_name))) orelse return error.MergeHeadNotFound;
                             const source_oid_slice = try source_oid_cursor.readBytes(&source_oid);
@@ -1785,15 +1838,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     }
 
                     // clean up the stored merge state
-                    switch (repo_kind) {
-                        .git => {
-                            try state.core.git_dir.deleteFile(merge_head_name);
-                            try state.core.git_dir.deleteFile(merge_msg_name);
-                        },
-                        .xit => {
-                            _ = try state.extra.moment.remove(hash.hashInt(repo_opts.hash, "merge-in-progress"));
-                        },
-                    }
+                    try removeMergeState(repo_kind, repo_opts, state);
 
                     // commit the change
                     commit_metadata.parent_oids = switch (merge_input.kind) {

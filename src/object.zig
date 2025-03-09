@@ -10,6 +10,7 @@ const chunk = @import("./chunk.zig");
 const cfg = @import("./config.zig");
 const tag = @import("./tag.zig");
 const tr = @import("./tree.zig");
+const mrg = @import("./merge.zig");
 
 fn compressZlib(comptime read_size: usize, in: std.fs.File, out: std.fs.File) !void {
     // init stream from input file
@@ -335,25 +336,7 @@ pub fn writeCommit(
     };
 
     // make sure there is no unfinished merge in progress
-    switch (repo_kind) {
-        .git => {
-            const merge_head_names = &[_][]const u8{ "MERGE_HEAD", "CHERRY_PICK_HEAD" };
-            for (merge_head_names) |head_name| {
-                if (state.core.git_dir.openFile(head_name, .{ .mode = .read_only })) |merge_head| {
-                    defer merge_head.close();
-                    return error.UnfinishedMergeInProgress;
-                } else |err| switch (err) {
-                    error.FileNotFound => {},
-                    else => |e| return e,
-                }
-            }
-        },
-        .xit => {
-            if (try state.extra.moment.getCursor(hash.hashInt(repo_opts.hash, "merge-in-progress"))) |_| {
-                return error.UnfinishedMergeInProgress;
-            }
-        },
-    }
+    try mrg.checkForUnfinishedMerge(repo_kind, repo_opts, state.readOnly());
 
     // read index
     var index = try idx.Index(repo_kind, repo_opts).init(allocator, state.readOnly());

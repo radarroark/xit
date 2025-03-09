@@ -7,6 +7,7 @@ const idx = @import("./index.zig");
 const fs = @import("./fs.zig");
 const rp = @import("./repo.zig");
 const tr = @import("./tree.zig");
+const mrg = @import("./merge.zig");
 
 pub const IndexStatusKind = enum {
     added,
@@ -896,25 +897,7 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
             // if -f, we need to clean up stored merge state as well
             if (input.force) {
-                switch (repo_kind) {
-                    .git => {
-                        const merge_head_names = &[_][]const u8{ "MERGE_HEAD", "CHERRY_PICK_HEAD" };
-                        const merge_msg_name = "MERGE_MSG";
-                        for (merge_head_names) |merge_head_name| {
-                            state.core.git_dir.deleteFile(merge_head_name) catch |err| switch (err) {
-                                error.FileNotFound => {},
-                                else => |e| return e,
-                            };
-                        }
-                        state.core.git_dir.deleteFile(merge_msg_name) catch |err| switch (err) {
-                            error.FileNotFound => {},
-                            else => |e| return e,
-                        };
-                    },
-                    .xit => {
-                        _ = try state.extra.moment.remove(hash.hashInt(repo_opts.hash, "merge-in-progress"));
-                    },
-                }
+                try mrg.removeMergeState(repo_kind, repo_opts, state);
             }
 
             return switch_result;
