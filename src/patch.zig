@@ -229,8 +229,6 @@ pub fn applyPatch(
                     var parent_line_id_bytes = hash.intToBytes(LineId(repo_opts.hash).Int, parent_line_id_int);
                     var parent_line_id_hash = hash.hashInt(repo_opts.hash, &parent_line_id_bytes);
 
-                    try parent_to_added_child.put(parent_line_id_hash, line_id_bytes);
-
                     // if parent is a ghost line, keep going up the chain until we find a live parent
                     while (!std.mem.eql(u8, &LineId(repo_opts.hash).first_bytes, &parent_line_id_bytes) and null == try live_parent_to_children.getCursor(parent_line_id_hash)) {
                         const next_parent_cursor = (try child_to_parent.getCursor(parent_line_id_hash)) orelse return error.ExpectedParent;
@@ -239,6 +237,8 @@ pub fn applyPatch(
                         @memcpy(&parent_line_id_bytes, next_parent_line_id_slice);
                         parent_line_id_hash = hash.hashInt(repo_opts.hash, next_parent_line_id_slice);
                     }
+
+                    try parent_to_added_child.put(parent_line_id_hash, line_id_bytes);
 
                     const live_children_cursor = try live_parent_to_children.putCursor(parent_line_id_hash);
                     const live_children = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(live_children_cursor);
