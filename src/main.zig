@@ -226,6 +226,19 @@ pub fn runPrint(
             error.CannotContinueMergeWithUnresolvedConflicts => {
                 try writers.err.print("you haven't resolved all the conflicts! after fixing, run `xit add` on them.\n", .{});
             },
+            error.RemoteRefContainsCommitsNotFoundLocally => {
+                try writers.err.print(
+                    \\a ref you are pushing to contains commits you don't have locally.
+                    \\you either need to retrieve them with `xit fetch` and then `xit merge`,
+                    \\or if you want to obliterate them like a badass, run this command with `-f`.
+                , .{});
+            },
+            error.RemoteRefContainsIncompatibleHistory => {
+                try writers.err.print(
+                    \\a ref you are pushing to has commits with an incompatible history.
+                    \\if you want to obliterate them like a badass, run this command with `-f`.
+                , .{});
+            },
             else => |e| return e,
         }
         return error.HandledError;
@@ -514,7 +527,12 @@ fn runCommand(
         },
         .push => |push_cmd| {
             var clear_line = false;
-            try repo.push(allocator, push_cmd.remote_name, push_cmd.refspec, .{ .progress_ctx = ProgressCtx{ .writers = writers, .clear_line = &clear_line } });
+            try repo.push(
+                allocator,
+                push_cmd.remote_name,
+                push_cmd.refspec,
+                .{ .force = push_cmd.force, .progress_ctx = ProgressCtx{ .writers = writers, .clear_line = &clear_line } },
+            );
         },
         .patch => |patch_cmd| switch (repo_kind) {
             .git => {

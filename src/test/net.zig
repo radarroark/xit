@@ -723,6 +723,15 @@ fn testPush(
         try server.start();
     }
 
+    // make a commit on the server
+    {
+        const hello_txt = try server_repo.core.work_dir.createFile("hello.txt", .{ .truncate = true });
+        defer hello_txt.close();
+        try hello_txt.writeAll("hello, world from the server!");
+        try server_repo.add(allocator, &.{"hello.txt"});
+        _ = try server_repo.commit(allocator, .{ .message = "new commit from the server" });
+    }
+
     // make another commit
     const commit2 = blk: {
         const goodbye_txt = try client_repo.core.work_dir.createFile("goodbye.txt", .{ .truncate = true });
@@ -732,23 +741,77 @@ fn testPush(
         break :blk try client_repo.commit(allocator, .{ .message = "goodbye" });
     };
 
-    client_repo.push(
+    // can't push because server has commit not found locally
+    try std.testing.expectError(error.RemoteRefContainsCommitsNotFoundLocally, client_repo.push(
         allocator,
         "origin",
         "master",
         .{ .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
-    ) catch |err| {
-        if (false) {
-            var stdout = std.ArrayListUnmanaged(u8){};
-            defer stdout.deinit(allocator);
-            var stderr = std.ArrayListUnmanaged(u8){};
-            defer stderr.deinit(allocator);
-            try server.core.process.collectOutput(allocator, &stdout, &stderr, 1024 * 1024);
-            if (stdout.items.len > 0) std.debug.print("server output:\n{s}\n", .{stdout.items});
-            if (stderr.items.len > 0) std.debug.print("server error:\n{s}\n", .{stderr.items});
-        }
-        return err;
-    };
+    ));
+
+    // restart the ssh server because it's flaky when multiple requests are made
+    if (is_ssh) {
+        server.stop();
+        try server.start();
+    }
+
+    // make a commit on the server with no parents, thus creating an incompatible git history
+    {
+        const hello_txt = try server_repo.core.work_dir.createFile("hello.txt", .{ .truncate = true });
+        defer hello_txt.close();
+        try hello_txt.writeAll("hello, world from the server again!");
+        try server_repo.add(allocator, &.{"hello.txt"});
+        _ = try server_repo.commit(allocator, .{ .message = "new git history on the server", .parent_oids = &.{} });
+    }
+
+    // can't push because commit doesn't exist locally
+    try std.testing.expectError(error.RemoteRefContainsCommitsNotFoundLocally, client_repo.push(
+        allocator,
+        "origin",
+        "master",
+        .{ .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
+    ));
+
+    // restart the ssh server because it's flaky when multiple requests are made
+    if (is_ssh) {
+        server.stop();
+        try server.start();
+    }
+
+    // retrieve the commit object
+    try client_repo.fetch(
+        allocator,
+        "origin",
+        .{ .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
+    );
+
+    // restart the ssh server because it's flaky when multiple requests are made
+    if (is_ssh) {
+        server.stop();
+        try server.start();
+    }
+
+    // can't push because server's history is incompatible
+    try std.testing.expectError(error.RemoteRefContainsIncompatibleHistory, client_repo.push(
+        allocator,
+        "origin",
+        "master",
+        .{ .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
+    ));
+
+    // restart the ssh server because it's flaky when multiple requests are made
+    if (is_ssh) {
+        server.stop();
+        try server.start();
+    }
+
+    // force push
+    try client_repo.push(
+        allocator,
+        "origin",
+        "master",
+        .{ .force = true, .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
+    );
 
     // make sure push was successful
     {

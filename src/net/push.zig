@@ -7,6 +7,7 @@ const rp = @import("../repo.zig");
 const hash = @import("../hash.zig");
 const obj = @import("../object.zig");
 const rf = @import("../ref.zig");
+const mrg = @import("../merge.zig");
 
 pub fn Push(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return struct {
@@ -57,6 +58,8 @@ pub fn Push(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
         fn initObjectIterator(
             self: *Push(repo_kind, repo_opts),
+            state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+            allocator: std.mem.Allocator,
         ) !void {
             var obj_iter = &self.obj_iter;
 
@@ -76,10 +79,15 @@ pub fn Push(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                         continue;
                     }
 
-                    // TODO: return error if spec.roid does not exist locally
-
-                    // TODO: return error if spec.loid and spec.roid don't have a common ancestor,
-                    // or if the common ancestor is the same as spec.roid
+                    if (mrg.commonAncestor(repo_kind, repo_opts, allocator, state, &spec.loid, &spec.roid)) |*ancestor_commit| {
+                        if (!std.mem.eql(u8, ancestor_commit, &spec.roid)) {
+                            return error.RemoteRefContainsCommitsNotFoundLocally;
+                        }
+                    } else |err| switch (err) {
+                        error.ObjectNotFound => return error.RemoteRefContainsCommitsNotFoundLocally,
+                        error.NoCommonAncestor => return error.RemoteRefContainsIncompatibleHistory,
+                        else => |e| return e,
+                    }
                 }
             }
 
@@ -134,7 +142,7 @@ pub fn Push(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             const transport = if (self.remote.transport) |*transport| transport else return error.NotConnected;
 
             try self.initSpecs(state, allocator);
-            try self.initObjectIterator();
+            try self.initObjectIterator(state, allocator);
             try transport.push(state, allocator, self);
 
             if (!self.unpack_ok) {

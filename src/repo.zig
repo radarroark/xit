@@ -1260,6 +1260,12 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             var refspec = try net_refspec.RefSpec.init(allocator, refspec_str, .push);
             defer refspec.deinit(allocator);
 
+            if (opts.force) {
+                // TODO: should we also make the refspecs in `opts` forced?
+                // right now it only affects the refspec passed in the separate param.
+                refspec.is_force = true;
+            }
+
             const refspec_normalized = try refspec.normalize(allocator);
             defer allocator.free(refspec_normalized);
 
