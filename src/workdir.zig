@@ -816,12 +816,17 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             input: SwitchInput(repo_opts.hash),
         ) !Switch(repo_kind, repo_opts) {
             // get the current oid
-            const current_oid_maybe = try rf.readHeadRecurMaybe(repo_kind, repo_opts, state.readOnly());
+            var head_buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
+            const head_maybe = try rf.readHead(repo_kind, repo_opts, state.readOnly(), &head_buffer);
+            const current_oid_maybe = if (head_maybe) |head| try rf.readRecur(repo_kind, repo_opts, state.readOnly(), head) else null;
 
             // get the target oid
-            var head_buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
-            const target = input.target orelse try rf.readHead(repo_kind, repo_opts, state.readOnly(), &head_buffer) orelse return error.HeadNotFound;
-            const target_oid = try rf.readRecur(repo_kind, repo_opts, state.readOnly(), target) orelse return error.InvalidSwitchTarget;
+            const target, const target_oid =
+                if (input.target) |target|
+                    .{ target, try rf.readRecur(repo_kind, repo_opts, state.readOnly(), target) orelse return error.InvalidSwitchTarget }
+                else
+                    // if target is null, just set it to the current oid (useful when we just want to reset back to HEAD)
+                    .{ head_maybe orelse return error.HeadNotFound, current_oid_maybe orelse return error.HeadNotFound };
 
             const arena = try allocator.create(std.heap.ArenaAllocator);
             arena.* = std.heap.ArenaAllocator.init(allocator);
