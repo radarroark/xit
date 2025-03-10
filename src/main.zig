@@ -59,12 +59,12 @@ pub fn run(
             .command => |command| {
                 try writers.err.print("\"{s}\" is not a valid command\n\n", .{command});
                 try cmd.printHelp(null, writers.err);
-                return error.PrintedError;
+                return error.HandledError;
             },
             .argument => |argument| {
                 try writers.err.print("\"{s}\" is not a valid argument\n\n", .{argument.value});
                 try cmd.printHelp(argument.command, writers.err);
-                return error.PrintedError;
+                return error.HandledError;
             },
         },
         .help => |cmd_kind_maybe| try cmd.printHelp(cmd_kind_maybe, writers.out),
@@ -157,88 +157,78 @@ pub fn runPrint(
     cwd: std.fs.Dir,
     writers: Writers,
 ) !void {
-    run(repo_kind, repo_opts, allocator, args, cwd, writers) catch |err| switch (err) {
-        error.RepoNotFound => {
-            try writers.err.print(
-                \\repo not found, dummy.
-                \\either you're in the wrong place or you need to make a new one like this:
-                \\
-                \\
-            , .{});
-            try cmd.printHelp(.init, writers.err);
-            return error.PrintedError;
-        },
-        error.RepoAlreadyExists => {
-            try writers.err.print(
-                \\repo already exists, dummy.
-                \\two repos in the same directory makes no sense.
-                \\think about it.
-                \\
-            , .{});
-            return error.PrintedError;
-        },
-        error.CannotRemoveFileWithStagedAndUnstagedChanges, error.CannotRemoveFileWithStagedChanges, error.CannotRemoveFileWithUnstagedChanges => {
-            try writers.err.print("a file has uncommitted changes. if you really want to do it, throw caution into the wind by adding the -f flag.\n", .{});
-            return error.PrintedError;
-        },
-        error.EmptyCommit => {
-            try writers.err.print("you haven't added anything to commit yet. if you really want to commit anyway, add the --allow-empty flag and no one will judge you.\n", .{});
-            return error.PrintedError;
-        },
-        error.AddIndexPathNotFound => {
-            try writers.err.print("a path you are adding does not exist\n", .{});
-            return error.PrintedError;
-        },
-        error.RemoveIndexPathNotFound => {
-            try writers.err.print("a path you are removing does not exist\n", .{});
-            return error.PrintedError;
-        },
-        error.RecursiveOptionRequired => {
-            try writers.err.print("to do this on a dir, add the -r flag\n", .{});
-            return error.PrintedError;
-        },
-        error.RefNotFound => {
-            try writers.err.print("ref does not exist\n", .{});
-            return error.PrintedError;
-        },
-        error.BranchAlreadyExists => {
-            try writers.err.print("branch already exists\n", .{});
-            return error.PrintedError;
-        },
-        error.UserConfigNotFound => {
-            try writers.err.print(
-                \\you need to set your name and email, mystery man. you can do it like this:
-                \\
-                \\    xit config add user.name foo
-                \\    xit config add user.email foo@bar
-            , .{});
-            return error.PrintedError;
-        },
-        error.SymLinksNotSupported => {
-            try writers.err.print("repos with symbolic links aren't supported right now, sowwy\n", .{});
-            return error.PrintedError;
-        },
-        error.SubmodulesNotSupported => {
-            try writers.err.print("repos with submodules aren't supported right now, sowwy\n", .{});
-            return error.PrintedError;
-        },
-        error.InvalidMergeSource => {
-            try writers.err.print("your merge source doesn't look right and you should feel bad\n", .{});
-            return error.PrintedError;
-        },
-        error.InvalidSwitchTarget => {
-            try writers.err.print("your switch target doesn't look right and you should feel bad\n", .{});
-            return error.PrintedError;
-        },
-        error.UnfinishedMergeInProgress => {
-            try writers.err.print("there is an unfinished merge in progress! run the command with `--continue` to finish.\n", .{});
-            return error.PrintedError;
-        },
-        error.CannotContinueMergeWithUnresolvedConflicts => {
-            try writers.err.print("you haven't resolved all the conflicts! after fixing, run `xit add` on them.\n", .{});
-            return error.PrintedError;
-        },
-        else => |e| return e,
+    run(repo_kind, repo_opts, allocator, args, cwd, writers) catch |err| {
+        switch (err) {
+            error.RepoNotFound => {
+                try writers.err.print(
+                    \\repo not found, dummy.
+                    \\either you're in the wrong place or you need to make a new one like this:
+                    \\
+                    \\
+                , .{});
+                try cmd.printHelp(.init, writers.err);
+            },
+            error.RepoAlreadyExists => {
+                try writers.err.print(
+                    \\repo already exists, dummy.
+                    \\two repos in the same directory makes no sense.
+                    \\think about it.
+                    \\
+                , .{});
+            },
+            error.CannotRemoveFileWithStagedAndUnstagedChanges, error.CannotRemoveFileWithStagedChanges, error.CannotRemoveFileWithUnstagedChanges => {
+                try writers.err.print("a file has uncommitted changes. if you really want to do it, throw caution into the wind by adding the -f flag.\n", .{});
+            },
+            error.EmptyCommit => {
+                try writers.err.print("you haven't added anything to commit yet. if you really want to commit anyway, add the --allow-empty flag and no one will judge you.\n", .{});
+            },
+            error.AddIndexPathNotFound => {
+                try writers.err.print("a path you are adding does not exist\n", .{});
+            },
+            error.RemoveIndexPathNotFound => {
+                try writers.err.print("a path you are removing does not exist\n", .{});
+            },
+            error.RecursiveOptionRequired => {
+                try writers.err.print("to do this on a dir, add the -r flag\n", .{});
+            },
+            error.RefNotFound => {
+                try writers.err.print("ref does not exist\n", .{});
+            },
+            error.BranchAlreadyExists => {
+                try writers.err.print("branch already exists\n", .{});
+            },
+            error.UserConfigNotFound => {
+                try writers.err.print(
+                    \\you need to set your name and email, mystery man. you can do it like this:
+                    \\
+                    \\    xit config add user.name foo
+                    \\    xit config add user.email foo@bar
+                , .{});
+            },
+            error.SymLinksNotSupported => {
+                try writers.err.print("repos with symbolic links aren't supported right now, sowwy\n", .{});
+            },
+            error.SubmodulesNotSupported => {
+                try writers.err.print("repos with submodules aren't supported right now, sowwy\n", .{});
+            },
+            error.InvalidMergeSource => {
+                try writers.err.print("your merge source doesn't look right and you should feel bad\n", .{});
+            },
+            error.InvalidSwitchTarget => {
+                try writers.err.print("your switch target doesn't look right and you should feel bad\n", .{});
+            },
+            error.UnfinishedMergeInProgress => {
+                try writers.err.print("there is an unfinished merge in progress! use `--continue` or `--abort` to finish it.\n", .{});
+            },
+            error.OtherMergeInProgress => {
+                try writers.err.print("there's another merge already in progress! use `--continue` or `--abort` to finish it.\n", .{});
+            },
+            error.CannotContinueMergeWithUnresolvedConflicts => {
+                try writers.err.print("you haven't resolved all the conflicts! after fixing, run `xit add` on them.\n", .{});
+            },
+            else => |e| return e,
+        }
+        return error.HandledError;
     };
 }
 
@@ -454,7 +444,7 @@ fn runCommand(
                         try writers.err.print("  {s}\n", .{path});
                     }
                     try writers.err.print("if you really want to continue, throw caution into the wind by adding the -f flag\n", .{});
-                    return error.PrintedError;
+                    return error.HandledError;
                 },
             }
         },
@@ -529,7 +519,7 @@ fn runCommand(
         .patch => |patch_cmd| switch (repo_kind) {
             .git => {
                 try writers.err.print("command not valid for this backend\n", .{});
-                return error.PrintedError;
+                return error.HandledError;
             },
             .xit => if (patch_cmd) {
                 var clear_line = false;
@@ -595,7 +585,7 @@ fn printMergeResult(
                     }
                 }
             }
-            return error.PrintedError;
+            return error.HandledError;
         },
     }
 }
@@ -621,7 +611,7 @@ pub fn main() !u8 {
 
     const writers = Writers{ .out = std.io.getStdOut().writer().any(), .err = std.io.getStdErr().writer().any() };
     runPrint(.xit, .{}, allocator, args.items, std.fs.cwd(), writers) catch |err| switch (err) {
-        error.PrintedError => return 1,
+        error.HandledError => return 1,
         else => |e| return e,
     };
 

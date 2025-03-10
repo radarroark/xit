@@ -1380,7 +1380,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     // merge
     {
         // both branches modified hello.txt, so there is a conflict
-        try std.testing.expectError(error.PrintedError, main.run(repo_kind, repo_opts, allocator, &.{ "merge", "stuff" }, work_dir, .{}));
+        try std.testing.expectError(error.HandledError, main.run(repo_kind, repo_opts, allocator, &.{ "merge", "stuff" }, work_dir, .{}));
 
         // there are conflicts in the index
         {
@@ -1404,7 +1404,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         }
 
         // merge again
-        try std.testing.expectError(error.PrintedError, main.run(repo_kind, repo_opts, allocator, &.{ "merge", "stuff" }, work_dir, .{}));
+        try std.testing.expectError(error.HandledError, main.run(repo_kind, repo_opts, allocator, &.{ "merge", "stuff" }, work_dir, .{}));
 
         // solve the conflict
         {
