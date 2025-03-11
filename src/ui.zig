@@ -113,14 +113,15 @@ pub fn start(
     var last_grid = try Grid.init(allocator, last_size);
     defer last_grid.deinit();
 
-    while (true) {
+    while (!term.quit) {
         // render to tty
         try terminal.render(&root, &last_grid, &last_size);
 
         // process any inputs
         while (try terminal.readKey()) |key| {
-            if (key == .codepoint and key.codepoint == 'q') {
-                return;
+            switch (key) {
+                .codepoint => |cp| if (cp == 'q') return,
+                else => {},
             }
             try root.input(key, root.getFocus());
         }
