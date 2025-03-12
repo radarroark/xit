@@ -835,16 +835,15 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                 allocator.destroy(arena);
             }
 
-            // compare the commits
-            var tree_diff = tr.TreeDiff(repo_kind, repo_opts).init(arena.allocator());
-            try tree_diff.compare(state.readOnly(), if (current_oid_maybe) |current_oid| &current_oid else null, &target_oid, null);
-
             var switch_result = Switch(repo_kind, repo_opts){
                 .arena = arena,
                 .allocator = allocator,
                 .result = .{ .success = {} },
             };
-            errdefer switch_result.deinit();
+
+            // compare the commits
+            var tree_diff = tr.TreeDiff(repo_kind, repo_opts).init(arena.allocator());
+            try tree_diff.compare(state.readOnly(), if (current_oid_maybe) |current_oid| &current_oid else null, &target_oid, null);
 
             switch (repo_kind) {
                 .git => {
