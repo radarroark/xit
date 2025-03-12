@@ -786,7 +786,7 @@ pub fn migrate(
             try objectToFile(repo_kind, repo_opts, state.readOnly(), allocator, path, tree_entry);
         }
         // update index
-        try index.addPath(state, path);
+        try index.addPath(state, path, &tree_entry);
     }
 }
 

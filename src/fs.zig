@@ -103,11 +103,15 @@ pub const Mode = packed struct(u32) {
                 };
                 return self_obj_type == other_obj_type;
             },
-            else => return switch (self.content.object_type) {
-                .regular_file => @as(u32, @bitCast(self)) == @as(u32, @bitCast(other)),
-                else => self.content.object_type == other.content.object_type,
-            },
+            else => return self.eqlExact(other),
         }
+    }
+
+    pub fn eqlExact(self: Mode, other: Mode) bool {
+        return switch (self.content.object_type) {
+            .regular_file => @as(u32, @bitCast(self)) == @as(u32, @bitCast(other)),
+            else => self.content.object_type == other.content.object_type,
+        };
     }
 };
 

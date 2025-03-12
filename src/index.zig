@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const obj = @import("./object.zig");
 const hash = @import("./hash.zig");
 const fs = @import("./fs.zig");
@@ -193,7 +194,17 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
         /// if path is a file, adds it as an entry to the index struct.
         /// if path is a dir, adds its children recursively.
         /// ignoring symlinks for now but will add that later.
-        pub fn addPath(self: *Index(repo_kind, repo_opts), state: rp.Repo(repo_kind, repo_opts).State(.read_write), path: []const u8) !void {
+        pub fn addPath(
+            self: *Index(repo_kind, repo_opts),
+            state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+            path: []const u8,
+            // this param is only ever used on windows.
+            // its purpose is to make the index entry have the same mode as the one in the tree,
+            // rather than overwriting it with the mode from the windows work dir.
+            // this is important to prevent windows users from accidently overwriting permissions
+            // or changing symlinks into regular files.
+            tree_entry_maybe: ?*const tr.TreeEntry(repo_opts.hash),
+        ) !void {
             // remove entries that are parents of this path (directory replaces file)
             var parent_path_maybe = std.fs.path.dirname(path);
             while (parent_path_maybe) |parent_path| {
@@ -221,6 +232,32 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
                     try obj.writeObject(repo_kind, repo_opts, state, file, reader, .{ .kind = .blob, .size = meta.size }, &oid);
 
+                    // get the mode
+                    // on windows, if a tree entry was supplied to this fn and its hash
+                    // is the same, use its mode.
+                    // otherwise, if there is an existing entry in the index and its hash
+                    // is the same, use its mode.
+                    // only if both are untrue should we use the mode from the disk.
+                    var mode_maybe: ?fs.Mode = null;
+                    if (.windows == builtin.os.tag) {
+                        if (tree_entry_maybe) |tree_entry| {
+                            if (std.mem.eql(u8, &oid, &tree_entry.oid)) {
+                                mode_maybe = tree_entry.mode;
+                            }
+                        }
+
+                        if (mode_maybe == null) {
+                            if (self.entries.get(path)) |*entries_for_path| {
+                                if (entries_for_path[0]) |*entry| {
+                                    if (std.mem.eql(u8, &oid, &entry.oid)) {
+                                        mode_maybe = entry.mode;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    const mode = mode_maybe orelse meta.mode;
+
                     // add entry
                     const entry = Entry{
                         .ctime_secs = meta.times.ctime_secs,
@@ -229,7 +266,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                         .mtime_nsecs = meta.times.mtime_nsecs,
                         .dev = meta.stat.dev,
                         .ino = meta.stat.ino,
-                        .mode = meta.mode,
+                        .mode = mode,
                         .uid = meta.stat.uid,
                         .gid = meta.stat.gid,
                         .file_size = switch (repo_kind) {
@@ -263,7 +300,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                         }
 
                         const subpath = try fs.joinPath(self.arena.allocator(), &.{ path, entry.name });
-                        try self.addPath(state, subpath);
+                        try self.addPath(state, subpath, null);
                     }
                 },
                 .sym_link => {
@@ -521,7 +558,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 
             // add or remove based on the `action`
             switch (action) {
-                .add => try self.addPath(state, path),
+                .add => try self.addPath(state, path, null),
                 .rm => {
                     if (!self.entries.contains(path) and !self.dir_to_paths.contains(path)) {
                         return error.RemoveIndexPathNotFound;

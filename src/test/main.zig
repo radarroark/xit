@@ -296,11 +296,11 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         defer three_txt.close();
         try three_txt.writeAll("one, two, three!");
 
-        // change permissions of a file
-        if (builtin.os.tag != .windows) {
+        // make run.sh an executable
+        if (.windows != builtin.os.tag) {
             const run_sh = try work_dir.openFile("run.sh", .{ .mode = .read_write });
             defer run_sh.close();
-            try run_sh.setPermissions(std.fs.File.Permissions{ .inner = std.fs.File.PermissionsUnix{ .mode = 0o755 } });
+            try run_sh.setPermissions(std.fs.File.Permissions{ .inner = .{ .mode = 0o755 } });
         }
 
         // make symlink
@@ -385,10 +385,10 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                 }
             }
 
-            if (builtin.os.tag != .windows) {
-                try std.testing.expectEqual(3, file_iter.next_index);
-            } else {
-                try std.testing.expectEqual(2, file_iter.next_index);
+            switch (builtin.os.tag) {
+                // on windows, permissions can't be changed so run.sh doesn't show up as modified
+                .windows => try std.testing.expectEqual(2, file_iter.next_index),
+                else => try std.testing.expectEqual(3, file_iter.next_index),
             }
         }
 
@@ -438,10 +438,10 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                 }
             }
 
-            if (builtin.os.tag != .windows) {
-                try std.testing.expectEqual(5, file_iter.next_index);
-            } else {
-                try std.testing.expectEqual(4, file_iter.next_index);
+            switch (builtin.os.tag) {
+                // on windows, permissions can't be changed so run.sh doesn't show up as modified
+                .windows => try std.testing.expectEqual(4, file_iter.next_index),
+                else => try std.testing.expectEqual(5, file_iter.next_index),
             }
         }
 
@@ -558,10 +558,10 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             }
         }
 
-        if (builtin.os.tag != .windows) {
-            try std.testing.expectEqual(9, file_iter.next_index);
-        } else {
-            try std.testing.expectEqual(8, file_iter.next_index);
+        switch (builtin.os.tag) {
+            // on windows, permissions can't be changed so run.sh doesn't show up as modified
+            .windows => try std.testing.expectEqual(8, file_iter.next_index),
+            else => try std.testing.expectEqual(9, file_iter.next_index),
         }
     }
 
