@@ -109,7 +109,7 @@ fetch        download objects and refs from another repository.
 push         update remote refs along with associated objects.
 ```
 
-To launch the TUI, just run `xit` without arguments, and press `ctrl+c` to quit it. In the repo created above, it'll look like this:
+To launch the TUI, just run `xit` without arguments, and press `q` to quit it. In the repo created above, it'll look like this:
 
 ```
 ╔═══╗                                                               
