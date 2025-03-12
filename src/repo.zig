@@ -1249,6 +1249,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             allocator: std.mem.Allocator,
             remote_name: []const u8,
             refspec_str: []const u8,
+            force: bool,
             opts: net.Opts(repo_opts.ProgressCtx),
         ) !void {
             var refspecs = std.ArrayList([]const u8).init(allocator);
@@ -1260,9 +1261,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             var refspec = try net_refspec.RefSpec.init(allocator, refspec_str, .push);
             defer refspec.deinit(allocator);
 
-            if (opts.force) {
-                // TODO: should we also make the refspecs in `opts` forced?
-                // right now it only affects the refspec passed in the separate param.
+            if (force) {
                 refspec.is_force = true;
             }
 

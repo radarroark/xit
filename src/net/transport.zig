@@ -10,7 +10,6 @@ const hash = @import("../hash.zig");
 
 pub fn Opts(comptime ProgressCtx: type) type {
     return struct {
-        force: bool = false,
         refspecs: ?[]const []const u8 = null,
         progress_ctx: ?ProgressCtx = null,
         wire: net_wire.Opts = .{},

@@ -114,7 +114,7 @@ pub fn run(
                     clone_cmd.url,
                     cwd,
                     clone_cmd.local_path,
-                    .{ .progress_ctx = ProgressCtx{ .writers = writers, .clear_line = &clear_line } },
+                    .{ .progress_ctx = .{ .writers = writers, .clear_line = &clear_line } },
                 );
                 defer repo.deinit();
 
@@ -523,7 +523,11 @@ fn runCommand(
         .clone => {},
         .fetch => |fetch_cmd| {
             var clear_line = false;
-            try repo.fetch(allocator, fetch_cmd.remote_name, .{ .progress_ctx = ProgressCtx{ .writers = writers, .clear_line = &clear_line } });
+            try repo.fetch(
+                allocator,
+                fetch_cmd.remote_name,
+                .{ .progress_ctx = .{ .writers = writers, .clear_line = &clear_line } },
+            );
         },
         .push => |push_cmd| {
             var clear_line = false;
@@ -531,7 +535,8 @@ fn runCommand(
                 allocator,
                 push_cmd.remote_name,
                 push_cmd.refspec,
-                .{ .force = push_cmd.force, .progress_ctx = ProgressCtx{ .writers = writers, .clear_line = &clear_line } },
+                push_cmd.force,
+                .{ .progress_ctx = .{ .writers = writers, .clear_line = &clear_line } },
             );
         },
         .patch => |patch_cmd| switch (repo_kind) {
@@ -541,7 +546,7 @@ fn runCommand(
             },
             .xit => if (patch_cmd) {
                 var clear_line = false;
-                try repo.patchOn(allocator, ProgressCtx{ .writers = writers, .clear_line = &clear_line });
+                try repo.patchOn(allocator, .{ .writers = writers, .clear_line = &clear_line });
             } else {
                 try repo.patchOff(allocator);
             },

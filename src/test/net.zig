@@ -695,6 +695,7 @@ fn testPush(
         allocator,
         "origin",
         "master",
+        false,
         .{ .refspecs = refspecs, .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
     ) catch |err| {
         if (false) {
@@ -746,6 +747,7 @@ fn testPush(
         allocator,
         "origin",
         "master",
+        false,
         .{ .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
     ));
 
@@ -769,6 +771,7 @@ fn testPush(
         allocator,
         "origin",
         "master",
+        false,
         .{ .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
     ));
 
@@ -796,6 +799,7 @@ fn testPush(
         allocator,
         "origin",
         "master",
+        false,
         .{ .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
     ));
 
@@ -810,7 +814,8 @@ fn testPush(
         allocator,
         "origin",
         "master",
-        .{ .force = true, .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
+        true,
+        .{ .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
     );
 
     // make sure push was successful
@@ -826,23 +831,13 @@ fn testPush(
     }
 
     // remove the remote tag
-    client_repo.push(
+    try client_repo.push(
         allocator,
         "origin",
         ":refs/tags/1.0.0",
+        false,
         .{ .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
-    ) catch |err| {
-        if (false) {
-            var stdout = std.ArrayListUnmanaged(u8){};
-            defer stdout.deinit(allocator);
-            var stderr = std.ArrayListUnmanaged(u8){};
-            defer stderr.deinit(allocator);
-            try server.core.process.collectOutput(allocator, &stdout, &stderr, 1024 * 1024);
-            if (stdout.items.len > 0) std.debug.print("server output:\n{s}\n", .{stdout.items});
-            if (stderr.items.len > 0) std.debug.print("server error:\n{s}\n", .{stderr.items});
-        }
-        return err;
-    };
+    );
 
     // make sure push was successful
     try std.testing.expect(null == try server_repo.readRef(.{ .kind = .tag, .name = "1.0.0" }));
