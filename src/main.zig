@@ -199,9 +199,6 @@ pub fn runPrint(
                     \\    xit config add user.email foo@bar
                 , .{});
             },
-            error.SymLinksNotSupported => {
-                try writers.err.print("repos with symbolic links aren't supported right now, sowwy\n", .{});
-            },
             error.SubmodulesNotSupported => {
                 try writers.err.print("repos with submodules aren't supported right now, sowwy\n", .{});
             },

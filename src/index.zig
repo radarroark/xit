@@ -207,8 +207,8 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
             // remove entries that are children of this path (file replaces directory)
             try self.removeChildren(path, null);
             // read the metadata
-            const meta = try fs.getMetadata(state.core.work_dir, path);
-            switch (meta.kind()) {
+            const meta = try fs.Metadata.init(state.core.work_dir, path);
+            switch (meta.kind) {
                 .file => {
                     // open file
                     const file = try state.core.work_dir.openFile(path, .{ .mode = .read_only });
@@ -220,24 +220,22 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 
                     // write object
                     var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-                    try obj.writeObject(repo_kind, repo_opts, state, file, reader, .{ .kind = .blob, .size = meta.size() }, &oid);
+                    try obj.writeObject(repo_kind, repo_opts, state, file, reader, .{ .kind = .blob, .size = meta.size }, &oid);
 
                     // add entry
-                    const times = fs.getTimes(meta);
-                    const stat = try fs.getStat(file);
                     const entry = Entry{
-                        .ctime_secs = times.ctime_secs,
-                        .ctime_nsecs = times.ctime_nsecs,
-                        .mtime_secs = times.mtime_secs,
-                        .mtime_nsecs = times.mtime_nsecs,
-                        .dev = stat.dev,
-                        .ino = stat.ino,
-                        .mode = fs.getMode(meta),
-                        .uid = stat.uid,
-                        .gid = stat.gid,
+                        .ctime_secs = meta.times.ctime_secs,
+                        .ctime_nsecs = meta.times.ctime_nsecs,
+                        .mtime_secs = meta.times.mtime_secs,
+                        .mtime_nsecs = meta.times.mtime_nsecs,
+                        .dev = meta.stat.dev,
+                        .ino = meta.stat.ino,
+                        .mode = meta.mode,
+                        .uid = meta.stat.uid,
+                        .gid = meta.stat.gid,
                         .file_size = switch (repo_kind) {
-                            .git => @truncate(meta.size()), // git docs say that the file size is truncated
-                            .xit => meta.size(),
+                            .git => @truncate(meta.size), // git docs say that the file size is truncated
+                            .xit => meta.size,
                         },
                         .oid = oid,
                         .flags = .{
@@ -271,6 +269,45 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                             try fs.joinPath(self.arena.allocator(), &.{ path, entry.name });
                         try self.addPath(state, subpath);
                     }
+                },
+                .sym_link => {
+                    // get the target path
+                    var target_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
+                    const target_path = try state.core.work_dir.readLink(path, &target_path_buffer);
+
+                    // make reader
+                    var stream = std.io.fixedBufferStream(target_path);
+                    const reader = stream.reader();
+
+                    // write object
+                    var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
+                    try obj.writeObject(repo_kind, repo_opts, state, &stream, reader, .{ .kind = .blob, .size = meta.size }, &oid);
+
+                    const entry = Entry{
+                        .ctime_secs = meta.times.ctime_secs,
+                        .ctime_nsecs = meta.times.ctime_nsecs,
+                        .mtime_secs = meta.times.mtime_secs,
+                        .mtime_nsecs = meta.times.mtime_nsecs,
+                        .dev = meta.stat.dev,
+                        .ino = meta.stat.ino,
+                        .mode = meta.mode,
+                        .uid = meta.stat.uid,
+                        .gid = meta.stat.gid,
+                        .file_size = switch (repo_kind) {
+                            .git => @truncate(meta.size), // git docs say that the file size is truncated
+                            .xit => meta.size,
+                        },
+                        .oid = oid,
+                        .flags = .{
+                            .name_length = @intCast(path.len),
+                            .stage = 0,
+                            .extended = false,
+                            .assume_valid = false,
+                        },
+                        .extended_flags = null,
+                        .path = path,
+                    };
+                    try self.addEntry(entry);
                 },
                 else => return,
             }

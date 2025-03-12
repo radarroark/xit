@@ -49,7 +49,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
         pub const Entry = struct {
             path: []const u8,
-            meta: std.fs.File.Metadata,
+            meta: fs.Metadata,
         };
 
         pub fn init(
@@ -165,17 +165,14 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             work_dir: std.fs.Dir,
             path: []const u8,
         ) !bool {
-            const meta = try fs.getMetadata(work_dir, path);
-            switch (meta.kind()) {
-                .file => {
-                    const file = try work_dir.openFile(path, .{ .mode = .read_only });
-                    defer file.close();
-
+            const meta = try fs.Metadata.init(work_dir, path);
+            switch (meta.kind) {
+                .file, .sym_link => {
                     if (index.entries.getIndex(path)) |entry_index| {
                         index_bools.*[entry_index] = true;
                         const entries_for_path = index.entries.values()[entry_index];
                         if (entries_for_path[0]) |entry| {
-                            if (try indexDiffersFromWorkDir(repo_kind, repo_opts, &entry, file, meta)) {
+                            if (try indexDiffersFromWorkDir(repo_kind, repo_opts, &entry, work_dir, path, meta)) {
                                 try modified.put(allocator, path, Status(repo_kind, repo_opts).Entry{ .path = path, .meta = meta });
                             }
                         }
@@ -260,28 +257,55 @@ pub fn indexDiffersFromWorkDir(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     entry: *const idx.Index(repo_kind, repo_opts).Entry,
-    file: std.fs.File,
-    meta: std.fs.File.Metadata,
+    parent_dir: std.fs.Dir,
+    path: []const u8,
+    meta: fs.Metadata,
 ) !bool {
-    if (meta.size() != entry.file_size or !fs.getMode(meta).eql(entry.mode)) {
+    if (meta.size != entry.file_size or !meta.mode.eql(entry.mode)) {
         return true;
     } else {
-        const times = fs.getTimes(meta);
-        if (times.ctime_secs != entry.ctime_secs or
-            times.ctime_nsecs != entry.ctime_nsecs or
-            times.mtime_secs != entry.mtime_secs or
-            times.mtime_nsecs != entry.mtime_nsecs)
-        {
-            // create blob header
-            const file_size = meta.size();
-            var header_buffer = [_]u8{0} ** 256; // should be plenty of space
-            const header = try std.fmt.bufPrint(&header_buffer, "blob {}\x00", .{file_size});
+        switch (meta.kind) {
+            .file => {
+                if (!meta.times.eql(.{
+                    .ctime_secs = entry.ctime_secs,
+                    .ctime_nsecs = entry.ctime_nsecs,
+                    .mtime_secs = entry.mtime_secs,
+                    .mtime_nsecs = entry.mtime_nsecs,
+                })) {
+                    const file = try parent_dir.openFile(path, .{ .mode = .read_only });
+                    defer file.close();
 
-            var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-            try hash.hashReader(repo_opts.hash, repo_opts.read_size, file.reader(), header, &oid);
-            if (!std.mem.eql(u8, &entry.oid, &oid)) {
-                return true;
-            }
+                    // create blob header
+                    var header_buffer = [_]u8{0} ** 256; // should be plenty of space
+                    const header = try std.fmt.bufPrint(&header_buffer, "blob {}\x00", .{meta.size});
+
+                    var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
+                    try hash.hashReader(repo_opts.hash, repo_opts.read_size, file.reader(), header, &oid);
+                    if (!std.mem.eql(u8, &entry.oid, &oid)) {
+                        return true;
+                    }
+                }
+            },
+            .sym_link => {
+                // get the target path
+                var target_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
+                const target_path = try parent_dir.readLink(path, &target_path_buffer);
+
+                // make reader
+                var stream = std.io.fixedBufferStream(target_path);
+                const reader = stream.reader();
+
+                // create blob header
+                var header_buffer = [_]u8{0} ** 256; // should be plenty of space
+                const header = try std.fmt.bufPrint(&header_buffer, "blob {}\x00", .{meta.size});
+
+                var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
+                try hash.hashReader(repo_opts.hash, repo_opts.read_size, reader, header, &oid);
+                if (!std.mem.eql(u8, &entry.oid, &oid)) {
+                    return true;
+                }
+            },
+            else => return error.UnexpectedFileKind,
         }
     }
     return false;
@@ -374,13 +398,13 @@ pub fn removePaths(
         defer head_tree.deinit();
 
         for (removed_paths.keys()) |path| {
-            const meta = fs.getMetadata(state.core.work_dir, path) catch |err| switch (err) {
+            const meta = fs.Metadata.init(state.core.work_dir, path) catch |err| switch (err) {
                 error.FileNotFound => continue,
                 else => |e| return e,
             };
 
-            switch (meta.kind()) {
-                .file => {
+            switch (meta.kind) {
+                .file, .sym_link => {
                     var differs_from_head = false;
                     var differs_from_work_dir = false;
 
@@ -392,9 +416,7 @@ pub fn removePaths(
                                 }
                             }
 
-                            const file = try state.core.work_dir.openFile(path, .{ .mode = .read_only });
-                            defer file.close();
-                            if (try indexDiffersFromWorkDir(repo_kind, repo_opts, &index_entry, file, meta)) {
+                            if (try indexDiffersFromWorkDir(repo_kind, repo_opts, &index_entry, state.core.work_dir, path, meta)) {
                                 differs_from_work_dir = true;
                             }
                         }
@@ -455,8 +477,8 @@ pub fn objectToFile(
 
             // open the out file
             const out_flags: std.fs.File.CreateFlags = switch (builtin.os.tag) {
-                .windows => .{},
-                else => .{ .mode = @as(u16, @bitCast(tree_entry.mode.content)) },
+                .windows => .{ .truncate = true },
+                else => .{ .truncate = true, .mode = @as(u16, @bitCast(tree_entry.mode.content)) },
             };
             const out_file = try state.core.work_dir.createFile(path, out_flags);
             defer out_file.close();
@@ -484,15 +506,45 @@ pub fn objectToFile(
                 try objectToFile(repo_kind, repo_opts, state, allocator, new_path, entry);
             }
         },
-        // TODO: handle symlinks
-        else => return error.ObjectInvalid,
+        .symbolic_link => switch (builtin.os.tag) {
+            .windows => {
+                var new_mode = tree_entry.mode;
+                new_mode.content.object_type = .regular_file;
+                try objectToFile(repo_kind, repo_opts, state, allocator, path, .{ .oid = tree_entry.oid, .mode = new_mode });
+            },
+            else => {
+                // delete file if there is any in this location
+                state.core.work_dir.deleteFile(path) catch |err| switch (err) {
+                    error.FileNotFound => {},
+                    else => |e| return e,
+                };
+
+                // open the reader
+                var obj_rdr = try obj.ObjectReader(repo_kind, repo_opts).init(allocator, state, &oid_hex);
+                defer obj_rdr.deinit();
+
+                // get path from blob content
+                var target_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
+                const size = try obj_rdr.reader.reader().readAll(&target_path_buffer);
+                const target_path = target_path_buffer[0..size];
+
+                // create parent dir(s)
+                if (std.fs.path.dirname(path)) |dir| {
+                    try state.core.work_dir.makePath(dir);
+                }
+
+                // create the symlink
+                try state.core.work_dir.symLink(target_path, path, .{});
+            },
+        },
+        // TODO: handle submodules
+        .gitlink => return error.SubmodulesNotSupported,
     }
 }
 
 pub const TreeToWorkDirChange = enum {
     none,
     untracked,
-    deleted,
     modified,
 };
 
@@ -500,17 +552,14 @@ fn compareIndexToWorkDir(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     entry_maybe: ?idx.Index(repo_kind, repo_opts).Entry,
-    file_maybe: ?std.fs.File,
+    parent_dir: std.fs.Dir,
+    path: []const u8,
 ) !TreeToWorkDirChange {
     if (entry_maybe) |entry| {
-        if (file_maybe) |file| {
-            if (try indexDiffersFromWorkDir(repo_kind, repo_opts, &entry, file, try file.metadata())) {
-                return .modified;
-            } else {
-                return .none;
-            }
+        if (try indexDiffersFromWorkDir(repo_kind, repo_opts, &entry, parent_dir, path, try fs.Metadata.init(parent_dir, path))) {
+            return .modified;
         } else {
-            return .deleted;
+            return .none;
         }
     } else {
         return .untracked;
@@ -561,8 +610,8 @@ fn untrackedParent(
     var parent = path;
     while (std.fs.path.dirname(parent)) |next_parent| {
         parent = next_parent;
-        const meta = fs.getMetadata(work_dir, next_parent) catch continue;
-        if (meta.kind() != .file) continue;
+        const meta = fs.Metadata.init(work_dir, next_parent) catch continue;
+        if (meta.kind != .file) continue;
         if (!index.entries.contains(next_parent)) {
             return next_parent;
         }
@@ -580,11 +629,9 @@ fn untrackedFile(
     path: []const u8,
     index: *const idx.Index(repo_kind, repo_opts),
 ) !bool {
-    const meta = try fs.getMetadata(work_dir, path);
-    switch (meta.kind()) {
-        .file => {
-            return !index.entries.contains(path);
-        },
+    const meta = try fs.Metadata.init(work_dir, path);
+    switch (meta.kind) {
+        .file, .sym_link => return !index.entries.contains(path),
         .directory => {
             var dir = try work_dir.openDir(path, .{ .iterate = true });
             defer dir.close();
@@ -639,7 +686,7 @@ pub fn migrate(
                 switch_result.setConflict();
                 try switch_result.result.conflict.stale_files.put(path, {});
             } else {
-                const meta = fs.getMetadata(state.core.work_dir, path) catch |err| switch (err) {
+                const meta = fs.Metadata.init(state.core.work_dir, path) catch |err| switch (err) {
                     error.FileNotFound, error.NotDir => {
                         // if the path doesn't exist in the work dir,
                         // but one of its parents *does* exist and isn't tracked
@@ -657,12 +704,10 @@ pub fn migrate(
                     },
                     else => |e| return e,
                 };
-                switch (meta.kind()) {
-                    .file => {
-                        const file = try state.core.work_dir.openFile(path, .{ .mode = .read_only });
-                        defer file.close();
+                switch (meta.kind) {
+                    .file, .sym_link => {
                         // if the path is a file that differs from the index
-                        if (try compareIndexToWorkDir(repo_kind, repo_opts, entry_maybe, file) != .none) {
+                        if (try compareIndexToWorkDir(repo_kind, repo_opts, entry_maybe, state.core.work_dir, path) != .none) {
                             switch_result.setConflict();
                             if (entry_maybe) |_| {
                                 try switch_result.result.conflict.stale_files.put(path, {});

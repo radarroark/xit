@@ -26,6 +26,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                 eof: bool,
             },
             buffer: struct {
+                data: []const u8,
                 iter: std.mem.SplitIterator(u8, .scalar),
             },
             nothing,
@@ -55,34 +56,74 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
             return iter;
         }
 
-        pub fn initFromWorkspace(state: rp.Repo(repo_kind, repo_opts).State(.read_only), allocator: std.mem.Allocator, path: []const u8, mode: fs.Mode) !LineIterator(repo_kind, repo_opts) {
-            var file = try state.core.work_dir.openFile(path, .{ .mode = .read_only });
-            errdefer file.close();
+        pub fn initFromWorkDir(state: rp.Repo(repo_kind, repo_opts).State(.read_only), allocator: std.mem.Allocator, path: []const u8, mode: fs.Mode) !LineIterator(repo_kind, repo_opts) {
+            switch (mode.content.object_type) {
+                .regular_file => {
+                    var file = try state.core.work_dir.openFile(path, .{ .mode = .read_only });
+                    errdefer file.close();
+                    const file_size = (try file.metadata()).size();
+                    const header = try std.fmt.allocPrint(allocator, "blob {}\x00", .{file_size});
+                    defer allocator.free(header);
+                    var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
+                    try hash.hashReader(repo_opts.hash, repo_opts.read_size, file.reader(), header, &oid);
+                    try file.seekTo(0);
 
-            const file_size = (try file.metadata()).size();
-            const header = try std.fmt.allocPrint(allocator, "blob {}\x00", .{file_size});
-            defer allocator.free(header);
-            var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-            try hash.hashReader(repo_opts.hash, repo_opts.read_size, file.reader(), header, &oid);
-            try file.seekTo(0);
-
-            var iter = LineIterator(repo_kind, repo_opts){
-                .allocator = allocator,
-                .path = path,
-                .oid = oid,
-                .oid_hex = std.fmt.bytesToHex(&oid, .lower),
-                .mode = mode,
-                .line_offsets = undefined,
-                .current_line = 0,
-                .source = .{
-                    .work_dir = .{
-                        .file = file,
-                        .eof = false,
-                    },
+                    var iter = LineIterator(repo_kind, repo_opts){
+                        .allocator = allocator,
+                        .path = path,
+                        .oid = oid,
+                        .oid_hex = std.fmt.bytesToHex(&oid, .lower),
+                        .mode = mode,
+                        .line_offsets = undefined,
+                        .current_line = 0,
+                        .source = .{
+                            .work_dir = .{
+                                .file = file,
+                                .eof = false,
+                            },
+                        },
+                    };
+                    try iter.validateLines();
+                    return iter;
                 },
-            };
-            try iter.validateLines();
-            return iter;
+                .symbolic_link => {
+                    var target_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
+                    const target_path = try state.core.work_dir.readLink(path, &target_path_buffer);
+
+                    // make reader
+                    var stream = std.io.fixedBufferStream(target_path);
+                    const reader = stream.reader();
+
+                    // create blob header
+                    var header_buffer = [_]u8{0} ** 256; // should be plenty of space
+                    const header = try std.fmt.bufPrint(&header_buffer, "blob {}\x00", .{target_path.len});
+
+                    var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
+                    try hash.hashReader(repo_opts.hash, repo_opts.read_size, reader, header, &oid);
+
+                    const data = try allocator.dupe(u8, target_path);
+                    errdefer allocator.free(data);
+
+                    var iter = LineIterator(repo_kind, repo_opts){
+                        .allocator = allocator,
+                        .path = path,
+                        .oid = oid,
+                        .oid_hex = std.fmt.bytesToHex(&oid, .lower),
+                        .mode = mode,
+                        .line_offsets = undefined,
+                        .current_line = 0,
+                        .source = .{
+                            .buffer = .{
+                                .data = data,
+                                .iter = std.mem.splitScalar(u8, data, '\n'),
+                            },
+                        },
+                    };
+                    try iter.validateLines();
+                    return iter;
+                },
+                else => return error.UnexpectedFileKind,
+            }
         }
 
         pub fn initFromNothing(allocator: std.mem.Allocator, path: []const u8) !LineIterator(repo_kind, repo_opts) {
@@ -90,7 +131,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                 .allocator = allocator,
                 .path = path,
                 .oid = [_]u8{0} ** hash.byteLen(repo_opts.hash),
-                .oid_hex = [_]u8{0} ** hash.hexLen(repo_opts.hash),
+                .oid_hex = [_]u8{'0'} ** hash.hexLen(repo_opts.hash),
                 .mode = null,
                 .line_offsets = undefined,
                 .current_line = 0,
@@ -147,17 +188,21 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
         }
 
         pub fn initFromBuffer(allocator: std.mem.Allocator, buffer: []const u8) !LineIterator(repo_kind, repo_opts) {
+            const data = try allocator.dupe(u8, buffer);
+            errdefer allocator.free(data);
+
             var iter = LineIterator(repo_kind, repo_opts){
                 .allocator = allocator,
                 .path = "",
                 .oid = [_]u8{0} ** hash.byteLen(repo_opts.hash),
-                .oid_hex = [_]u8{0} ** hash.hexLen(repo_opts.hash),
+                .oid_hex = [_]u8{'0'} ** hash.hexLen(repo_opts.hash),
                 .mode = null,
                 .line_offsets = undefined,
                 .current_line = 0,
                 .source = .{
                     .buffer = .{
-                        .iter = std.mem.splitScalar(u8, buffer, '\n'),
+                        .data = data,
+                        .iter = std.mem.splitScalar(u8, data, '\n'),
                     },
                 },
             };
@@ -252,7 +297,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
             switch (self.source) {
                 .object => |*object| object.object_reader.deinit(),
                 .work_dir => |*work_dir| work_dir.file.close(),
-                .buffer => {},
+                .buffer => |*buffer| self.allocator.free(buffer.data),
                 .nothing => {},
                 .binary => {},
             }
@@ -1064,7 +1109,7 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
 
             if (line_iter_a.mode) |a_mode| {
                 if (line_iter_b.mode) |b_mode| {
-                    if (a_mode.content.unix_permission != b_mode.content.unix_permission) {
+                    if (!a_mode.eql(b_mode)) {
                         try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "old mode {s}", .{a_mode.toStr()}));
                         try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "new mode {s}", .{b_mode.toStr()}));
                     } else {
@@ -1297,13 +1342,13 @@ pub fn LineIteratorPair(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                 .not_added => |not_added| {
                     switch (not_added) {
                         .modified => {
-                            const meta = try fs.getMetadata(state.core.work_dir, path);
-                            const mode = fs.getMode(meta);
+                            const meta = try fs.Metadata.init(state.core.work_dir, path);
+                            const mode = meta.mode;
 
                             const index_entries_for_path = stat.index.entries.get(path) orelse return error.EntryNotFound;
                             var a = try LineIterator(repo_kind, repo_opts).initFromIndex(state, allocator, index_entries_for_path[0] orelse return error.NullEntry);
                             errdefer a.deinit();
-                            var b = try LineIterator(repo_kind, repo_opts).initFromWorkspace(state, allocator, path, mode);
+                            var b = try LineIterator(repo_kind, repo_opts).initFromWorkDir(state, allocator, path, mode);
                             errdefer b.deinit();
                             return .{ .path = path, .a = a, .b = b };
                         },
@@ -1318,12 +1363,12 @@ pub fn LineIteratorPair(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     }
                 },
                 .not_tracked => {
-                    const meta = try fs.getMetadata(state.core.work_dir, path);
-                    const mode = fs.getMode(meta);
+                    const meta = try fs.Metadata.init(state.core.work_dir, path);
+                    const mode = meta.mode;
 
                     var a = try LineIterator(repo_kind, repo_opts).initFromNothing(allocator, path);
                     errdefer a.deinit();
-                    var b = try LineIterator(repo_kind, repo_opts).initFromWorkspace(state, allocator, path, mode);
+                    var b = try LineIterator(repo_kind, repo_opts).initFromWorkDir(state, allocator, path, mode);
                     errdefer b.deinit();
                     return .{ .path = path, .a = a, .b = b };
                 },
@@ -1366,7 +1411,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                 .work_dir => |work_dir| {
                     if (next_index < work_dir.status.conflicts.count()) {
                         const path = work_dir.status.conflicts.keys()[next_index];
-                        const meta = try fs.getMetadata(self.core.work_dir, path);
+                        const meta = try fs.Metadata.init(self.core.work_dir, path);
                         const stage: usize = switch (work_dir.conflict_diff_kind) {
                             .base => 1,
                             .target => 2,
@@ -1377,8 +1422,8 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                         if (index_entries_for_path[stage]) |index_entry| {
                             var a = try LineIterator(repo_kind, repo_opts).initFromIndex(state, self.allocator, index_entry);
                             errdefer a.deinit();
-                            var b = switch (meta.kind()) {
-                                .file => try LineIterator(repo_kind, repo_opts).initFromWorkspace(state, self.allocator, path, fs.getMode(meta)),
+                            var b = switch (meta.kind) {
+                                .file, .sym_link => try LineIterator(repo_kind, repo_opts).initFromWorkDir(state, self.allocator, path, meta.mode),
                                 // in file/dir conflicts, `path` may be a directory which can't be diffed, so just make it nothing
                                 else => try LineIterator(repo_kind, repo_opts).initFromNothing(self.allocator, path),
                             };
@@ -1400,7 +1445,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                         const index_entries_for_path = work_dir.status.index.entries.get(entry.path) orelse return error.EntryNotFound;
                         var a = try LineIterator(repo_kind, repo_opts).initFromIndex(state, self.allocator, index_entries_for_path[0] orelse return error.NullEntry);
                         errdefer a.deinit();
-                        var b = try LineIterator(repo_kind, repo_opts).initFromWorkspace(state, self.allocator, entry.path, fs.getMode(entry.meta));
+                        var b = try LineIterator(repo_kind, repo_opts).initFromWorkDir(state, self.allocator, entry.path, entry.meta.mode);
                         errdefer b.deinit();
                         self.next_index += 1;
                         return .{ .path = entry.path, .a = a, .b = b };

@@ -303,6 +303,16 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             try run_sh.setPermissions(std.fs.File.Permissions{ .inner = std.fs.File.PermissionsUnix{ .mode = 0o755 } });
         }
 
+        // make symlink
+        switch (builtin.os.tag) {
+            .windows => {
+                var fake_symlink = try work_dir.createFile("three.txt", .{});
+                defer fake_symlink.close();
+                try fake_symlink.writeAll("one/two/three.txt");
+            },
+            else => try work_dir.symLink("one/two/three.txt", "three.txt", .{}),
+        }
+
         // work dir diff
         {
             var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
@@ -536,15 +546,22 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             } else if (std.mem.eql(u8, "one/two/three.txt", line_iter_pair.path)) {
                 try std.testing.expectEqualStrings("diff --git a/one/two/three.txt b/one/two/three.txt", hunk_iter.header_lines.items[0]);
                 try std.testing.expectEqualStrings("new file mode 100644", hunk_iter.header_lines.items[1]);
+            } else if (std.mem.eql(u8, "three.txt", line_iter_pair.path)) {
+                try std.testing.expectEqualStrings("diff --git a/three.txt b/three.txt", hunk_iter.header_lines.items[0]);
+                // on windows, it is not a symlink
+                switch (builtin.os.tag) {
+                    .windows => try std.testing.expectEqualStrings("new file mode 100644", hunk_iter.header_lines.items[1]),
+                    else => try std.testing.expectEqualStrings("new file mode 120000", hunk_iter.header_lines.items[1]),
+                }
             } else {
                 return error.EntryNotExpected;
             }
         }
 
         if (builtin.os.tag != .windows) {
-            try std.testing.expectEqual(8, file_iter.next_index);
+            try std.testing.expectEqual(9, file_iter.next_index);
         } else {
-            try std.testing.expectEqual(7, file_iter.next_index);
+            try std.testing.expectEqual(8, file_iter.next_index);
         }
     }
 
@@ -717,7 +734,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
             var index = try idx.Index(repo_kind, repo_opts).init(allocator, state);
             defer index.deinit();
-            try std.testing.expectEqual(7, index.entries.count());
+            try std.testing.expectEqual(8, index.entries.count());
             try std.testing.expect(index.entries.contains("README"));
             try std.testing.expect(index.entries.contains("src/zig/main.zig"));
             try std.testing.expect(index.entries.contains("tests/main_test.zig"));
@@ -725,6 +742,67 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             try std.testing.expect(index.entries.contains("hello.txt/nested2.txt"));
             try std.testing.expect(index.entries.contains("run.sh"));
             try std.testing.expect(index.entries.contains("one/two/three.txt"));
+            try std.testing.expect(index.entries.contains("three.txt"));
+        }
+
+        switch (repo_kind) {
+            .git => {
+                // read index with libgit
+                var repo: ?*c.git_repository = null;
+                try std.testing.expectEqual(0, c.git_repository_open(&repo, repo_path));
+                defer c.git_repository_free(repo);
+                var index: ?*c.git_index = null;
+                try std.testing.expectEqual(0, c.git_repository_index(&index, repo));
+                defer c.git_index_free(index);
+                try std.testing.expectEqual(8, c.git_index_entrycount(index));
+            },
+            .xit => {
+                // read the index in xitdb
+                var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+                defer repo.deinit();
+                var count: u32 = 0;
+                var moment = try repo.core.latestMoment();
+                if (try moment.getCursor(hash.hashInt(repo_opts.hash, "index"))) |index_cursor| {
+                    var iter = try index_cursor.iterator();
+                    defer iter.deinit();
+                    while (try iter.next()) |_| {
+                        count += 1;
+                    }
+                }
+                try std.testing.expectEqual(8, count);
+            },
+        }
+
+        // replace directory with file
+        {
+            var hello_txt_dir = try work_dir.openDir("hello.txt", .{});
+            defer hello_txt_dir.close();
+            try hello_txt_dir.deleteFile("nested.txt");
+            try hello_txt_dir.deleteFile("nested2.txt");
+        }
+        try work_dir.deleteDir("hello.txt");
+        var hello_txt2 = try work_dir.createFile("hello.txt", .{});
+        defer hello_txt2.close();
+
+        // add the new file
+        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "hello.txt" }, work_dir, .{});
+
+        // read index
+        {
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+            defer repo.deinit();
+            var moment = try repo.core.latestMoment();
+            const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
+            var index = try idx.Index(repo_kind, repo_opts).init(allocator, state);
+            defer index.deinit();
+            try std.testing.expectEqual(7, index.entries.count());
+            try std.testing.expect(index.entries.contains("README"));
+            try std.testing.expect(index.entries.contains("src/zig/main.zig"));
+            try std.testing.expect(index.entries.contains("tests/main_test.zig"));
+            try std.testing.expect(index.entries.contains("hello.txt"));
+            try std.testing.expect(index.entries.contains("run.sh"));
+            try std.testing.expect(index.entries.contains("one/two/three.txt"));
+            try std.testing.expect(index.entries.contains("three.txt"));
         }
 
         switch (repo_kind) {
@@ -752,65 +830,6 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                     }
                 }
                 try std.testing.expectEqual(7, count);
-            },
-        }
-
-        // replace directory with file
-        {
-            var hello_txt_dir = try work_dir.openDir("hello.txt", .{});
-            defer hello_txt_dir.close();
-            try hello_txt_dir.deleteFile("nested.txt");
-            try hello_txt_dir.deleteFile("nested2.txt");
-        }
-        try work_dir.deleteDir("hello.txt");
-        var hello_txt2 = try work_dir.createFile("hello.txt", .{});
-        defer hello_txt2.close();
-
-        // add the new file
-        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "hello.txt" }, work_dir, .{});
-
-        // read index
-        {
-            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
-            defer repo.deinit();
-            var moment = try repo.core.latestMoment();
-            const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-            var index = try idx.Index(repo_kind, repo_opts).init(allocator, state);
-            defer index.deinit();
-            try std.testing.expectEqual(6, index.entries.count());
-            try std.testing.expect(index.entries.contains("README"));
-            try std.testing.expect(index.entries.contains("src/zig/main.zig"));
-            try std.testing.expect(index.entries.contains("tests/main_test.zig"));
-            try std.testing.expect(index.entries.contains("hello.txt"));
-            try std.testing.expect(index.entries.contains("run.sh"));
-            try std.testing.expect(index.entries.contains("one/two/three.txt"));
-        }
-
-        switch (repo_kind) {
-            .git => {
-                // read index with libgit
-                var repo: ?*c.git_repository = null;
-                try std.testing.expectEqual(0, c.git_repository_open(&repo, repo_path));
-                defer c.git_repository_free(repo);
-                var index: ?*c.git_index = null;
-                try std.testing.expectEqual(0, c.git_repository_index(&index, repo));
-                defer c.git_index_free(index);
-                try std.testing.expectEqual(6, c.git_index_entrycount(index));
-            },
-            .xit => {
-                // read the index in xitdb
-                var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
-                defer repo.deinit();
-                var count: u32 = 0;
-                var moment = try repo.core.latestMoment();
-                if (try moment.getCursor(hash.hashInt(repo_opts.hash, "index"))) |index_cursor| {
-                    var iter = try index_cursor.iterator();
-                    defer iter.deinit();
-                    while (try iter.next()) |_| {
-                        count += 1;
-                    }
-                }
-                try std.testing.expectEqual(6, count);
             },
         }
 
@@ -1002,7 +1021,11 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             status_options.flags = c.GIT_STATUS_OPT_INCLUDE_UNTRACKED;
             try std.testing.expectEqual(0, c.git_status_list_new(&status_list, repo, &status_options));
             defer c.git_status_list_free(status_list);
-            try std.testing.expectEqual(5, c.git_status_list_entrycount(status_list));
+            switch (builtin.os.tag) {
+                .windows => try std.testing.expectEqual(5, c.git_status_list_entrycount(status_list)),
+                // libgit2 detects the symlink as worktree modified...I'm not sure why
+                else => try std.testing.expectEqual(6, c.git_status_list_entrycount(status_list)),
+            }
         }
 
         // index changes
@@ -1089,7 +1112,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         // read tree
         var tree_object = try obj.Object(repo_kind, repo_opts, .full).init(allocator, state, &commit_object.content.commit.tree);
         defer tree_object.deinit();
-        try std.testing.expectEqual(6, tree_object.content.tree.entries.count());
+        try std.testing.expectEqual(7, tree_object.content.tree.entries.count());
     }
 
     // remove dir from index

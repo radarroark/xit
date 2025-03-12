@@ -59,90 +59,156 @@ pub const Mode = packed struct(u32) {
     },
     padding: u16 = 0,
 
-    pub fn toStr(self: Mode) []const u8 {
-        return if (self.content.unix_permission == 0o755) "100755" else "100644";
+    pub fn init(meta: std.fs.File.Metadata) Mode {
+        const is_executable = switch (builtin.os.tag) {
+            .windows => false,
+            else => meta.permissions().inner.unixHas(std.fs.File.PermissionsUnix.Class.user, .execute),
+        };
+        const obj_type: Mode.ObjectType = switch (meta.kind()) {
+            .sym_link => .symbolic_link,
+            else => .regular_file,
+        };
+        return .{
+            .content = .{
+                .unix_permission = switch (obj_type) {
+                    .regular_file => if (is_executable) 0o755 else 0o644,
+                    else => 0,
+                },
+                .object_type = obj_type,
+            },
+        };
     }
 
-    pub fn eql(self: Mode, m2: Mode) bool {
-        return @as(u32, @bitCast(self)) == @as(u32, @bitCast(m2));
+    pub fn toStr(self: Mode) []const u8 {
+        return switch (self.content.object_type) {
+            .tree => "40000",
+            .regular_file => if (self.content.unix_permission == 0o755) "100755" else "100644",
+            .symbolic_link => "120000",
+            .gitlink => "160000",
+        };
+    }
+
+    pub fn eql(self: Mode, other: Mode) bool {
+        return switch (self.content.object_type) {
+            .regular_file => @as(u32, @bitCast(self)) == @as(u32, @bitCast(other)),
+            else => self.content.object_type == other.content.object_type,
+        };
     }
 };
-
-pub fn getMode(meta: std.fs.File.Metadata) Mode {
-    const is_executable = switch (builtin.os.tag) {
-        .windows => false,
-        else => meta.permissions().inner.unixHas(std.fs.File.PermissionsUnix.Class.user, .execute),
-    };
-    return .{
-        .content = .{
-            .unix_permission = if (is_executable) 0o755 else 0o644,
-            .object_type = .regular_file,
-        },
-    };
-}
 
 pub const Times = struct {
     ctime_secs: u32,
     ctime_nsecs: u32,
     mtime_secs: u32,
     mtime_nsecs: u32,
-};
 
-pub fn getTimes(meta: std.fs.File.Metadata) Times {
-    const ctime = meta.created() orelse 0;
-    const mtime = meta.modified();
-    return Times{
-        .ctime_secs = @intCast(@divTrunc(ctime, std.time.ns_per_s)),
-        .ctime_nsecs = @intCast(@mod(ctime, std.time.ns_per_s)),
-        .mtime_secs = @intCast(@divTrunc(mtime, std.time.ns_per_s)),
-        .mtime_nsecs = @intCast(@mod(mtime, std.time.ns_per_s)),
-    };
-}
+    pub fn init(meta: std.fs.File.Metadata) Times {
+        const ctime = meta.created() orelse 0;
+        const mtime = meta.modified();
+        return .{
+            .ctime_secs = @intCast(@divTrunc(ctime, std.time.ns_per_s)),
+            .ctime_nsecs = @intCast(@mod(ctime, std.time.ns_per_s)),
+            .mtime_secs = @intCast(@divTrunc(mtime, std.time.ns_per_s)),
+            .mtime_nsecs = @intCast(@mod(mtime, std.time.ns_per_s)),
+        };
+    }
+
+    pub fn eql(self: Times, other: Times) bool {
+        return self.ctime_secs == other.ctime_secs and
+            self.ctime_nsecs == other.ctime_nsecs and
+            self.mtime_secs == other.mtime_secs and
+            self.mtime_nsecs == other.mtime_nsecs;
+    }
+};
 
 pub const Stat = struct {
     dev: u32,
     ino: u32,
     uid: u32,
     gid: u32,
+
+    pub fn init(fd: std.posix.fd_t) !Stat {
+        switch (builtin.os.tag) {
+            .windows => return .{
+                .dev = 0,
+                .ino = 0,
+                .uid = 0,
+                .gid = 0,
+            },
+            else => {
+                const stat = try std.posix.fstat(fd);
+                return .{
+                    .dev = @intCast(stat.dev),
+                    .ino = @intCast(stat.ino),
+                    .uid = stat.uid,
+                    .gid = stat.gid,
+                };
+            },
+        }
+    }
 };
 
-pub fn getStat(file: std.fs.File) !Stat {
-    switch (builtin.os.tag) {
-        .windows => return .{
-            .dev = 0,
-            .ino = 0,
-            .uid = 0,
-            .gid = 0,
-        },
-        else => {
-            const stat = try std.posix.fstat(file.handle);
-            return .{
-                .dev = @intCast(stat.dev),
-                .ino = @intCast(stat.ino),
-                .uid = stat.uid,
-                .gid = stat.gid,
-            };
-        },
-    }
-}
+pub const Metadata = struct {
+    kind: std.fs.File.Kind,
+    times: Times,
+    stat: Stat,
+    mode: Mode,
+    size: u64,
 
-pub fn getMetadata(parent_dir: std.fs.Dir, path: []const u8) !std.fs.File.Metadata {
-    // on windows, openFile returns error.IsDir on a dir.
-    // so we need to call openDir in that case.
-    if (parent_dir.openFile(path, .{ .mode = .read_only })) |file| {
-        defer file.close();
-        return try file.metadata();
-    } else |err| {
-        switch (err) {
+    pub fn init(parent_dir: std.fs.Dir, path: []const u8) !Metadata {
+        // special handling for symlinks
+        if (.windows != builtin.os.tag) {
+            var target_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
+            if (parent_dir.readLink(path, &target_path_buffer)) |target_path| {
+                return .{
+                    .kind = .sym_link,
+                    .times = std.mem.zeroes(Times),
+                    .stat = std.mem.zeroes(Stat),
+                    .mode = .{ .content = .{ .unix_permission = 0, .object_type = .symbolic_link } },
+                    .size = target_path.len,
+                };
+            } else |err| switch (err) {
+                error.NotLink => {},
+                else => |e| return e,
+            }
+        }
+
+        // on windows, openFile returns error.IsDir on a dir.
+        // so we need to call openDir in that case.
+        var meta: std.fs.File.Metadata = undefined;
+        var stat: Stat = undefined;
+        if (parent_dir.openFile(path, .{ .mode = .read_only })) |file| {
+            defer file.close();
+            meta = try file.metadata();
+            stat = try Stat.init(file.handle);
+        } else |err| switch (err) {
             error.IsDir => {
                 var dir = try parent_dir.openDir(path, .{});
                 defer dir.close();
-                return try dir.metadata();
+                meta = try dir.metadata();
+                stat = try Stat.init(dir.fd);
             },
             else => |e| return e,
         }
+
+        return try initFromFileMetadata(meta, stat);
     }
-}
+
+    pub fn initFromFile(file: std.fs.File) !Metadata {
+        const meta = try file.metadata();
+        return initFromFileMetadata(meta, try Stat.init(file.handle));
+    }
+
+    pub fn initFromFileMetadata(file_meta: std.fs.File.Metadata, stat: Stat) !Metadata {
+        return .{
+            .kind = file_meta.kind(),
+            .times = Times.init(file_meta),
+            .stat = stat,
+            .mode = Mode.init(file_meta),
+            .size = file_meta.size(),
+        };
+    }
+};
 
 pub fn joinPath(allocator: std.mem.Allocator, paths: []const []const u8) ![]u8 {
     var total_len: usize = 0;
