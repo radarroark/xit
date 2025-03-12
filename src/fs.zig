@@ -89,10 +89,25 @@ pub const Mode = packed struct(u32) {
     }
 
     pub fn eql(self: Mode, other: Mode) bool {
-        return switch (self.content.object_type) {
-            .regular_file => @as(u32, @bitCast(self)) == @as(u32, @bitCast(other)),
-            else => self.content.object_type == other.content.object_type,
-        };
+        switch (builtin.os.tag) {
+            .windows => {
+                // on windows, we are not comparing permissions,
+                // and we are treating symlinks as if they are normal files.
+                const self_obj_type = switch (self.content.object_type) {
+                    .symbolic_link => .regular_file,
+                    else => |obj_type| obj_type,
+                };
+                const other_obj_type = switch (other.content.object_type) {
+                    .symbolic_link => .regular_file,
+                    else => |obj_type| obj_type,
+                };
+                return self_obj_type == other_obj_type;
+            },
+            else => return switch (self.content.object_type) {
+                .regular_file => @as(u32, @bitCast(self)) == @as(u32, @bitCast(other)),
+                else => self.content.object_type == other.content.object_type,
+            },
+        }
     }
 };
 
