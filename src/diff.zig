@@ -1,5 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const rp = @import("./repo.zig");
 const work = @import("./workdir.zig");
 const hash = @import("./hash.zig");
@@ -1106,24 +1105,11 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
 
             try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "diff --git a/{s} b/{s}", .{ line_iter_a.path, line_iter_b.path }));
 
-            const oid_equals = std.mem.eql(u8, &line_iter_a.oid, &line_iter_b.oid);
-
             var mode_maybe: ?fs.Mode = null;
 
             if (line_iter_a.mode) |a_mode| {
                 if (line_iter_b.mode) |b_mode| {
-                    // display the modes separately if they aren't equal
-                    const mode_equals = switch (builtin.os.tag) {
-                        // on windows, `eql` does fuzzy equality because permissions and symlinks are ignored.
-                        // so, when comparing with the work dir, we'll consider the modes equal
-                        // if either the modes are exactly equal or they are fuzzy equal and their oids are the same.
-                        .windows => if (line_iter_b.source == .work_dir)
-                            a_mode.eqlExact(b_mode) or (a_mode.eqlFuzzy(b_mode) and oid_equals)
-                        else
-                            a_mode.eqlExact(b_mode),
-                        else => a_mode.eqlExact(b_mode),
-                    };
-                    if (!mode_equals) {
+                    if (!a_mode.eqlExact(b_mode)) {
                         try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "old mode {s}", .{a_mode.toStr()}));
                         try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "new mode {s}", .{b_mode.toStr()}));
                     } else {
@@ -1138,7 +1124,7 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                 }
             }
 
-            if (!oid_equals) {
+            if (!std.mem.eql(u8, &line_iter_a.oid, &line_iter_b.oid)) {
                 if (mode_maybe) |mode| {
                     try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "index {s}..{s} {s}", .{
                         line_iter_a.oid_hex[0..7],
