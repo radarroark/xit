@@ -1178,12 +1178,12 @@ fn samePathConflict(
 
                 // three-way merge of the modes
                 const mode_maybe = blk: {
-                    if (target_entry.mode.eql(source_entry.mode)) {
+                    if (target_entry.mode.eqlExact(source_entry.mode)) {
                         break :blk target_entry.mode;
                     } else if (base_entry_maybe) |base_entry| {
-                        if (base_entry.mode.eql(target_entry.mode)) {
+                        if (base_entry.mode.eqlExact(target_entry.mode)) {
                             break :blk source_entry.mode;
-                        } else if (base_entry.mode.eql(source_entry.mode)) {
+                        } else if (base_entry.mode.eqlExact(source_entry.mode)) {
                             break :blk target_entry.mode;
                         }
                     }

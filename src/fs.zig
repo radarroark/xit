@@ -89,22 +89,24 @@ pub const Mode = packed struct(u32) {
     }
 
     pub fn eql(self: Mode, other: Mode) bool {
-        switch (builtin.os.tag) {
-            .windows => {
-                // on windows, we are not comparing permissions,
-                // and we are treating symlinks as if they are normal files.
-                const self_obj_type = switch (self.content.object_type) {
-                    .symbolic_link => .regular_file,
-                    else => |obj_type| obj_type,
-                };
-                const other_obj_type = switch (other.content.object_type) {
-                    .symbolic_link => .regular_file,
-                    else => |obj_type| obj_type,
-                };
-                return self_obj_type == other_obj_type;
-            },
-            else => return self.eqlExact(other),
-        }
+        return switch (builtin.os.tag) {
+            .windows => self.eqlFuzzy(other),
+            else => self.eqlExact(other),
+        };
+    }
+
+    // on windows, we are not comparing permissions,
+    // and we are treating symlinks as if they are normal files.
+    pub fn eqlFuzzy(self: Mode, other: Mode) bool {
+        const self_obj_type = switch (self.content.object_type) {
+            .symbolic_link => .regular_file,
+            else => |obj_type| obj_type,
+        };
+        const other_obj_type = switch (other.content.object_type) {
+            .symbolic_link => .regular_file,
+            else => |obj_type| obj_type,
+        };
+        return self_obj_type == other_obj_type;
     }
 
     pub fn eqlExact(self: Mode, other: Mode) bool {

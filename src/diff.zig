@@ -1112,10 +1112,18 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
 
             if (line_iter_a.mode) |a_mode| {
                 if (line_iter_b.mode) |b_mode| {
-                    // display the modes separately if they aren't equal.
-                    // on windows, `eql` does fuzzy equality because permissions and symlinks are ignored,
-                    // but we still want to display the modes separately if the actual oids are different.
-                    if (!a_mode.eql(b_mode) or (.windows == builtin.os.tag and !oid_equals and !a_mode.eqlExact(b_mode))) {
+                    // display the modes separately if they aren't equal
+                    const mode_equals = switch (builtin.os.tag) {
+                        // on windows, `eql` does fuzzy equality because permissions and symlinks are ignored.
+                        // so, when comparing with the work dir, we'll consider the modes equal
+                        // if either the modes are exactly equal or they are fuzzy equal and their oids are the same.
+                        .windows => if (line_iter_b.source == .work_dir)
+                            a_mode.eqlExact(b_mode) or (a_mode.eqlFuzzy(b_mode) and oid_equals)
+                        else
+                            a_mode.eqlExact(b_mode),
+                        else => a_mode.eqlExact(b_mode),
+                    };
+                    if (!mode_equals) {
                         try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "old mode {s}", .{a_mode.toStr()}));
                         try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "new mode {s}", .{b_mode.toStr()}));
                     } else {

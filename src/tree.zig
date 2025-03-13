@@ -11,7 +11,7 @@ pub fn TreeEntry(comptime hash_kind: hash.HashKind) type {
         mode: fs.Mode,
 
         pub fn eql(self: TreeEntry(hash_kind), other: TreeEntry(hash_kind)) bool {
-            return std.mem.eql(u8, &self.oid, &other.oid) and self.mode.eql(other.mode);
+            return std.mem.eql(u8, &self.oid, &other.oid) and self.mode.eqlExact(other.mode);
         }
 
         pub fn isTree(self: TreeEntry(hash_kind)) bool {

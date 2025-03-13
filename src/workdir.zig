@@ -578,7 +578,7 @@ fn compareTreeToIndex(
 ) TreeToIndexChange {
     if (item_maybe) |item| {
         if (entry_maybe) |entry| {
-            if (!entry.mode.eql(item.mode) or !std.mem.eql(u8, &entry.oid, &item.oid)) {
+            if (!entry.mode.eqlExact(item.mode) or !std.mem.eql(u8, &entry.oid, &item.oid)) {
                 return .modified;
             } else {
                 return .none;
