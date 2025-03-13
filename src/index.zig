@@ -304,6 +304,9 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     }
                 },
                 .sym_link => {
+                    // remove entries that are children of this path (file replaces directory)
+                    try self.removeChildren(path, null);
+
                     // get the target path
                     var target_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
                     const target_path = try state.core.work_dir.readLink(path, &target_path_buffer);
