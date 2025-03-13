@@ -854,93 +854,61 @@ pub const Capabilities = struct {
     shallow: bool = false,
     common: bool = false,
 
-    fn init(allocator: std.mem.Allocator, caps_str: ?[]const u8, symrefs: *std.ArrayList(net_refspec.RefSpec)) !Capabilities {
-        var caps = Capabilities{};
-        var ptr = caps_str orelse return caps;
+    fn init(allocator: std.mem.Allocator, caps_maybe: ?[]const u8, symrefs: *std.ArrayList(net_refspec.RefSpec)) !Capabilities {
+        var self = Capabilities{};
+        var iter = std.mem.splitScalar(u8, caps_maybe orelse return self, ' ');
 
-        while (ptr.len > 0) {
-            if (ptr[0] == ' ') {
-                ptr = ptr[1..];
-            }
+        while (iter.next()) |cap| {
+            if (std.mem.startsWith(u8, cap, "ofs-delta")) {
+                self.ofs_delta = true;
+                self.common = true;
+            } else if (std.mem.startsWith(u8, cap, "multi_ack_detailed")) {
+                self.multi_ack_detailed = true;
+                self.common = true;
+            } else if (std.mem.startsWith(u8, cap, "multi_ack")) {
+                self.multi_ack = true;
+                self.common = true;
+            } else if (std.mem.startsWith(u8, cap, "include-tag")) {
+                self.include_tag = true;
+                self.common = true;
+            } else if (std.mem.startsWith(u8, cap, "side-band-64k")) {
+                self.side_band_64k = true;
+                self.common = true;
+            } else if (std.mem.startsWith(u8, cap, "side-band")) {
+                self.side_band = true;
+                self.common = true;
+            } else if (std.mem.startsWith(u8, cap, "delete-refs")) {
+                self.delete_refs = true;
+                self.common = true;
+            } else if (std.mem.startsWith(u8, cap, "push-options")) {
+                self.push_options = true;
+                self.common = true;
+            } else if (std.mem.startsWith(u8, cap, "thin-pack")) {
+                self.thin_pack = true;
+                self.common = true;
+            } else if (std.mem.startsWith(u8, cap, "symref=")) {
+                const symref = cap["symref=".len..];
 
-            if (std.mem.startsWith(u8, ptr, "ofs-delta")) {
-                caps.ofs_delta = true;
-                caps.common = true;
-                ptr = ptr["ofs-delta".len..];
-            } else if (std.mem.startsWith(u8, ptr, "multi_ack_detailed")) {
-                caps.multi_ack_detailed = true;
-                caps.common = true;
-                ptr = ptr["multi_ack_detailed".len..];
-            } else if (std.mem.startsWith(u8, ptr, "multi_ack")) {
-                caps.multi_ack = true;
-                caps.common = true;
-                ptr = ptr["multi_ack".len..];
-            } else if (std.mem.startsWith(u8, ptr, "include-tag")) {
-                caps.include_tag = true;
-                caps.common = true;
-                ptr = ptr["include-tag".len..];
-            } else if (std.mem.startsWith(u8, ptr, "side-band-64k")) {
-                caps.side_band_64k = true;
-                caps.common = true;
-                ptr = ptr["side-band-64k".len..];
-            } else if (std.mem.startsWith(u8, ptr, "side-band")) {
-                caps.side_band = true;
-                caps.common = true;
-                ptr = ptr["side-band".len..];
-            } else if (std.mem.startsWith(u8, ptr, "delete-refs")) {
-                caps.delete_refs = true;
-                caps.common = true;
-                ptr = ptr["delete-refs".len..];
-            } else if (std.mem.startsWith(u8, ptr, "push-options")) {
-                caps.push_options = true;
-                caps.common = true;
-                ptr = ptr["push-options".len..];
-            } else if (std.mem.startsWith(u8, ptr, "thin-pack")) {
-                caps.thin_pack = true;
-                caps.common = true;
-                ptr = ptr["thin-pack".len..];
-            } else if (std.mem.startsWith(u8, ptr, "symref=")) {
-                ptr = ptr["symref=".len..];
-
-                const end = std.mem.indexOfScalar(u8, ptr, ' ') orelse ptr.len;
-
-                var spec = try net_refspec.RefSpec.init(allocator, ptr[0..end], .fetch);
+                var spec = try net_refspec.RefSpec.init(allocator, symref, .fetch);
                 errdefer spec.deinit(allocator);
 
                 try symrefs.append(spec);
-
-                ptr = ptr[end..];
-            } else if (std.mem.startsWith(u8, ptr, "allow-tip-sha1-in-want")) {
-                caps.allow_tip_sha1_in_want = true;
-                caps.common = true;
-                ptr = ptr["allow-tip-sha1-in-want".len..];
-            } else if (std.mem.startsWith(u8, ptr, "allow-reachable-sha1-in-want")) {
-                caps.allow_reachable_sha1_in_want = true;
-                caps.common = true;
-                ptr = ptr["allow-reachable-sha1-in-want".len..];
-            } else if (std.mem.startsWith(u8, ptr, "object-format=")) {
-                ptr = ptr["object-format=".len..];
-                const end = std.mem.indexOfScalar(u8, ptr, ' ') orelse ptr.len;
+            } else if (std.mem.startsWith(u8, cap, "allow-tip-sha1-in-want")) {
+                self.allow_tip_sha1_in_want = true;
+                self.common = true;
+            } else if (std.mem.startsWith(u8, cap, "allow-reachable-sha1-in-want")) {
+                self.allow_reachable_sha1_in_want = true;
+                self.common = true;
+            } else if (std.mem.startsWith(u8, cap, "object-format=")) {
                 // currently ignored
-                ptr = ptr[end..];
-            } else if (std.mem.startsWith(u8, ptr, "agent=")) {
-                ptr = ptr["agent=".len..];
-                const end = std.mem.indexOfScalar(u8, ptr, ' ') orelse ptr.len;
+            } else if (std.mem.startsWith(u8, cap, "agent=")) {
                 // currently ignored
-                ptr = ptr[end..];
-            } else if (std.mem.startsWith(u8, ptr, "shallow")) {
-                caps.shallow = true;
-                caps.common = true;
-                ptr = ptr["shallow".len..];
-            }
-
-            if (std.mem.indexOfScalar(u8, ptr, ' ')) |idx| {
-                ptr = ptr[idx..];
-            } else {
-                break;
+            } else if (std.mem.startsWith(u8, cap, "shallow")) {
+                self.shallow = true;
+                self.common = true;
             }
         }
 
-        return caps;
+        return self;
     }
 };
