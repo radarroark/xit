@@ -151,88 +151,103 @@ pub fn runPrint(
     cwd: std.fs.Dir,
     writers: Writers,
 ) !void {
-    run(repo_kind, repo_opts, allocator, args, cwd, writers) catch |err| {
-        switch (err) {
-            error.RepoNotFound => {
-                try writers.err.print(
-                    \\repo not found, dummy.
-                    \\either you're in the wrong place or you need to make a new one like this:
-                    \\
-                    \\
-                , .{});
-                try cmd.printHelp(.init, writers.err);
-            },
-            error.RepoAlreadyExists => {
-                try writers.err.print(
-                    \\repo already exists, dummy.
-                    \\two repos in the same directory makes no sense.
-                    \\think about it.
-                    \\
-                , .{});
-            },
-            error.CannotRemoveFileWithStagedAndUnstagedChanges, error.CannotRemoveFileWithStagedChanges, error.CannotRemoveFileWithUnstagedChanges => {
-                try writers.err.print("a file has uncommitted changes. if you really want to do it, throw caution into the wind by adding the -f flag.\n", .{});
-            },
-            error.EmptyCommit => {
-                try writers.err.print("you haven't added anything to commit yet. if you really want to commit anyway, add the --allow-empty flag and no one will judge you.\n", .{});
-            },
-            error.AddIndexPathNotFound => {
-                try writers.err.print("a path you are adding does not exist\n", .{});
-            },
-            error.RemoveIndexPathNotFound => {
-                try writers.err.print("a path you are removing does not exist\n", .{});
-            },
-            error.RecursiveOptionRequired => {
-                try writers.err.print("to do this on a dir, add the -r flag\n", .{});
-            },
-            error.RefNotFound => {
-                try writers.err.print("ref does not exist\n", .{});
-            },
-            error.BranchAlreadyExists => {
-                try writers.err.print("branch already exists\n", .{});
-            },
-            error.UserConfigNotFound => {
-                try writers.err.print(
-                    \\you need to set your name and email, mystery man. you can do it like this:
-                    \\
-                    \\    xit config add user.name foo
-                    \\    xit config add user.email foo@bar
-                , .{});
-            },
-            error.SubmodulesNotSupported => {
-                try writers.err.print("repos with submodules aren't supported right now, sowwy\n", .{});
-            },
-            error.InvalidMergeSource => {
-                try writers.err.print("your merge source doesn't look right and you should feel bad\n", .{});
-            },
-            error.InvalidSwitchTarget => {
-                try writers.err.print("your switch target doesn't look right and you should feel bad\n", .{});
-            },
-            error.UnfinishedMergeInProgress => {
-                try writers.err.print("there is an unfinished merge in progress! use `--continue` or `--abort` to finish it.\n", .{});
-            },
-            error.OtherMergeInProgress => {
-                try writers.err.print("there's another merge already in progress! use `--continue` or `--abort` to finish it.\n", .{});
-            },
-            error.CannotContinueMergeWithUnresolvedConflicts => {
-                try writers.err.print("you haven't resolved all the conflicts! after fixing, run `xit add` on them.\n", .{});
-            },
-            error.RemoteRefContainsCommitsNotFoundLocally => {
-                try writers.err.print(
-                    \\a ref you are pushing to contains commits you don't have locally.
-                    \\you either need to retrieve them with `xit fetch` and then `xit merge`,
-                    \\or if you want to obliterate them like a badass, run this command with `-f`.
-                , .{});
-            },
-            error.RemoteRefContainsIncompatibleHistory => {
-                try writers.err.print(
-                    \\a ref you are pushing to has commits with an incompatible history.
-                    \\if you want to obliterate them like a badass, run this command with `-f`.
-                , .{});
-            },
-            else => |e| return e,
-        }
-        return error.HandledError;
+    run(repo_kind, repo_opts, allocator, args, cwd, writers) catch |err| switch (err) {
+        error.RepoNotFound => {
+            try writers.err.print(
+                \\repo not found, dummy.
+                \\either you're in the wrong place or you need to make a new one like this:
+                \\
+                \\
+            , .{});
+            try cmd.printHelp(.init, writers.err);
+            return error.HandledError;
+        },
+        error.RepoAlreadyExists => {
+            try writers.err.print(
+                \\repo already exists, dummy.
+                \\two repos in the same directory makes no sense.
+                \\think about it.
+                \\
+            , .{});
+            return error.HandledError;
+        },
+        error.CannotRemoveFileWithStagedAndUnstagedChanges, error.CannotRemoveFileWithStagedChanges, error.CannotRemoveFileWithUnstagedChanges => {
+            try writers.err.print("a file has uncommitted changes. if you really want to do it, throw caution into the wind by adding the -f flag.\n", .{});
+            return error.HandledError;
+        },
+        error.EmptyCommit => {
+            try writers.err.print("you haven't added anything to commit yet. if you really want to commit anyway, add the --allow-empty flag and no one will judge you.\n", .{});
+            return error.HandledError;
+        },
+        error.AddIndexPathNotFound => {
+            try writers.err.print("a path you are adding does not exist\n", .{});
+            return error.HandledError;
+        },
+        error.RemoveIndexPathNotFound => {
+            try writers.err.print("a path you are removing does not exist\n", .{});
+            return error.HandledError;
+        },
+        error.RecursiveOptionRequired => {
+            try writers.err.print("to do this on a dir, add the -r flag\n", .{});
+            return error.HandledError;
+        },
+        error.RefNotFound => {
+            try writers.err.print("ref does not exist\n", .{});
+            return error.HandledError;
+        },
+        error.BranchAlreadyExists => {
+            try writers.err.print("branch already exists\n", .{});
+            return error.HandledError;
+        },
+        error.UserConfigNotFound => {
+            try writers.err.print(
+                \\you need to set your name and email, mystery man. you can do it like this:
+                \\
+                \\    xit config add user.name foo
+                \\    xit config add user.email foo@bar
+            , .{});
+            return error.HandledError;
+        },
+        error.SubmodulesNotSupported => {
+            try writers.err.print("repos with submodules aren't supported right now, sowwy\n", .{});
+            return error.HandledError;
+        },
+        error.InvalidMergeSource => {
+            try writers.err.print("your merge source doesn't look right and you should feel bad\n", .{});
+            return error.HandledError;
+        },
+        error.InvalidSwitchTarget => {
+            try writers.err.print("your switch target doesn't look right and you should feel bad\n", .{});
+            return error.HandledError;
+        },
+        error.UnfinishedMergeInProgress => {
+            try writers.err.print("there is an unfinished merge in progress! use `--continue` or `--abort` to finish it.\n", .{});
+            return error.HandledError;
+        },
+        error.OtherMergeInProgress => {
+            try writers.err.print("there's another merge already in progress! use `--continue` or `--abort` to finish it.\n", .{});
+            return error.HandledError;
+        },
+        error.CannotContinueMergeWithUnresolvedConflicts => {
+            try writers.err.print("you haven't resolved all the conflicts! after fixing, run `xit add` on them.\n", .{});
+            return error.HandledError;
+        },
+        error.RemoteRefContainsCommitsNotFoundLocally => {
+            try writers.err.print(
+                \\a ref you are pushing to contains commits you don't have locally.
+                \\you either need to retrieve them with `xit fetch` and then `xit merge`,
+                \\or if you want to obliterate them like a badass, run this command with `-f`.
+            , .{});
+            return error.HandledError;
+        },
+        error.RemoteRefContainsIncompatibleHistory => {
+            try writers.err.print(
+                \\a ref you are pushing to has commits with an incompatible history.
+                \\if you want to obliterate them like a badass, run this command with `-f`.
+            , .{});
+            return error.HandledError;
+        },
+        else => |e| return e,
     };
 }
 
