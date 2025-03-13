@@ -1343,12 +1343,10 @@ pub fn LineIteratorPair(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     switch (not_added) {
                         .modified => {
                             const meta = try fs.Metadata.init(state.core.work_dir, path);
-                            const mode = meta.mode;
-
                             const index_entries_for_path = stat.index.entries.get(path) orelse return error.EntryNotFound;
                             var a = try LineIterator(repo_kind, repo_opts).initFromIndex(state, allocator, index_entries_for_path[0] orelse return error.NullEntry);
                             errdefer a.deinit();
-                            var b = try LineIterator(repo_kind, repo_opts).initFromWorkDir(state, allocator, path, mode);
+                            var b = try LineIterator(repo_kind, repo_opts).initFromWorkDir(state, allocator, path, meta.mode);
                             errdefer b.deinit();
                             return .{ .path = path, .a = a, .b = b };
                         },
@@ -1360,15 +1358,23 @@ pub fn LineIteratorPair(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                             errdefer b.deinit();
                             return .{ .path = path, .a = a, .b = b };
                         },
+                        .conflict => {
+                            const meta = try fs.Metadata.init(state.core.work_dir, path);
+                            const index_entries_for_path = stat.index.entries.get(path) orelse return error.EntryNotFound;
+                            const target_entry = index_entries_for_path[2] orelse return error.NullEntry;
+                            var a = try LineIterator(repo_kind, repo_opts).initFromIndex(state, allocator, target_entry);
+                            errdefer a.deinit();
+                            var b = try LineIterator(repo_kind, repo_opts).initFromWorkDir(state, allocator, path, meta.mode);
+                            errdefer b.deinit();
+                            return .{ .path = path, .a = a, .b = b };
+                        },
                     }
                 },
                 .not_tracked => {
                     const meta = try fs.Metadata.init(state.core.work_dir, path);
-                    const mode = meta.mode;
-
                     var a = try LineIterator(repo_kind, repo_opts).initFromNothing(allocator, path);
                     errdefer a.deinit();
-                    var b = try LineIterator(repo_kind, repo_opts).initFromWorkDir(state, allocator, path, mode);
+                    var b = try LineIterator(repo_kind, repo_opts).initFromWorkDir(state, allocator, path, meta.mode);
                     errdefer b.deinit();
                     return .{ .path = path, .a = a, .b = b };
                 },

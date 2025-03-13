@@ -31,6 +31,7 @@ pub fn StatusListItem(comptime Widget: type) type {
                 .not_added => |not_added| switch (not_added) {
                     .modified => "±",
                     .deleted => "-",
+                    .conflict => "≠",
                 },
                 .not_tracked => "?",
             };
@@ -228,7 +229,7 @@ pub fn StatusTabs(comptime Widget: type, comptime repo_kind: rp.RepoKind, compti
 
             const counts = [_]usize{
                 status.index_added.count() + status.index_modified.count() + status.index_deleted.count(),
-                status.work_dir_modified.count() + status.work_dir_deleted.count(),
+                status.work_dir_modified.count() + status.work_dir_deleted.count() + status.conflicts.count(),
                 status.untracked.count(),
             };
 
@@ -358,6 +359,9 @@ pub fn StatusContent(comptime Widget: type, comptime repo_kind: rp.RepoKind, com
                     }
                     for (status.work_dir_deleted.keys()) |path| {
                         try filtered_statuses.append(.{ .kind = .{ .not_added = .deleted }, .path = path });
+                    }
+                    for (status.conflicts.keys()) |path| {
+                        try filtered_statuses.append(.{ .kind = .{ .not_added = .conflict }, .path = path });
                     }
                 },
                 .not_tracked => {

@@ -24,6 +24,7 @@ pub const StatusKind = union(IndexStatusKind) {
     not_added: enum {
         modified,
         deleted,
+        conflict,
     },
     not_tracked,
 };
