@@ -316,7 +316,7 @@ pub fn writeChunks(
     var writer = try chunk_info_cursor.writer();
 
     // make the .xit/chunks dir
-    var chunks_dir = try state.core.xit_dir.makeOpenPath("chunks", .{});
+    var chunks_dir = try state.core.repo_dir.makeOpenPath("chunks", .{});
     defer chunks_dir.close();
 
     var chunk_buffer = [_]u8{0} ** repo_opts.extra.chunk_opts.max_size;
@@ -436,7 +436,7 @@ fn findChunkIndex(
 
 pub fn readChunk(
     comptime repo_opts: rp.RepoOpts(.xit),
-    xit_dir: std.fs.Dir,
+    repo_dir: std.fs.Dir,
     chunk_info_reader: *rp.Repo(.xit, repo_opts).DB.Cursor(.read_only).Reader,
     object_position: u64,
     buf: []u8,
@@ -464,7 +464,7 @@ pub fn readChunk(
     const chunk_hash_hex = std.fmt.bytesToHex(chunk_hash_bytes, .lower);
 
     // open the chunk file
-    var chunks_dir = try xit_dir.openDir("chunks", .{});
+    var chunks_dir = try repo_dir.openDir("chunks", .{});
     defer chunks_dir.close();
     const chunk_file = try chunks_dir.openFile(&chunk_hash_hex, .{});
     defer chunk_file.close();
@@ -507,7 +507,7 @@ const ZlibStream = std.compress.flate.inflate.Decompressor(.zlib, std.fs.File.Re
 
 pub fn ChunkObjectReader(comptime repo_opts: rp.RepoOpts(.xit)) type {
     return struct {
-        xit_dir: std.fs.Dir,
+        repo_dir: std.fs.Dir,
         cursor: *rp.Repo(.xit, repo_opts).DB.Cursor(.read_only),
         chunk_info_reader: rp.Repo(.xit, repo_opts).DB.Cursor(.read_only).Reader,
         position: u64,
@@ -545,7 +545,7 @@ pub fn ChunkObjectReader(comptime repo_opts: rp.RepoOpts(.xit)) type {
             chunk_info_ptr.* = chunk_info_kv_pair.value_cursor;
 
             return .{
-                .xit_dir = state.core.xit_dir,
+                .repo_dir = state.core.repo_dir,
                 .cursor = chunk_info_ptr,
                 .chunk_info_reader = try chunk_info_ptr.reader(),
                 .position = 0,
@@ -574,7 +574,7 @@ pub fn ChunkObjectReader(comptime repo_opts: rp.RepoOpts(.xit)) type {
         }
 
         fn readStep(self: *ChunkObjectReader(repo_opts), buf: []u8) !usize {
-            return try readChunk(repo_opts, self.xit_dir, &self.chunk_info_reader, self.position, buf);
+            return try readChunk(repo_opts, self.repo_dir, &self.chunk_info_reader, self.position, buf);
         }
 
         pub fn reset(self: *ChunkObjectReader(repo_opts)) !void {

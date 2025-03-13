@@ -39,7 +39,7 @@ pub fn add(
 
     switch (repo_kind) {
         .git => {
-            var refs_dir = try state.core.git_dir.openDir("refs", .{});
+            var refs_dir = try state.core.repo_dir.openDir("refs", .{});
             defer refs_dir.close();
             var heads_dir = try refs_dir.makeOpenPath("heads", .{});
             defer heads_dir.close();
@@ -124,13 +124,13 @@ pub fn remove(
 
     switch (repo_kind) {
         .git => {
-            var refs_dir = try state.core.git_dir.openDir("refs", .{});
+            var refs_dir = try state.core.repo_dir.openDir("refs", .{});
             defer refs_dir.close();
             var heads_dir = try refs_dir.makeOpenPath("heads", .{});
             defer heads_dir.close();
 
             // create lock file for HEAD
-            var head_lock = try fs.LockFile.init(state.core.git_dir, "HEAD");
+            var head_lock = try fs.LockFile.init(state.core.repo_dir, "HEAD");
             defer head_lock.deinit();
 
             // delete file

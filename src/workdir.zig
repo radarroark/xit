@@ -194,12 +194,12 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     var contains_file = false;
 
                     while (try iter.next()) |entry| {
-                        // ignore internal dir
-                        const file_name = switch (repo_kind) {
+                        // ignore repo dir
+                        const repo_dir_name = switch (repo_kind) {
                             .git => ".git",
                             .xit => ".xit",
                         };
-                        if (std.mem.eql(u8, file_name, entry.name)) {
+                        if (std.mem.eql(u8, repo_dir_name, entry.name)) {
                             continue;
                         }
 
@@ -891,7 +891,7 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             switch (repo_kind) {
                 .git => {
                     // create lock file
-                    var lock = try fs.LockFile.init(state.core.git_dir, "index");
+                    var lock = try fs.LockFile.init(state.core.repo_dir, "index");
                     defer lock.deinit();
 
                     // read index

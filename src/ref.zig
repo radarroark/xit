@@ -172,7 +172,7 @@ pub const RefList = struct {
 
         switch (repo_kind) {
             .git => {
-                var refs_dir = try state.core.git_dir.openDir("refs", .{});
+                var refs_dir = try state.core.repo_dir.openDir("refs", .{});
                 defer refs_dir.close();
                 var ref_kind_dir = refs_dir.openDir(dir_name, .{ .iterate = true }) catch |err| switch (err) {
                     error.FileNotFound => return ref_list,
@@ -275,7 +275,7 @@ pub fn read(
     switch (repo_kind) {
         .git => {
             // look for loose ref
-            if (state.core.git_dir.openFile(ref_path, .{ .mode = .read_only })) |ref_file| {
+            if (state.core.repo_dir.openFile(ref_path, .{ .mode = .read_only })) |ref_file| {
                 defer ref_file.close();
                 const size = try ref_file.reader().readAll(buffer);
                 const ref_content = std.mem.sliceTo(buffer[0..size], '\n');
@@ -286,7 +286,7 @@ pub fn read(
             }
 
             // look for packed ref
-            if (state.core.git_dir.openFile("packed-refs", .{ .mode = .read_only })) |packed_refs_file| {
+            if (state.core.repo_dir.openFile("packed-refs", .{ .mode = .read_only })) |packed_refs_file| {
                 defer packed_refs_file.close();
 
                 var buffered_reader = std.io.bufferedReaderSize(repo_opts.read_size, packed_refs_file.reader());
@@ -404,9 +404,9 @@ pub fn write(
     switch (repo_kind) {
         .git => {
             if (std.fs.path.dirname(ref_path)) |ref_parent_path| {
-                try state.core.git_dir.makePath(ref_parent_path);
+                try state.core.repo_dir.makePath(ref_parent_path);
             }
-            var lock = try fs.LockFile.init(state.core.git_dir, ref_path);
+            var lock = try fs.LockFile.init(state.core.repo_dir, ref_path);
             defer lock.deinit();
             try lock.lock_file.writeAll(content);
             try lock.lock_file.writeAll("\n");
@@ -486,7 +486,7 @@ pub fn remove(
 ) !void {
     switch (repo_kind) {
         .git => {
-            state.core.git_dir.deleteFile(ref_path) catch |err| switch (err) {
+            state.core.repo_dir.deleteFile(ref_path) catch |err| switch (err) {
                 error.FileNotFound => return error.RefNotFound,
                 else => |e| return e,
             };

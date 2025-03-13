@@ -59,30 +59,30 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     // init repo-specific state
     const TestState = switch (repo_kind) {
         .git => struct {
-            git_dir: std.fs.Dir,
+            repo_dir: std.fs.Dir,
         },
         .xit => struct {
-            xit_dir: std.fs.Dir,
+            repo_dir: std.fs.Dir,
             db_file: std.fs.File,
         },
     };
     var test_state: TestState = switch (repo_kind) {
         .git => .{
-            .git_dir = try work_dir.openDir(".git", .{}),
+            .repo_dir = try work_dir.openDir(".git", .{}),
         },
         .xit => blk: {
-            const xit_dir = try work_dir.openDir(".xit", .{});
+            const repo_dir = try work_dir.openDir(".xit", .{});
             break :blk .{
-                .xit_dir = xit_dir,
-                .db_file = try xit_dir.openFile("db", .{ .mode = .read_write }),
+                .repo_dir = repo_dir,
+                .db_file = try repo_dir.openFile("db", .{ .mode = .read_write }),
             };
         },
     };
     defer switch (repo_kind) {
-        .git => test_state.git_dir.close(),
+        .git => test_state.repo_dir.close(),
         .xit => {
             test_state.db_file.close();
-            test_state.xit_dir.close();
+            test_state.repo_dir.close();
         },
     };
 
@@ -172,7 +172,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                     var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
                     defer repo.deinit();
                     const head_file_buffer = try rf.readHeadRecur(repo_kind, repo_opts, .{ .core = &repo.core, .extra = .{} });
-                    var objects_dir = try test_state.git_dir.openDir("objects", .{});
+                    var objects_dir = try test_state.repo_dir.openDir("objects", .{});
                     defer objects_dir.close();
                     var hash_prefix_dir = try objects_dir.openDir(head_file_buffer[0..2], .{});
                     defer hash_prefix_dir.close();
@@ -458,7 +458,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                     var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
                     defer repo.deinit();
                     const head_file_buffer = try rf.readHeadRecur(repo_kind, repo_opts, .{ .core = &repo.core, .extra = .{} });
-                    var objects_dir = try test_state.git_dir.openDir("objects", .{});
+                    var objects_dir = try test_state.repo_dir.openDir("objects", .{});
                     defer objects_dir.close();
                     var hash_prefix_dir = try objects_dir.openDir(head_file_buffer[0..2], .{});
                     defer hash_prefix_dir.close();
@@ -835,7 +835,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
         // a stale index lock file isn't hanging around
         if (repo_kind == .git) {
-            const lock_file_or_err = test_state.git_dir.openFile("index.lock", .{ .mode = .read_only });
+            const lock_file_or_err = test_state.repo_dir.openFile("index.lock", .{ .mode = .read_only });
             try std.testing.expectEqual(error.FileNotFound, lock_file_or_err);
         }
     }
@@ -1266,7 +1266,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // make sure the ref is created with subdirs
     if (repo_kind == .git) {
-        const ref_file = try test_state.git_dir.openFile("refs/heads/a/b/c", .{});
+        const ref_file = try test_state.repo_dir.openFile("refs/heads/a/b/c", .{});
         defer ref_file.close();
     }
 
@@ -1287,9 +1287,9 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // make sure the subdirs are deleted
     if (repo_kind == .git) {
-        try std.testing.expectEqual(error.FileNotFound, test_state.git_dir.openFile("refs/heads/a/b/c", .{}));
-        try std.testing.expectEqual(error.FileNotFound, test_state.git_dir.openDir("refs/heads/a/b", .{}));
-        try std.testing.expectEqual(error.FileNotFound, test_state.git_dir.openDir("refs/heads/a", .{}));
+        try std.testing.expectEqual(error.FileNotFound, test_state.repo_dir.openFile("refs/heads/a/b/c", .{}));
+        try std.testing.expectEqual(error.FileNotFound, test_state.repo_dir.openDir("refs/heads/a/b", .{}));
+        try std.testing.expectEqual(error.FileNotFound, test_state.repo_dir.openDir("refs/heads/a", .{}));
     }
 
     // switch to master

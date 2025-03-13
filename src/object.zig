@@ -52,7 +52,7 @@ pub fn writeObject(
 
     switch (repo_kind) {
         .git => {
-            var objects_dir = try state.core.git_dir.openDir("objects", .{});
+            var objects_dir = try state.core.repo_dir.openDir("objects", .{});
             defer objects_dir.close();
 
             // make the two char dir
@@ -214,7 +214,7 @@ fn writeTree(
 
     switch (repo_kind) {
         .git => {
-            var objects_dir = try state.core.git_dir.openDir("objects", .{});
+            var objects_dir = try state.core.repo_dir.openDir("objects", .{});
             defer objects_dir.close();
 
             // make the two char dir
@@ -261,22 +261,18 @@ fn sign(
     signing_key: []const u8,
 ) ![]const []const u8 {
     const content = try std.mem.join(arena.allocator(), "\n", lines);
-    const dir = switch (repo_kind) {
-        .git => state.core.git_dir,
-        .xit => state.core.xit_dir,
-    };
 
     // write the commit content to a file
     const content_file_name = "xit_signing_buffer";
-    const content_file = try dir.createFile(content_file_name, .{ .truncate = true, .lock = .exclusive });
+    const content_file = try state.core.repo_dir.createFile(content_file_name, .{ .truncate = true, .lock = .exclusive });
     defer {
         content_file.close();
-        dir.deleteFile(content_file_name) catch {};
+        state.core.repo_dir.deleteFile(content_file_name) catch {};
     }
     try content_file.writeAll(content);
 
     // sign the file
-    const content_file_path = try dir.realpathAlloc(arena.allocator(), content_file_name);
+    const content_file_path = try state.core.repo_dir.realpathAlloc(arena.allocator(), content_file_name);
     var process = std.process.Child.init(
         &.{ "ssh-keygen", "-Y", "sign", "-n", "git", "-f", signing_key, content_file_path },
         allocator,
@@ -291,10 +287,10 @@ fn sign(
 
     // read the sig
     const sig_file_name = content_file_name ++ ".sig";
-    const sig_file = try dir.openFile(sig_file_name, .{ .mode = .read_only });
+    const sig_file = try state.core.repo_dir.openFile(sig_file_name, .{ .mode = .read_only });
     defer {
         sig_file.close();
-        dir.deleteFile(sig_file_name) catch {};
+        state.core.repo_dir.deleteFile(sig_file_name) catch {};
     }
     const sig_file_reader = sig_file.reader();
     var sig_lines = std.ArrayList([]const u8).init(arena.allocator());
@@ -440,7 +436,7 @@ pub fn writeCommit(
     switch (repo_kind) {
         .git => {
             // open the objects dir
-            var objects_dir = try state.core.git_dir.openDir("objects", .{});
+            var objects_dir = try state.core.repo_dir.openDir("objects", .{});
             defer objects_dir.close();
 
             // make the two char dir
@@ -543,7 +539,7 @@ pub fn writeTag(
     switch (repo_kind) {
         .git => {
             // open the objects dir
-            var objects_dir = try state.core.git_dir.openDir("objects", .{});
+            var objects_dir = try state.core.repo_dir.openDir("objects", .{});
             defer objects_dir.close();
 
             // make the two char dir
@@ -1128,7 +1124,7 @@ pub fn PatchWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoO
             const DB = rp.Repo(.xit, repo_opts).DB;
             const db_name = "temp.db";
 
-            xit_dir: std.fs.Dir,
+            repo_dir: std.fs.Dir,
             db_file: std.fs.File,
             db: *DB,
             parent_to_children: DB.HashMap(.read_write),
@@ -1136,10 +1132,10 @@ pub fn PatchWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoO
             commit_count: usize,
 
             pub fn init(state: rp.Repo(.xit, repo_opts).State(.read_only), allocator: std.mem.Allocator) !PatchWriter(repo_kind, repo_opts) {
-                const db_file = try state.core.xit_dir.createFile(db_name, .{ .truncate = true, .lock = .exclusive, .read = true });
+                const db_file = try state.core.repo_dir.createFile(db_name, .{ .truncate = true, .lock = .exclusive, .read = true });
                 errdefer {
                     db_file.close();
-                    state.core.xit_dir.deleteFile(db_name) catch {};
+                    state.core.repo_dir.deleteFile(db_name) catch {};
                 }
 
                 const db_ptr = try allocator.create(DB);
@@ -1152,7 +1148,7 @@ pub fn PatchWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoO
                 const parent_to_children = try DB.HashMap(.read_write).init(parent_to_children_cursor);
 
                 return .{
-                    .xit_dir = state.core.xit_dir,
+                    .repo_dir = state.core.repo_dir,
                     .db_file = db_file,
                     .db = db_ptr,
                     .parent_to_children = parent_to_children,
@@ -1163,7 +1159,7 @@ pub fn PatchWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoO
 
             pub fn deinit(self: *PatchWriter(repo_kind, repo_opts), allocator: std.mem.Allocator) void {
                 self.db_file.close();
-                self.xit_dir.deleteFile(db_name) catch {};
+                self.repo_dir.deleteFile(db_name) catch {};
                 allocator.destroy(self.db);
                 self.oid_queue.deinit(allocator);
             }

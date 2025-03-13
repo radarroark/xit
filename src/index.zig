@@ -69,7 +69,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
             switch (repo_kind) {
                 .git => {
                     // open index
-                    const index_file = state.core.git_dir.openFile("index", .{ .mode = .read_only }) catch |err| switch (err) {
+                    const index_file = state.core.repo_dir.openFile("index", .{ .mode = .read_only }) catch |err| switch (err) {
                         error.FileNotFound => return self,
                         else => |e| return e,
                     };
@@ -290,12 +290,12 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     defer dir.close();
                     var iter = dir.iterate();
                     while (try iter.next()) |entry| {
-                        // ignore internal dir
-                        const file_name = switch (repo_kind) {
+                        // ignore repo dir
+                        const repo_dir_name = switch (repo_kind) {
                             .git => ".git",
                             .xit => ".xit",
                         };
-                        if (std.mem.eql(u8, file_name, entry.name)) {
+                        if (std.mem.eql(u8, repo_dir_name, entry.name)) {
                             continue;
                         }
 

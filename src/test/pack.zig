@@ -44,8 +44,8 @@ test "pack" {
     defer c.git_repository_free(repo);
 
     // make sure the git dir was created
-    var git_dir = try work_dir.openDir(".git", .{});
-    defer git_dir.close();
+    var repo_dir = try work_dir.openDir(".git", .{});
+    defer repo_dir.close();
 
     // add and commit
     var commit_oid1: c.git_oid = undefined;

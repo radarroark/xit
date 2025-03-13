@@ -122,7 +122,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                         }
                     };
 
-                    var config_file = try state.core.git_dir.createFile("config", .{ .read = true, .truncate = false });
+                    var config_file = try state.core.repo_dir.createFile("config", .{ .read = true, .truncate = false });
                     defer config_file.close();
 
                     const reader = config_file.reader();

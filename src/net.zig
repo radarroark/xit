@@ -65,7 +65,7 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
         ) !Remote(repo_kind, repo_opts) {
             switch (repo_kind) {
                 .git => {
-                    var lock = try fs.LockFile.init(state.core.git_dir, "config");
+                    var lock = try fs.LockFile.init(state.core.repo_dir, "config");
                     defer lock.deinit();
 
                     try addConfig(.{ .core = state.core, .extra = .{ .lock_file_maybe = lock.lock_file } }, allocator, name, url);

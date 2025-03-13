@@ -49,7 +49,7 @@ pub fn remove(
 ) !void {
     switch (repo_kind) {
         .git => {
-            var refs_dir = try state.core.git_dir.openDir("refs", .{});
+            var refs_dir = try state.core.repo_dir.openDir("refs", .{});
             defer refs_dir.close();
             var tags_dir = try refs_dir.makeOpenPath("tags", .{});
             defer tags_dir.close();

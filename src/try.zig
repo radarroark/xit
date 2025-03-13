@@ -46,15 +46,15 @@ pub fn main() !void {
     defer temp_dir.close();
 
     {
-        var src_git_dir = try cwd.openDir(".git", .{ .iterate = true });
-        defer src_git_dir.close();
+        var src_repo_dir = try cwd.openDir(".git", .{ .iterate = true });
+        defer src_repo_dir.close();
 
         try temp_dir.makeDir(".git");
 
-        var dest_git_dir = try temp_dir.openDir(".git", .{});
-        defer dest_git_dir.close();
+        var dest_repo_dir = try temp_dir.openDir(".git", .{});
+        defer dest_repo_dir.close();
 
-        try copyDir(src_git_dir, dest_git_dir);
+        try copyDir(src_repo_dir, dest_repo_dir);
     }
 
     var args = std.ArrayList([]const u8).init(allocator);

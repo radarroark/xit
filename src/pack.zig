@@ -424,7 +424,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
         }
 
         fn initWithIndex(allocator: std.mem.Allocator, core: *rp.Repo(repo_kind, repo_opts).Core, oid_hex: *const [hash.hexLen(repo_opts.hash)]u8) !PackObjectReader(repo_kind, repo_opts) {
-            var pack_dir = try core.git_dir.openDir("objects/pack", .{ .iterate = true });
+            var pack_dir = try core.repo_dir.openDir("objects/pack", .{ .iterate = true });
             defer pack_dir.close();
 
             const pack_offset = try searchPackIndexes(repo_opts.hash, pack_dir, oid_hex);
@@ -997,7 +997,7 @@ pub fn LooseOrPackObjectReader(comptime repo_opts: rp.RepoOpts(.git)) type {
             oid_hex: *const [hash.hexLen(repo_opts.hash)]u8,
         ) !LooseOrPackObjectReader(repo_opts) {
             // open the objects dir
-            var objects_dir = try state.core.git_dir.openDir("objects", .{});
+            var objects_dir = try state.core.repo_dir.openDir("objects", .{});
             defer objects_dir.close();
 
             // open the object file

@@ -437,7 +437,7 @@ fn testFetch(
 
     // export server repo
     {
-        const export_file = try server_repo.core.git_dir.createFile("git-daemon-export-ok", .{});
+        const export_file = try server_repo.core.repo_dir.createFile("git-daemon-export-ok", .{});
         defer export_file.close();
 
         try server_repo.addConfig(allocator, .{ .name = "uploadpack.allowAnySHA1InWant", .value = "true" });
@@ -623,7 +623,7 @@ fn testPush(
 
     // export server repo
     {
-        const export_file = try server_repo.core.git_dir.createFile("git-daemon-export-ok", .{});
+        const export_file = try server_repo.core.repo_dir.createFile("git-daemon-export-ok", .{});
         defer export_file.close();
     }
 
@@ -887,7 +887,7 @@ fn testClone(
 
     // export server repo
     {
-        const export_file = try server_repo.core.git_dir.createFile("git-daemon-export-ok", .{});
+        const export_file = try server_repo.core.repo_dir.createFile("git-daemon-export-ok", .{});
         defer export_file.close();
     }
 

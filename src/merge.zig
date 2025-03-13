@@ -1351,20 +1351,13 @@ pub fn removeMergeState(
         };
     }
 
-    switch (repo_kind) {
-        .git => {
-            state.core.git_dir.deleteFile(merge_msg_name) catch |err| switch (err) {
-                error.FileNotFound => {},
-                else => |e| return e,
-            };
-        },
-        .xit => {
-            state.core.xit_dir.deleteFile(merge_msg_name) catch |err| switch (err) {
-                error.FileNotFound => {},
-                else => |e| return e,
-            };
-            _ = try state.extra.moment.remove(hash.hashInt(repo_opts.hash, "merge-in-progress"));
-        },
+    state.core.repo_dir.deleteFile(merge_msg_name) catch |err| switch (err) {
+        error.FileNotFound => {},
+        else => |e| return e,
+    };
+
+    if (.xit == repo_kind) {
+        _ = try state.extra.moment.remove(hash.hashInt(repo_opts.hash, "merge-in-progress"));
     }
 }
 
@@ -1597,7 +1590,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     switch (repo_kind) {
                         .git => {
                             // create lock file
-                            var lock = try fs.LockFile.init(state.core.git_dir, "index");
+                            var lock = try fs.LockFile.init(state.core.repo_dir, "index");
                             defer lock.deinit();
 
                             // read index
@@ -1626,7 +1619,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                             if (conflicts.count() > 0) {
                                 try rf.write(repo_kind, repo_opts, state, merge_head_name, .{ .oid = &source_oid });
 
-                                const merge_msg = try state.core.git_dir.createFile(merge_msg_name, .{ .truncate = true, .lock = .exclusive });
+                                const merge_msg = try state.core.repo_dir.createFile(merge_msg_name, .{ .truncate = true, .lock = .exclusive });
                                 defer merge_msg.close();
                                 try merge_msg.writeAll(commit_metadata.message orelse "");
 
@@ -1671,7 +1664,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                             if (conflicts.count() > 0) {
                                 try rf.write(repo_kind, repo_opts, state, merge_head_name, .{ .oid = &source_oid });
 
-                                const merge_msg = try state.core.xit_dir.createFile(merge_msg_name, .{ .truncate = true, .lock = .exclusive });
+                                const merge_msg = try state.core.repo_dir.createFile(merge_msg_name, .{ .truncate = true, .lock = .exclusive });
                                 defer merge_msg.close();
                                 try merge_msg.writeAll(commit_metadata.message orelse "");
 
@@ -1744,25 +1737,13 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     const source_oid = try rf.readRecur(repo_kind, repo_opts, state.readOnly(), .{ .ref = .{ .kind = .none, .name = merge_head_name } }) orelse return error.MergeHeadNotFound;
 
                     // read the merge message
+                    const merge_msg = state.core.repo_dir.openFile(merge_msg_name, .{ .mode = .read_only }) catch |err| switch (err) {
+                        error.FileNotFound => return error.MergeMessageNotFound,
+                        else => |e| return e,
+                    };
+                    defer merge_msg.close();
                     var commit_metadata: obj.CommitMetadata(repo_opts.hash) = merge_input.commit_metadata orelse .{};
-                    switch (repo_kind) {
-                        .git => {
-                            const merge_msg = state.core.git_dir.openFile(merge_msg_name, .{ .mode = .read_only }) catch |err| switch (err) {
-                                error.FileNotFound => return error.MergeMessageNotFound,
-                                else => |e| return e,
-                            };
-                            defer merge_msg.close();
-                            commit_metadata.message = try merge_msg.readToEndAlloc(arena.allocator(), repo_opts.max_read_size);
-                        },
-                        .xit => {
-                            const merge_msg = state.core.xit_dir.openFile(merge_msg_name, .{ .mode = .read_only }) catch |err| switch (err) {
-                                error.FileNotFound => return error.MergeMessageNotFound,
-                                else => |e| return e,
-                            };
-                            defer merge_msg.close();
-                            commit_metadata.message = try merge_msg.readToEndAlloc(arena.allocator(), repo_opts.max_read_size);
-                        },
-                    }
+                    commit_metadata.message = try merge_msg.readToEndAlloc(arena.allocator(), repo_opts.max_read_size);
 
                     // we need to return the source name but we don't have it,
                     // so just copy the source oid into a buffer and return that instead

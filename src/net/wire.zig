@@ -512,15 +512,11 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             state: rp.Repo(repo_kind, repo_opts).State(.read_write),
             allocator: std.mem.Allocator,
         ) !void {
-            const dir = switch (repo_kind) {
-                .git => state.core.git_dir,
-                .xit => state.core.xit_dir,
-            };
             const temp_pack_name = "temp.pack";
 
             // receive pack file
             {
-                var temp_pack = try fs.LockFile.init(dir, temp_pack_name);
+                var temp_pack = try fs.LockFile.init(state.core.repo_dir, temp_pack_name);
                 defer temp_pack.deinit();
 
                 if (!self.caps.side_band and !self.caps.side_band_64k) {
@@ -560,8 +556,8 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
 
             // iterate over pack file
             {
-                defer dir.deleteFile(temp_pack_name) catch {};
-                const pack_file_path = try dir.realpathAlloc(allocator, temp_pack_name);
+                defer state.core.repo_dir.deleteFile(temp_pack_name) catch {};
+                const pack_file_path = try state.core.repo_dir.realpathAlloc(allocator, temp_pack_name);
                 defer allocator.free(pack_file_path);
                 var pack_iter = try pack.PackObjectIterator(repo_kind, repo_opts).init(allocator, pack_file_path);
                 defer pack_iter.deinit();
