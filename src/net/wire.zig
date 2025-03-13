@@ -899,15 +899,10 @@ pub const Capabilities = struct {
                 caps.thin_pack = true;
                 caps.common = true;
                 ptr = ptr["thin-pack".len..];
-            } else if (std.mem.startsWith(u8, ptr, "symref")) {
-                ptr = ptr["symref".len..];
+            } else if (std.mem.startsWith(u8, ptr, "symref=")) {
+                ptr = ptr["symref=".len..];
 
-                if (ptr[0] != '=') {
-                    return error.InvalidSymref;
-                }
-                ptr = ptr[1..];
-
-                const end = std.mem.indexOfScalar(u8, ptr, ' ') orelse std.mem.indexOfScalar(u8, ptr, '\x00') orelse return error.InvalidSymref;
+                const end = std.mem.indexOfScalar(u8, ptr, ' ') orelse ptr.len;
 
                 var spec = try net_refspec.RefSpec.init(allocator, ptr[0..end], .fetch);
                 errdefer spec.deinit(allocator);
@@ -925,8 +920,14 @@ pub const Capabilities = struct {
                 ptr = ptr["allow-reachable-sha1-in-want".len..];
             } else if (std.mem.startsWith(u8, ptr, "object-format=")) {
                 ptr = ptr["object-format=".len..];
+                const end = std.mem.indexOfScalar(u8, ptr, ' ') orelse ptr.len;
+                // currently ignored
+                ptr = ptr[end..];
             } else if (std.mem.startsWith(u8, ptr, "agent=")) {
                 ptr = ptr["agent=".len..];
+                const end = std.mem.indexOfScalar(u8, ptr, ' ') orelse ptr.len;
+                // currently ignored
+                ptr = ptr[end..];
             } else if (std.mem.startsWith(u8, ptr, "shallow")) {
                 caps.shallow = true;
                 caps.common = true;
