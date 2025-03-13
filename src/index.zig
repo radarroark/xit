@@ -263,10 +263,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                             continue;
                         }
 
-                        const subpath = if (std.mem.eql(u8, path, "."))
-                            try self.arena.allocator().dupe(u8, entry.name)
-                        else
-                            try fs.joinPath(self.arena.allocator(), &.{ path, entry.name });
+                        const subpath = try fs.joinPath(self.arena.allocator(), &.{ path, entry.name });
                         try self.addPath(state, subpath);
                     }
                 },
@@ -500,7 +497,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
             action: enum { add, rm },
             removed_paths_maybe: ?*std.StringArrayHashMap(void),
         ) !void {
-            const path = if (path_parts.len == 0) "." else try fs.joinPath(self.arena.allocator(), path_parts);
+            const path = try fs.joinPath(self.arena.allocator(), path_parts);
 
             // if the path doesn't exist, remove it, regardless of what the `action` is
             if (state.core.work_dir.openFile(path, .{ .mode = .read_only })) |file| {

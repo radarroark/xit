@@ -226,9 +226,13 @@ pub const Metadata = struct {
 };
 
 pub fn joinPath(allocator: std.mem.Allocator, paths: []const []const u8) ![]u8 {
+    if (paths.len == 0 or (paths.len == 1 and std.mem.eql(u8, ".", paths[0]))) {
+        return try allocator.dupe(u8, ".");
+    }
+
     var total_len: usize = 0;
     for (paths, 0..) |path, i| {
-        if (path.len == 0) {
+        if (path.len == 0 or std.mem.eql(u8, ".", path)) {
             continue;
         }
         total_len += path.len;
@@ -242,7 +246,7 @@ pub fn joinPath(allocator: std.mem.Allocator, paths: []const []const u8) ![]u8 {
 
     var buf_slice = buf[0..];
     for (paths, 0..) |path, i| {
-        if (path.len == 0) {
+        if (path.len == 0 or std.mem.eql(u8, ".", path)) {
             continue;
         }
         @memcpy(buf_slice[0..path.len], path);

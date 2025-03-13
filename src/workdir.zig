@@ -202,10 +202,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                             continue;
                         }
 
-                        const subpath = if (std.mem.eql(u8, path, "."))
-                            try arena.allocator().dupe(u8, entry.name)
-                        else
-                            try fs.joinPath(arena.allocator(), &.{ path, entry.name });
+                        const subpath = try fs.joinPath(arena.allocator(), &.{ path, entry.name });
 
                         var grandchild_untracked = std.StringArrayHashMapUnmanaged(Status(repo_kind, repo_opts).Entry){};
                         defer grandchild_untracked.deinit(allocator);
