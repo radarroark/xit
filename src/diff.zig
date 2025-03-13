@@ -1361,8 +1361,8 @@ pub fn LineIteratorPair(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                         .conflict => {
                             const meta = try fs.Metadata.init(state.core.work_dir, path);
                             const index_entries_for_path = stat.index.entries.get(path) orelse return error.EntryNotFound;
-                            const entry = index_entries_for_path[2] orelse index_entries_for_path[3] orelse return error.NullEntry;
-                            var a = try LineIterator(repo_kind, repo_opts).initFromIndex(state, allocator, entry);
+                            const conflict_entry = index_entries_for_path[2] orelse index_entries_for_path[3] orelse return error.NullEntry;
+                            var a = try LineIterator(repo_kind, repo_opts).initFromIndex(state, allocator, conflict_entry);
                             errdefer a.deinit();
                             var b = try LineIterator(repo_kind, repo_opts).initFromWorkDir(state, allocator, path, meta.mode);
                             errdefer b.deinit();

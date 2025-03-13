@@ -748,9 +748,9 @@ pub fn migrate(
         // if we are using -f, and the conflicting file isn't being removed,
         // just add it so the index is updated (making it non-conflicting)
         // and the work dir is (optionally) updated
-        else if (!remove_files.contains(path)) {
-            const target_entry = index_entries_for_path[2] orelse return error.ExpectedIndexEntry;
-            try add_files.put(path, .{ .oid = target_entry.oid, .mode = target_entry.mode });
+        else if (!remove_files.contains(path) and !add_files.contains(path)) {
+            const conflict_entry = index_entries_for_path[2] orelse index_entries_for_path[3] orelse return error.NullEntry;
+            try add_files.put(path, .{ .oid = conflict_entry.oid, .mode = conflict_entry.mode });
         }
     }
 
