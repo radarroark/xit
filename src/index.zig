@@ -195,21 +195,20 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
         /// ignoring symlinks for now but will add that later.
         pub fn addPath(self: *Index(repo_kind, repo_opts), state: rp.Repo(repo_kind, repo_opts).State(.read_write), path: []const u8) !void {
             // remove entries that are parents of this path (directory replaces file)
-            {
-                var parent_path_maybe = std.fs.path.dirname(path);
-                while (parent_path_maybe) |parent_path| {
-                    if (self.entries.contains(parent_path)) {
-                        try self.removePath(parent_path, null);
-                    }
-                    parent_path_maybe = std.fs.path.dirname(parent_path);
+            var parent_path_maybe = std.fs.path.dirname(path);
+            while (parent_path_maybe) |parent_path| {
+                if (self.entries.contains(parent_path)) {
+                    try self.removePath(parent_path, null);
                 }
+                parent_path_maybe = std.fs.path.dirname(parent_path);
             }
-            // remove entries that are children of this path (file replaces directory)
-            try self.removeChildren(path, null);
-            // read the metadata
+
             const meta = try fs.Metadata.init(state.core.work_dir, path);
             switch (meta.kind) {
                 .file => {
+                    // remove entries that are children of this path (file replaces directory)
+                    try self.removeChildren(path, null);
+
                     // open file
                     const file = try state.core.work_dir.openFile(path, .{ .mode = .read_only });
                     defer file.close();
