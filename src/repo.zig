@@ -599,7 +599,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
         pub fn status(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator) !work.Status(repo_kind, repo_opts) {
             var moment = try self.core.latestMoment();
             const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
-            return try work.Status(repo_kind, repo_opts).init(allocator, state, null);
+            return try work.Status(repo_kind, repo_opts).init(allocator, state);
         }
 
         pub fn filePair(

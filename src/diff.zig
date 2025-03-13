@@ -1337,6 +1337,14 @@ pub fn LineIteratorPair(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                             errdefer b.deinit();
                             return .{ .path = path, .a = a, .b = b };
                         },
+                        .conflict => {
+                            var a = try LineIterator(repo_kind, repo_opts).initFromTree(state, allocator, path, stat.resolved_conflicts.get(path) orelse return error.EntryNotFound);
+                            errdefer a.deinit();
+                            const index_entries_for_path = stat.index.entries.get(path) orelse return error.EntryNotFound;
+                            var b = try LineIterator(repo_kind, repo_opts).initFromIndex(state, allocator, index_entries_for_path[0] orelse return error.NullEntry);
+                            errdefer b.deinit();
+                            return .{ .path = path, .a = a, .b = b };
+                        },
                     }
                 },
                 .not_added => |not_added| {
@@ -1415,8 +1423,8 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
             var next_index = self.next_index;
             switch (self.diff_opts) {
                 .work_dir => |work_dir| {
-                    if (next_index < work_dir.status.conflicts.count()) {
-                        const path = work_dir.status.conflicts.keys()[next_index];
+                    if (next_index < work_dir.status.unresolved_conflicts.count()) {
+                        const path = work_dir.status.unresolved_conflicts.keys()[next_index];
                         const meta = try fs.Metadata.init(self.core.work_dir, path);
                         const stage: usize = switch (work_dir.conflict_diff_kind) {
                             .base => 1,
@@ -1443,7 +1451,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                             return try self.next();
                         }
                     } else {
-                        next_index -= work_dir.status.conflicts.count();
+                        next_index -= work_dir.status.unresolved_conflicts.count();
                     }
 
                     if (next_index < work_dir.status.work_dir_modified.count()) {

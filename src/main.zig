@@ -313,7 +313,7 @@ fn runCommand(
                 try writers.out.print("D  {s}\n", .{path});
             }
 
-            for (stat.conflicts.keys(), stat.conflicts.values()) |path, conflict| {
+            for (stat.unresolved_conflicts.keys(), stat.unresolved_conflicts.values()) |path, conflict| {
                 if (conflict.base) {
                     if (conflict.target) {
                         if (conflict.source) {

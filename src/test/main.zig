@@ -1411,7 +1411,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             defer repo.deinit();
             var status = try repo.status(allocator);
             defer status.deinit(allocator);
-            try std.testing.expect(status.conflicts.count() > 0);
+            try std.testing.expect(status.unresolved_conflicts.count() > 0);
         }
 
         // abort the merge
@@ -1423,7 +1423,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             defer repo.deinit();
             var status = try repo.status(allocator);
             defer status.deinit(allocator);
-            try std.testing.expectEqual(0, status.conflicts.count());
+            try std.testing.expectEqual(0, status.unresolved_conflicts.count());
         }
 
         // merge again

@@ -1339,6 +1339,19 @@ pub fn checkForOtherMerge(
     }
 }
 
+pub fn readAnyMergeHead(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+) !?[hash.hexLen(repo_opts.hash)]u8 {
+    for (merge_head_names) |head_name| {
+        if (try rf.readRecur(repo_kind, repo_opts, state, .{ .ref = .{ .kind = .none, .name = head_name } })) |source_oid| {
+            return source_oid;
+        }
+    }
+    return null;
+}
+
 pub fn removeMergeState(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),

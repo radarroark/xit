@@ -20,6 +20,7 @@ pub const StatusKind = union(IndexStatusKind) {
         created,
         modified,
         deleted,
+        conflict,
     },
     not_added: enum {
         modified,
@@ -43,7 +44,8 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
         index_added: std.StringArrayHashMapUnmanaged(void),
         index_modified: std.StringArrayHashMapUnmanaged(void),
         index_deleted: std.StringArrayHashMapUnmanaged(void),
-        conflicts: std.StringArrayHashMapUnmanaged(MergeConflictStatus),
+        unresolved_conflicts: std.StringArrayHashMapUnmanaged(MergeConflictStatus),
+        resolved_conflicts: std.StringArrayHashMapUnmanaged(tr.TreeEntry(repo_opts.hash)),
         index: idx.Index(repo_kind, repo_opts),
         head_tree: tr.Tree(repo_kind, repo_opts),
         arena: *std.heap.ArenaAllocator,
@@ -56,7 +58,6 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
         pub fn init(
             allocator: std.mem.Allocator,
             state: rp.Repo(repo_kind, repo_opts).State(.read_only),
-            oid_maybe: ?*const [hash.hexLen(repo_opts.hash)]u8,
         ) !Status(repo_kind, repo_opts) {
             var untracked = std.StringArrayHashMapUnmanaged(Entry){};
             errdefer untracked.deinit(allocator);
@@ -76,8 +77,11 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             var index_deleted = std.StringArrayHashMapUnmanaged(void){};
             errdefer index_deleted.deinit(allocator);
 
-            var conflicts = std.StringArrayHashMapUnmanaged(MergeConflictStatus){};
-            errdefer conflicts.deinit(allocator);
+            var unresolved_conflicts = std.StringArrayHashMapUnmanaged(MergeConflictStatus){};
+            errdefer unresolved_conflicts.deinit(allocator);
+
+            var resolved_conflicts = std.StringArrayHashMapUnmanaged(tr.TreeEntry(repo_opts.hash)){};
+            errdefer resolved_conflicts.deinit(allocator);
 
             const arena = try allocator.create(std.heap.ArenaAllocator);
             arena.* = std.heap.ArenaAllocator.init(allocator);
@@ -94,8 +98,14 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
             _ = try addEntries(allocator, arena, &untracked, &work_dir_modified, &index, &index_bools, state.core.work_dir, ".");
 
-            var head_tree = try tr.Tree(repo_kind, repo_opts).init(allocator, state, oid_maybe);
+            var head_tree = try tr.Tree(repo_kind, repo_opts).init(allocator, state, null);
             errdefer head_tree.deinit();
+
+            var merge_source_tree_maybe = if (try mrg.readAnyMergeHead(repo_kind, repo_opts, state)) |*merge_source_oid|
+                try tr.Tree(repo_kind, repo_opts).init(allocator, state, merge_source_oid)
+            else
+                null;
+            defer if (merge_source_tree_maybe) |*merge_source_tree| merge_source_tree.deinit();
 
             // for each entry in the index
             for (index.entries.keys(), index.entries.values(), 0..) |path, *index_entries_for_path, i| {
@@ -104,9 +114,22 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     if (!index_bools[i]) {
                         try work_dir_deleted.put(allocator, path, {});
                     }
-                    if (head_tree.entries.get(index_entry.path)) |head_entry| {
-                        if (!index_entry.mode.eql(head_entry.mode) or !std.mem.eql(u8, &index_entry.oid, &head_entry.oid)) {
-                            try index_modified.put(allocator, index_entry.path, {});
+
+                    if (head_tree.entries.get(path)) |head_entry| {
+                        if (!head_entry.eql(.{ .oid = index_entry.oid, .mode = index_entry.mode })) {
+                            try index_modified.put(allocator, path, {});
+                        } else if (merge_source_tree_maybe) |*merge_source_tree| {
+                            // if the head entry is different than the merge source entry,
+                            // it was a conflict that has now been resolved.
+                            // add the merge source entry to the resolved conflicts so
+                            // the entry can be diffed with it in the UI.
+                            if (merge_source_tree.entries.get(path)) |merge_source_entry| {
+                                if (!head_entry.eql(merge_source_entry)) {
+                                    if (!merge_source_entry.eql(.{ .oid = index_entry.oid, .mode = index_entry.mode })) {
+                                        try resolved_conflicts.put(allocator, path, merge_source_entry);
+                                    }
+                                }
+                            }
                         }
                     } else {
                         try index_added.put(allocator, index_entry.path, {});
@@ -114,7 +137,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                 }
                 // add to conflicts
                 else {
-                    try conflicts.put(allocator, path, .{
+                    try unresolved_conflicts.put(allocator, path, .{
                         .base = index_entries_for_path[1] != null,
                         .target = index_entries_for_path[2] != null,
                         .source = index_entries_for_path[3] != null,
@@ -135,7 +158,8 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                 .index_added = index_added,
                 .index_modified = index_modified,
                 .index_deleted = index_deleted,
-                .conflicts = conflicts,
+                .unresolved_conflicts = unresolved_conflicts,
+                .resolved_conflicts = resolved_conflicts,
                 .index = index,
                 .head_tree = head_tree,
                 .arena = arena,
@@ -149,7 +173,8 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             self.index_added.deinit(allocator);
             self.index_modified.deinit(allocator);
             self.index_deleted.deinit(allocator);
-            self.conflicts.deinit(allocator);
+            self.unresolved_conflicts.deinit(allocator);
+            self.resolved_conflicts.deinit(allocator);
             self.index.deinit();
             self.head_tree.deinit();
             self.arena.deinit();
