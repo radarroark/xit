@@ -73,16 +73,15 @@ pub fn Widget(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
     };
 }
 
-pub fn start(
+pub fn rootWidget(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     repo: *rp.Repo(repo_kind, repo_opts),
     allocator: std.mem.Allocator,
     cmd_kind_maybe: ?cmd.CommandKind,
-) !void {
-    // init root widget
+) !Widget(repo_kind, repo_opts) {
     var root = Widget(repo_kind, repo_opts){ .ui_root = try ui_root.Root(Widget(repo_kind, repo_opts), repo_kind, repo_opts).init(allocator, repo) };
-    defer root.deinit();
+    errdefer root.deinit();
 
     // set initial focus for root widget
     try root.build(.{
@@ -104,6 +103,33 @@ pub fn start(
             try root.getFocus().setFocus(child_id);
         }
     }
+
+    // if we're using this for UI testing, build the root widget several more times.
+    // this will ensure that the content has a chance to load. diffs are built
+    // incrementally when `build` is called so they may need a few iterations before
+    // they are visible. this also ensures that it is built with an appropriate size.
+    if (repo_opts.is_test) {
+        for (0..5) |_| {
+            try root.build(.{
+                .min_size = .{ .width = null, .height = null },
+                .max_size = .{ .width = 100, .height = 50 },
+            }, root.getFocus());
+        }
+    }
+
+    return root;
+}
+
+pub fn start(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    repo: *rp.Repo(repo_kind, repo_opts),
+    allocator: std.mem.Allocator,
+    cmd_kind_maybe: ?cmd.CommandKind,
+) !void {
+    // init root widget
+    var root = try rootWidget(repo_kind, repo_opts, repo, allocator, cmd_kind_maybe);
+    defer root.deinit();
 
     // init term
     var terminal = try term.Terminal.init(allocator);
