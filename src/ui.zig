@@ -104,10 +104,8 @@ pub fn rootWidget(
         }
     }
 
-    // if we're using this for UI testing, build the root widget several more times.
-    // this will ensure that the content has a chance to load. diffs are built
-    // incrementally when `build` is called so they may need a few iterations before
-    // they are visible. this also ensures that it is built with an appropriate size.
+    // if we're using this for UI testing, build the root widget several more times
+    // to ensure that the content has a chance to load
     if (repo_opts.is_test) {
         for (0..5) |_| {
             try root.build(.{
@@ -118,6 +116,26 @@ pub fn rootWidget(
     }
 
     return root;
+}
+
+pub fn input(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    root: *Widget(repo_kind, repo_opts),
+    key: inp.Key,
+) !void {
+    try root.input(key, root.getFocus());
+
+    // if we're using this for UI testing, build the root widget several more times
+    // to ensure that the content has a chance to load
+    if (repo_opts.is_test) {
+        for (0..5) |_| {
+            try root.build(.{
+                .min_size = .{ .width = null, .height = null },
+                .max_size = .{ .width = 100, .height = 50 },
+            }, root.getFocus());
+        }
+    }
 }
 
 pub fn start(
@@ -149,7 +167,7 @@ pub fn start(
                 .codepoint => |cp| if (cp == 'q') return,
                 else => {},
             }
-            try root.input(key, root.getFocus());
+            try input(repo_kind, repo_opts, &root, key);
         }
 
         // rebuild widget

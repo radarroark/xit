@@ -1366,12 +1366,8 @@ fn testMergeConflictFileDir(comptime repo_kind: rp.RepoKind, comptime repo_opts:
             , grid);
         }
 
-        try root.input(.arrow_down, root.getFocus());
-        try root.input(.arrow_right, root.getFocus());
-        try root.build(.{
-            .min_size = .{ .width = null, .height = null },
-            .max_size = .{ .width = 100, .height = 50 },
-        }, root.getFocus());
+        try ui.input(repo_kind, repo_opts, &root, .arrow_down);
+        try ui.input(repo_kind, repo_opts, &root, .arrow_right);
 
         {
             const grid = try root.getGrid().?.toString(allocator);
@@ -1390,11 +1386,7 @@ fn testMergeConflictFileDir(comptime repo_kind: rp.RepoKind, comptime repo_opts:
             , grid);
         }
 
-        try root.input(.arrow_right, root.getFocus());
-        try root.build(.{
-            .min_size = .{ .width = null, .height = null },
-            .max_size = .{ .width = 100, .height = 50 },
-        }, root.getFocus());
+        try ui.input(repo_kind, repo_opts, &root, .arrow_right);
 
         {
             const grid = try root.getGrid().?.toString(allocator);
@@ -1409,7 +1401,19 @@ fn testMergeConflictFileDir(comptime repo_kind: rp.RepoKind, comptime repo_opts:
                 \\                          ╚═══════════════╝                                     
                 \\   ┌────────────┐   ┌──────────────────────────────────────────────────────────┐
                 \\ ? │f.txt~master│   │                                                          │
-                \\   └────────────┘   └──────────────────────────────────────────────────────────┘
+                \\   └────────────┘   │ diff --git a/f.txt~master b/f.txt~master                 │
+                \\                    │ new file mode 100644                                     │
+                \\                    │ index 0000000..32f95c0                                   │
+                \\                    │ --- a/f.txt~master                                       │
+                \\                    │ +++ b/f.txt~master                                       │
+                \\                    │                                                          │
+                \\                    │                                                          │
+                \\                    │                                                          │
+                \\                    │ @@ -0,0 +0,1 @@                                          │
+                \\                    │ + hi                                                     │
+                \\                    │                                                          │
+                \\                    │                                                          │
+                \\                    └──────────────────────────────────────────────────────────┘
             , grid);
         }
     }
@@ -1551,12 +1555,8 @@ fn testMergeConflictDirFile(comptime repo_kind: rp.RepoKind, comptime repo_opts:
             , grid);
         }
 
-        try root.input(.arrow_down, root.getFocus());
-        try root.input(.arrow_right, root.getFocus());
-        try root.build(.{
-            .min_size = .{ .width = null, .height = null },
-            .max_size = .{ .width = 100, .height = 50 },
-        }, root.getFocus());
+        try ui.input(repo_kind, repo_opts, &root, .arrow_down);
+        try ui.input(repo_kind, repo_opts, &root, .arrow_right);
 
         {
             const grid = try root.getGrid().?.toString(allocator);
@@ -1571,7 +1571,19 @@ fn testMergeConflictDirFile(comptime repo_kind: rp.RepoKind, comptime repo_opts:
                 \\                          ╚═══════════════╝                                     
                 \\   ┌─────────┐      ┌──────────────────────────────────────────────────────────┐
                 \\ ? │f.txt~foo│      │                                                          │
-                \\   └─────────┘      └──────────────────────────────────────────────────────────┘
+                \\   └─────────┘      │ diff --git a/f.txt~foo b/f.txt~foo                       │
+                \\                    │ new file mode 100644                                     │
+                \\                    │ index 0000000..32f95c0                                   │
+                \\                    │ --- a/f.txt~foo                                          │
+                \\                    │ +++ b/f.txt~foo                                          │
+                \\                    │                                                          │
+                \\                    │                                                          │
+                \\                    │                                                          │
+                \\                    │ @@ -0,0 +0,1 @@                                          │
+                \\                    │ + hi                                                     │
+                \\                    │                                                          │
+                \\                    │                                                          │
+                \\                    └──────────────────────────────────────────────────────────┘
             , grid);
         }
     }
