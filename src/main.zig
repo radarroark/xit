@@ -10,6 +10,7 @@
 //!  Let this be our first!" -- Lunar: Silver Star Story
 
 const std = @import("std");
+
 const cmd = @import("./command.zig");
 const rp = @import("./repo.zig");
 const ui = @import("./ui.zig");
@@ -624,8 +625,9 @@ fn printMergeResult(
 /// at least, not that i know of. i guess internally zig probably
 /// has an earlier entrypoint which is even mainier than this.
 pub fn main() !u8 {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
+
     const allocator = gpa.allocator();
 
     var args = std.ArrayList([]const u8).init(allocator);
@@ -633,12 +635,15 @@ pub fn main() !u8 {
 
     var arg_it = try std.process.argsWithAllocator(allocator);
     defer arg_it.deinit();
+
     _ = arg_it.skip();
+
     while (arg_it.next()) |arg| {
         try args.append(arg);
     }
 
     const writers = Writers{ .out = std.io.getStdOut().writer().any(), .err = std.io.getStdErr().writer().any() };
+
     runPrint(.xit, .{}, allocator, args.items, std.fs.cwd(), writers) catch |err| switch (err) {
         error.HandledError => return 1,
         else => |e| return e,
