@@ -54,25 +54,15 @@ pub fn remove(
             var tags_dir = try refs_dir.makeOpenPath("tags", .{});
             defer tags_dir.close();
 
-            // get absolute paths
-            var tags_dir_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-            const tags_dir_path = try tags_dir.realpath(".", &tags_dir_buffer);
-            var ref_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-            const ref_path = try tags_dir.realpath(input.name, &ref_buffer);
-
             // delete file
             try tags_dir.deleteFile(input.name);
 
             // delete parent dirs
             // this is only necessary because tags with a slash
             // in their name are stored on disk as subdirectories
-            var parent_path_maybe = std.fs.path.dirname(ref_path);
+            var parent_path_maybe = std.fs.path.dirname(input.name);
             while (parent_path_maybe) |parent_path| {
-                if (std.mem.eql(u8, tags_dir_path, parent_path)) {
-                    break;
-                }
-
-                std.fs.deleteDirAbsolute(parent_path) catch |err| switch (err) {
+                tags_dir.deleteDir(parent_path) catch |err| switch (err) {
                     error.DirNotEmpty => break,
                     else => |e| return e,
                 };
