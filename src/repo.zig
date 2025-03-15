@@ -24,8 +24,8 @@ pub const RepoKind = enum {
 pub fn RepoOpts(comptime repo_kind: RepoKind) type {
     return struct {
         hash: hash.HashKind = .sha1,
-        read_size: usize = 1024,
-        max_read_size: usize = 2048,
+        read_size: usize = 2048,
+        max_read_size: usize = 4096,
         max_line_size: usize = 10_000,
         max_line_count: usize = 10_000_000,
         net_read_size: usize = 65536,
@@ -38,9 +38,9 @@ pub fn RepoOpts(comptime repo_kind: RepoKind) type {
             .xit => struct {
                 compress_chunks: bool = true,
                 chunk_opts: chunk.FastCdcOpts = .{
-                    .min_size = 1024,
-                    .avg_size = 2048,
-                    .max_size = 4096,
+                    .min_size = 2048,
+                    .avg_size = 4096,
+                    .max_size = 8192,
                     .normalization = .level1,
                 },
                 enable_patches: bool = false,
