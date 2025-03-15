@@ -474,7 +474,6 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp
                         const offsetx = i + n - 1;
                         const offsety = j + m - 1;
                         const hmax = @as(usize, @intCast(l + parity)) / 2;
-                        var zz: isize = 0;
 
                         h_loop: for (0..hmax + 1) |h| {
                             const hh: isize = @intCast(h);
@@ -496,18 +495,20 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp
                                     y += 1;
                                 }
                                 self.b[@intCast(k - z * @divFloor(k, z))] = x;
-                                zz = w - k;
-                                if (parity == 1 and zz >= 1 - hh and zz < hh and x + self.b[@intCast(z + zz - z * @divFloor(zz, z))] >= n) {
-                                    if (h > 1 or x != u) {
-                                        try self.stack.append(i + x);
-                                        try self.stack.append(n - x);
-                                        try self.stack.append(j + y);
-                                        try self.stack.append(m - y);
-                                        n = u;
-                                        m = v;
-                                        z = 2 * (@min(n, m) + 1);
-                                        continue :z_block;
-                                    } else break :h_loop;
+                                if (parity == 1) {
+                                    const zz = w - k;
+                                    if (zz >= 1 - hh and zz < hh and x + self.b[@intCast(z + zz - z * @divFloor(zz, z))] >= n) {
+                                        if (h > 1 or x != u) {
+                                            try self.stack.append(i + x);
+                                            try self.stack.append(n - x);
+                                            try self.stack.append(j + y);
+                                            try self.stack.append(m - y);
+                                            n = u;
+                                            m = v;
+                                            z = 2 * (@min(n, m) + 1);
+                                            continue :z_block;
+                                        } else break :h_loop;
+                                    }
                                 }
                             }
 
@@ -526,18 +527,20 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp
                                     y += 1;
                                 }
                                 self.b[@intCast(z + k - z * @divFloor(k, z))] = x;
-                                zz = w - k;
-                                if (parity == 0 and zz >= -hh and zz <= hh and x + self.b[@intCast(zz - z * @divFloor(zz, z))] >= n) {
-                                    if (h > 0 or x != u) {
-                                        try self.stack.append(i + n - u);
-                                        try self.stack.append(u);
-                                        try self.stack.append(j + m - v);
-                                        try self.stack.append(v);
-                                        n = n - x;
-                                        m = m - y;
-                                        z = 2 * (@min(n, m) + 1);
-                                        continue :z_block;
-                                    } else break :h_loop;
+                                if (parity == 0) {
+                                    const zz = w - k;
+                                    if (zz >= -hh and zz <= hh and x + self.b[@intCast(zz - z * @divFloor(zz, z))] >= n) {
+                                        if (h > 0 or x != u) {
+                                            try self.stack.append(i + n - u);
+                                            try self.stack.append(u);
+                                            try self.stack.append(j + m - v);
+                                            try self.stack.append(v);
+                                            n = n - x;
+                                            m = m - y;
+                                            z = 2 * (@min(n, m) + 1);
+                                            continue :z_block;
+                                        } else break :h_loop;
+                                    }
                                 }
                             }
                         }
@@ -604,6 +607,7 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp
         }
 
         pub fn init(allocator: std.mem.Allocator, line_iter_a: *LineIterator(repo_kind, repo_opts), line_iter_b: *LineIterator(repo_kind, repo_opts)) !MyersDiffIterator(repo_kind, repo_opts) {
+            const i: usize = 0;
             const n = line_iter_a.count();
             const m = line_iter_b.count();
             const z = (@min(n, m) + 1) * 2;
@@ -618,8 +622,8 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp
                 .stack = std.ArrayList(isize).init(allocator),
                 .action = .push,
                 .b = b,
-                .i = 0,
-                .j = 0,
+                .i = @intCast(i),
+                .j = @intCast(i),
                 .n = @intCast(n),
                 .m = @intCast(m),
                 .z = @intCast(z),
