@@ -27,7 +27,7 @@ test "main" {
     try std.testing.expectEqualStrings(&last_hash_git, &last_hash_xit);
 
     // make sure sha256 works on the xit side
-    _ = try testMain(.xit, .{ .hash = .sha256, .is_test = true, .extra = .{ .compress_chunks = true } });
+    _ = try testMain(.xit, .{ .hash = .sha256, .is_test = true });
 }
 
 fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) ![hash.hexLen(repo_opts.hash)]u8 {

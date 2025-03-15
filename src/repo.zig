@@ -36,7 +36,7 @@ pub fn RepoOpts(comptime repo_kind: RepoKind) type {
         pub const Extra = switch (repo_kind) {
             .git => struct {},
             .xit => struct {
-                compress_chunks: bool = false,
+                compress_chunks: bool = true,
                 chunk_opts: chunk.FastCdcOpts = .{
                     .min_size = 1024,
                     .avg_size = 2048,
