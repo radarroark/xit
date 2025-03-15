@@ -7,8 +7,8 @@
             .hash = "xitdb-0.0.0-EEFkxttHAwAhxvrEGl479YF4R2SJ4NyThHIt1Lahk3Za",
         },
         .xitui = .{
-            .url = "git+https://github.com/radarroark/xitui#9af1baab8a02451093c63b783092f5707c77e768",
-            .hash = "xitui-0.0.0--YPVyFT9AABZEtjK9LMSsN1PcQ2D7aXral6Kgvjis1PY",
+            .url = "git+https://github.com/radarroark/xitui#eb8167ea5b69e47433849fccb133ef392cd81a1a",
+            .hash = "xitui-0.0.0--YPVyOr9AABC_VbXl3xB49zdlAGyhgZoOceueuwkNeZJ",
         },
     },
     .paths = .{
