@@ -3,21 +3,27 @@ const net_wire = @import("./wire.zig");
 
 pub const HttpState = struct {
     http_client: std.http.Client,
-    request: ?std.http.Client.Request,
-    sent_request: bool,
+    read_request: ?std.http.Client.Request,
+    write_request: ?std.http.Client.Request,
+    sent_write_request: bool,
 
     pub fn init(allocator: std.mem.Allocator) !HttpState {
         return .{
             .http_client = std.http.Client{ .allocator = allocator },
-            .request = null,
-            .sent_request = false,
+            .read_request = null,
+            .write_request = null,
+            .sent_write_request = false,
         };
     }
 
     pub fn deinit(self: *HttpState) void {
-        if (self.request) |*req| {
+        if (self.read_request) |*req| {
             req.deinit();
-            self.request = null;
+            self.read_request = null;
+        }
+        if (self.write_request) |*req| {
+            req.deinit();
+            self.write_request = null;
         }
         self.http_client.deinit();
 
@@ -59,15 +65,12 @@ pub const HttpStream = struct {
         buffer: [*]const u8,
         len: usize,
     ) !void {
-        if (self.wire_state.request) |*req| {
+        if (self.wire_state.write_request) |*req| {
             try req.writeAll(buffer[0..len]);
         } else {
             var request = try HttpRequest.init(allocator, self, len);
             defer request.deinit(allocator);
-
-            var req = try writeBuffer(&self.wire_state.http_client, &request, buffer[0..len]);
-            errdefer req.deinit();
-            self.wire_state.request = req;
+            self.wire_state.write_request = try self.initWriteRequest(&request, buffer[0..len]);
         }
     }
 
@@ -75,23 +78,30 @@ pub const HttpStream = struct {
         self: *HttpStream,
         allocator: std.mem.Allocator,
         buffer: [*]u8,
-        buffer_size: usize,
+        len: usize,
     ) !usize {
-        return switch (self.service.method) {
-            .GET => try self.readGet(allocator, buffer, buffer_size),
-            .POST => try self.readPost(allocator, buffer, buffer_size),
-            else => error.UnexpectedHttpMethod,
-        };
+        switch (self.service.method) {
+            .GET => if (self.wire_state.read_request) |*req| {
+                return try req.reader().read(buffer[0..len]);
+            } else {
+                var out_len: usize = 0;
+                self.wire_state.read_request = try self.initReadRequest(allocator, buffer[0..len], &out_len);
+                return out_len;
+            },
+            .POST => return if (self.wire_state.write_request) |*req|
+                try self.readPost(allocator, req, buffer, len)
+            else
+                0,
+            else => return error.UnexpectedHttpMethod,
+        }
     }
 
-    fn readGet(
+    fn initReadRequest(
         self: *HttpStream,
         allocator: std.mem.Allocator,
-        buffer: [*]u8,
-        buffer_size: usize,
-    ) !usize {
-        var complete = false;
-
+        buffer: []u8,
+        out_len: *usize,
+    ) !std.http.Client.Request {
         var request = try HttpRequest.init(allocator, self, 0);
         defer request.deinit(allocator);
 
@@ -102,62 +112,151 @@ pub const HttpStream = struct {
         };
         defer response.deinit(allocator);
 
-        const body = try readBuffer(allocator, &self.wire_state.http_client, &request, &response);
-        defer allocator.free(body);
+        const uri = try std.Uri.parse(request.url);
 
-        try handleResponse(&complete, self, &response, true);
+        var server_header_buffer: [1024]u8 = undefined;
+        var req = try self.wire_state.http_client.open(request.method, uri, .{
+            .server_header_buffer = &server_header_buffer,
+            .keep_alive = false,
+        });
+        errdefer req.deinit();
 
-        if (body.len > buffer_size) return error.BufferTooSmall;
-        @memcpy(buffer[0..body.len], body);
+        try req.send();
+        try req.wait();
 
-        return body.len;
+        out_len.* = try req.reader().read(buffer);
+
+        if (req.response.content_type) |content_type| {
+            response.content_type = try allocator.dupe(u8, content_type);
+        }
+
+        if (req.response.location) |location| {
+            response.location = try allocator.dupe(u8, location);
+        }
+
+        response.status = req.response.status;
+
+        try self.handleResponse(&response, true);
+
+        return req;
+    }
+
+    fn initWriteRequest(
+        self: *HttpStream,
+        request: *const HttpRequest,
+        buffer: []const u8,
+    ) !std.http.Client.Request {
+        const uri = try std.Uri.parse(request.url);
+
+        var server_header_buffer: [1024]u8 = undefined;
+        var req = try self.wire_state.http_client.open(request.method, uri, .{
+            .server_header_buffer = &server_header_buffer,
+            .keep_alive = false,
+        });
+        errdefer req.deinit();
+
+        req.transfer_encoding = if (request.chunked)
+            .chunked
+        else
+            .{ .content_length = buffer.len };
+        if (request.content_type) |content_type| {
+            req.headers.content_type = .{ .override = content_type };
+        }
+        req.handle_continue = request.expect_continue;
+        req.extra_headers = &.{
+            .{ .name = "accept", .value = request.accept },
+        };
+
+        try req.send();
+        try req.writeAll(buffer);
+
+        return req;
     }
 
     fn readPost(
         self: *HttpStream,
         allocator: std.mem.Allocator,
+        req: *std.http.Client.Request,
         buffer: [*]u8,
         buffer_size: usize,
     ) !usize {
         var out_len: usize = 0;
 
-        if (self.wire_state.request) |*req| {
-            if (!self.wire_state.sent_request) {
-                try req.finish();
-                try req.wait();
-                self.wire_state.sent_request = true;
-            }
+        if (!self.wire_state.sent_write_request) {
+            try req.finish();
+            try req.wait();
+            self.wire_state.sent_write_request = true;
+        }
 
-            var response = HttpResponse{
-                .status = undefined,
-                .content_type = null,
-                .location = null,
-            };
-            defer response.deinit(allocator);
+        var response = HttpResponse{
+            .status = undefined,
+            .content_type = null,
+            .location = null,
+        };
+        defer response.deinit(allocator);
 
-            if (req.response.content_type) |content_type| {
-                response.content_type = try allocator.dupe(u8, content_type);
-            }
+        if (req.response.content_type) |content_type| {
+            response.content_type = try allocator.dupe(u8, content_type);
+        }
 
-            if (req.response.location) |location| {
-                response.location = try allocator.dupe(u8, location);
-            }
+        if (req.response.location) |location| {
+            response.location = try allocator.dupe(u8, location);
+        }
 
-            response.status = req.response.status;
+        response.status = req.response.status;
 
-            var complete = false;
-            try handleResponse(&complete, self, &response, false);
+        try self.handleResponse(&response, false);
 
-            out_len = try req.reader().read(buffer[0..buffer_size]);
+        out_len = try req.reader().read(buffer[0..buffer_size]);
 
-            if (out_len == 0) {
-                req.deinit();
-                self.wire_state.request = null;
-                self.wire_state.sent_request = false;
-            }
+        if (out_len == 0) {
+            req.deinit();
+            self.wire_state.write_request = null;
+            self.wire_state.sent_write_request = false;
         }
 
         return out_len;
+    }
+
+    fn handleResponse(
+        self: *HttpStream,
+        response: *HttpResponse,
+        allow_replay: bool,
+    ) !void {
+        const is_redirect = response.status == .moved_permanently or
+            response.status == .found or
+            response.status == .see_other or
+            response.status == .temporary_redirect or
+            response.status == .permanent_redirect;
+
+        if (allow_replay and is_redirect) {
+            if (response.location) |_| {
+                return error.HttpRedirectNotImplemented;
+            } else {
+                return error.HttpRedirectWithoutLocation;
+            }
+            return;
+        } else if (is_redirect) {
+            return error.HttpRedirectUnexpected;
+        }
+
+        if (response.status == .unauthorized or response.status == .proxy_auth_required) {
+            return error.HttpUnauthorized;
+        }
+
+        if (response.status != .ok) {
+            const status_code: c_int = @intFromEnum(response.status);
+            _ = status_code;
+            return error.HttpStatusCodeUnexpected;
+        }
+
+        if (response.content_type) |content_type| {
+            if (!std.mem.eql(u8, content_type, self.service.response_type)) {
+                return error.HttpContentTypeInvalid;
+            }
+        } else {
+            return error.HttpContentTypeMissing;
+        }
     }
 };
 
@@ -259,115 +358,3 @@ const HttpResponse = struct {
         if (self.location) |location| allocator.free(location);
     }
 };
-
-fn handleResponse(
-    complete: *bool,
-    stream: *HttpStream,
-    response: *HttpResponse,
-    allow_replay: bool,
-) !void {
-    complete.* = false;
-
-    const is_redirect = response.status == .moved_permanently or
-        response.status == .found or
-        response.status == .see_other or
-        response.status == .temporary_redirect or
-        response.status == .permanent_redirect;
-
-    if (allow_replay and is_redirect) {
-        if (response.location) |_| {
-            return error.HttpRedirectNotImplemented;
-        } else {
-            return error.HttpRedirectWithoutLocation;
-        }
-        return;
-    } else if (is_redirect) {
-        return error.HttpRedirectUnexpected;
-    }
-
-    if (response.status == .unauthorized or response.status == .proxy_auth_required) {
-        return error.HttpUnauthorized;
-    }
-
-    if (response.status != .ok) {
-        const status_code: c_int = @intFromEnum(response.status);
-        _ = status_code;
-        return error.HttpStatusCodeUnexpected;
-    }
-
-    if (response.content_type) |content_type| {
-        if (!std.mem.eql(u8, content_type, stream.service.response_type)) {
-            return error.HttpContentTypeInvalid;
-        }
-    } else {
-        return error.HttpContentTypeMissing;
-    }
-
-    complete.* = true;
-}
-
-fn readBuffer(
-    allocator: std.mem.Allocator,
-    client: *std.http.Client,
-    request: *const HttpRequest,
-    response: *HttpResponse,
-) ![]u8 {
-    const uri = try std.Uri.parse(request.url);
-
-    var server_header_buffer: [1024]u8 = undefined;
-    var req = try client.open(request.method, uri, .{
-        .server_header_buffer = &server_header_buffer,
-        .keep_alive = false,
-    });
-    defer req.deinit();
-
-    try req.send();
-    try req.wait();
-
-    const body = try req.reader().readAllAlloc(allocator, 8192);
-    errdefer allocator.free(body);
-
-    if (req.response.content_type) |content_type| {
-        response.content_type = try allocator.dupe(u8, content_type);
-    }
-
-    if (req.response.location) |location| {
-        response.location = try allocator.dupe(u8, location);
-    }
-
-    response.status = req.response.status;
-
-    return body;
-}
-
-fn writeBuffer(
-    client: *std.http.Client,
-    request: *const HttpRequest,
-    buffer: []const u8,
-) !std.http.Client.Request {
-    const uri = try std.Uri.parse(request.url);
-
-    var server_header_buffer: [1024]u8 = undefined;
-    var req = try client.open(request.method, uri, .{
-        .server_header_buffer = &server_header_buffer,
-        .keep_alive = false,
-    });
-    errdefer req.deinit();
-
-    req.transfer_encoding = if (request.chunked)
-        .chunked
-    else
-        .{ .content_length = buffer.len };
-    if (request.content_type) |content_type| {
-        req.headers.content_type = .{ .override = content_type };
-    }
-    req.handle_continue = request.expect_continue;
-    req.extra_headers = &.{
-        .{ .name = "accept", .value = request.accept },
-    };
-
-    try req.send();
-    try req.writeAll(buffer);
-
-    return req;
-}
