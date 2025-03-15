@@ -273,8 +273,12 @@ fn writeBlobWithDiff3(
             if (range_maybe) |range| {
                 for (range.begin..range.end) |line_num| {
                     const line = try iter.get(line_num);
-                    errdefer inner_allocator.free(line);
-                    try lines.append(line);
+                    defer iter.free(line);
+                    {
+                        const line_dupe = try inner_allocator.dupe(u8, line);
+                        errdefer inner_allocator.free(line_dupe);
+                        try lines.append(line_dupe);
+                    }
                 }
             }
             return .{
@@ -388,10 +392,12 @@ fn writeBlobWithDiff3(
                     switch (chunk) {
                         .clean => |clean| {
                             for (clean.begin..clean.end) |line_num| {
-                                const base_line = try self.parent.base_iter.get(line_num);
+                                const line = try self.parent.base_iter.get(line_num);
+                                defer self.parent.base_iter.free(line);
                                 {
-                                    errdefer self.parent.allocator.free(base_line);
-                                    try self.parent.line_buffer.append(base_line);
+                                    const line_dupe = try self.parent.allocator.dupe(u8, line);
+                                    errdefer self.parent.allocator.free(line_dupe);
+                                    try self.parent.line_buffer.append(line_dupe);
                                 }
                                 self.parent.current_line = self.parent.line_buffer.items[0];
                             }
