@@ -71,10 +71,8 @@ pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime rep
                                 try self.addLines(hunk_iter.header_lines.items);
                                 hunk_iter.header_lines.clearAndFree();
                             }
-                            if (try hunk_iter.next(self.allocator)) |*hunk_ptr| {
-                                var hunk = hunk_ptr.*;
-                                defer hunk.deinit(self.allocator);
-                                try self.addHunk(hunk_iter, &hunk);
+                            if (try hunk_iter.next(self.iter_arena.allocator())) |*hunk_ptr| {
+                                try self.addHunk(hunk_iter, hunk_ptr);
                             } else {
                                 self.hunk_iter = null;
                             }
