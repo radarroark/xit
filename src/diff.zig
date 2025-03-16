@@ -1106,11 +1106,10 @@ test "diff3" {
 
 pub fn Hunk(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return struct {
-        edits: std.ArrayList(Edit),
-        allocator: std.mem.Allocator,
+        edits: std.ArrayListUnmanaged(Edit),
 
-        pub fn deinit(self: *Hunk(repo_kind, repo_opts)) void {
-            self.edits.deinit();
+        pub fn deinit(self: *Hunk(repo_kind, repo_opts), allocator: std.mem.Allocator) void {
+            self.edits.deinit(allocator);
         }
 
         pub const Offsets = struct {
@@ -1155,7 +1154,6 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
         header_lines: std.ArrayList([]const u8),
         myers_diff: MyersDiffIterator(repo_kind, repo_opts),
         eof: bool,
-        allocator: std.mem.Allocator,
         arena: *std.heap.ArenaAllocator,
         line_iter_a: *LineIterator(repo_kind, repo_opts),
         line_iter_b: *LineIterator(repo_kind, repo_opts),
@@ -1224,26 +1222,24 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                 .header_lines = header_lines,
                 .myers_diff = myers_diff,
                 .eof = false,
-                .allocator = allocator,
                 .arena = arena,
                 .line_iter_a = line_iter_a,
                 .line_iter_b = line_iter_b,
                 .found_edit = false,
                 .margin = 0,
                 .next_hunk = Hunk(repo_kind, repo_opts){
-                    .edits = std.ArrayList(Edit).init(allocator),
-                    .allocator = allocator,
+                    .edits = std.ArrayListUnmanaged(Edit){},
                 },
             };
         }
 
-        pub fn next(self: *HunkIterator(repo_kind, repo_opts)) !?Hunk(repo_kind, repo_opts) {
+        pub fn next(self: *HunkIterator(repo_kind, repo_opts), allocator: std.mem.Allocator) !?Hunk(repo_kind, repo_opts) {
             const max_margin: usize = 3;
 
             if (!self.eof) {
                 while (true) {
                     if (try self.myers_diff.next()) |edit| {
-                        try self.next_hunk.edits.append(edit);
+                        try self.next_hunk.edits.append(allocator, edit);
 
                         if (edit == .eql) {
                             self.margin += 1;
@@ -1273,8 +1269,7 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                         if (self.found_edit) {
                             const hunk = self.next_hunk;
                             self.next_hunk = Hunk(repo_kind, repo_opts){
-                                .edits = std.ArrayList(Edit).init(self.allocator),
-                                .allocator = self.allocator,
+                                .edits = std.ArrayListUnmanaged(Edit){},
                             };
                             self.found_edit = false;
                             self.margin = 0;
@@ -1289,8 +1284,7 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                             // return the last hunk
                             const hunk = self.next_hunk;
                             self.next_hunk = Hunk(repo_kind, repo_opts){
-                                .edits = std.ArrayList(Edit).init(self.allocator),
-                                .allocator = self.allocator,
+                                .edits = std.ArrayListUnmanaged(Edit){},
                             };
                             self.found_edit = false;
                             self.margin = 0;
@@ -1305,24 +1299,23 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
             }
         }
 
-        pub fn deinit(self: *HunkIterator(repo_kind, repo_opts)) void {
+        pub fn deinit(self: *HunkIterator(repo_kind, repo_opts), allocator: std.mem.Allocator) void {
             self.myers_diff.deinit();
             self.arena.deinit();
-            self.allocator.destroy(self.arena);
-            self.next_hunk.deinit();
+            allocator.destroy(self.arena);
+            self.next_hunk.deinit(allocator);
         }
 
-        pub fn reset(self: *HunkIterator(repo_kind, repo_opts)) !void {
+        pub fn reset(self: *HunkIterator(repo_kind, repo_opts), allocator: std.mem.Allocator) !void {
             try self.myers_diff.reset();
             self.eof = false;
             try self.line_iter_a.reset();
             try self.line_iter_b.reset();
             self.found_edit = false;
             self.margin = 0;
-            self.next_hunk.deinit();
+            self.next_hunk.deinit(allocator);
             self.next_hunk = Hunk(repo_kind, repo_opts){
-                .edits = std.ArrayList(Edit).init(self.allocator),
-                .allocator = self.allocator,
+                .edits = std.ArrayListUnmanaged(Edit){},
             };
         }
     };

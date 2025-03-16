@@ -330,7 +330,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                 var line_iter_pair = line_iter_pair_ptr.*;
                 defer line_iter_pair.deinit();
                 var hunk_iter = try df.HunkIterator(repo_kind, repo_opts).init(allocator, &line_iter_pair.a, &line_iter_pair.b);
-                defer hunk_iter.deinit();
+                defer hunk_iter.deinit(allocator);
                 if (std.mem.eql(u8, "hello.txt", line_iter_pair.path)) {
                     try std.testing.expectEqualStrings("diff --git a/hello.txt b/hello.txt", hunk_iter.header_lines.items[0]);
                     const expected_hunks = &[_][]const df.Edit{
@@ -363,9 +363,9 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                         },
                     };
                     for (expected_hunks) |expected_hunk| {
-                        if (try hunk_iter.next()) |*actual_hunk_ptr| {
+                        if (try hunk_iter.next(allocator)) |*actual_hunk_ptr| {
                             var actual_hunk = actual_hunk_ptr.*;
-                            defer actual_hunk.deinit();
+                            defer actual_hunk.deinit(allocator);
                             for (expected_hunk, actual_hunk.edits.items) |expected_edit, actual_edit| {
                                 try std.testing.expectEqualDeep(expected_edit, actual_edit.withoutOffset());
                             }
@@ -417,7 +417,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                 var line_iter_pair = line_iter_pair_ptr.*;
                 defer line_iter_pair.deinit();
                 var hunk_iter = try df.HunkIterator(repo_kind, repo_opts).init(allocator, &line_iter_pair.a, &line_iter_pair.b);
-                defer hunk_iter.deinit();
+                defer hunk_iter.deinit(allocator);
                 if (std.mem.eql(u8, "LICENSE", line_iter_pair.path)) {
                     try std.testing.expectEqualStrings("diff --git a/LICENSE b/LICENSE", hunk_iter.header_lines.items[0]);
                     try std.testing.expectEqualStrings("deleted file mode 100644", hunk_iter.header_lines.items[1]);
@@ -521,7 +521,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             var line_iter_pair = line_iter_pair_ptr.*;
             defer line_iter_pair.deinit();
             var hunk_iter = try df.HunkIterator(repo_kind, repo_opts).init(allocator, &line_iter_pair.a, &line_iter_pair.b);
-            defer hunk_iter.deinit();
+            defer hunk_iter.deinit(allocator);
             if (std.mem.eql(u8, "LICENSE", line_iter_pair.path)) {
                 try std.testing.expectEqualStrings("diff --git a/LICENSE b/LICENSE", hunk_iter.header_lines.items[0]);
                 try std.testing.expectEqualStrings("deleted file mode 100644", hunk_iter.header_lines.items[1]);

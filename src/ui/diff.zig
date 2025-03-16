@@ -71,8 +71,10 @@ pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime rep
                                 try self.addLines(hunk_iter.header_lines.items);
                                 hunk_iter.header_lines.clearAndFree();
                             }
-                            if (try hunk_iter.next()) |hunk| {
-                                try self.addHunk(hunk_iter, hunk);
+                            if (try hunk_iter.next(self.allocator)) |*hunk_ptr| {
+                                var hunk = hunk_ptr.*;
+                                defer hunk.deinit(self.allocator);
+                                try self.addHunk(hunk_iter, &hunk);
                             } else {
                                 self.hunk_iter = null;
                             }
@@ -240,7 +242,7 @@ pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime rep
         pub fn addHunk(
             self: *Diff(Widget, repo_kind, repo_opts),
             hunk_iter: *const df.HunkIterator(repo_kind, repo_opts),
-            hunk: df.Hunk(repo_kind, repo_opts),
+            hunk: *const df.Hunk(repo_kind, repo_opts),
         ) !void {
             const buf = blk: {
                 var arr = std.ArrayList(u8).init(self.allocator);
@@ -261,7 +263,11 @@ pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime rep
                         .ins => |ins| try hunk_iter.line_iter_b.get(ins.new_line.num),
                         .del => |del| try hunk_iter.line_iter_a.get(del.old_line.num),
                     };
-                    defer hunk_iter.allocator.free(line);
+                    defer switch (edit) {
+                        .eql => hunk_iter.line_iter_b.free(line),
+                        .ins => hunk_iter.line_iter_b.free(line),
+                        .del => hunk_iter.line_iter_a.free(line),
+                    };
                     try writer.print("{s} {s}\n", .{
                         switch (edit) {
                             .eql => " ",

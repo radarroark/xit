@@ -386,13 +386,13 @@ fn runCommand(
                 var line_iter_pair = line_iter_pair_ptr.*;
                 defer line_iter_pair.deinit();
                 var hunk_iter = try df.HunkIterator(repo_kind, repo_opts).init(allocator, &line_iter_pair.a, &line_iter_pair.b);
-                defer hunk_iter.deinit();
+                defer hunk_iter.deinit(allocator);
                 for (hunk_iter.header_lines.items) |header_line| {
                     try writers.out.print("{s}\n", .{header_line});
                 }
-                while (try hunk_iter.next()) |*hunk_ptr| {
+                while (try hunk_iter.next(allocator)) |*hunk_ptr| {
                     var hunk = hunk_ptr.*;
-                    defer hunk.deinit();
+                    defer hunk.deinit(allocator);
                     const offsets = hunk.offsets();
                     try writers.out.print("@@ -{},{} +{},{} @@\n", .{
                         offsets.del_start,
@@ -406,7 +406,11 @@ fn runCommand(
                             .ins => |ins| try hunk_iter.line_iter_b.get(ins.new_line.num),
                             .del => |del| try hunk_iter.line_iter_a.get(del.old_line.num),
                         };
-                        defer hunk_iter.allocator.free(line);
+                        defer switch (edit) {
+                            .eql => hunk_iter.line_iter_b.free(line),
+                            .ins => hunk_iter.line_iter_b.free(line),
+                            .del => hunk_iter.line_iter_a.free(line),
+                        };
                         try writers.out.print("{s} {s}\n", .{
                             switch (edit) {
                                 .eql => " ",
