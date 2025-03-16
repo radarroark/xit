@@ -959,7 +959,10 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 }
 
 pub const ObjectIteratorOptions = struct {
-    recursive: bool,
+    kind: enum {
+        all,
+        commit,
+    },
 };
 
 pub fn ObjectIterator(
@@ -1004,6 +1007,7 @@ pub fn ObjectIterator(
             while (self.oid_queue.popFirst()) |node| {
                 const next_oid = node.data;
                 self.allocator.destroy(node);
+
                 if (!self.oid_excludes.contains(next_oid)) {
                     try self.oid_excludes.put(next_oid, {});
                     switch (load_kind) {
@@ -1011,6 +1015,11 @@ pub fn ObjectIterator(
                             var object = try Object(repo_kind, repo_opts, .full).init(self.allocator, state, &next_oid);
                             defer object.deinit();
                             try self.includeContent(object.content);
+
+                            switch (self.options.kind) {
+                                .all => {},
+                                .commit => if (.commit != object.content) continue,
+                            }
 
                             var raw_object = try Object(repo_kind, repo_opts, .raw).init(self.allocator, state, &next_oid);
                             errdefer raw_object.deinit();
@@ -1021,6 +1030,15 @@ pub fn ObjectIterator(
                             var object = try Object(repo_kind, repo_opts, .full).init(self.allocator, state, &next_oid);
                             errdefer object.deinit();
                             try self.includeContent(object.content);
+
+                            switch (self.options.kind) {
+                                .all => {},
+                                .commit => if (.commit != object.content) {
+                                    object.deinit();
+                                    continue;
+                                },
+                            }
+
                             self.object = object;
                             return &self.object;
                         },
@@ -1033,13 +1051,12 @@ pub fn ObjectIterator(
         fn includeContent(self: *ObjectIterator(repo_kind, repo_opts, load_kind), content: ObjectContent(repo_opts.hash)) !void {
             switch (content) {
                 .blob => {},
-                .tree => |tree_content| {
-                    if (self.options.recursive) {
-                        for (tree_content.entries.values()) |entry| {
-                            const entry_oid = std.fmt.bytesToHex(entry.oid, .lower);
-                            try self.include(&entry_oid);
-                        }
-                    }
+                .tree => |tree_content| switch (self.options.kind) {
+                    .all => for (tree_content.entries.values()) |entry| {
+                        const entry_oid = std.fmt.bytesToHex(entry.oid, .lower);
+                        try self.include(&entry_oid);
+                    },
+                    .commit => {},
                 },
                 .commit => |commit_content| {
                     if (commit_content.metadata.parent_oids) |parent_oids| {
@@ -1047,15 +1064,12 @@ pub fn ObjectIterator(
                             try self.include(parent_oid);
                         }
                     }
-                    if (self.options.recursive) {
-                        try self.include(&commit_content.tree);
+                    switch (self.options.kind) {
+                        .all => try self.include(&commit_content.tree),
+                        .commit => {},
                     }
                 },
-                .tag => |tag_content| {
-                    if (self.options.recursive) {
-                        try self.include(&tag_content.target);
-                    }
-                },
+                .tag => |tag_content| try self.include(&tag_content.target),
             }
         }
 
@@ -1076,12 +1090,11 @@ pub fn ObjectIterator(
             defer object.deinit();
             switch (object.content) {
                 .blob, .tag => {},
-                .tree => |tree| {
-                    if (self.options.recursive) {
-                        for (tree.entries.values()) |entry| {
-                            try self.exclude(&std.fmt.bytesToHex(entry.oid, .lower));
-                        }
-                    }
+                .tree => |tree| switch (self.options.kind) {
+                    .all => for (tree.entries.values()) |entry| {
+                        try self.exclude(&std.fmt.bytesToHex(entry.oid, .lower));
+                    },
+                    .commit => {},
                 },
                 .commit => |commit| {
                     if (commit.metadata.parent_oids) |parent_oids| {
@@ -1089,8 +1102,9 @@ pub fn ObjectIterator(
                             try self.oid_excludes.put(parent_oid, {});
                         }
                     }
-                    if (self.options.recursive) {
-                        try self.exclude(&commit.tree);
+                    switch (self.options.kind) {
+                        .all => try self.exclude(&commit.tree),
+                        .commit => {},
                     }
                 },
             }

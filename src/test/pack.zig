@@ -214,7 +214,7 @@ test "pack" {
 
         const head_oid = try rf.readHeadRecur(.git, repo_opts, .{ .core = &r.core, .extra = .{} });
 
-        var obj_iter = try obj.ObjectIterator(.git, repo_opts, .raw).init(allocator, .{ .core = &r.core, .extra = .{} }, .{ .recursive = true });
+        var obj_iter = try obj.ObjectIterator(.git, repo_opts, .raw).init(allocator, .{ .core = &r.core, .extra = .{} }, .{ .kind = .all });
         defer obj_iter.deinit();
         try obj_iter.include(&head_oid);
 

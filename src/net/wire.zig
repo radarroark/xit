@@ -353,7 +353,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
 
             try net_pkt.bufferWants(repo_kind, repo_opts, allocator, fetch_data, &self.caps, &buffer);
 
-            var obj_iter = try obj.ObjectIterator(repo_kind, repo_opts, .raw).init(allocator, state, .{ .recursive = true });
+            var obj_iter = try obj.ObjectIterator(repo_kind, repo_opts, .raw).init(allocator, state, .{ .kind = .all });
             defer obj_iter.deinit();
 
             {

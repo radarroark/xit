@@ -151,6 +151,13 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
         error.FileNotFound => {},
         else => |e| return e,
     }
+
+    // make sure we can enable patches after adding a tag
+    if (repo_kind == .xit) {
+        _ = try repo.addTag(allocator, .{ .name = "1.0.0", .message = "hi" });
+
+        try repo.patchOn(allocator, null);
+    }
 }
 
 test "merge" {
@@ -286,7 +293,7 @@ fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
     // make sense to you, you're not alone...my future self won't
     // know what it means either probably.
     {
-        var obj_iter = try obj.ObjectIterator(repo_kind, repo_opts, .raw).init(allocator, state, .{ .recursive = true });
+        var obj_iter = try obj.ObjectIterator(repo_kind, repo_opts, .raw).init(allocator, state, .{ .kind = .all });
         defer obj_iter.deinit();
         try obj_iter.include(&commit_k);
 
@@ -2455,12 +2462,12 @@ fn testLog(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo
         try std.testing.expectEqual(0, oid_set.count());
     }
 
-    // iterate over all objects recursively
+    // iterate over all objects
     {
         var count: usize = 0;
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-        var obj_iter = try obj.ObjectIterator(repo_kind, repo_opts, .full).init(allocator, state, .{ .recursive = true });
+        var obj_iter = try obj.ObjectIterator(repo_kind, repo_opts, .full).init(allocator, state, .{ .kind = .all });
         defer obj_iter.deinit();
         try obj_iter.include(&commit_g);
         while (try obj_iter.next()) |object| {

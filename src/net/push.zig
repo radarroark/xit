@@ -22,7 +22,7 @@ pub fn Push(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             remote: *net.Remote(repo_kind, repo_opts),
             allocator: std.mem.Allocator,
         ) !Push(repo_kind, repo_opts) {
-            var obj_iter = try obj.ObjectIterator(repo_kind, repo_opts, .raw).init(allocator, state, .{ .recursive = true });
+            var obj_iter = try obj.ObjectIterator(repo_kind, repo_opts, .raw).init(allocator, state, .{ .kind = .all });
             errdefer obj_iter.deinit();
 
             return Push(repo_kind, repo_opts){

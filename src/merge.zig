@@ -581,7 +581,7 @@ fn writeBlobWithPatches(
 
     // get all the patch ids from source
     {
-        var iter = try obj.ObjectIterator(.xit, repo_opts, .full).init(allocator, state.readOnly(), .{ .recursive = false });
+        var iter = try obj.ObjectIterator(.xit, repo_opts, .full).init(allocator, state.readOnly(), .{ .kind = .commit });
         defer iter.deinit();
         try iter.include(source_oid);
 

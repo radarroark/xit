@@ -795,7 +795,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
         ) !obj.ObjectIterator(repo_kind, repo_opts, .full) {
             var moment = try self.core.latestMoment();
             const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
-            var iter = try obj.ObjectIterator(repo_kind, repo_opts, .full).init(allocator, state, .{ .recursive = false });
+            var iter = try obj.ObjectIterator(repo_kind, repo_opts, .full).init(allocator, state, .{ .kind = .commit });
             errdefer iter.deinit();
 
             const start_oids = start_oids_maybe orelse if (try rf.readHeadRecurMaybe(repo_kind, repo_opts, state)) |head_oid| &.{head_oid} else &.{};
@@ -970,7 +970,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         try config.add(state, .{ .name = "merge.algorithm", .value = "patch" });
                     }
 
-                    var obj_iter = try obj.ObjectIterator(repo_kind, repo_opts, .full).init(ctx.allocator, state.readOnly(), .{ .recursive = false });
+                    var obj_iter = try obj.ObjectIterator(repo_kind, repo_opts, .full).init(ctx.allocator, state.readOnly(), .{ .kind = .commit });
                     defer obj_iter.deinit();
 
                     // add heads
