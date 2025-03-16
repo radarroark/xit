@@ -55,10 +55,7 @@ pub fn PackObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
                 .delta => try pack_reader.initDeltaAndCache(self.allocator, state),
             }
 
-            // make sure the stream is at the end so the file position is correct
-            while (try pack_reader.stream.next()) |_| {}
-
-            self.start_position = try pack_reader.pack_file.getPos();
+            self.start_position = try pack_reader.stream.getEndPos();
             self.object_index += 1;
 
             try pack_reader.reset();
@@ -177,11 +174,102 @@ const PackObjectHeader = packed struct {
 
 const ZlibStream = std.compress.flate.inflate.Decompressor(.zlib, std.fs.File.Reader);
 
+/// contains the stream used to read a pack object.
+/// it can either be read from a file on disk or from an in-memory buffer.
+const PackObjectStream = union(enum) {
+    file: struct {
+        pack_file: std.fs.File,
+        zlib_stream: ZlibStream,
+        start_position: u64,
+    },
+    memory: struct {
+        allocator: std.mem.Allocator,
+        buffer: []u8,
+        stream: std.io.FixedBufferStream([]u8),
+        end_position: u64,
+    },
+
+    pub const Error = ZlibStream.Reader.Error;
+
+    pub fn deinit(self: *PackObjectStream) void {
+        switch (self.*) {
+            .file => |*file| file.pack_file.close(),
+            .memory => |*memory| memory.allocator.free(memory.buffer),
+        }
+    }
+
+    pub fn convertToBuffer(self: *PackObjectStream, allocator: std.mem.Allocator) !void {
+        var buffer_arr = std.ArrayListUnmanaged(u8){};
+        errdefer buffer_arr.deinit(allocator);
+
+        try self.reset();
+
+        var read_buffer = [_]u8{0} ** 2048;
+        while (true) {
+            const size = try self.read(&read_buffer);
+            if (size == 0) {
+                break;
+            }
+            try buffer_arr.appendSlice(allocator, read_buffer[0..size]);
+        }
+
+        const end_position = try self.getEndPos();
+        const buffer = try buffer_arr.toOwnedSlice(allocator);
+
+        self.deinit();
+        self.* = .{
+            .memory = .{
+                .allocator = allocator,
+                .buffer = buffer,
+                .stream = std.io.fixedBufferStream(buffer),
+                .end_position = end_position,
+            },
+        };
+    }
+
+    pub fn reset(self: *PackObjectStream) !void {
+        switch (self.*) {
+            .file => |*file| {
+                try file.pack_file.seekTo(file.start_position);
+                file.* = .{
+                    .pack_file = file.pack_file,
+                    .zlib_stream = std.compress.zlib.decompressor(file.pack_file.reader()),
+                    .start_position = file.start_position,
+                };
+            },
+            .memory => |*memory| try memory.stream.seekTo(0),
+        }
+    }
+
+    pub fn getEndPos(self: *PackObjectStream) !usize {
+        switch (self.*) {
+            .file => |*file| {
+                // make sure the stream is at the end so the file position is correct
+                while (try file.zlib_stream.next()) |_| {}
+                return try file.pack_file.getPos();
+            },
+            .memory => |*memory| return memory.end_position,
+        }
+    }
+
+    pub fn read(self: *PackObjectStream, dest: []u8) !usize {
+        return switch (self.*) {
+            .file => |*file| try file.zlib_stream.reader().read(dest),
+            .memory => |*memory| try memory.stream.reader().read(dest),
+        };
+    }
+
+    pub fn skipBytes(self: *PackObjectStream, num_bytes: u64) !void {
+        switch (self.*) {
+            .file => |*file| try file.zlib_stream.reader().skipBytes(num_bytes, .{}),
+            .memory => |*memory| try memory.stream.reader().skipBytes(num_bytes, .{}),
+        }
+    }
+};
+
 pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return struct {
-        pack_file: std.fs.File,
-        stream: ZlibStream,
-        start_position: u64,
+        stream: PackObjectStream,
         relative_position: u64,
         size: u64,
         internal: union(enum) {
@@ -224,7 +312,10 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             },
         };
 
-        pub const Error = ZlibStream.Reader.Error || PackOrChunkObjectReader(repo_kind, repo_opts).Error || error{ Unseekable, UnexpectedEndOfStream, InvalidDeltaCache };
+        // objects larger than this (in bytes) will not be read entirely into memory
+        const max_buffer_size = 50_000_000;
+
+        pub const Error = PackObjectStream.Error || PackOrChunkObjectReader(repo_kind, repo_opts).Error || error{ Unseekable, UnexpectedEndOfStream, InvalidDeltaCache };
 
         pub fn init(
             allocator: std.mem.Allocator,
@@ -332,10 +423,19 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             switch (obj_header.kind) {
                 .commit, .tree, .blob, .tag => {
                     const start_position = try pack_file.getPos();
-                    return .{
+
+                    var stream = PackObjectStream{ .file = .{
                         .pack_file = pack_file,
-                        .stream = std.compress.zlib.decompressor(reader),
+                        .zlib_stream = std.compress.zlib.decompressor(reader),
                         .start_position = start_position,
+                    } };
+                    errdefer stream.deinit();
+                    if (size <= max_buffer_size) {
+                        try stream.convertToBuffer(allocator);
+                    }
+
+                    return .{
+                        .stream = stream,
                         .relative_position = 0,
                         .size = size,
                         .internal = .{
@@ -377,9 +477,11 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     const start_position = try pack_file.getPos();
 
                     return .{
-                        .pack_file = pack_file,
-                        .stream = undefined,
-                        .start_position = start_position,
+                        .stream = .{ .file = .{
+                            .pack_file = pack_file,
+                            .zlib_stream = undefined,
+                            .start_position = start_position,
+                        } },
                         .relative_position = 0,
                         .size = size,
                         .internal = .{
@@ -401,9 +503,11 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     const start_position = try pack_file.getPos();
 
                     return .{
-                        .pack_file = pack_file,
-                        .stream = undefined,
-                        .start_position = start_position,
+                        .stream = .{ .file = .{
+                            .pack_file = pack_file,
+                            .zlib_stream = undefined,
+                            .start_position = start_position,
+                        } },
                         .relative_position = 0,
                         .size = size,
                         .internal = .{
@@ -464,8 +568,6 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             allocator: std.mem.Allocator,
             state: rp.Repo(repo_kind, repo_opts).State(.read_only),
         ) !void {
-            const reader = self.pack_file.reader();
-
             const base_reader = try allocator.create(PackOrChunkObjectReader(repo_kind, repo_opts));
             errdefer allocator.destroy(base_reader);
 
@@ -480,8 +582,12 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
 
             var bytes_read: u64 = 0;
 
-            var stream = std.compress.zlib.decompressor(reader);
-            const zlib_reader = stream.reader();
+            const pack_file = self.stream.file.pack_file;
+            const start_position = self.stream.file.start_position;
+
+            const reader = pack_file.reader();
+            var zlib_stream = std.compress.zlib.decompressor(reader);
+            const zlib_reader = zlib_stream.reader();
 
             // get size of base object (little endian variable length format)
             var base_size: u64 = 0;
@@ -595,10 +701,18 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             };
             cache.sort(SortCtx{ .keys = cache.keys() });
 
+            var stream = PackObjectStream{ .file = .{
+                .pack_file = pack_file,
+                .zlib_stream = zlib_stream,
+                .start_position = start_position,
+            } };
+            errdefer stream.deinit();
+            if (self.size <= max_buffer_size) {
+                try stream.convertToBuffer(allocator);
+            }
+
             self.* = .{
-                .pack_file = self.pack_file,
                 .stream = stream,
-                .start_position = self.start_position,
                 .relative_position = bytes_read,
                 .size = self.size,
                 .internal = .{
@@ -673,7 +787,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
         }
 
         pub fn deinit(self: *PackObjectReader(repo_kind, repo_opts), allocator: std.mem.Allocator) void {
-            self.pack_file.close();
+            self.stream.deinit();
             switch (self.internal) {
                 .basic => {},
                 .delta => |*delta| {
@@ -704,8 +818,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
         }
 
         pub fn reset(self: *PackObjectReader(repo_kind, repo_opts)) !void {
-            try self.pack_file.seekTo(self.start_position);
-            self.stream = std.compress.zlib.decompressor(self.pack_file.reader());
+            try self.stream.reset();
             self.relative_position = 0;
 
             switch (self.internal) {
@@ -723,7 +836,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             switch (self.internal) {
                 .basic => {
                     if (self.size < self.relative_position) return error.EndOfStream;
-                    const size = try self.stream.reader().read(dest[0..@min(dest.len, self.size - self.relative_position)]);
+                    const size = try self.stream.read(dest[0..@min(dest.len, self.size - self.relative_position)]);
                     self.relative_position += size;
                     return size;
                 },
@@ -741,16 +854,15 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                             .add_new => {
                                 const offset = delta_chunk.location.offset + delta_state.chunk_position;
                                 if (self.relative_position > offset) {
-                                    try self.pack_file.seekTo(self.start_position);
-                                    self.stream = std.compress.zlib.decompressor(self.pack_file.reader());
+                                    try self.stream.reset();
                                     self.relative_position = 0;
                                 }
                                 if (self.relative_position < offset) {
                                     const bytes_to_skip = offset - self.relative_position;
-                                    try self.stream.reader().skipBytes(bytes_to_skip, .{});
+                                    try self.stream.skipBytes(bytes_to_skip);
                                     self.relative_position += bytes_to_skip;
                                 }
-                                const size = try self.stream.reader().read(dest_slice[0..bytes_to_read]);
+                                const size = try self.stream.read(dest_slice[0..bytes_to_read]);
                                 // TODO: in rare cases this is not true....why?
                                 //if (size != bytes_to_read) return error.UnexpectedEndOfStream;
                                 self.relative_position += size;
