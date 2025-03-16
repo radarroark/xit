@@ -3,160 +3,6 @@ const hash = @import("./hash.zig");
 const rp = @import("./repo.zig");
 const obj = @import("./object.zig");
 
-fn findOid(
-    comptime hash_kind: hash.HashKind,
-    idx_file: std.fs.File,
-    oid_list_pos: u64,
-    index: usize,
-) ![hash.byteLen(hash_kind)]u8 {
-    const reader = idx_file.reader();
-    const oid_pos = oid_list_pos + (index * hash.byteLen(hash_kind));
-    try idx_file.seekTo(oid_pos);
-    return try reader.readBytesNoEof(hash.byteLen(hash_kind));
-}
-
-fn findObjectIndex(
-    comptime hash_kind: hash.HashKind,
-    idx_file: std.fs.File,
-    fanout_table: [256]u32,
-    oid_list_pos: u64,
-    oid_bytes: *const [hash.byteLen(hash_kind)]u8,
-) !?usize {
-    var left: u32 = 0;
-    var right = fanout_table[oid_bytes[0]];
-
-    // binary search for the oid
-    while (left < right) {
-        const mid = left + ((right - left) / 2);
-        const mid_oid_bytes = try findOid(hash_kind, idx_file, oid_list_pos, mid);
-        if (std.mem.eql(u8, oid_bytes, &mid_oid_bytes)) {
-            return mid;
-        } else if (std.mem.lessThan(u8, oid_bytes, &mid_oid_bytes)) {
-            if (mid == 0) {
-                break;
-            } else {
-                right = mid - 1;
-            }
-        } else {
-            if (left == fanout_table[oid_bytes[0]]) {
-                break;
-            } else {
-                left = mid + 1;
-            }
-        }
-    }
-
-    const right_oid_bytes = try findOid(hash_kind, idx_file, oid_list_pos, right);
-    if (std.mem.eql(u8, oid_bytes, &right_oid_bytes)) {
-        return right;
-    }
-
-    return null;
-}
-
-fn findOffset(
-    comptime hash_kind: hash.HashKind,
-    idx_file: std.fs.File,
-    fanout_table: [256]u32,
-    oid_list_pos: u64,
-    index: usize,
-) !u64 {
-    const reader = idx_file.reader();
-
-    const entry_count = fanout_table[fanout_table.len - 1];
-    const crc_size: u64 = 4;
-    const offset_size: u64 = 4;
-    const crc_list_pos = oid_list_pos + (entry_count * hash.byteLen(hash_kind));
-    const offset_list_pos = crc_list_pos + (entry_count * crc_size);
-    const offset_pos = offset_list_pos + (index * offset_size);
-
-    try idx_file.seekTo(offset_pos);
-    const offset: packed struct {
-        value: u31,
-        extra: bool,
-    } = @bitCast(try reader.readInt(u32, .big));
-    if (!offset.extra) {
-        return offset.value;
-    }
-
-    const offset64_size: u64 = 8;
-    const offset64_list_pos = offset_list_pos + (entry_count * offset_size);
-    const offset64_pos = offset64_list_pos + (offset.value * offset64_size);
-
-    try idx_file.seekTo(offset64_pos);
-    return try reader.readInt(u64, .big);
-}
-
-fn searchPackIndex(
-    comptime hash_kind: hash.HashKind,
-    idx_file: std.fs.File,
-    oid_bytes: *const [hash.byteLen(hash_kind)]u8,
-) !?u64 {
-    const reader = idx_file.reader();
-
-    const header = try reader.readBytesNoEof(4);
-    const version = if (!std.mem.eql(u8, &.{ 255, 116, 79, 99 }, &header)) 1 else try reader.readInt(u32, .big);
-    if (version != 2) {
-        return error.NotImplemented;
-    }
-
-    var fanout_table = [_]u32{0} ** 256;
-    for (&fanout_table) |*entry| {
-        entry.* = try reader.readInt(u32, .big);
-    }
-    const oid_list_pos = try idx_file.getPos();
-
-    if (try findObjectIndex(hash_kind, idx_file, fanout_table, oid_list_pos, oid_bytes)) |index| {
-        return try findOffset(hash_kind, idx_file, fanout_table, oid_list_pos, index);
-    }
-
-    return null;
-}
-
-fn PackOffset(comptime hash_kind: hash.HashKind) type {
-    return struct {
-        pack_id: [hash.hexLen(hash_kind)]u8,
-        value: u64,
-    };
-}
-
-fn searchPackIndexes(
-    comptime hash_kind: hash.HashKind,
-    pack_dir: std.fs.Dir,
-    oid_hex: *const [hash.hexLen(hash_kind)]u8,
-) !PackOffset(hash_kind) {
-    const oid_bytes = try hash.hexToBytes(hash_kind, oid_hex.*);
-
-    const prefix = "pack-";
-    const suffix = ".idx";
-
-    var iter = pack_dir.iterate();
-    while (try iter.next()) |entry| {
-        switch (entry.kind) {
-            .file => {
-                if (std.mem.startsWith(u8, entry.name, prefix) and std.mem.endsWith(u8, entry.name, suffix)) {
-                    const pack_id = entry.name[prefix.len .. entry.name.len - suffix.len];
-
-                    if (pack_id.len == hash.hexLen(hash_kind)) {
-                        var idx_file = try pack_dir.openFile(entry.name, .{ .mode = .read_only });
-                        defer idx_file.close();
-
-                        if (try searchPackIndex(hash_kind, idx_file, &oid_bytes)) |offset| {
-                            return .{
-                                .pack_id = pack_id[0..comptime hash.hexLen(hash_kind)].*,
-                                .value = offset,
-                            };
-                        }
-                    }
-                }
-            },
-            else => {},
-        }
-    }
-
-    return error.ObjectNotFound;
-}
-
 pub fn PackObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return struct {
         allocator: std.mem.Allocator,
@@ -1287,4 +1133,160 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             }
         }
     };
+}
+
+// search pack index files
+
+fn findOid(
+    comptime hash_kind: hash.HashKind,
+    idx_file: std.fs.File,
+    oid_list_pos: u64,
+    index: usize,
+) ![hash.byteLen(hash_kind)]u8 {
+    const reader = idx_file.reader();
+    const oid_pos = oid_list_pos + (index * hash.byteLen(hash_kind));
+    try idx_file.seekTo(oid_pos);
+    return try reader.readBytesNoEof(hash.byteLen(hash_kind));
+}
+
+fn findObjectIndex(
+    comptime hash_kind: hash.HashKind,
+    idx_file: std.fs.File,
+    fanout_table: [256]u32,
+    oid_list_pos: u64,
+    oid_bytes: *const [hash.byteLen(hash_kind)]u8,
+) !?usize {
+    var left: u32 = 0;
+    var right = fanout_table[oid_bytes[0]];
+
+    // binary search for the oid
+    while (left < right) {
+        const mid = left + ((right - left) / 2);
+        const mid_oid_bytes = try findOid(hash_kind, idx_file, oid_list_pos, mid);
+        if (std.mem.eql(u8, oid_bytes, &mid_oid_bytes)) {
+            return mid;
+        } else if (std.mem.lessThan(u8, oid_bytes, &mid_oid_bytes)) {
+            if (mid == 0) {
+                break;
+            } else {
+                right = mid - 1;
+            }
+        } else {
+            if (left == fanout_table[oid_bytes[0]]) {
+                break;
+            } else {
+                left = mid + 1;
+            }
+        }
+    }
+
+    const right_oid_bytes = try findOid(hash_kind, idx_file, oid_list_pos, right);
+    if (std.mem.eql(u8, oid_bytes, &right_oid_bytes)) {
+        return right;
+    }
+
+    return null;
+}
+
+fn findOffset(
+    comptime hash_kind: hash.HashKind,
+    idx_file: std.fs.File,
+    fanout_table: [256]u32,
+    oid_list_pos: u64,
+    index: usize,
+) !u64 {
+    const reader = idx_file.reader();
+
+    const entry_count = fanout_table[fanout_table.len - 1];
+    const crc_size: u64 = 4;
+    const offset_size: u64 = 4;
+    const crc_list_pos = oid_list_pos + (entry_count * hash.byteLen(hash_kind));
+    const offset_list_pos = crc_list_pos + (entry_count * crc_size);
+    const offset_pos = offset_list_pos + (index * offset_size);
+
+    try idx_file.seekTo(offset_pos);
+    const offset: packed struct {
+        value: u31,
+        extra: bool,
+    } = @bitCast(try reader.readInt(u32, .big));
+    if (!offset.extra) {
+        return offset.value;
+    }
+
+    const offset64_size: u64 = 8;
+    const offset64_list_pos = offset_list_pos + (entry_count * offset_size);
+    const offset64_pos = offset64_list_pos + (offset.value * offset64_size);
+
+    try idx_file.seekTo(offset64_pos);
+    return try reader.readInt(u64, .big);
+}
+
+fn searchPackIndex(
+    comptime hash_kind: hash.HashKind,
+    idx_file: std.fs.File,
+    oid_bytes: *const [hash.byteLen(hash_kind)]u8,
+) !?u64 {
+    const reader = idx_file.reader();
+
+    const header = try reader.readBytesNoEof(4);
+    const version = if (!std.mem.eql(u8, &.{ 255, 116, 79, 99 }, &header)) 1 else try reader.readInt(u32, .big);
+    if (version != 2) {
+        return error.NotImplemented;
+    }
+
+    var fanout_table = [_]u32{0} ** 256;
+    for (&fanout_table) |*entry| {
+        entry.* = try reader.readInt(u32, .big);
+    }
+    const oid_list_pos = try idx_file.getPos();
+
+    if (try findObjectIndex(hash_kind, idx_file, fanout_table, oid_list_pos, oid_bytes)) |index| {
+        return try findOffset(hash_kind, idx_file, fanout_table, oid_list_pos, index);
+    }
+
+    return null;
+}
+
+fn PackOffset(comptime hash_kind: hash.HashKind) type {
+    return struct {
+        pack_id: [hash.hexLen(hash_kind)]u8,
+        value: u64,
+    };
+}
+
+fn searchPackIndexes(
+    comptime hash_kind: hash.HashKind,
+    pack_dir: std.fs.Dir,
+    oid_hex: *const [hash.hexLen(hash_kind)]u8,
+) !PackOffset(hash_kind) {
+    const oid_bytes = try hash.hexToBytes(hash_kind, oid_hex.*);
+
+    const prefix = "pack-";
+    const suffix = ".idx";
+
+    var iter = pack_dir.iterate();
+    while (try iter.next()) |entry| {
+        switch (entry.kind) {
+            .file => {
+                if (std.mem.startsWith(u8, entry.name, prefix) and std.mem.endsWith(u8, entry.name, suffix)) {
+                    const pack_id = entry.name[prefix.len .. entry.name.len - suffix.len];
+
+                    if (pack_id.len == hash.hexLen(hash_kind)) {
+                        var idx_file = try pack_dir.openFile(entry.name, .{ .mode = .read_only });
+                        defer idx_file.close();
+
+                        if (try searchPackIndex(hash_kind, idx_file, &oid_bytes)) |offset| {
+                            return .{
+                                .pack_id = pack_id[0..comptime hash.hexLen(hash_kind)].*,
+                                .value = offset,
+                            };
+                        }
+                    }
+                }
+            },
+            else => {},
+        }
+    }
+
+    return error.ObjectNotFound;
 }
