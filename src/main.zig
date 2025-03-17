@@ -247,6 +247,7 @@ pub fn runPrint(
             , .{});
             return error.HandledError;
         },
+        error.BrokenPipe => {},
         else => |e| return e,
     };
 }
