@@ -45,7 +45,10 @@ const ProgressCtx = struct {
                 self.node.* = std.Progress.start(.{ .root_name = name, .estimated_total_items = start.estimated_total_items });
             },
             .complete_one => if (self.node.*) |node| node.completeOne(),
-            .end => if (self.node.*) |node| node.end(),
+            .end => if (self.node.*) |node| {
+                node.end();
+                self.node.* = null;
+            },
             .text => |text| {
                 if (self.clear_line.*) {
                     try self.writers.out.print("\x1B[F", .{});
