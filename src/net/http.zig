@@ -17,6 +17,11 @@ pub const HttpState = struct {
     }
 
     pub fn deinit(self: *HttpState) void {
+        self.http_client.deinit();
+        close(self);
+    }
+
+    pub fn close(self: *HttpState) void {
         if (self.read_request) |*req| {
             req.deinit();
             self.read_request = null;
@@ -25,12 +30,8 @@ pub const HttpState = struct {
             req.deinit();
             self.write_request = null;
         }
-        self.http_client.deinit();
-
-        close(self);
+        self.sent_write_request = false;
     }
-
-    pub fn close(_: *HttpState) void {}
 };
 
 pub const HttpStream = struct {

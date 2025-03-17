@@ -216,7 +216,11 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             url: []const u8,
             direction: net.Direction,
         ) !void {
-            try self.closeWireState(allocator);
+            if (self.url) |current_url| {
+                allocator.free(current_url);
+                self.url = null;
+            }
+            try self.wire_state.close();
 
             const url_dupe = try allocator.dupe(u8, url);
             self.url = url_dupe;
@@ -295,6 +299,11 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                     need_pack = true;
                     break;
                 }
+            }
+
+            if (self.is_stateless) {
+                self.clearStream(allocator);
+                try self.wire_state.close();
             }
 
             if (.push != self.direction) {
@@ -493,6 +502,11 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             allocator: std.mem.Allocator,
             buffer: []const u8,
         ) !void {
+            if (self.is_stateless) {
+                self.clearStream(allocator);
+                try self.wire_state.close();
+            }
+
             if (.fetch != self.direction) {
                 return error.InvalidDirection;
             }
@@ -705,7 +719,12 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             }
 
             self.clearStream(allocator);
-            try self.closeWireState(allocator);
+
+            if (self.url) |url| {
+                allocator.free(url);
+                self.url = null;
+            }
+            try self.wire_state.close();
 
             for (self.common.items) |*pkt| {
                 pkt.deinit(allocator);
@@ -720,14 +739,6 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                 wire_stream.deinit(allocator);
                 self.wire_stream = null;
             }
-        }
-
-        fn closeWireState(self: *WireTransport(repo_kind, repo_opts), allocator: std.mem.Allocator) !void {
-            if (self.url) |url| {
-                allocator.free(url);
-                self.url = null;
-            }
-            try self.wire_state.close();
         }
 
         fn updateHeads(self: *WireTransport(repo_kind, repo_opts), allocator: std.mem.Allocator, symrefs: *std.ArrayList(net_refspec.RefSpec)) !void {
