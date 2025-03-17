@@ -553,7 +553,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                         switch (pkt) {
                             .progress => |progress| if (repo_opts.ProgressCtx != void) {
                                 if (self.opts.progress_ctx) |progress_ctx| {
-                                    try progress_ctx.run(progress);
+                                    try progress_ctx.run(.{ .text = progress });
                                 }
                             },
                             .data => |data| if (data.len > 0) {
@@ -789,7 +789,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                         .err => return error.ServerReportedError,
                         .progress => |progress| if (repo_opts.ProgressCtx != void) {
                             if (self.opts.progress_ctx) |progress_ctx| {
-                                try progress_ctx.run(progress);
+                                try progress_ctx.run(.{ .text = progress });
                             }
                         },
                         else => iter_over = try handlePushPkt(git_push, pkt),

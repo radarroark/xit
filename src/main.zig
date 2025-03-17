@@ -29,13 +29,31 @@ pub const Writers = struct {
 const ProgressCtx = struct {
     writers: Writers,
     clear_line: *bool,
+    node: *?std.Progress.Node,
 
-    pub fn run(self: @This(), text: []const u8) !void {
-        if (self.clear_line.*) {
-            try self.writers.out.print("\x1B[F", .{});
+    pub fn run(self: @This(), event: rp.ProgressEvent) !void {
+        switch (event) {
+            .start => |start| {
+                if (self.node.*) |node| {
+                    node.end();
+                }
+                const name = switch (start.kind) {
+                    .writing_object_from_pack => "Writing object from pack",
+                    .writing_object => "Writing object",
+                    .writing_patch => "Writing patch",
+                };
+                self.node.* = std.Progress.start(.{ .root_name = name, .estimated_total_items = start.estimated_total_items });
+            },
+            .complete_one => if (self.node.*) |node| node.completeOne(),
+            .end => if (self.node.*) |node| node.end(),
+            .text => |text| {
+                if (self.clear_line.*) {
+                    try self.writers.out.print("\x1B[F", .{});
+                }
+                try self.writers.out.print("{s}\n", .{text});
+                self.clear_line.* = true;
+            },
         }
-        try self.writers.out.print("{s}\n", .{text});
-        self.clear_line.* = true;
     }
 };
 
@@ -103,12 +121,13 @@ pub fn run(
             .clone => |clone_cmd| {
                 const repo_opts_with_ctx = repo_opts.withProgressCtx(ProgressCtx);
                 var clear_line = false;
+                var progress_node: ?std.Progress.Node = null;
                 var repo = try rp.Repo(repo_kind, repo_opts_with_ctx).clone(
                     allocator,
                     clone_cmd.url,
                     cwd,
                     clone_cmd.local_path,
-                    .{ .progress_ctx = .{ .writers = writers, .clear_line = &clear_line } },
+                    .{ .progress_ctx = .{ .writers = writers, .clear_line = &clear_line, .node = &progress_node } },
                 );
                 defer repo.deinit();
 
@@ -534,20 +553,22 @@ fn runCommand(
         .clone => {},
         .fetch => |fetch_cmd| {
             var clear_line = false;
+            var progress_node: ?std.Progress.Node = null;
             try repo.fetch(
                 allocator,
                 fetch_cmd.remote_name,
-                .{ .progress_ctx = .{ .writers = writers, .clear_line = &clear_line } },
+                .{ .progress_ctx = .{ .writers = writers, .clear_line = &clear_line, .node = &progress_node } },
             );
         },
         .push => |push_cmd| {
             var clear_line = false;
+            var progress_node: ?std.Progress.Node = null;
             try repo.push(
                 allocator,
                 push_cmd.remote_name,
                 push_cmd.refspec,
                 push_cmd.force,
-                .{ .progress_ctx = .{ .writers = writers, .clear_line = &clear_line } },
+                .{ .progress_ctx = .{ .writers = writers, .clear_line = &clear_line, .node = &progress_node } },
             );
         },
         .patch => |patch_cmd| switch (repo_kind) {
@@ -557,7 +578,8 @@ fn runCommand(
             },
             .xit => if (patch_cmd) {
                 var clear_line = false;
-                try repo.patchOn(allocator, .{ .writers = writers, .clear_line = &clear_line });
+                var progress_node: ?std.Progress.Node = null;
+                try repo.patchOn(allocator, .{ .writers = writers, .clear_line = &clear_line, .node = &progress_node });
             } else {
                 try repo.patchOff(allocator);
             },

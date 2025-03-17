@@ -16,6 +16,22 @@ const tr = @import("./tree.zig");
 const net = @import("./net.zig");
 const net_refspec = @import("./net/refspec.zig");
 
+pub const ProgressKind = enum {
+    writing_object_from_pack,
+    writing_object,
+    writing_patch,
+};
+
+pub const ProgressEvent = union(enum) {
+    start: struct {
+        kind: ProgressKind,
+        estimated_total_items: usize,
+    },
+    complete_one: ProgressKind,
+    end: ProgressKind,
+    text: []const u8,
+};
+
 pub const RepoKind = enum {
     git,
     xit,

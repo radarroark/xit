@@ -1225,18 +1225,22 @@ pub fn PatchWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoO
             ) !void {
                 const patch = @import("./patch.zig");
 
-                var patch_count: usize = 0;
+                if (repo_opts.ProgressCtx != void) {
+                    if (progress_ctx_maybe) |progress_ctx| {
+                        try progress_ctx.run(.{ .start = .{
+                            .kind = .writing_patch,
+                            .estimated_total_items = self.commit_count,
+                        } });
+                    }
+                }
 
                 while (self.oid_queue.count() > 0) {
                     const oid = self.oid_queue.keys()[0];
                     const oid_hex = std.fmt.bytesToHex(&oid, .lower);
 
-                    patch_count += 1;
                     if (repo_opts.ProgressCtx != void) {
                         if (progress_ctx_maybe) |progress_ctx| {
-                            const text = try std.fmt.allocPrint(allocator, "Writing patches for commit {}/{}", .{ patch_count, self.commit_count });
-                            defer allocator.free(text);
-                            try progress_ctx.run(text);
+                            try progress_ctx.run(.{ .complete_one = .writing_patch });
                         }
                     }
 
@@ -1255,6 +1259,12 @@ pub fn PatchWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoO
                             const child_oid = hash.intToBytes(hash.HashInt(repo_opts.hash), kv_pair.hash);
                             try self.oid_queue.put(allocator, child_oid, {});
                         }
+                    }
+                }
+
+                if (repo_opts.ProgressCtx != void) {
+                    if (progress_ctx_maybe) |progress_ctx| {
+                        try progress_ctx.run(.{ .end = .writing_patch });
                     }
                 }
             }
@@ -1279,17 +1289,21 @@ pub fn copyFromObjectIterator(
             null;
     defer if (patch_writer_maybe) |*patch_writer| patch_writer.deinit(allocator);
 
-    var object_count: usize = 0;
+    if (repo_opts.ProgressCtx != void) {
+        if (progress_ctx_maybe) |progress_ctx| {
+            try progress_ctx.run(.{ .start = .{
+                .kind = .writing_object,
+                .estimated_total_items = 0,
+            } });
+        }
+    }
 
     while (try obj_iter.next()) |object| {
         defer object.deinit();
 
-        object_count += 1;
         if (repo_opts.ProgressCtx != void) {
             if (progress_ctx_maybe) |progress_ctx| {
-                const text = try std.fmt.allocPrint(allocator, "Writing object {}", .{object_count});
-                defer allocator.free(text);
-                try progress_ctx.run(text);
+                try progress_ctx.run(.{ .complete_one = .writing_object });
             }
         }
 
@@ -1308,6 +1322,12 @@ pub fn copyFromObjectIterator(
             if (object.content == .commit) {
                 try patch_writer.add(state.readOnly(), allocator, &oid);
             }
+        }
+    }
+
+    if (repo_opts.ProgressCtx != void) {
+        if (progress_ctx_maybe) |progress_ctx| {
+            try progress_ctx.run(.{ .end = .writing_object });
         }
     }
 
@@ -1331,7 +1351,14 @@ pub fn copyFromPackObjectIterator(
             null;
     defer if (patch_writer_maybe) |*patch_writer| patch_writer.deinit(allocator);
 
-    var object_count: usize = 0;
+    if (repo_opts.ProgressCtx != void) {
+        if (progress_ctx_maybe) |progress_ctx| {
+            try progress_ctx.run(.{ .start = .{
+                .kind = .writing_object_from_pack,
+                .estimated_total_items = pack_iter.object_count,
+            } });
+        }
+    }
 
     while (try pack_iter.next(state.readOnly())) |pack_reader| {
         defer pack_reader.deinit(allocator);
@@ -1355,12 +1382,9 @@ pub fn copyFromPackObjectIterator(
             .pack_reader = pack_reader,
         };
 
-        object_count += 1;
         if (repo_opts.ProgressCtx != void) {
             if (progress_ctx_maybe) |progress_ctx| {
-                const text = try std.fmt.allocPrint(allocator, "Writing object {}", .{object_count});
-                defer allocator.free(text);
-                try progress_ctx.run(text);
+                try progress_ctx.run(.{ .complete_one = .writing_object_from_pack });
             }
         }
 
@@ -1372,6 +1396,12 @@ pub fn copyFromPackObjectIterator(
             if (header.kind == .commit) {
                 try patch_writer.add(state.readOnly(), allocator, &oid);
             }
+        }
+    }
+
+    if (repo_opts.ProgressCtx != void) {
+        if (progress_ctx_maybe) |progress_ctx| {
+            try progress_ctx.run(.{ .end = .writing_object_from_pack });
         }
     }
 
