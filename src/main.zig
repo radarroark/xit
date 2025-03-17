@@ -29,6 +29,7 @@ pub const Writers = struct {
 const ProgressCtx = struct {
     writers: Writers,
     clear_line: *bool,
+    root_node: std.Progress.Node,
 
     pub fn run(self: @This(), text: []const u8) !void {
         if (self.clear_line.*) {
@@ -108,7 +109,11 @@ pub fn run(
                     clone_cmd.url,
                     cwd,
                     clone_cmd.local_path,
-                    .{ .progress_ctx = .{ .writers = writers, .clear_line = &clear_line } },
+                    .{ .progress_ctx = .{
+                        .writers = writers,
+                        .clear_line = &clear_line,
+                        .root_node = std.Progress.start(.{ .root_name = "clone" }),
+                    } },
                 );
                 defer repo.deinit();
 
@@ -537,7 +542,11 @@ fn runCommand(
             try repo.fetch(
                 allocator,
                 fetch_cmd.remote_name,
-                .{ .progress_ctx = .{ .writers = writers, .clear_line = &clear_line } },
+                .{ .progress_ctx = .{
+                    .writers = writers,
+                    .clear_line = &clear_line,
+                    .root_node = std.Progress.start(.{ .root_name = "fetch" }),
+                } },
             );
         },
         .push => |push_cmd| {
@@ -547,7 +556,11 @@ fn runCommand(
                 push_cmd.remote_name,
                 push_cmd.refspec,
                 push_cmd.force,
-                .{ .progress_ctx = .{ .writers = writers, .clear_line = &clear_line } },
+                .{ .progress_ctx = .{
+                    .writers = writers,
+                    .clear_line = &clear_line,
+                    .root_node = std.Progress.start(.{ .root_name = "push" }),
+                } },
             );
         },
         .patch => |patch_cmd| switch (repo_kind) {
@@ -557,7 +570,11 @@ fn runCommand(
             },
             .xit => if (patch_cmd) {
                 var clear_line = false;
-                try repo.patchOn(allocator, .{ .writers = writers, .clear_line = &clear_line });
+                try repo.patchOn(allocator, .{
+                    .writers = writers,
+                    .clear_line = &clear_line,
+                    .root_node = std.Progress.start(.{ .root_name = "patch" }),
+                });
             } else {
                 try repo.patchOff(allocator);
             },

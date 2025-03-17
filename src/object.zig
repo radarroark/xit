@@ -1274,24 +1274,22 @@ pub fn copyFromObjectIterator(
 ) !void {
     var patch_writer_maybe: ?PatchWriter(repo_kind, repo_opts) =
         if (repo_kind == .xit and try cfg.patchEnabled(repo_opts, state.readOnly(), allocator))
-            try PatchWriter(repo_kind, repo_opts).init(state.readOnly(), allocator)
-        else
-            null;
+        try PatchWriter(repo_kind, repo_opts).init(state.readOnly(), allocator)
+    else
+        null;
     defer if (patch_writer_maybe) |*patch_writer| patch_writer.deinit(allocator);
 
-    var object_count: usize = 0;
+    const node_maybe = if (repo_opts.ProgressCtx != void and progress_ctx_maybe != null)
+        progress_ctx_maybe.?.root_node.start("Writing objects", 0)
+    else
+        null;
 
     while (try obj_iter.next()) |object| {
         defer object.deinit();
 
-        object_count += 1;
-        if (repo_opts.ProgressCtx != void) {
-            if (progress_ctx_maybe) |progress_ctx| {
-                const text = try std.fmt.allocPrint(allocator, "Writing object {}", .{object_count});
-                defer allocator.free(text);
-                try progress_ctx.run(text);
-            }
-        }
+        defer if (node_maybe) |node| {
+            node.completeOne();
+        };
 
         var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
         try writeObject(
@@ -1326,15 +1324,19 @@ pub fn copyFromPackObjectIterator(
 ) !void {
     var patch_writer_maybe: ?PatchWriter(repo_kind, repo_opts) =
         if (repo_kind == .xit and try cfg.patchEnabled(repo_opts, state.readOnly(), allocator))
-            try PatchWriter(repo_kind, repo_opts).init(state.readOnly(), allocator)
-        else
-            null;
+        try PatchWriter(repo_kind, repo_opts).init(state.readOnly(), allocator)
+    else
+        null;
     defer if (patch_writer_maybe) |*patch_writer| patch_writer.deinit(allocator);
 
-    var object_count: usize = 0;
+    const node_maybe = if (repo_opts.ProgressCtx != void and progress_ctx_maybe != null)
+        progress_ctx_maybe.?.root_node.start("Writing objects from pack file", pack_iter.object_count)
+    else
+        null;
 
     while (try pack_iter.next(state.readOnly())) |pack_reader| {
         defer pack_reader.deinit(allocator);
+        defer if (node_maybe) |node| node.completeOne();
 
         const Stream = struct {
             pack_reader: *pack.PackObjectReader(repo_kind, repo_opts),
@@ -1354,15 +1356,6 @@ pub fn copyFromPackObjectIterator(
         const stream = Stream{
             .pack_reader = pack_reader,
         };
-
-        object_count += 1;
-        if (repo_opts.ProgressCtx != void) {
-            if (progress_ctx_maybe) |progress_ctx| {
-                const text = try std.fmt.allocPrint(allocator, "Writing object {}", .{object_count});
-                defer allocator.free(text);
-                try progress_ctx.run(text);
-            }
-        }
 
         var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
         const header = pack_reader.header();
