@@ -198,23 +198,26 @@ const PackObjectStream = union(enum) {
         }
     }
 
-    pub fn convertToBuffer(self: *PackObjectStream, allocator: std.mem.Allocator) !void {
-        var buffer_arr = std.ArrayListUnmanaged(u8){};
-        errdefer buffer_arr.deinit(allocator);
-
+    pub fn convertToBuffer(self: *PackObjectStream, allocator: std.mem.Allocator, buffer_size: u64) !void {
         try self.reset();
 
-        var read_buffer = [_]u8{0} ** 2048;
-        while (true) {
-            const size = try self.read(&read_buffer);
+        const buffer = try allocator.alloc(u8, buffer_size);
+        errdefer allocator.free(buffer);
+
+        var bytes_read: usize = 0;
+        while (bytes_read < buffer_size) {
+            const size = try self.read(buffer[bytes_read..]);
             if (size == 0) {
                 break;
             }
-            try buffer_arr.appendSlice(allocator, read_buffer[0..size]);
+            bytes_read += size;
+        }
+
+        if (bytes_read != buffer_size) {
+            return error.EndOfStream;
         }
 
         const end_position = try self.getEndPos();
-        const buffer = try buffer_arr.toOwnedSlice(allocator);
 
         self.deinit();
         self.* = .{
@@ -431,7 +434,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     } };
                     errdefer stream.deinit();
                     if (size <= max_buffer_size) {
-                        try stream.convertToBuffer(allocator);
+                        try stream.convertToBuffer(allocator, size);
                     }
 
                     return .{
@@ -708,7 +711,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             } };
             errdefer stream.deinit();
             if (self.size <= max_buffer_size) {
-                try stream.convertToBuffer(allocator);
+                try stream.convertToBuffer(allocator, self.size);
             }
 
             self.* = .{
