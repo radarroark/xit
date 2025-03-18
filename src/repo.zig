@@ -1048,7 +1048,9 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         }
                     }
 
-                    var patch_writer = try obj.PatchWriter(repo_kind, repo_opts).init(state.readOnly(), ctx.allocator);
+                    const patch = @import("./patch.zig");
+
+                    var patch_writer = try patch.PatchWriter(repo_opts).init(state.readOnly(), ctx.allocator);
                     defer patch_writer.deinit(ctx.allocator);
 
                     while (try obj_iter.next()) |commit_object| {
@@ -1153,7 +1155,6 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
         pub fn copyObjects(
             self: *Repo(repo_kind, repo_opts),
-            allocator: std.mem.Allocator,
             comptime source_repo_kind: RepoKind,
             comptime source_repo_opts: RepoOpts(source_repo_kind),
             obj_iter: *obj.ObjectIterator(source_repo_kind, source_repo_opts, .raw),
@@ -1165,7 +1166,6 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         repo_kind,
                         repo_opts,
                         .{ .core = &self.core, .extra = .{} },
-                        allocator,
                         source_repo_kind,
                         source_repo_opts,
                         obj_iter,
@@ -1175,7 +1175,6 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                 .xit => {
                     const Ctx = struct {
                         core: *Repo(repo_kind, repo_opts).Core,
-                        allocator: std.mem.Allocator,
                         obj_iter: *obj.ObjectIterator(source_repo_kind, source_repo_opts, .raw),
                         progress_ctx_maybe: ?repo_opts.ProgressCtx,
 
@@ -1186,7 +1185,6 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                                 repo_kind,
                                 repo_opts,
                                 state,
-                                ctx.allocator,
                                 source_repo_kind,
                                 source_repo_opts,
                                 ctx.obj_iter,
@@ -1198,7 +1196,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
                     try history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
-                        Ctx{ .core = &self.core, .allocator = allocator, .obj_iter = obj_iter, .progress_ctx_maybe = progress_ctx_maybe },
+                        Ctx{ .core = &self.core, .obj_iter = obj_iter, .progress_ctx_maybe = progress_ctx_maybe },
                     );
                 },
             }

@@ -1565,7 +1565,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 
                     // Lazy patch generation
                     if (repo_kind == .xit and merge_algo == .patch) {
-                        try writePossiblePatches(repo_kind, repo_opts, state, allocator, &target_oid, &source_oid);
+                        try writePossiblePatches(repo_opts, state, allocator, &target_oid, &source_oid);
                     }
 
                     // diff the base ancestor with the target oid
@@ -1825,17 +1825,18 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 }
 
 fn writePossiblePatches(
-    comptime repo_kind: rp.RepoKind,
-    comptime repo_opts: rp.RepoOpts(repo_kind),
-    state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+    comptime repo_opts: rp.RepoOpts(.xit),
+    state: rp.Repo(.xit, repo_opts).State(.read_write),
     allocator: std.mem.Allocator,
     target_oid: *const [hash.hexLen(repo_opts.hash)]u8,
     source_oid: *const [hash.hexLen(repo_opts.hash)]u8,
 ) !void {
-    var patch_writer = try obj.PatchWriter(repo_kind, repo_opts).init(state.readOnly(), allocator);
+    const patch = @import("./patch.zig");
+
+    var patch_writer = try patch.PatchWriter(repo_opts).init(state.readOnly(), allocator);
     defer patch_writer.deinit(allocator);
 
-    const base_oid = try commonAncestor(repo_kind, repo_opts, allocator, state.readOnly(), target_oid, source_oid);
+    const base_oid = try commonAncestor(.xit, repo_opts, allocator, state.readOnly(), target_oid, source_oid);
     var source_iter = try obj.ObjectIterator(.xit, repo_opts, .full).init(allocator, state.readOnly(), .{ .kind = .commit });
     defer source_iter.deinit();
     try source_iter.include(source_oid);

@@ -299,7 +299,7 @@ fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 
         var dest_repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "dest_repo");
         defer dest_repo.deinit();
-        try dest_repo.copyObjects(allocator, repo_kind, repo_opts, &obj_iter, null);
+        try dest_repo.copyObjects(repo_kind, repo_opts, &obj_iter, null);
 
         var dest_obj_iter = try dest_repo.log(allocator, &.{commit_k});
         defer dest_obj_iter.deinit();
