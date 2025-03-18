@@ -1563,6 +1563,11 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                         };
                     }
 
+                    // Lazy patch generation
+                    if (repo_kind == .xit and merge_algo == .patch) {
+                        try writePossiblePatches(repo_kind, repo_opts, state, allocator, &target_oid, &source_oid);
+                    }
+
                     // diff the base ancestor with the target oid
                     var target_diff = tr.TreeDiff(repo_kind, repo_opts).init(arena.allocator());
                     try target_diff.compare(state.readOnly(), &base_oid, &target_oid, null);
@@ -1817,4 +1822,46 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
             self.allocator.destroy(self.arena);
         }
     };
+}
+
+fn writePossiblePatches(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+    allocator: std.mem.Allocator,
+    target_oid: *const [hash.hexLen(repo_opts.hash)]u8,
+    source_oid: *const [hash.hexLen(repo_opts.hash)]u8,
+) !void {
+    var patch_writer = try obj.PatchWriter(repo_kind, repo_opts).init(state.readOnly(), allocator);
+    defer patch_writer.deinit(allocator);
+
+    const base_oid = try commonAncestor(repo_kind, repo_opts, allocator, state.readOnly(), target_oid, source_oid);
+    var source_iter = try obj.ObjectIterator(.xit, repo_opts, .full).init(allocator, state.readOnly(), .{ .kind = .commit });
+    defer source_iter.deinit();
+    try source_iter.include(source_oid);
+    while (try source_iter.next()) |commit_object| {
+        defer commit_object.deinit();
+
+        const oid = try hash.hexToBytes(repo_opts.hash, commit_object.oid);
+        try patch_writer.add(state.readOnly(), allocator, &oid);
+
+        if (std.mem.eql(u8, &base_oid, &commit_object.oid)) {
+            break;
+        }
+    }
+    var target_iter = try obj.ObjectIterator(.xit, repo_opts, .full).init(allocator, state.readOnly(), .{ .kind = .commit });
+    defer target_iter.deinit();
+    try target_iter.include(target_oid);
+    while (try target_iter.next()) |commit_object| {
+        defer commit_object.deinit();
+
+        const oid = try hash.hexToBytes(repo_opts.hash, commit_object.oid);
+        try patch_writer.add(state.readOnly(), allocator, &oid);
+
+        if (std.mem.eql(u8, &base_oid, &commit_object.oid)) {
+            break;
+        }
+    }
+
+    try patch_writer.write(state, allocator, null);
 }

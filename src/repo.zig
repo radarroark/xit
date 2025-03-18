@@ -986,43 +986,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         try config.add(state, .{ .name = "merge.algorithm", .value = "patch" });
                     }
 
-                    var obj_iter = try obj.ObjectIterator(repo_kind, repo_opts, .full).init(ctx.allocator, state.readOnly(), .{ .kind = .commit });
-                    defer obj_iter.deinit();
-
-                    // add heads
-                    {
-                        var ref_list = try rf.RefList.init(repo_kind, repo_opts, state.readOnly(), ctx.allocator, .head);
-                        defer ref_list.deinit();
-
-                        for (ref_list.refs.values()) |ref| {
-                            if (try rf.readRecur(repo_kind, repo_opts, state.readOnly(), .{ .ref = ref })) |oid| {
-                                try obj_iter.include(&oid);
-                            }
-                        }
-                    }
-
-                    // add tags
-                    {
-                        var ref_list = try rf.RefList.init(repo_kind, repo_opts, state.readOnly(), ctx.allocator, .tag);
-                        defer ref_list.deinit();
-
-                        for (ref_list.refs.values()) |ref| {
-                            if (try rf.readRecur(repo_kind, repo_opts, state.readOnly(), .{ .ref = ref })) |oid| {
-                                try obj_iter.include(&oid);
-                            }
-                        }
-                    }
-
-                    var patch_writer = try obj.PatchWriter(repo_kind, repo_opts).init(state.readOnly(), ctx.allocator);
-                    defer patch_writer.deinit(ctx.allocator);
-
-                    while (try obj_iter.next()) |commit_object| {
-                        defer commit_object.deinit();
-                        const oid = try hash.hexToBytes(repo_opts.hash, commit_object.oid);
-                        try patch_writer.add(state.readOnly(), ctx.allocator, &oid);
-                    }
-
-                    try patch_writer.write(state, ctx.allocator, ctx.progress_ctx_maybe);
+                    // Patches will be generated when necessary.
                 }
             };
 
