@@ -443,29 +443,6 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
     };
 }
 
-pub fn patchEnabled(
-    comptime repo_opts: rp.RepoOpts(.xit),
-    state: rp.Repo(.xit, repo_opts).State(.read_only),
-    allocator: std.mem.Allocator,
-) !bool {
-    var config = try Config(.xit, repo_opts).init(state, allocator);
-    defer config.deinit();
-
-    if (config.sections.get("merge")) |merge_section| {
-        if (merge_section.get("algorithm")) |algo| {
-            if (std.mem.eql(u8, "diff3", algo)) {
-                return false;
-            } else if (std.mem.eql(u8, "patch", algo)) {
-                return true;
-            } else {
-                return error.InvalidMergeAlgorithm;
-            }
-        }
-    }
-
-    return false;
-}
-
 pub const RemoteConfig = struct {
     allocator: std.mem.Allocator,
     arena: *std.heap.ArenaAllocator,

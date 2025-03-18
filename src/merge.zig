@@ -1836,7 +1836,6 @@ fn writePossiblePatches(
     var patch_writer = try patch.PatchWriter(repo_opts).init(state.readOnly(), allocator);
     defer patch_writer.deinit(allocator);
 
-    const base_oid = try commonAncestor(.xit, repo_opts, allocator, state.readOnly(), target_oid, source_oid);
     var source_iter = try obj.ObjectIterator(.xit, repo_opts, .full).init(allocator, state.readOnly(), .{ .kind = .commit });
     defer source_iter.deinit();
     try source_iter.include(source_oid);
@@ -1845,11 +1844,8 @@ fn writePossiblePatches(
 
         const oid = try hash.hexToBytes(repo_opts.hash, commit_object.oid);
         try patch_writer.add(state.readOnly(), allocator, &oid);
-
-        if (std.mem.eql(u8, &base_oid, &commit_object.oid)) {
-            break;
-        }
     }
+
     var target_iter = try obj.ObjectIterator(.xit, repo_opts, .full).init(allocator, state.readOnly(), .{ .kind = .commit });
     defer target_iter.deinit();
     try target_iter.include(target_oid);
@@ -1858,10 +1854,6 @@ fn writePossiblePatches(
 
         const oid = try hash.hexToBytes(repo_opts.hash, commit_object.oid);
         try patch_writer.add(state.readOnly(), allocator, &oid);
-
-        if (std.mem.eql(u8, &base_oid, &commit_object.oid)) {
-            break;
-        }
     }
 
     try patch_writer.write(state, allocator, null);

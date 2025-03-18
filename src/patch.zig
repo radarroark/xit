@@ -34,11 +34,6 @@ pub fn writeAndApplyPatches(
     allocator: std.mem.Allocator,
     commit_oid: *const [hash.hexLen(repo_opts.hash)]u8,
 ) !void {
-    // if the merge algo isn't set to patch, exit early
-    if (!try cfg.patchEnabled(repo_opts, state.readOnly(), allocator)) {
-        return;
-    }
-
     const parent_commit_oid_maybe = blk: {
         var commit_object = try obj.Object(.xit, repo_opts, .full).init(allocator, state.readOnly(), commit_oid);
         defer commit_object.deinit();
@@ -172,6 +167,10 @@ pub fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
             allocator: std.mem.Allocator,
             oid: *const [hash.byteLen(repo_opts.hash)]u8,
         ) !void {
+            if (self.oid_queue.contains(oid.*)) {
+                return;
+            }
+
             const oid_hex = std.fmt.bytesToHex(oid, .lower);
             const commit_id_int = try hash.hexToInt(repo_opts.hash, &oid_hex);
 

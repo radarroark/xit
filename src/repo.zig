@@ -360,8 +360,6 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             switch (repo_kind) {
                 .git => return try obj.writeCommit(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, allocator, metadata),
                 .xit => {
-                    const patch = @import("./patch.zig");
-
                     var result: [hash.hexLen(repo_opts.hash)]u8 = undefined;
 
                     const Ctx = struct {
@@ -374,7 +372,6 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
                             ctx.result.* = try obj.writeCommit(repo_kind, repo_opts, state, ctx.allocator, ctx.metadata);
-                            try patch.writeAndApplyPatches(repo_opts, state, ctx.allocator, ctx.result);
                         }
                     };
 
@@ -840,8 +837,6 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             switch (repo_kind) {
                 .git => return try mrg.Merge(repo_kind, repo_opts).init(.{ .core = &self.core, .extra = .{} }, allocator, input),
                 .xit => {
-                    const patch = @import("./patch.zig");
-
                     var merge_result: mrg.Merge(repo_kind, repo_opts) = undefined;
 
                     const Ctx = struct {
@@ -857,9 +852,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             ctx.merge_result.* = try mrg.Merge(repo_kind, repo_opts).init(state, ctx.allocator, ctx.input);
 
                             switch (ctx.merge_result.result) {
-                                .success => |success| {
-                                    try patch.writeAndApplyPatches(repo_opts, state, ctx.allocator, &success.oid);
-                                },
+                                .success => {},
                                 // no need to make a new transaction if nothing was done
                                 .nothing => return error.CancelTransaction,
                                 .fast_forward, .conflict => {},
