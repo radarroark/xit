@@ -833,9 +833,10 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             self: *Repo(repo_kind, repo_opts),
             allocator: std.mem.Allocator,
             input: mrg.MergeInput(repo_opts.hash),
+            progress_ctx_maybe: ?repo_opts.ProgressCtx,
         ) !mrg.Merge(repo_kind, repo_opts) {
             switch (repo_kind) {
-                .git => return try mrg.Merge(repo_kind, repo_opts).init(.{ .core = &self.core, .extra = .{} }, allocator, input),
+                .git => return try mrg.Merge(repo_kind, repo_opts).init(.{ .core = &self.core, .extra = .{} }, allocator, input, progress_ctx_maybe),
                 .xit => {
                     var merge_result: mrg.Merge(repo_kind, repo_opts) = undefined;
 
@@ -844,12 +845,13 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         allocator: std.mem.Allocator,
                         input: mrg.MergeInput(repo_opts.hash),
                         merge_result: *mrg.Merge(repo_kind, repo_opts),
+                        progress_ctx_maybe: ?repo_opts.ProgressCtx,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
 
-                            ctx.merge_result.* = try mrg.Merge(repo_kind, repo_opts).init(state, ctx.allocator, ctx.input);
+                            ctx.merge_result.* = try mrg.Merge(repo_kind, repo_opts).init(state, ctx.allocator, ctx.input, ctx.progress_ctx_maybe);
 
                             switch (ctx.merge_result.result) {
                                 .success => {},
@@ -863,7 +865,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
                     history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
-                        Ctx{ .core = &self.core, .allocator = allocator, .input = input, .merge_result = &merge_result },
+                        Ctx{ .core = &self.core, .allocator = allocator, .input = input, .progress_ctx_maybe = progress_ctx_maybe, .merge_result = &merge_result },
                     ) catch |err| switch (err) {
                         error.CancelTransaction => {},
                         else => |e| return e,

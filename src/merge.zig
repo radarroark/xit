@@ -1436,6 +1436,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
             state: rp.Repo(repo_kind, repo_opts).State(.read_write),
             allocator: std.mem.Allocator,
             merge_input: MergeInput(repo_opts.hash),
+            progress_ctx_maybe: ?repo_opts.ProgressCtx,
         ) !Merge(repo_kind, repo_opts) {
             // TODO: exit early if work dir is dirty
 
@@ -1565,7 +1566,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 
                     // Lazy patch generation
                     if (repo_kind == .xit and merge_algo == .patch) {
-                        try writePossiblePatches(repo_opts, state, allocator, &target_oid, &source_oid);
+                        try writePossiblePatches(repo_opts, state, allocator, &target_oid, &source_oid, progress_ctx_maybe);
                     }
 
                     // diff the base ancestor with the target oid
@@ -1830,6 +1831,7 @@ fn writePossiblePatches(
     allocator: std.mem.Allocator,
     target_oid: *const [hash.hexLen(repo_opts.hash)]u8,
     source_oid: *const [hash.hexLen(repo_opts.hash)]u8,
+    progress_ctx_maybe: ?repo_opts.ProgressCtx,
 ) !void {
     const patch = @import("./patch.zig");
 
@@ -1856,5 +1858,5 @@ fn writePossiblePatches(
         try patch_writer.add(state.readOnly(), allocator, &oid);
     }
 
-    try patch_writer.write(state, allocator, null);
+    try patch_writer.write(state, allocator, progress_ctx_maybe);
 }
