@@ -118,7 +118,7 @@ pub fn main() !void {
         defer xit_repo.deinit();
 
         if (patch_enabled) {
-            try xit_repo.patchOn(allocator, null);
+            try xit_repo.patchAll(allocator, null);
         }
 
         for (0..commits.items.len) |i| {

@@ -156,7 +156,7 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
     if (repo_kind == .xit) {
         _ = try repo.addTag(allocator, .{ .name = "1.0.0", .message = "hi" });
 
-        try repo.patchOn(allocator, null);
+        try repo.patchAll(allocator, null);
     }
 }
 

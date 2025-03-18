@@ -67,6 +67,8 @@ fn commandHelp(command_kind: CommandKind) Help {
             .example =
             \\enable:
             \\    xit patch on
+            \\enable and generate patches for all commits immediately:
+            \\    xit patch all
             \\disable:
             \\    xit patch off
             ,
@@ -507,7 +509,11 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
         init: struct {
             dir: []const u8,
         },
-        patch: bool,
+        patch: enum {
+            on,
+            off,
+            all,
+        },
         add: struct {
             paths: []const []const u8,
         },
@@ -569,7 +575,9 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                 .patch => {
                     if (cmd_args.positional_args.len != 1) return null;
 
-                    return .{ .patch = if (std.mem.eql(u8, "on", cmd_args.positional_args[0])) true else if (std.mem.eql(u8, "off", cmd_args.positional_args[0])) false else return null };
+                    const option = cmd_args.positional_args[0];
+
+                    return .{ .patch = if (std.mem.eql(u8, "on", option)) .on else if (std.mem.eql(u8, "off", option)) .off else if (std.mem.eql(u8, "all", option)) .all else return null };
                 },
                 .add => {
                     if (cmd_args.positional_args.len == 0) return null;

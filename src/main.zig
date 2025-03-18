@@ -137,8 +137,12 @@ pub fn run(
                 if (repo_kind == .xit) {
                     try writers.out.print(
                         \\
-                        \\clone complete! here's how to enable patch-based merging:
+                        \\clone complete!
+                        \\
+                        \\to enable patch-based merging:
                         \\    xit patch on
+                        \\to enable patch-based merging and generate all patches in advance:
+                        \\    xit patch all
                     , .{});
                 }
             },
@@ -579,12 +583,14 @@ fn runCommand(
                 try writers.err.print("command not valid for this backend\n", .{});
                 return error.HandledError;
             },
-            .xit => if (patch_cmd) {
-                var clear_line = false;
-                var progress_node: ?std.Progress.Node = null;
-                try repo.patchOn(allocator, .{ .writers = writers, .clear_line = &clear_line, .node = &progress_node });
-            } else {
-                try repo.patchOff(allocator);
+            .xit => switch (patch_cmd) {
+                .on => try repo.setMergeAlgorithm(allocator, .patch),
+                .off => try repo.setMergeAlgorithm(allocator, .diff3),
+                .all => {
+                    var clear_line = false;
+                    var progress_node: ?std.Progress.Node = null;
+                    try repo.patchAll(allocator, .{ .writers = writers, .clear_line = &clear_line, .node = &progress_node });
+                },
             },
         },
     }
