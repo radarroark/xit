@@ -102,6 +102,10 @@ pub fn commonAncestor(
         return oid1.*;
     }
 
+    if (getDescendent(repo_kind, repo_opts, allocator, state, oid1, oid2)) |child| {
+        return if (std.mem.eql(u8, &child, oid1)) oid2.* else oid1.*;
+    } else |_| {}
+
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
