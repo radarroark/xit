@@ -117,10 +117,6 @@ pub fn main() !void {
         var xit_repo = try rp.Repo(.xit, .{}).init(allocator, .{ .cwd = temp_dir }, ".");
         defer xit_repo.deinit();
 
-        if (patch_enabled) {
-            try xit_repo.patchAll(allocator, null);
-        }
-
         for (0..commits.items.len) |i| {
             var commit_object = commits.items[commits.items.len - i - 1];
             try writers.out.print("Creating commit: {s}\n", .{commit_object.content.commit.metadata.message orelse ""});
@@ -137,6 +133,11 @@ pub fn main() !void {
             metadata.parent_oids = null;
             metadata.allow_empty = true;
             _ = try xit_repo.commit(allocator, metadata);
+        }
+
+        if (patch_enabled) {
+            try writers.out.print("Generating patches\n", .{});
+            try xit_repo.patchAll(allocator, null);
         }
 
         // make changes so we see things in the status UI
