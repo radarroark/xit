@@ -223,14 +223,14 @@ pub fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
                 const oid = self.oid_queue.keys()[0];
                 const oid_hex = std.fmt.bytesToHex(&oid, .lower);
 
+                try writeAndApplyPatches(repo_opts, state, allocator, &oid_hex);
+                self.oid_queue.swapRemoveAt(0);
+
                 if (repo_opts.ProgressCtx != void) {
                     if (progress_ctx_maybe) |progress_ctx| {
                         try progress_ctx.run(.{ .complete_one = .writing_patch });
                     }
                 }
-
-                try writeAndApplyPatches(repo_opts, state, allocator, &oid_hex);
-                self.oid_queue.swapRemoveAt(0);
 
                 const commit_id_int = try hash.hexToInt(repo_opts.hash, &oid_hex);
                 if (try self.parent_to_children.getCursor(commit_id_int)) |children_cursor| {

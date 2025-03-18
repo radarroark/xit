@@ -1133,12 +1133,6 @@ pub fn copyFromObjectIterator(
     while (try obj_iter.next()) |object| {
         defer object.deinit();
 
-        if (repo_opts.ProgressCtx != void) {
-            if (progress_ctx_maybe) |progress_ctx| {
-                try progress_ctx.run(.{ .complete_one = .writing_object });
-            }
-        }
-
         var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
         try writeObject(
             repo_kind,
@@ -1149,6 +1143,12 @@ pub fn copyFromObjectIterator(
             object.object_reader.header(),
             &oid,
         );
+
+        if (repo_opts.ProgressCtx != void) {
+            if (progress_ctx_maybe) |progress_ctx| {
+                try progress_ctx.run(.{ .complete_one = .writing_object });
+            }
+        }
     }
 
     if (repo_opts.ProgressCtx != void) {
@@ -1197,15 +1197,15 @@ pub fn copyFromPackObjectIterator(
             .pack_reader = pack_reader,
         };
 
+        var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
+        const header = pack_reader.header();
+        try writeObject(repo_kind, repo_opts, state, &stream, stream.reader(), header, &oid);
+
         if (repo_opts.ProgressCtx != void) {
             if (progress_ctx_maybe) |progress_ctx| {
                 try progress_ctx.run(.{ .complete_one = .writing_object_from_pack });
             }
         }
-
-        var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-        const header = pack_reader.header();
-        try writeObject(repo_kind, repo_opts, state, &stream, stream.reader(), header, &oid);
     }
 
     if (repo_opts.ProgressCtx != void) {
