@@ -114,7 +114,6 @@ pub fn commonAncestor(
         kind: enum {
             one,
             two,
-            stale,
         },
     };
     var queue = std.DoublyLinkedList(Parent){};
@@ -134,7 +133,6 @@ pub fn commonAncestor(
     var parents_of_1 = std.StringHashMap(void).init(arena.allocator());
     var parents_of_2 = std.StringHashMap(void).init(arena.allocator());
     var parents_of_both = std.StringArrayHashMap(void).init(arena.allocator());
-    var stale_oids = std.StringHashMap(void).init(arena.allocator());
 
     while (queue.popFirst()) |node| {
         switch (node.data.kind) {
@@ -156,37 +154,21 @@ pub fn commonAncestor(
                     try parents_of_2.put(&node.data.oid, {});
                 }
             },
-            .stale => {
-                try stale_oids.put(&node.data.oid, {});
-            },
         }
 
         const is_base_ancestor = parents_of_both.contains(&node.data.oid);
 
         // TODO: instead of appending to the end, append it in descending order of timestamp
         // so we prioritize more recent commits and avoid wasteful traversal deep in the history.
-        const object = try obj.Object(repo_kind, repo_opts, .full).init(arena.allocator(), state, &node.data.oid);
-        if (object.content.commit.metadata.parent_oids) |parent_oids| {
-            for (parent_oids) |parent_oid| {
-                const is_stale = is_base_ancestor or stale_oids.contains(&parent_oid);
-                var new_node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
-                new_node.data = .{ .oid = parent_oid, .kind = if (is_stale) .stale else node.data.kind };
-                queue.append(new_node);
+        if (!is_base_ancestor) {
+            const object = try obj.Object(repo_kind, repo_opts, .full).init(arena.allocator(), state, &node.data.oid);
+            if (object.content.commit.metadata.parent_oids) |parent_oids| {
+                for (parent_oids) |parent_oid| {
+                    var new_node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
+                    new_node.data = .{ .oid = parent_oid, .kind = node.data.kind };
+                    queue.append(new_node);
+                }
             }
-        }
-
-        // stop if queue only has stale nodes
-        var queue_is_stale = true;
-        var next_node_maybe = queue.first;
-        while (next_node_maybe) |next_node| {
-            if (!stale_oids.contains(&next_node.data.oid)) {
-                queue_is_stale = false;
-                break;
-            }
-            next_node_maybe = next_node.next;
-        }
-        if (queue_is_stale) {
-            break;
         }
     }
 
