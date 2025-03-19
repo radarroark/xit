@@ -1,23 +1,26 @@
-You're looking at xit, a new version control system (pronounced like "zit" or "shit", whatever you prefer). Here be dragons, as they say. This is new and unstable software. Maybe one day it will be a worthy successor to git, but for now, only use it if you're adventurous. Here are the main features:
+You're looking at xit, a new version control system. It's pronounced like "zit", but feel free to say it like "shit" if you run into a bug. Here be dragons, as they say. This is new and unstable software. Maybe one day it will be a worthy successor to git, but for now, only use it if you're adventurous. Here are the main features:
 
 * git compatible
   * supports the git networking protocol for push/fetch/clone
+  * status: mostly complete (supports http and ssh, but some features like http auth aren't done)
   * [read more](docs/compat.md) about git compatibility
 * combine snapshot-based and patch-based version control
   * merging and cherry-picking uses patches like Darcs and Pijul
   * restoring files and anything sent over the network uses snapshots like git
+  * status: complete (patch-based merging can be enabled with `xit patch on`)
   * [read more](docs/patch.md) about snapshots vs patches
 * built-in TUI
   * all functionality will be exposed via the TUI
-  * for now though, it only shows log and status...baby steps!
+  * status: incomplete (only log and status is there right now...baby steps!)
   * [read more](docs/tui.md) about the TUI
 * store large/binary files efficiently
   * uses a modern chunking algorithm (FastCDC) to deltify large files
   * doesn't compress binary files...it has no benefit and can even make them larger
+  * status: complete (but needs optimization...xit repos usually take much more space than git repos right now)
   * [read more](docs/chunk.md) about chunking
 * universal undo
   * any change to the repo can be cleanly undone
-  * this feature is still under development, so it's not available yet
+  * status: incomplete (the immutable database is complete but the undo TUI isn't done)
   * [read more](docs/db.md) about the immutable database
 * clean implementation
   * uses *no* third-party libraries in production...all bugs are our bugs
