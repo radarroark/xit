@@ -102,10 +102,6 @@ pub fn commonAncestor(
         return oid1.*;
     }
 
-    if (getDescendent(repo_kind, repo_opts, allocator, state, oid1, oid2)) |child| {
-        return if (std.mem.eql(u8, &child, oid1)) oid2.* else oid1.*;
-    } else |_| {}
-
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
@@ -139,7 +135,9 @@ pub fn commonAncestor(
     while (queue.popFirst()) |node| {
         switch (node.data.kind) {
             .one => {
-                if (parents_of_2.contains(&node.data.oid)) {
+                if (std.mem.eql(u8, &node.data.oid, oid2)) {
+                    return oid2.*;
+                } else if (parents_of_2.contains(&node.data.oid)) {
                     try parents_of_both.put(&node.data.oid, {});
                 } else if (parents_of_1.contains(&node.data.oid)) {
                     continue; // this oid was already added to the queue
@@ -148,7 +146,9 @@ pub fn commonAncestor(
                 }
             },
             .two => {
-                if (parents_of_1.contains(&node.data.oid)) {
+                if (std.mem.eql(u8, &node.data.oid, oid1)) {
+                    return oid1.*;
+                } else if (parents_of_1.contains(&node.data.oid)) {
                     try parents_of_both.put(&node.data.oid, {});
                 } else if (parents_of_2.contains(&node.data.oid)) {
                     continue; // this oid was already added to the queue
