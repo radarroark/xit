@@ -308,6 +308,108 @@ fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
     }
 }
 
+test "merge side branch" {
+    try testMergeSideBranch(.git, .{ .is_test = true });
+    try testMergeSideBranch(.xit, .{ .is_test = true });
+    try testMergeSideBranch(.xit, .{ .is_test = true, .extra = .{ .enable_patches = true } });
+}
+
+fn testMergeSideBranch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) !void {
+    const allocator = std.testing.allocator;
+    const temp_dir_name = "temp-test-repo-merge-side-branch";
+
+    // create the temp dir
+    const cwd = std.fs.cwd();
+    var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
+    if (temp_dir_or_err) |*temp_dir| {
+        temp_dir.close();
+        try cwd.deleteTree(temp_dir_name);
+    } else |_| {}
+    var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
+    defer cwd.deleteTree(temp_dir_name) catch {};
+    defer temp_dir.close();
+
+    {
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "repo");
+        defer repo.deinit();
+    }
+
+    var work_dir = try temp_dir.openDir("repo", .{});
+    defer work_dir.close();
+
+    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+    defer repo.deinit();
+
+    //           C <------ D [side]
+    //          /           \
+    //         /             \
+    // A <--- B <---- E <---- F <---- G [master]
+    //                 \
+    //                  \
+    //                   \
+    //                    H <---- I <---- J [topic]
+
+    try addFile(repo_kind, repo_opts, &repo, allocator, "master.md", "a");
+    _ = try repo.commit(allocator, .{ .message = "a" });
+
+    try addFile(repo_kind, repo_opts, &repo, allocator, "master.md", "b");
+    _ = try repo.commit(allocator, .{ .message = "b" });
+
+    try repo.addBranch(.{ .name = "side" });
+
+    {
+        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "side" } } });
+        defer result.deinit();
+    }
+
+    try addFile(repo_kind, repo_opts, &repo, allocator, "side.md", "c");
+    _ = try repo.commit(allocator, .{ .message = "c" });
+
+    try addFile(repo_kind, repo_opts, &repo, allocator, "side.md", "d");
+    _ = try repo.commit(allocator, .{ .message = "d" });
+
+    {
+        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
+        defer result.deinit();
+    }
+
+    try addFile(repo_kind, repo_opts, &repo, allocator, "master.md", "e");
+    const commit_e = try repo.commit(allocator, .{ .message = "e" });
+
+    try repo.addBranch(.{ .name = "topic" });
+
+    // commit f
+    _ = blk: {
+        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "side" } }} } } }, null);
+        defer merge.deinit();
+        try std.testing.expect(.success == merge.result);
+        break :blk merge.result.success.oid;
+    };
+
+    try addFile(repo_kind, repo_opts, &repo, allocator, "master.md", "g");
+    const commit_g = try repo.commit(allocator, .{ .message = "g" });
+
+    {
+        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "topic" } } });
+        defer result.deinit();
+    }
+
+    try addFile(repo_kind, repo_opts, &repo, allocator, "topic.md", "h");
+    _ = try repo.commit(allocator, .{ .message = "h" });
+
+    try addFile(repo_kind, repo_opts, &repo, allocator, "topic.md", "i");
+    _ = try repo.commit(allocator, .{ .message = "i" });
+
+    try addFile(repo_kind, repo_opts, &repo, allocator, "topic.md", "j");
+    const commit_j = try repo.commit(allocator, .{ .message = "j" });
+
+    var moment = try repo.core.latestMoment();
+    const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
+
+    const ancestor_g_j = try mrg.commonAncestor(repo_kind, repo_opts, allocator, state, &commit_g, &commit_j);
+    try std.testing.expectEqualStrings(&commit_e, &ancestor_g_j);
+}
+
 test "merge conflict" {
     // read and write objects in small increments to help uncover bugs
 
