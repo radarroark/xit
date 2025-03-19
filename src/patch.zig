@@ -183,7 +183,14 @@ pub fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
 
                 if (try state.extra.moment.getCursor(hash.hashInt(repo_opts.hash, "commit-id->snapshot"))) |commit_id_to_snapshot_cursor| {
                     const commit_id_to_snapshot = try DB.HashMap(.read_only).init(commit_id_to_snapshot_cursor);
-                    if (try commit_id_to_snapshot.getCursor(parent_commit_id_int)) |_| {
+
+                    // if the commit already has patches, there is nothing to do so exit early
+                    if (try commit_id_to_snapshot.getCursor(commit_id_int)) |_| {
+                        return;
+                    }
+                    // if the commit's parent already has patches, consider this a "base" commit
+                    // (i.e., a commit that is ready to have a patch generated right away)
+                    else if (try commit_id_to_snapshot.getCursor(parent_commit_id_int)) |_| {
                         is_base_oid = true;
                     }
                 }
