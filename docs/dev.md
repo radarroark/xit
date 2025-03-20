@@ -48,6 +48,8 @@ Networking is tested with a separate command: `zig build testnet`
 
 * As I said, unclean failures can lead to zombie processes, particularly the `git daemon` process from the `raw` tests. They can prevent the tests from succeeding afterwards. On Linux I search for them with `ps aux | grep git` and kill them mercilessly and with prejudice.
 
+Additionally, both `test` and `testnet` support test case filtering by `-Dtest-filter=` option.
+
 The UI can be tested with `zig build try`.
 
 * It creates a temp dir called `temp-try` and copies the entire `.git` dir (from the repo it is running in) into this temp dir. It then initializes a xit repo (with a `.xit` dir) in this temp dir. Next, it checks out out several recent commits into this dir and commits them into the newly-formed xit repo. This creates a nice test repo seeded with real content.
