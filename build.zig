@@ -4,6 +4,7 @@ const builtin = @import("builtin");
 pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const test_filters = b.option([]const []const u8, "test-filter", "Skip tests that do not match any filter") orelse &[0][]const u8{};
 
     // main
     {
@@ -82,6 +83,7 @@ pub fn build(b: *std.Build) !void {
         const unit_tests = b.addTest(.{
             .root_source_file = b.path("src/test.zig"),
             .optimize = optimize,
+            .filters = test_filters,
         });
         unit_tests.root_module.addImport("xit", xit);
         unit_tests.linkLibC();
@@ -99,6 +101,7 @@ pub fn build(b: *std.Build) !void {
         const unit_tests = b.addTest(.{
             .root_source_file = b.path("src/testnet.zig"),
             .optimize = optimize,
+            .filters = test_filters,
         });
         unit_tests.root_module.addImport("xit", xit);
         if (.windows == builtin.os.tag) {
