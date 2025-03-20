@@ -260,6 +260,8 @@ fn commandHelp(command_kind: CommandKind) Help {
             \\    xit log
             \\display in CLI:
             \\    xit log --cli
+            \\display specified branch
+            \\    xit log branch_name
             ,
         },
         .merge => .{
@@ -542,7 +544,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
         restore: struct {
             path: []const u8,
         },
-        log,
+        log: []const rf.RefOrOid(hash_kind),
         merge: mrg.MergeInput(hash_kind),
         cherry_pick: mrg.MergeInput(hash_kind),
         config: cfg.ConfigCommand,
@@ -741,9 +743,13 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                     return .{ .restore = .{ .path = cmd_args.positional_args[0] } };
                 },
                 .log => {
-                    if (cmd_args.positional_args.len != 0) return null;
+                    var source = std.ArrayList(rf.RefOrOid(hash_kind)).init(cmd_args.arena.allocator());
+                    for (cmd_args.positional_args) |arg| {
+                        const ref_or_oid = rf.RefOrOid(hash_kind).initFromUser(arg) orelse return error.InvalidRefOrOid;
+                        try source.append(ref_or_oid);
+                    }
 
-                    return .log;
+                    return .{ .log = try source.toOwnedSlice() };
                 },
                 .merge => {
                     var merge_action: mrg.MergeAction(hash_kind) = undefined;

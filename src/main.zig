@@ -500,8 +500,24 @@ fn runCommand(
         },
         .reset_add => |reset_add_cmd| try repo.resetAdd(reset_add_cmd),
         .restore => |restore_cmd| try repo.restore(allocator, restore_cmd.path),
-        .log => {
-            var commit_iter = try repo.log(allocator, null);
+        .log => |heads| {
+            var moment = try repo.core.latestMoment();
+            const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
+            const start_oids_maybe = if (heads.len == 0) null else blk: {
+                var oids = try std.ArrayList([hash.hexLen(repo_opts.hash)]u8).initCapacity(allocator, heads.len);
+                for (heads) |ref_or_oid| {
+                    const oid = try rf.readRecur(repo_kind, repo_opts, state, ref_or_oid) orelse {
+                        try writers.err.print("Invalid ref: {s}\n", .{switch (ref_or_oid) {
+                            .oid => |oid| oid,
+                            .ref => |ref| ref.name,
+                        }});
+                        return error.InvalidRef;
+                    };
+                    oids.appendAssumeCapacity(oid);
+                }
+                break :blk try oids.toOwnedSlice();
+            };
+            var commit_iter = try repo.log(allocator, start_oids_maybe);
             defer commit_iter.deinit();
             while (try commit_iter.next()) |commit_object| {
                 defer commit_object.deinit();
