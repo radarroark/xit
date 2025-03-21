@@ -44,15 +44,19 @@ pub fn FileTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         }
 
         fn parsePath(url: []const u8) ![]const u8 {
-            const uri = try std.Uri.parse(url);
-            const path = switch (uri.path) {
-                .raw => |s| s,
-                .percent_encoded => |s| s,
-            };
-            if (.windows == builtin.os.tag and path[0] == '/') {
-                return path[1..];
+            if (std.mem.startsWith(u8, url, "file://")) {
+                const uri = try std.Uri.parse(url);
+                const path = switch (uri.path) {
+                    .raw => |s| s,
+                    .percent_encoded => |s| s,
+                };
+                if (.windows == builtin.os.tag and path[0] == '/') {
+                    return path[1..];
+                } else {
+                    return path;
+                }
             } else {
-                return path;
+                return url;
             }
         }
 
@@ -77,7 +81,7 @@ pub fn FileTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
 
             const path = try parsePath(url);
 
-            var repo_dir = try state.core.init_opts.cwd.openDir(std.mem.sliceTo(path, 0), .{});
+            var repo_dir = try state.core.init_opts.cwd.openDir(path, .{});
             defer repo_dir.close();
 
             var remote_repo = try rp.Repo(.git, remote_repo_opts).open(allocator, .{ .cwd = repo_dir });

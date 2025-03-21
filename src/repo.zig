@@ -1072,7 +1072,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
         }
 
         pub fn addRemote(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: cfg.AddConfigInput) !void {
-            if (!net.validateUrl(input.value)) {
+            if (!net.validateUrl(self.core.init_opts.cwd, input.value)) {
                 return error.InvalidRemoteUrl;
             }
 

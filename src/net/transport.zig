@@ -38,7 +38,7 @@ pub fn Transport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpt
             url: []const u8,
             opts: Opts(repo_opts.ProgressCtx),
         ) !Transport(repo_kind, repo_opts) {
-            const transport_def_kind = TransportDefinition.init(url) orelse return error.UnsupportedUrl;
+            const transport_def_kind = TransportDefinition.init(state.core.init_opts.cwd, url) orelse return error.UnsupportedUrl;
             return switch (transport_def_kind) {
                 .file => .{ .file = try net_file.FileTransport(repo_kind, repo_opts).init(opts) },
                 .wire => |wire_kind| .{ .wire = try net_wire.WireTransport(repo_kind, repo_opts).init(state, allocator, wire_kind, opts) },
@@ -142,15 +142,20 @@ pub const TransportDefinition = union(TransportKind) {
     file,
     wire: net_wire.WireKind,
 
-    pub fn init(url: []const u8) ?TransportDefinition {
-        const url_slice = std.mem.sliceTo(url, 0);
-        if (initWithUrl(url_slice)) |def| {
+    pub fn init(cwd: std.fs.Dir, url: []const u8) ?TransportDefinition {
+        if (initWithUrl(url)) |def| {
             return def;
         }
 
         if (net_ssh.parseUri(url)) |_| {
             return .{ .wire = .ssh };
-        } else |_| return null;
+        } else |_| {}
+
+        var dir_or_err = cwd.openDir(url, .{});
+        if (dir_or_err) |*dir| {
+            defer dir.close();
+            return .file;
+        } else |_| {}
 
         return null;
     }

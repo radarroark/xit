@@ -289,8 +289,8 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
     };
 }
 
-pub fn validateUrl(url: []const u8) bool {
-    return net_transport.TransportDefinition.init(url) != null;
+pub fn validateUrl(cwd: std.fs.Dir, url: []const u8) bool {
+    return net_transport.TransportDefinition.init(cwd, url) != null;
 }
 
 pub fn matchingRefSpec(
@@ -644,10 +644,10 @@ pub fn clone(
     var repo_dir = try cwd.makeOpenPath(local_path, .{});
     defer repo_dir.close();
 
-    var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = repo_dir }, ".");
+    var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = cwd }, local_path);
     errdefer repo.deinit();
 
-    const transport_def = net_transport.TransportDefinition.init(url) orelse return error.UnsupportedUrl;
+    const transport_def = net_transport.TransportDefinition.init(cwd, url) orelse return error.UnsupportedUrl;
 
     switch (repo_kind) {
         .git => {

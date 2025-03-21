@@ -466,7 +466,8 @@ fn testFetch(
         const separator = if (repo_path[0] == '/') "" else "/";
 
         const remote_url = switch (transport_def) {
-            .file => try std.fmt.allocPrint(allocator, "file://{s}{s}", .{ separator, repo_path }),
+            //.file => try std.fmt.allocPrint(allocator, "file://{s}{s}", .{ separator, repo_path }),
+            .file => try std.fmt.allocPrint(allocator, "../server", .{}), // relative file paths work too
             .wire => |wire_kind| switch (wire_kind) {
                 .http => try std.fmt.allocPrint(allocator, "http://localhost:{}/server", .{port}),
                 .raw => try std.fmt.allocPrint(allocator, "git://localhost:{}/server", .{port}),
@@ -659,7 +660,8 @@ fn testPush(
         const separator = if (repo_path[0] == '/') "" else "/";
 
         const remote_url = switch (transport_def) {
-            .file => try std.fmt.allocPrint(allocator, "file://{s}{s}", .{ separator, repo_path }),
+            //.file => try std.fmt.allocPrint(allocator, "file://{s}{s}", .{ separator, repo_path }),
+            .file => try std.fmt.allocPrint(allocator, "../server", .{}), // relative file paths work too
             .wire => |wire_kind| switch (wire_kind) {
                 .http => try std.fmt.allocPrint(allocator, "http://localhost:{}/server", .{port}),
                 .raw => try std.fmt.allocPrint(allocator, "git://localhost:{}/server", .{port}),
@@ -907,7 +909,8 @@ fn testClone(
         const separator = if (repo_path[0] == '/') "" else "/";
 
         break :blk switch (transport_def) {
-            .file => try std.fmt.allocPrint(allocator, "file://{s}{s}", .{ separator, repo_path }),
+            //.file => try std.fmt.allocPrint(allocator, "file://{s}{s}", .{ separator, repo_path }),
+            .file => try std.fmt.allocPrint(allocator, "server", .{}), // relative file paths work too
             .wire => |wire_kind| switch (wire_kind) {
                 .http => try std.fmt.allocPrint(allocator, "http://localhost:{}/server", .{port}),
                 .raw => try std.fmt.allocPrint(allocator, "git://localhost:{}/server", .{port}),
