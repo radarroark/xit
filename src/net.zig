@@ -644,7 +644,8 @@ pub fn clone(
     var repo_dir = try cwd.makeOpenPath(local_path, .{});
     defer repo_dir.close();
 
-    var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = cwd }, local_path);
+    // Use server's default branch
+    var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = cwd, .create_default_branch = null }, local_path);
     errdefer repo.deinit();
 
     const transport_def = net_transport.TransportDefinition.init(cwd, url) orelse return error.UnsupportedUrl;

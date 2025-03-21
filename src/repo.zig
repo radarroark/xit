@@ -79,6 +79,7 @@ pub fn RepoOpts(comptime repo_kind: RepoKind) type {
 
 pub const InitOpts = struct {
     cwd: std.fs.Dir,
+    create_default_branch: ?[]const u8 = "master",
 };
 
 pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind)) type {
@@ -175,8 +176,6 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             var work_dir = try opts.cwd.makeOpenPath(sub_path, .{});
             errdefer work_dir.close();
 
-            const default_branch_name = "master";
-
             const repo_dir_name = switch (repo_kind) {
                 .git => ".git",
                 .xit => ".xit",
@@ -211,9 +210,10 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         },
                     };
 
-                    // create default branch
-                    try self.addBranch(.{ .name = default_branch_name });
-                    try self.resetAdd(.{ .ref = .{ .kind = .head, .name = default_branch_name } });
+                    if (opts.create_default_branch) |default_branch_name| {
+                        try self.addBranch(.{ .name = default_branch_name });
+                        try self.resetAdd(.{ .ref = .{ .kind = .head, .name = default_branch_name } });
+                    }
 
                     return self;
                 },
@@ -233,9 +233,10 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         },
                     };
 
-                    // create default branch
-                    try self.addBranch(.{ .name = default_branch_name });
-                    try self.resetAdd(.{ .ref = .{ .kind = .head, .name = default_branch_name } });
+                    if (opts.create_default_branch) |default_branch_name| {
+                        try self.addBranch(.{ .name = default_branch_name });
+                        try self.resetAdd(.{ .ref = .{ .kind = .head, .name = default_branch_name } });
+                    }
 
                     if (repo_opts.extra.enable_patches) {
                         try self.setMergeAlgorithm(allocator, .patch);

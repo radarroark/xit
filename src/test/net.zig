@@ -874,8 +874,8 @@ fn testClone(
     var server_dir = try temp_dir.makeOpenPath("server", .{});
     defer server_dir.close();
 
-    // init server repo
-    var server_repo = try rp.Repo(.git, .{ .is_test = true }).init(allocator, .{ .cwd = server_dir }, ".");
+    // init server repo with default branch name as main
+    var server_repo = try rp.Repo(.git, .{ .is_test = true }).init(allocator, .{ .cwd = server_dir, .create_default_branch = "main" }, ".");
     defer server_repo.deinit();
 
     // make a commit
@@ -962,4 +962,9 @@ fn testClone(
     // make sure clone was successful
     const hello_txt = try temp_dir.openFile("client/hello.txt", .{});
     defer hello_txt.close();
+
+    // make sure HEAD points to the right default branch
+    var current_branch_buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
+    const head = try client_repo.head(&current_branch_buffer);
+    try std.testing.expectEqualStrings("main", head.ref.name);
 }
