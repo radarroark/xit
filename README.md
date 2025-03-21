@@ -70,6 +70,17 @@ xit fetch origin
 xit merge refs/remotes/origin/master
 ```
 
+Converting to/from git repos is easy using local remotes:
+
+```
+# convert from git to xit
+xit clone path/to/git/repo path/to/xit/repo
+
+# convert from xit to git
+xit remote add origin path/to/git/repo
+xit push origin master
+```
+
 Here's the output of `xit --help` to give you an idea of what's supported so far:
 
 ```
