@@ -36,7 +36,7 @@ pub fn Pkt(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo
         progress: []u8,
         err: []u8,
         ok: []u8,
-        ng: void,
+        ng: []u8,
         unpack: struct {
             unpack_ok: bool,
         },
@@ -96,7 +96,7 @@ pub fn Pkt(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo
                 else if (std.mem.startsWith(u8, content, "ok"))
                     try okPkt(repo_kind, repo_opts, allocator, content)
                 else if (std.mem.startsWith(u8, content, "ng"))
-                    .{ .ng = {} }
+                    try ngPkt(repo_kind, repo_opts, allocator, content)
                 else if (std.mem.startsWith(u8, content, "unpack"))
                     try unpackPkt(repo_kind, repo_opts, content)
                 else if (std.mem.startsWith(u8, content, "unshallow"))
@@ -119,7 +119,7 @@ pub fn Pkt(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo
                 .progress => |p| allocator.free(p),
                 .err => |p| allocator.free(p),
                 .ok => |p| allocator.free(p),
-                .ng => {},
+                .ng => |p| allocator.free(p),
                 .unpack => {},
                 .unshallow => {},
                 .shallow => {},
@@ -382,6 +382,26 @@ fn okPkt(
     const ok = try allocator.dupe(u8, line[0..len]);
     errdefer allocator.free(ok);
     return .{ .ok = ok };
+}
+
+fn ngPkt(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    allocator: std.mem.Allocator,
+    content: []const u8,
+) !Pkt(repo_kind, repo_opts) {
+    var line = content.ptr;
+    var len = content.len;
+
+    line += 3;
+    len -= 3;
+
+    if (len > 0 and line[len - 1] == '\n') {
+        len -= 1;
+    }
+    const ng = try allocator.dupe(u8, line[0..len]);
+    errdefer allocator.free(ng);
+    return .{ .ng = ng };
 }
 
 fn unpackPkt(
