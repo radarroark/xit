@@ -109,11 +109,13 @@ fn sendCommand(stream: *RawStream) !void {
         .raw => |s| s,
         .percent_encoded => |s| s,
     };
-    try buffer.writer().print("0000{s} {s}\x00host={s}\x00", .{ stream.cmd, path, host_str });
 
     var command_size_buf = [_]u8{'0'} ** 4;
+
+    try buffer.writer().print("{s}{s} {s}\x00host={s}\x00", .{ &command_size_buf, stream.cmd, path, host_str });
+
     try net_pkt.commandSize(&command_size_buf, buffer.items.len);
-    @memcpy(buffer.items[0..command_size_buf.len], &command_size_buf);
+    @memcpy(buffer.items[0..4], &command_size_buf);
 
     try stream.io.writeAll(buffer.items.ptr, buffer.items.len);
 

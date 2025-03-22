@@ -143,13 +143,19 @@ pub fn commandSize(command: []u8, len: usize) !void {
 pub fn bufferHave(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
+    allocator: std.mem.Allocator,
     oid_hex: *const [hash.hexLen(repo_opts.hash)]u8,
     buf: *std.ArrayList(u8),
 ) !void {
-    const have_len = PKT_LEN_SIZE + PKT_HAVE_PREFIX.len + oid_hex.len + 1;
     var command_size_buf = [_]u8{'0'} ** 4;
-    try commandSize(&command_size_buf, have_len);
-    try buf.writer().print("{s}{s}{s}\n", .{ &command_size_buf, PKT_HAVE_PREFIX, oid_hex });
+
+    const line = try std.fmt.allocPrint(allocator, "{s}{s}{s}\n", .{ &command_size_buf, PKT_HAVE_PREFIX, oid_hex });
+    defer allocator.free(line);
+
+    try commandSize(&command_size_buf, line.len);
+    @memcpy(line[0..4], &command_size_buf);
+
+    try buf.appendSlice(line);
 }
 
 fn bufferWantWithCaps(
@@ -160,49 +166,53 @@ fn bufferWantWithCaps(
     caps: *const net_wire.Capabilities,
     buf: *std.ArrayList(u8),
 ) !void {
-    var str = std.ArrayList(u8).init(allocator);
-    defer str.deinit();
+    var line = std.ArrayList(u8).init(allocator);
+    defer line.deinit();
+
+    var command_size_buf = [_]u8{'0'} ** 4;
+
+    try line.writer().print("{s}{s}{s} ", .{ &command_size_buf, PKT_WANT_PREFIX, &head.oid });
 
     if (caps.multi_ack_detailed) {
-        try str.appendSlice("multi_ack_detailed ");
+        try line.appendSlice("multi_ack_detailed ");
     } else if (caps.multi_ack) {
-        try str.appendSlice("multi_ack ");
+        try line.appendSlice("multi_ack ");
     }
 
     if (caps.side_band_64k) {
-        try str.appendSlice("side-band-64k ");
+        try line.appendSlice("side-band-64k ");
     } else if (caps.side_band) {
-        try str.appendSlice("side-band ");
+        try line.appendSlice("side-band ");
     }
 
     if (caps.include_tag) {
-        try str.appendSlice("include-tag ");
+        try line.appendSlice("include-tag ");
     }
 
     if (caps.thin_pack) {
-        try str.appendSlice("thin-pack ");
+        try line.appendSlice("thin-pack ");
     }
 
     if (caps.ofs_delta) {
-        try str.appendSlice("ofs-delta ");
+        try line.appendSlice("ofs-delta ");
     }
 
     if (caps.shallow) {
-        try str.appendSlice("shallow ");
+        try line.appendSlice("shallow ");
     }
+
+    try line.append('\n');
 
     const PKT_MAX_WANTLEN = (PKT_LEN_SIZE + PKT_WANT_PREFIX.len + hash.hexLen(repo_opts.hash) + 1);
 
-    if (str.items.len > (PKT_MAX_SIZE - (PKT_MAX_WANTLEN + 1))) {
+    if (line.items.len > (PKT_MAX_SIZE - (PKT_MAX_WANTLEN + 1))) {
         return error.InvalidPacket;
     }
 
-    const len = PKT_LEN_SIZE + PKT_WANT_PREFIX.len + head.oid.len + 1 + str.items.len + 1;
+    try commandSize(&command_size_buf, line.items.len);
+    @memcpy(line.items[0..4], &command_size_buf);
 
-    var command_size_buf = [_]u8{'0'} ** 4;
-    try commandSize(&command_size_buf, len);
-
-    try buf.writer().print("{s}{s}{s} {s}\n", .{ &command_size_buf, PKT_WANT_PREFIX, &head.oid, str.items });
+    try buf.appendSlice(line.items);
 }
 
 pub fn bufferWants(
@@ -213,9 +223,6 @@ pub fn bufferWants(
     caps: *const net_wire.Capabilities,
     buf: *std.ArrayList(u8),
 ) !void {
-    const oid_len = hash.hexLen(repo_opts.hash);
-    const want_len = PKT_LEN_SIZE + PKT_WANT_PREFIX.len + oid_len + 1;
-
     var idx: usize = 0;
     if (caps.common) {
         for (wants.refs, 0..) |*head, i| {
@@ -238,9 +245,14 @@ pub fn bufferWants(
         }
 
         var command_size_buf = [_]u8{'0'} ** 4;
-        try commandSize(&command_size_buf, want_len);
 
-        try buf.writer().print("{s}{s}{s}\n", .{ &command_size_buf, PKT_WANT_PREFIX, &head.oid });
+        const line = try std.fmt.allocPrint(allocator, "{s}{s}{s}\n", .{ &command_size_buf, PKT_WANT_PREFIX, &head.oid });
+        defer allocator.free(line);
+
+        try commandSize(&command_size_buf, line.len);
+        @memcpy(line[0..4], &command_size_buf);
+
+        try buf.appendSlice(line);
     }
 
     try buf.appendSlice("0000");

@@ -320,7 +320,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             var buffer = std.ArrayList(u8).init(allocator);
             defer buffer.deinit();
 
-            try pktline(&buffer, git_push.specs.items);
+            try pktline(allocator, &buffer, git_push.specs.items);
             try stream.write(allocator, buffer.items.ptr, buffer.items.len);
 
             if (need_pack) {
@@ -389,7 +389,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             while (i < 256) {
                 const object = try obj_iter.next() orelse break;
                 defer object.deinit();
-                try net_pkt.bufferHave(repo_kind, repo_opts, &object.oid, &buffer);
+                try net_pkt.bufferHave(repo_kind, repo_opts, allocator, &object.oid, &buffer);
 
                 i += 1;
                 if (i % 20 == 0) {
@@ -430,7 +430,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                     try net_pkt.bufferWants(repo_kind, repo_opts, allocator, fetch_data, &self.caps, &buffer);
 
                     for (self.common.items) |*pkt| {
-                        try net_pkt.bufferHave(repo_kind, repo_opts, &pkt.ack.oid, &buffer);
+                        try net_pkt.bufferHave(repo_kind, repo_opts, allocator, &pkt.ack.oid, &buffer);
                     }
                 }
             }
@@ -439,7 +439,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                 try net_pkt.bufferWants(repo_kind, repo_opts, allocator, fetch_data, &self.caps, &buffer);
 
                 for (self.common.items) |*pkt| {
-                    try net_pkt.bufferHave(repo_kind, repo_opts, &pkt.ack.oid, &buffer);
+                    try net_pkt.bufferHave(repo_kind, repo_opts, allocator, &pkt.ack.oid, &buffer);
                 }
             }
 
@@ -460,38 +460,25 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             }
         }
 
-        fn pktline(buffer: *std.ArrayList(u8), specs: []net_push.PushSpec(repo_kind, repo_opts)) !void {
+        fn pktline(allocator: std.mem.Allocator, buffer: *std.ArrayList(u8), specs: []net_push.PushSpec(repo_kind, repo_opts)) !void {
             for (specs, 0..) |*spec, i| {
-                var len: usize = spec.refspec.dst.len + 7;
-
-                const report_status = "report-status";
-                const side_band_64k = "side-band-64k";
-
-                if (i == 0) {
-                    len += 1;
-
-                    len += report_status.len + 1;
-
-                    len += side_band_64k.len + 1;
-                }
-
-                const old_id_len = spec.roid.len;
-                const new_id_len = spec.loid.len;
-
-                len += (old_id_len + new_id_len);
+                var line = std.ArrayList(u8).init(allocator);
+                defer line.deinit();
 
                 var command_size_buf = [_]u8{'0'} ** 4;
-                try net_pkt.commandSize(&command_size_buf, len);
 
-                try buffer.writer().print("{s}{s} {s} {s}", .{ &command_size_buf, &spec.roid, &spec.loid, spec.refspec.dst });
+                try line.writer().print("{s}{s} {s} {s}", .{ &command_size_buf, &spec.roid, &spec.loid, spec.refspec.dst });
 
                 if (i == 0) {
-                    try buffer.append('\x00');
-                    try buffer.appendSlice(" " ++ report_status);
-                    try buffer.appendSlice(" " ++ side_band_64k);
+                    try line.writer().print("\x00 report-status side-band-64k", .{});
                 }
 
-                try buffer.append('\n');
+                try line.append('\n');
+
+                try net_pkt.commandSize(&command_size_buf, line.items.len);
+                @memcpy(line.items[0..4], &command_size_buf);
+
+                try buffer.appendSlice(line.items);
             }
 
             try buffer.appendSlice("0000");
