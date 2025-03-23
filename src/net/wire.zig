@@ -329,12 +329,26 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                     defer pack_writer.deinit();
 
                     var read_buffer = [_]u8{0} ** repo_opts.read_size;
+                    var total_size: usize = 0;
+
                     while (true) {
                         const size = try pack_writer.read(&read_buffer);
                         if (size == 0) {
                             break;
                         }
+
                         try stream.write(allocator, &read_buffer, size);
+
+                        if (repo_opts.ProgressCtx != void) {
+                            if (self.opts.progress_ctx) |progress_ctx| {
+                                total_size += size;
+
+                                const line = try std.fmt.allocPrint(allocator, "{} bytes sent", .{total_size});
+                                defer allocator.free(line);
+
+                                try progress_ctx.run(.{ .text = line });
+                            }
+                        }
                     }
                 } else {
                     git_push.unpack_ok = true;
