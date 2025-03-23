@@ -20,6 +20,7 @@ pub const ProgressKind = enum {
     writing_object_from_pack,
     writing_object,
     writing_patch,
+    sending_bytes,
 };
 
 pub const ProgressEvent = union(enum) {
@@ -28,6 +29,10 @@ pub const ProgressEvent = union(enum) {
         estimated_total_items: usize,
     },
     complete_one: ProgressKind,
+    complete_total: struct {
+        kind: ProgressKind,
+        count: usize,
+    },
     end: ProgressKind,
     text: []const u8,
 };

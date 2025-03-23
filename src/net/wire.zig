@@ -328,6 +328,15 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                 if (pack_writer_maybe) |*pack_writer| {
                     defer pack_writer.deinit();
 
+                    if (repo_opts.ProgressCtx != void) {
+                        if (self.opts.progress_ctx) |progress_ctx| {
+                            try progress_ctx.run(.{ .start = .{
+                                .kind = .sending_bytes,
+                                .estimated_total_items = 0,
+                            } });
+                        }
+                    }
+
                     var read_buffer = [_]u8{0} ** repo_opts.read_size;
                     var total_size: usize = 0;
 
@@ -342,11 +351,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                         if (repo_opts.ProgressCtx != void) {
                             if (self.opts.progress_ctx) |progress_ctx| {
                                 total_size += size;
-
-                                const line = try std.fmt.allocPrint(allocator, "{} bytes sent", .{total_size});
-                                defer allocator.free(line);
-
-                                try progress_ctx.run(.{ .text = line });
+                                try progress_ctx.run(.{ .complete_total = .{ .kind = .sending_bytes, .count = total_size } });
                             }
                         }
                     }

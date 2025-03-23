@@ -41,10 +41,12 @@ const ProgressCtx = struct {
                     .writing_object_from_pack => "Writing object from pack",
                     .writing_object => "Writing object",
                     .writing_patch => "Writing patch",
+                    .sending_bytes => "Sending bytes",
                 };
                 self.node.* = std.Progress.start(.{ .root_name = name, .estimated_total_items = start.estimated_total_items });
             },
             .complete_one => if (self.node.*) |node| node.completeOne(),
+            .complete_total => |complete_total| if (self.node.*) |node| node.setCompletedItems(complete_total.count),
             .end => if (self.node.*) |node| {
                 node.end();
                 self.node.* = null;
