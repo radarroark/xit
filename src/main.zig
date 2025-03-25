@@ -10,6 +10,7 @@
 //!  Let this be our first!" -- Lunar: Silver Star Story
 
 const std = @import("std");
+const builtin = @import("builtin");
 const cmd = @import("./command.zig");
 const rp = @import("./repo.zig");
 const ui = @import("./ui.zig");
@@ -686,14 +687,17 @@ fn printMergeResult(
     }
 }
 
+var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+
 /// this is the main "main". it's even mainier than "run".
 /// this is the real deal. there is no main more main than this.
 /// at least, not that i know of. i guess internally zig probably
 /// has an earlier entrypoint which is even mainier than this.
 pub fn main() !u8 {
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    const allocator = if (builtin.mode == .Debug) debug_allocator.allocator() else std.heap.smp_allocator;
+    defer if (builtin.mode == .Debug) {
+        _ = debug_allocator.deinit();
+    };
 
     var args = std.ArrayList([]const u8).init(allocator);
     defer args.deinit();
