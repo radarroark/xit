@@ -1,4 +1,5 @@
 const std = @import("std");
+
 const hash = @import("./hash.zig");
 const rp = @import("./repo.zig");
 const obj = @import("./object.zig");
@@ -173,6 +174,8 @@ const PackObjectHeader = packed struct {
 };
 
 const ZlibStream = std.compress.flate.inflate.Decompressor(.zlib, std.fs.File.Reader);
+const MemStream = std.io.FixedBufferStream([]align(4096) u8);
+const ZlibMemStream = std.compress.flate.inflate.Decompressor(.zlib, MemStream.Reader);
 
 /// contains the stream used to read a pack object.
 /// it can either be read from a file on disk or from an in-memory buffer.
@@ -182,6 +185,12 @@ const PackObjectStream = union(enum) {
         zlib_stream: ZlibStream,
         start_position: u64,
     },
+    filemap: struct {
+        data: []align(4096) u8,
+        stream: MemStream,
+        zlib_stream: ZlibMemStream,
+        start_position: u64,
+    },
     memory: struct {
         allocator: std.mem.Allocator,
         buffer: []u8,
@@ -189,11 +198,14 @@ const PackObjectStream = union(enum) {
         end_position: u64,
     },
 
-    pub const Error = ZlibStream.Reader.Error;
+    pub const Error = ZlibStream.Reader.Error || ZlibMemStream.Reader.Error || PromoteError;
 
     pub fn deinit(self: *PackObjectStream) void {
         switch (self.*) {
             .file => |*file| file.pack_file.close(),
+            .filemap => |*filemap| {
+                std.posix.munmap(filemap.data);
+            },
             .memory => |*memory| memory.allocator.free(memory.buffer),
         }
     }
@@ -231,6 +243,7 @@ const PackObjectStream = union(enum) {
     }
 
     pub fn reset(self: *PackObjectStream) !void {
+        try self.tryToPromoteToFileMap();
         switch (self.*) {
             .file => |*file| {
                 try file.pack_file.seekTo(file.start_position);
@@ -240,32 +253,68 @@ const PackObjectStream = union(enum) {
                     .start_position = file.start_position,
                 };
             },
+            .filemap => |*filemap| {
+                try filemap.stream.seekTo(filemap.start_position);
+                filemap.zlib_stream = std.compress.zlib.decompressor(filemap.stream.reader());
+            },
             .memory => |*memory| try memory.stream.seekTo(0),
         }
     }
 
     pub fn getEndPos(self: *PackObjectStream) !usize {
+        try self.tryToPromoteToFileMap();
         switch (self.*) {
             .file => |*file| {
                 // make sure the stream is at the end so the file position is correct
                 while (try file.zlib_stream.next()) |_| {}
                 return try file.pack_file.getPos();
             },
+            .filemap => |*filemap| {
+                // make sure the stream is at the end so the file position is correct
+                while (try filemap.zlib_stream.next()) |_| {}
+                return try filemap.stream.getPos();
+            },
             .memory => |*memory| return memory.end_position,
         }
     }
 
     pub fn read(self: *PackObjectStream, dest: []u8) !usize {
+        try self.tryToPromoteToFileMap();
         return switch (self.*) {
             .file => |*file| try file.zlib_stream.reader().read(dest),
+            .filemap => |*filemap| try filemap.zlib_stream.reader().read(dest),
             .memory => |*memory| try memory.stream.reader().read(dest),
         };
     }
 
     pub fn skipBytes(self: *PackObjectStream, num_bytes: u64) !void {
+        try self.tryToPromoteToFileMap();
         switch (self.*) {
             .file => |*file| try file.zlib_stream.reader().skipBytes(num_bytes, .{}),
+            .filemap => |*filemap| try filemap.zlib_stream.reader().skipBytes(num_bytes, .{}),
             .memory => |*memory| try memory.stream.reader().skipBytes(num_bytes, .{}),
+        }
+    }
+
+    const PromoteError = std.posix.MMapError || std.posix.SetrlimitError || std.posix.SeekError || error{SystemResources};
+    fn tryToPromoteToFileMap(self: *PackObjectStream) PromoteError!void {
+        switch (self.*) {
+            .memory, .filemap => return,
+            .file => |*file| {
+                const native_os = @import("builtin").target.os.tag;
+                if (native_os != .linux) return;
+
+                const data = try std.posix.mmap(null, try file.pack_file.getEndPos(), std.posix.PROT.READ, .{ .TYPE = .PRIVATE }, file.pack_file.handle, 0);
+                file.pack_file.close();
+                const filemap: PackObjectStream = .{ .filemap = .{
+                    .data = data,
+                    .stream = MemStream{ .buffer = data, .pos = file.start_position },
+                    .start_position = file.start_position,
+                    .zlib_stream = undefined,
+                } };
+                self.* = filemap;
+                self.filemap.zlib_stream = std.compress.zlib.decompressor(self.filemap.stream.reader());
+            },
         }
     }
 };
