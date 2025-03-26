@@ -21,6 +21,7 @@ const mrg = @import("./merge.zig");
 const obj = @import("./object.zig");
 const tr = @import("./tree.zig");
 const rf = @import("./ref.zig");
+const net_refspec = @import("./net/refspec.zig");
 
 pub const Writers = struct {
     out: std.io.AnyWriter = std.io.null_writer.any(),
@@ -514,7 +515,11 @@ fn runCommand(
                 const oid = oid_maybe orelse {
                     try writers.err.print("invalid ref: {s}\n", .{switch (ref_or_oid) {
                         .oid => |oid| oid,
-                        .ref => |ref| ref.name,
+                        .ref => |ref| blk: {
+                            var ref_path_buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
+                            const ref_path = try ref.toPath(&ref_path_buffer);
+                            break :blk ref_path;
+                        },
                     }});
                     return error.HandledError;
                 };
@@ -593,10 +598,30 @@ fn runCommand(
         .fetch => |fetch_cmd| {
             var clear_line = false;
             var progress_node: ?std.Progress.Node = null;
+            var refspecs = try std.ArrayList([]const u8).initCapacity(allocator, fetch_cmd.refspec_strs.len);
+            defer {
+                for (refspecs.items) |refspec| allocator.free(refspec);
+                refspecs.deinit();
+            }
+            for (fetch_cmd.refspec_strs) |refspec_str| {
+                var refspec = try net_refspec.RefSpec.init(allocator, refspec_str, .fetch);
+                defer refspec.deinit(allocator);
+                // Use the same name as src if not specified
+                if (refspec.dst.len == 0) {
+                    allocator.free(refspec.dst);
+                    refspec.dst = try allocator.dupe(u8, refspec.src);
+                }
+                const refspec_normalized = try refspec.normalize(allocator);
+                refspecs.appendAssumeCapacity(refspec_normalized);
+            }
+
             try repo.fetch(
                 allocator,
                 fetch_cmd.remote_name,
-                .{ .progress_ctx = .{ .writers = writers, .clear_line = &clear_line, .node = &progress_node } },
+                .{
+                    .progress_ctx = .{ .writers = writers, .clear_line = &clear_line, .node = &progress_node },
+                    .refspecs = if (refspecs.items.len > 0) refspecs.items else null,
+                },
             );
         },
         .push => |push_cmd| {
