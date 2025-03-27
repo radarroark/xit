@@ -10,6 +10,28 @@ const df = @import("./diff.zig");
 const tr = @import("./tree.zig");
 const cfg = @import("./config.zig");
 
+fn CommitParent(comptime hash_kind: hash.HashKind) type {
+    return struct {
+        oid: [hash.hexLen(hash_kind)]u8,
+        kind: enum { one, two, stale },
+        timestamp: u64,
+    };
+}
+
+fn CommitParentsQueue(comptime hash_kind: hash.HashKind) type {
+    const compareFn = struct {
+        fn compareCommitParents(_: void, a: CommitParent(hash_kind), b: CommitParent(hash_kind)) std.math.Order {
+            return std.math.order(b.timestamp, a.timestamp); // Pop latest first
+        }
+    }.compareCommitParents;
+
+    return std.PriorityQueue(
+        CommitParent(hash_kind),
+        void,
+        compareFn,
+    );
+}
+
 fn getDescendent(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
@@ -25,23 +47,14 @@ fn getDescendent(
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    const ParentKind = enum {
-        one,
-        two,
-    };
-    const Parent = struct {
-        oid: [hash.hexLen(repo_opts.hash)]u8,
-        kind: ParentKind,
-    };
-    var queue = std.DoublyLinkedList(Parent){};
+    var queue = CommitParentsQueue(repo_opts.hash).init(arena.allocator(), {});
 
     {
         const object = try obj.Object(repo_kind, repo_opts, .full).init(arena.allocator(), state, oid1);
         if (object.content.commit.metadata.parent_oids) |parent_oids| {
             for (parent_oids) |parent_oid| {
-                var node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
-                node.data = .{ .oid = parent_oid, .kind = .one };
-                queue.append(node);
+                const parent_object = try obj.Object(repo_kind, repo_opts, .full).init(arena.allocator(), state, &parent_oid);
+                try queue.add(.{ .oid = parent_oid, .kind = .one, .timestamp = parent_object.content.commit.metadata.timestamp });
             }
         }
     }
@@ -50,39 +63,36 @@ fn getDescendent(
         const object = try obj.Object(repo_kind, repo_opts, .full).init(arena.allocator(), state, oid2);
         if (object.content.commit.metadata.parent_oids) |parent_oids| {
             for (parent_oids) |parent_oid| {
-                var node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
-                node.data = .{ .oid = parent_oid, .kind = .two };
-                queue.append(node);
+                const parent_object = try obj.Object(repo_kind, repo_opts, .full).init(arena.allocator(), state, &parent_oid);
+                try queue.add(.{ .oid = parent_oid, .kind = .two, .timestamp = parent_object.content.commit.metadata.timestamp });
             }
         }
     }
 
-    while (queue.popFirst()) |node| {
-        switch (node.data.kind) {
+    while (queue.removeOrNull()) |node| {
+        switch (node.kind) {
             .one => {
-                if (std.mem.eql(u8, oid2, &node.data.oid)) {
+                if (std.mem.eql(u8, oid2, &node.oid)) {
                     return oid1.*;
-                } else if (std.mem.eql(u8, oid1, &node.data.oid)) {
+                } else if (std.mem.eql(u8, oid1, &node.oid)) {
                     continue; // this oid was already added to the queue
                 }
             },
             .two => {
-                if (std.mem.eql(u8, oid1, &node.data.oid)) {
+                if (std.mem.eql(u8, oid1, &node.oid)) {
                     return oid2.*;
-                } else if (std.mem.eql(u8, oid2, &node.data.oid)) {
+                } else if (std.mem.eql(u8, oid2, &node.oid)) {
                     continue; // this oid was already added to the queue
                 }
             },
+            .stale => unreachable,
         }
 
-        // TODO: instead of appending to the end, append it in descending order of timestamp
-        // so we prioritize more recent commits and avoid wasteful traversal deep in the history.
-        const object = try obj.Object(repo_kind, repo_opts, .full).init(arena.allocator(), state, &node.data.oid);
+        const object = try obj.Object(repo_kind, repo_opts, .full).init(arena.allocator(), state, &node.oid);
         if (object.content.commit.metadata.parent_oids) |parent_oids| {
             for (parent_oids) |parent_oid| {
-                var new_node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
-                new_node.data = .{ .oid = parent_oid, .kind = node.data.kind };
-                queue.append(new_node);
+                const parent_object = try obj.Object(repo_kind, repo_opts, .full).init(arena.allocator(), state, &parent_oid);
+                try queue.add(.{ .oid = parent_oid, .kind = node.kind, .timestamp = parent_object.content.commit.metadata.timestamp });
             }
         }
     }
@@ -105,26 +115,16 @@ pub fn commonAncestor(
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    const Parent = struct {
-        oid: [hash.hexLen(repo_opts.hash)]u8,
-        kind: enum {
-            one,
-            two,
-            stale,
-        },
-    };
-    var queue = std.DoublyLinkedList(Parent){};
+    var queue = CommitParentsQueue(repo_opts.hash).init(arena.allocator(), {});
 
     {
-        var node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
-        node.data = .{ .oid = oid1.*, .kind = .one };
-        queue.append(node);
+        const object = try obj.Object(repo_kind, repo_opts, .full).init(arena.allocator(), state, oid1);
+        try queue.add(.{ .oid = oid1.*, .kind = .one, .timestamp = object.content.commit.metadata.timestamp });
     }
 
     {
-        var node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
-        node.data = .{ .oid = oid2.*, .kind = .two };
-        queue.append(node);
+        const object = try obj.Object(repo_kind, repo_opts, .full).init(arena.allocator(), state, oid2);
+        try queue.add(.{ .oid = oid2.*, .kind = .two, .timestamp = object.content.commit.metadata.timestamp });
     }
 
     var parents_of_1 = std.StringHashMap(void).init(arena.allocator());
@@ -132,58 +132,65 @@ pub fn commonAncestor(
     var parents_of_both = std.StringArrayHashMap(void).init(arena.allocator());
     var stale_oids = std.StringHashMap(void).init(arena.allocator());
 
-    while (queue.popFirst()) |node| {
-        switch (node.data.kind) {
+    while (queue.removeOrNull()) |node| {
+        switch (node.kind) {
             .one => {
-                if (std.mem.eql(u8, &node.data.oid, oid2)) {
+                if (std.mem.eql(u8, &node.oid, oid2)) {
                     return oid2.*;
-                } else if (parents_of_2.contains(&node.data.oid)) {
-                    try parents_of_both.put(&node.data.oid, {});
-                } else if (parents_of_1.contains(&node.data.oid)) {
+                } else if (parents_of_2.contains(&node.oid)) {
+                    try parents_of_both.put(try arena.allocator().dupe(u8, &node.oid), {});
+                } else if (parents_of_1.contains(&node.oid)) {
                     continue; // this oid was already added to the queue
                 } else {
-                    try parents_of_1.put(&node.data.oid, {});
+                    try parents_of_1.put(try arena.allocator().dupe(u8, &node.oid), {});
                 }
             },
             .two => {
-                if (std.mem.eql(u8, &node.data.oid, oid1)) {
+                if (std.mem.eql(u8, &node.oid, oid1)) {
                     return oid1.*;
-                } else if (parents_of_1.contains(&node.data.oid)) {
-                    try parents_of_both.put(&node.data.oid, {});
-                } else if (parents_of_2.contains(&node.data.oid)) {
+                } else if (parents_of_1.contains(&node.oid)) {
+                    try parents_of_both.put(try arena.allocator().dupe(u8, &node.oid), {});
+                } else if (parents_of_2.contains(&node.oid)) {
                     continue; // this oid was already added to the queue
                 } else {
-                    try parents_of_2.put(&node.data.oid, {});
+                    try parents_of_2.put(try arena.allocator().dupe(u8, &node.oid), {});
                 }
             },
             .stale => {
-                try stale_oids.put(&node.data.oid, {});
+                try stale_oids.put(try arena.allocator().dupe(u8, &node.oid), {});
             },
         }
 
-        const is_base_ancestor = parents_of_both.contains(&node.data.oid);
+        const is_base_ancestor = parents_of_both.contains(&node.oid);
 
-        // TODO: instead of appending to the end, append it in descending order of timestamp
-        // so we prioritize more recent commits and avoid wasteful traversal deep in the history.
-        const object = try obj.Object(repo_kind, repo_opts, .full).init(arena.allocator(), state, &node.data.oid);
+        const object = try obj.Object(repo_kind, repo_opts, .full).init(arena.allocator(), state, &node.oid);
         if (object.content.commit.metadata.parent_oids) |parent_oids| {
-            for (parent_oids) |parent_oid| {
+            parents: for (parent_oids) |parent_oid| {
                 const is_stale = is_base_ancestor or stale_oids.contains(&parent_oid);
-                var new_node = try arena.allocator().create(std.DoublyLinkedList(Parent).Node);
-                new_node.data = .{ .oid = parent_oid, .kind = if (is_stale) .stale else node.data.kind };
-                queue.append(new_node);
+                if (is_stale) {
+                    var iter = queue.iterator();
+                    while (iter.next()) |node_in_queue| {
+                        // Catch up with another side, update node's kind in the queue
+                        // to avoid confusion which could lead to endless loop
+                        if (std.mem.eql(u8, &node_in_queue.oid, &parent_oid)) {
+                            try queue.update(node_in_queue, .{ .oid = node_in_queue.oid, .kind = .stale, .timestamp = node_in_queue.timestamp });
+                            continue :parents;
+                        }
+                    }
+                }
+                const parent_object = try obj.Object(repo_kind, repo_opts, .full).init(arena.allocator(), state, &parent_oid);
+                try queue.add(.{ .oid = parent_oid, .kind = if (is_stale) .stale else node.kind, .timestamp = parent_object.content.commit.metadata.timestamp });
             }
         }
 
         // stop if queue only has stale nodes
         var queue_is_stale = true;
-        var next_node_maybe = queue.first;
-        while (next_node_maybe) |next_node| {
-            if (!stale_oids.contains(&next_node.data.oid)) {
+        var iter = queue.iterator();
+        while (iter.next()) |next_node| {
+            if (next_node.kind != .stale) {
                 queue_is_stale = false;
                 break;
             }
-            next_node_maybe = next_node.next;
         }
         if (queue_is_stale) {
             break;

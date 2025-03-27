@@ -307,6 +307,7 @@ pub fn CommitMetadata(comptime hash_kind: hash.HashKind) type {
         message: ?[]const u8 = null,
         parent_oids: ?[]const [hash.hexLen(hash_kind)]u8 = null,
         allow_empty: bool = false,
+        timestamp: u64 = 0,
 
         pub fn firstParent(self: CommitMetadata(hash_kind)) ?*const [hash.hexLen(hash_kind)]u8 {
             if (self.parent_oids) |parent_oids| {
@@ -848,6 +849,11 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                                     metadata.author = value;
                                 } else if (std.mem.eql(u8, "committer", key)) {
                                     metadata.committer = value;
+                                    var iter = std.mem.splitBackwardsScalar(u8, value, ' ');
+                                    _ = iter.next(); // timezone
+                                    if (iter.next()) |timestamp_str| {
+                                        metadata.timestamp = try std.fmt.parseInt(u64, timestamp_str, 0);
+                                    }
                                 }
                             }
                         }
