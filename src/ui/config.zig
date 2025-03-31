@@ -17,12 +17,12 @@ pub fn ConfigListItem(comptime Widget: type) type {
             var box = try wgt.Box(Widget).init(allocator, null, .horiz);
             errdefer box.deinit();
 
-            var name_text_box = try wgt.TextBox(Widget).init(allocator, full_name, .single);
+            var name_text_box = try wgt.TextBox(Widget).init(allocator, full_name, .single, .none);
             errdefer name_text_box.deinit();
             name_text_box.getFocus().focusable = true;
             try box.children.put(name_text_box.getFocus().id, .{ .widget = .{ .text_box = name_text_box }, .rect = null, .min_size = .{ .width = 30, .height = null } });
 
-            var value_text_box = try wgt.TextBox(Widget).init(allocator, value, .single);
+            var value_text_box = try wgt.TextBox(Widget).init(allocator, value, .single, .none);
             errdefer value_text_box.deinit();
             value_text_box.getFocus().focusable = true;
             try box.children.put(value_text_box.getFocus().id, .{ .widget = .{ .text_box = value_text_box }, .rect = null, .min_size = .{ .width = 30, .height = null } });

@@ -28,7 +28,7 @@ pub fn RootTabs(comptime Widget: type) type {
                     .status => "status",
                     .config => continue, // temporarily disable config section
                 };
-                var text_box = try wgt.TextBox(Widget).init(allocator, name, .single);
+                var text_box = try wgt.TextBox(Widget).init(allocator, name, .single, .none);
                 errdefer text_box.deinit();
                 text_box.getFocus().focusable = true;
                 try box.children.put(text_box.getFocus().id, .{ .widget = .{ .text_box = text_box }, .rect = null, .min_size = null });

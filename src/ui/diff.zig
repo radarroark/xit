@@ -232,7 +232,7 @@ pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime rep
             }
 
             // add new diff widget
-            var text_box = try wgt.TextBox(Widget).init(self.allocator, buf, .hidden);
+            var text_box = try wgt.TextBox(Widget).init(self.allocator, buf, .hidden, .none);
             errdefer text_box.deinit();
             try self.box.children.values()[0].widget.scroll.child.box.children.put(text_box.getFocus().id, .{ .widget = .{ .text_box = text_box }, .rect = null, .min_size = null });
         }
@@ -286,7 +286,7 @@ pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime rep
             }
 
             // add new diff widget
-            var text_box = try wgt.TextBox(Widget).init(self.allocator, buf, .hidden);
+            var text_box = try wgt.TextBox(Widget).init(self.allocator, buf, .hidden, .none);
             errdefer text_box.deinit();
             try self.box.children.values()[0].widget.scroll.child.box.children.put(text_box.getFocus().id, .{ .widget = .{ .text_box = text_box }, .rect = null, .min_size = null });
         }

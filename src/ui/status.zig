@@ -36,10 +36,10 @@ pub fn StatusListItem(comptime Widget: type) type {
                 },
                 .not_tracked => "?",
             };
-            var status_text = try wgt.TextBox(Widget).init(allocator, status_kind_sym, .hidden);
+            var status_text = try wgt.TextBox(Widget).init(allocator, status_kind_sym, .hidden, .none);
             errdefer status_text.deinit();
 
-            var path_text = try wgt.TextBox(Widget).init(allocator, status.path, .hidden);
+            var path_text = try wgt.TextBox(Widget).init(allocator, status.path, .hidden, .none);
             errdefer path_text.deinit();
 
             var box = try wgt.Box(Widget).init(allocator, null, .horiz);
@@ -79,7 +79,7 @@ pub fn StatusListItem(comptime Widget: type) type {
             return self.box.getFocus();
         }
 
-        pub fn setBorder(self: *StatusListItem(Widget), border_style: ?wgt.Box(Widget).BorderStyle) void {
+        pub fn setBorder(self: *StatusListItem(Widget), border_style: ?wgt.BorderStyle) void {
             self.box.children.values()[1].widget.text_box.border_style = border_style;
         }
     };
@@ -247,7 +247,7 @@ pub fn StatusTabs(comptime Widget: type, comptime repo_kind: rp.RepoKind, compti
                     .not_tracked => "not tracked",
                 };
                 const label = try std.fmt.allocPrint(arena.allocator(), "{s} ({})", .{ name, counts[i] });
-                var text_box = try wgt.TextBox(Widget).init(allocator, label, .single);
+                var text_box = try wgt.TextBox(Widget).init(allocator, label, .single, .none);
                 errdefer text_box.deinit();
                 text_box.getFocus().focusable = true;
                 try box.children.put(text_box.getFocus().id, .{ .widget = .{ .text_box = text_box }, .rect = null, .min_size = null });
