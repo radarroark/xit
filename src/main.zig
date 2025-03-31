@@ -687,13 +687,12 @@ fn printMergeResult(
     }
 }
 
-var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
-
 /// this is the main "main". it's even mainier than "run".
 /// this is the real deal. there is no main more main than this.
 /// at least, not that i know of. i guess internally zig probably
 /// has an earlier entrypoint which is even mainier than this.
 pub fn main() !u8 {
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
     const allocator = if (builtin.mode == .Debug) debug_allocator.allocator() else std.heap.smp_allocator;
     defer if (builtin.mode == .Debug) {
         _ = debug_allocator.deinit();
