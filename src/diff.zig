@@ -153,6 +153,23 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
 
         pub fn initFromTree(state: rp.Repo(repo_kind, repo_opts).State(.read_only), allocator: std.mem.Allocator, path: []const u8, entry: tr.TreeEntry(repo_opts.hash)) !LineIterator(repo_kind, repo_opts) {
             const oid_hex = std.fmt.bytesToHex(&entry.oid, .lower);
+
+            // treat submodules as binary files so they are ignored in diffs and patches
+            if (entry.mode.content.object_type == .gitlink) {
+                var offsets = std.ArrayList(usize).init(allocator);
+                errdefer offsets.deinit();
+                return .{
+                    .allocator = allocator,
+                    .path = path,
+                    .oid = entry.oid,
+                    .oid_hex = oid_hex,
+                    .mode = entry.mode,
+                    .line_offsets = try offsets.toOwnedSlice(),
+                    .current_line = 0,
+                    .source = .binary,
+                };
+            }
+
             var object_reader = try obj.ObjectReader(repo_kind, repo_opts).init(allocator, state, &oid_hex);
             errdefer object_reader.deinit();
             var iter = LineIterator(repo_kind, repo_opts){
@@ -182,6 +199,25 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
 
         pub fn initFromOid(state: rp.Repo(repo_kind, repo_opts).State(.read_only), allocator: std.mem.Allocator, path: []const u8, oid: *const [hash.byteLen(repo_opts.hash)]u8, mode_maybe: ?fs.Mode) !LineIterator(repo_kind, repo_opts) {
             const oid_hex = std.fmt.bytesToHex(oid, .lower);
+
+            // treat submodules as binary files so they are ignored in diffs and patches
+            if (mode_maybe) |mode| {
+                if (mode.content.object_type == .gitlink) {
+                    var offsets = std.ArrayList(usize).init(allocator);
+                    errdefer offsets.deinit();
+                    return .{
+                        .allocator = allocator,
+                        .path = path,
+                        .oid = oid.*,
+                        .oid_hex = oid_hex,
+                        .mode = mode_maybe,
+                        .line_offsets = try offsets.toOwnedSlice(),
+                        .current_line = 0,
+                        .source = .binary,
+                    };
+                }
+            }
+
             var object_reader = try obj.ObjectReader(repo_kind, repo_opts).init(allocator, state, &oid_hex);
             errdefer object_reader.deinit();
             var iter = LineIterator(repo_kind, repo_opts){
