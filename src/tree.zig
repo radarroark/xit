@@ -190,7 +190,7 @@ pub fn Tree(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
             const oid = oid_maybe orelse &(try rf.readHeadRecurMaybe(repo_kind, repo_opts, state) orelse return tree);
 
-            var commit_object = try obj.Object(repo_kind, repo_opts, .full).init(allocator, state, oid);
+            var commit_object = try obj.readCommit(repo_kind, repo_opts, .full, allocator, state, oid);
             defer commit_object.deinit();
             try tree.read(state, "", &commit_object.content.commit.tree);
 

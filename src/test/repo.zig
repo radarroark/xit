@@ -152,11 +152,21 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
         else => |e| return e,
     }
 
-    // make sure we can enable patches after adding a tag
-    if (repo_kind == .xit) {
-        _ = try repo.addTag(allocator, .{ .name = "1.0.0", .message = "hi" });
+    _ = try repo.addTag(allocator, .{ .name = "1.0.0", .message = "hi" });
 
+    // we can enable patches after adding a tag
+    if (repo_kind == .xit) {
         try repo.patchAll(allocator, null);
+    }
+
+    {
+        // we can set the tag to HEAD
+        var result = try repo.resetDir(allocator, .{ .target = .{ .ref = .{ .kind = .tag, .name = "1.0.0" } } });
+        defer result.deinit();
+
+        // status works when HEAD points to a tag
+        var status = try repo.status(allocator);
+        defer status.deinit(allocator);
     }
 }
 
