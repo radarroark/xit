@@ -568,28 +568,6 @@ pub fn writeTag(
     return std.fmt.bytesToHex(tag_hash_bytes_buffer, .lower);
 }
 
-pub fn readCommit(
-    comptime repo_kind: rp.RepoKind,
-    comptime repo_opts: rp.RepoOpts(repo_kind),
-    comptime load_kind: ObjectLoadKind,
-    allocator: std.mem.Allocator,
-    state: rp.Repo(repo_kind, repo_opts).State(.read_only),
-    oid: *const [hash.hexLen(repo_opts.hash)]u8,
-) !Object(repo_kind, repo_opts, load_kind) {
-    var object = try Object(repo_kind, repo_opts, load_kind).init(allocator, state, oid);
-    errdefer object.deinit();
-
-    switch (object.content) {
-        .blob, .tree => return error.CommitNotFound,
-        .commit => return object,
-        .tag => |tag_content| {
-            const commit_object = try readCommit(repo_kind, repo_opts, load_kind, allocator, state, &tag_content.target);
-            object.deinit();
-            return commit_object;
-        },
-    }
-}
-
 pub const ObjectKind = enum {
     blob,
     tree,
@@ -974,6 +952,25 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                             .object_reader = obj_rdr,
                         };
                     },
+                },
+            }
+        }
+
+        pub fn initCommit(
+            allocator: std.mem.Allocator,
+            state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+            oid: *const [hash.hexLen(repo_opts.hash)]u8,
+        ) !Object(repo_kind, repo_opts, load_kind) {
+            var object = try Object(repo_kind, repo_opts, load_kind).init(allocator, state, oid);
+            errdefer object.deinit();
+
+            switch (object.content) {
+                .blob, .tree => return error.CommitNotFound,
+                .commit => return object,
+                .tag => |tag_content| {
+                    const commit_object = try initCommit(allocator, state, &tag_content.target);
+                    object.deinit();
+                    return commit_object;
                 },
             }
         }
