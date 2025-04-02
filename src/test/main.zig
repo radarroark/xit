@@ -1592,6 +1592,10 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             const message = try tag_object.object_reader.reader.reader().readAllAlloc(allocator, repo_opts.max_read_size);
             defer allocator.free(message);
             try std.testing.expectEqualStrings("this is an annotated tag", message);
+
+            // common ancester with a tag
+            const ancestor_commit = try mrg.commonAncestor(repo_kind, repo_opts, allocator, state, &tag_oid, &commit4_stuff);
+            try std.testing.expectEqualStrings(&commit4_stuff, &ancestor_commit);
         }
 
         try main.run(repo_kind, repo_opts, allocator, &.{ "tag", "list" }, work_dir, .{});

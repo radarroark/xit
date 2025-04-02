@@ -50,20 +50,20 @@ fn getDescendent(
     var queue = CommitParentsQueue(repo_opts.hash).init(arena.allocator(), {});
 
     {
-        const object = try obj.Object(repo_kind, repo_opts, .full).init(arena.allocator(), state, oid1);
+        const object = try obj.Object(repo_kind, repo_opts, .full).initCommit(arena.allocator(), state, oid1);
         if (object.content.commit.metadata.parent_oids) |parent_oids| {
             for (parent_oids) |parent_oid| {
-                const parent_object = try obj.Object(repo_kind, repo_opts, .full).init(arena.allocator(), state, &parent_oid);
+                const parent_object = try obj.Object(repo_kind, repo_opts, .full).initCommit(arena.allocator(), state, &parent_oid);
                 try queue.add(.{ .oid = parent_oid, .kind = .one, .timestamp = parent_object.content.commit.metadata.timestamp });
             }
         }
     }
 
     {
-        const object = try obj.Object(repo_kind, repo_opts, .full).init(arena.allocator(), state, oid2);
+        const object = try obj.Object(repo_kind, repo_opts, .full).initCommit(arena.allocator(), state, oid2);
         if (object.content.commit.metadata.parent_oids) |parent_oids| {
             for (parent_oids) |parent_oid| {
-                const parent_object = try obj.Object(repo_kind, repo_opts, .full).init(arena.allocator(), state, &parent_oid);
+                const parent_object = try obj.Object(repo_kind, repo_opts, .full).initCommit(arena.allocator(), state, &parent_oid);
                 try queue.add(.{ .oid = parent_oid, .kind = .two, .timestamp = parent_object.content.commit.metadata.timestamp });
             }
         }
@@ -88,10 +88,10 @@ fn getDescendent(
             .stale => unreachable,
         }
 
-        const object = try obj.Object(repo_kind, repo_opts, .full).init(arena.allocator(), state, &node.oid);
+        const object = try obj.Object(repo_kind, repo_opts, .full).initCommit(arena.allocator(), state, &node.oid);
         if (object.content.commit.metadata.parent_oids) |parent_oids| {
             for (parent_oids) |parent_oid| {
-                const parent_object = try obj.Object(repo_kind, repo_opts, .full).init(arena.allocator(), state, &parent_oid);
+                const parent_object = try obj.Object(repo_kind, repo_opts, .full).initCommit(arena.allocator(), state, &parent_oid);
                 try queue.add(.{ .oid = parent_oid, .kind = node.kind, .timestamp = parent_object.content.commit.metadata.timestamp });
             }
         }
@@ -118,12 +118,12 @@ pub fn commonAncestor(
     var queue = CommitParentsQueue(repo_opts.hash).init(arena.allocator(), {});
 
     {
-        const object = try obj.Object(repo_kind, repo_opts, .full).init(arena.allocator(), state, oid1);
+        const object = try obj.Object(repo_kind, repo_opts, .full).initCommit(arena.allocator(), state, oid1);
         try queue.add(.{ .oid = oid1.*, .kind = .one, .timestamp = object.content.commit.metadata.timestamp });
     }
 
     {
-        const object = try obj.Object(repo_kind, repo_opts, .full).init(arena.allocator(), state, oid2);
+        const object = try obj.Object(repo_kind, repo_opts, .full).initCommit(arena.allocator(), state, oid2);
         try queue.add(.{ .oid = oid2.*, .kind = .two, .timestamp = object.content.commit.metadata.timestamp });
     }
 
@@ -163,7 +163,7 @@ pub fn commonAncestor(
 
         const is_base_ancestor = parents_of_both.contains(&node.oid);
 
-        const object = try obj.Object(repo_kind, repo_opts, .full).init(arena.allocator(), state, &node.oid);
+        const object = try obj.Object(repo_kind, repo_opts, .full).initCommit(arena.allocator(), state, &node.oid);
         if (object.content.commit.metadata.parent_oids) |parent_oids| {
             parents: for (parent_oids) |parent_oid| {
                 const is_stale = is_base_ancestor or stale_oids.contains(&parent_oid);
@@ -178,7 +178,7 @@ pub fn commonAncestor(
                         }
                     }
                 }
-                const parent_object = try obj.Object(repo_kind, repo_opts, .full).init(arena.allocator(), state, &parent_oid);
+                const parent_object = try obj.Object(repo_kind, repo_opts, .full).initCommit(arena.allocator(), state, &parent_oid);
                 try queue.add(.{ .oid = parent_oid, .kind = if (is_stale) .stale else node.kind, .timestamp = parent_object.content.commit.metadata.timestamp });
             }
         }
