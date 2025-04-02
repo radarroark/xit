@@ -58,15 +58,7 @@ pub const Ref = struct {
 
         const refs_str = split_iter.next() orelse return null;
         if (!std.mem.eql(u8, "refs", refs_str)) {
-            // if there are no further parts, this is an unqualified ref like HEAD
-            if (null == split_iter.peek()) {
-                return .{ .kind = .none, .name = ref_path };
-            }
-            // the path has slashes but doesn't start with "refs"
-            // so it's probably invalid
-            else {
-                return null;
-            }
+            return .{ .kind = .none, .name = ref_path };
         }
 
         const ref_kind = split_iter.next() orelse return null;
