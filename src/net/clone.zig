@@ -61,7 +61,7 @@ fn checkoutBranch(
     defer default_branch.deinit();
     try defaultBranch(repo_kind, repo_opts, remote, &default_branch);
 
-    const default_branch_ref = rf.Ref.initFromPath(default_branch.items) orelse return error.InvalidRef;
+    const default_branch_ref = rf.Ref.initFromPath(default_branch.items, .head) orelse return error.InvalidRef;
     const remote_branch_name = default_branch_ref.name;
 
     try rf.replaceHead(repo_kind, repo_opts, state, .{ .ref = .{ .kind = .head, .name = remote_branch_name } });

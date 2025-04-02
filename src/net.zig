@@ -419,7 +419,7 @@ fn updateRef(
     ref_path: []const u8,
     oid_hex: *const [hash.hexLen(repo_opts.hash)]u8,
 ) !void {
-    const ref = rf.Ref.initFromPath(ref_path) orelse return error.InvalidRefPath;
+    const ref = rf.Ref.initFromPath(ref_path, null) orelse return error.InvalidRefPath;
     const existing_oid_maybe = try rf.readRecur(repo_kind, repo_opts, state.readOnly(), .{ .ref = ref });
 
     if (existing_oid_maybe) |*existing_oid| {
@@ -458,7 +458,7 @@ pub fn resolveRefPath(
     allocator: std.mem.Allocator,
     ref_path: []const u8,
 ) !?[hash.hexLen(repo_opts.hash)]u8 {
-    const ref = rf.Ref.initFromPath(ref_path) orelse return error.InvalidRefPath;
+    const ref = rf.Ref.initFromPath(ref_path, null) orelse return error.InvalidRefPath;
     return try resolveRef(repo_kind, repo_opts, state, allocator, ref);
 }
 

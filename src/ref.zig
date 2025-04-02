@@ -53,16 +53,29 @@ pub const Ref = struct {
     kind: RefKind,
     name: []const u8,
 
-    pub fn initFromPath(ref_path: []const u8) ?Ref {
+    pub fn initFromPath(ref_path: []const u8, default_kind_maybe: ?RefKind) ?Ref {
         var split_iter = std.mem.splitScalar(u8, ref_path, '/');
 
-        const refs_str = split_iter.next() orelse return null;
-        if (!std.mem.eql(u8, "refs", refs_str)) {
-            return .{ .kind = .none, .name = ref_path };
+        const first_part = split_iter.next() orelse return null;
+        if (!std.mem.eql(u8, "refs", first_part)) {
+            const unqualified_refs = std.StaticStringMap(void).initComptime(.{
+                .{"HEAD"},
+                .{"MERGE_HEAD"},
+                .{"CHERRY_PICK_HEAD"},
+            });
+
+            // if this is an unqualified ref like HEAD, set the kind to none
+            if (null == split_iter.peek() and unqualified_refs.has(first_part)) {
+                return .{ .kind = .none, .name = ref_path };
+            }
+            // otherwise, give it the default kind
+            else {
+                return .{ .kind = default_kind_maybe orelse return null, .name = ref_path };
+            }
         }
 
         const ref_kind = split_iter.next() orelse return null;
-        const ref_name_offset = refs_str.len + 1 + ref_kind.len + 1;
+        const ref_name_offset = first_part.len + 1 + ref_kind.len + 1;
         const ref_name = if (ref_name_offset >= ref_path.len) return null else ref_path[ref_name_offset..];
 
         if (std.mem.eql(u8, "heads", ref_kind)) {
@@ -91,12 +104,13 @@ pub const Ref = struct {
 };
 
 test "parse ref paths" {
-    try std.testing.expectEqualDeep(Ref{ .kind = .none, .name = "HEAD" }, Ref.initFromPath("HEAD"));
-    try std.testing.expectEqualDeep(Ref{ .kind = .head, .name = "master" }, Ref.initFromPath("refs/heads/master"));
-    try std.testing.expectEqualDeep(Ref{ .kind = .head, .name = "a/b/c" }, Ref.initFromPath("refs/heads/a/b/c"));
-    try std.testing.expectEqualDeep(Ref{ .kind = .tag, .name = "1.0.0" }, Ref.initFromPath("refs/tags/1.0.0"));
-    try std.testing.expectEqualDeep(Ref{ .kind = .{ .remote = "origin" }, .name = "master" }, Ref.initFromPath("refs/remotes/origin/master"));
-    try std.testing.expectEqualDeep(Ref{ .kind = .{ .other = "for" }, .name = "experimental" }, Ref.initFromPath("refs/for/experimental"));
+    try std.testing.expectEqualDeep(Ref{ .kind = .none, .name = "HEAD" }, Ref.initFromPath("HEAD", null));
+    try std.testing.expectEqualDeep(Ref{ .kind = .head, .name = "master" }, Ref.initFromPath("refs/heads/master", null));
+    try std.testing.expectEqualDeep(Ref{ .kind = .head, .name = "master" }, Ref.initFromPath("master", .head));
+    try std.testing.expectEqualDeep(Ref{ .kind = .head, .name = "a/b/c" }, Ref.initFromPath("refs/heads/a/b/c", null));
+    try std.testing.expectEqualDeep(Ref{ .kind = .tag, .name = "1.0.0" }, Ref.initFromPath("refs/tags/1.0.0", null));
+    try std.testing.expectEqualDeep(Ref{ .kind = .{ .remote = "origin" }, .name = "master" }, Ref.initFromPath("refs/remotes/origin/master", null));
+    try std.testing.expectEqualDeep(Ref{ .kind = .{ .other = "for" }, .name = "experimental" }, Ref.initFromPath("refs/for/experimental", null));
 }
 
 pub fn isOid(comptime hash_kind: hash.HashKind, content: []const u8) bool {
@@ -118,7 +132,7 @@ pub fn RefOrOid(comptime hash_kind: hash.HashKind) type {
 
         pub fn initFromDb(content: []const u8) ?RefOrOid(hash_kind) {
             if (std.mem.startsWith(u8, content, REF_START_STR)) {
-                if (Ref.initFromPath(content[REF_START_STR.len..])) |ref| {
+                if (Ref.initFromPath(content[REF_START_STR.len..], null)) |ref| {
                     return .{ .ref = ref };
                 } else {
                     return null;
@@ -133,13 +147,8 @@ pub fn RefOrOid(comptime hash_kind: hash.HashKind) type {
         pub fn initFromUser(content: []const u8) ?RefOrOid(hash_kind) {
             if (isOid(hash_kind, content)) {
                 return .{ .oid = content[0..comptime hash.hexLen(hash_kind)] };
-            } else if (Ref.initFromPath(content)) |ref| {
-                if (.none == ref.kind) {
-                    // an unqualified ref from the user was probably intended to be a branch name
-                    return .{ .ref = .{ .kind = .head, .name = ref.name } };
-                } else {
-                    return .{ .ref = ref };
-                }
+            } else if (Ref.initFromPath(content, .head)) |ref| {
+                return .{ .ref = ref };
             } else {
                 return null;
             }
@@ -323,7 +332,7 @@ pub fn read(
         },
         .xit => {
             var map = state.extra.moment.*;
-            const ref = Ref.initFromPath(ref_path) orelse return error.InvalidRef;
+            const ref = Ref.initFromPath(ref_path, null) orelse return error.InvalidRef;
             const refs_cursor = (try map.getCursor(hash.hashInt(repo_opts.hash, "refs"))) orelse return error.RefNotFound;
             const refs = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_only).init(refs_cursor);
 
@@ -424,7 +433,7 @@ pub fn write(
         },
         .xit => {
             var map = state.extra.moment.*;
-            const ref = Ref.initFromPath(ref_path) orelse return error.InvalidRef;
+            const ref = Ref.initFromPath(ref_path, null) orelse return error.InvalidRef;
             const refs_cursor = try map.putCursor(hash.hashInt(repo_opts.hash, "refs"));
             const refs = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(refs_cursor);
 
@@ -507,7 +516,7 @@ pub fn remove(
         },
         .xit => {
             var map = state.extra.moment.*;
-            const ref = Ref.initFromPath(ref_path) orelse return error.InvalidRef;
+            const ref = Ref.initFromPath(ref_path, null) orelse return error.InvalidRef;
             const refs_cursor = try map.putCursor(hash.hashInt(repo_opts.hash, "refs"));
             const refs = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(refs_cursor);
 

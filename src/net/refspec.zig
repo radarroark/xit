@@ -5,7 +5,7 @@ const net = @import("../net.zig");
 pub const git_refspec_tags = "refs/tags/*:refs/tags/*";
 
 pub fn validateName(ref_path: []const u8, is_glob: bool) bool {
-    const ref = rf.Ref.initFromPath(ref_path) orelse return false;
+    const ref = rf.Ref.initFromPath(ref_path, .head) orelse return false;
     if (is_glob) {
         var split_iter = std.mem.splitScalar(u8, ref.name, '/');
         while (split_iter.next()) |path_part| {
@@ -180,11 +180,9 @@ pub const RefSpec = struct {
     }
 
     pub fn normalize(self: *RefSpec, allocator: std.mem.Allocator) ![]const u8 {
-        const src_ref_maybe = if (rf.Ref.initFromPath(self.src)) |ref| blk: {
+        const src_ref_maybe = if (rf.Ref.initFromPath(self.src, .head)) |ref| blk: {
             if (ref.name.len == 0) {
                 break :blk null;
-            } else if (.none == ref.kind) {
-                break :blk rf.Ref{ .kind = .head, .name = ref.name };
             } else {
                 break :blk ref;
             }
@@ -195,11 +193,9 @@ pub const RefSpec = struct {
         var src_ref_path_buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
         const src_ref_path = if (src_ref_maybe) |src_ref| try src_ref.toPath(&src_ref_path_buffer) else "";
 
-        const dst_ref_maybe = if (rf.Ref.initFromPath(self.dst)) |ref| blk: {
+        const dst_ref_maybe = if (rf.Ref.initFromPath(self.dst, .head)) |ref| blk: {
             if (ref.name.len == 0) {
                 break :blk null;
-            } else if (.none == ref.kind) {
-                break :blk rf.Ref{ .kind = .head, .name = ref.name };
             } else {
                 break :blk ref;
             }
