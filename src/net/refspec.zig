@@ -198,7 +198,7 @@ pub const RefSpec = struct {
         const dst_ref_maybe = if (rf.Ref.initFromPath(self.dst)) |ref| blk: {
             if (ref.name.len == 0) {
                 break :blk null;
-            } else if (.none == ref.kind) {
+            } else if (.none == ref.kind and !ref.raw) {
                 break :blk rf.Ref{ .kind = .head, .name = ref.name };
             } else {
                 break :blk ref;

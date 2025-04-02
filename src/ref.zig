@@ -51,6 +51,7 @@ pub const RefKind = union(enum) {
 pub const Ref = struct {
     kind: RefKind,
     name: []const u8,
+    raw: bool = false,
 
     pub fn initFromPath(ref_path: []const u8) ?Ref {
         var split_iter = std.mem.splitScalar(u8, ref_path, '/');
@@ -79,8 +80,10 @@ pub const Ref = struct {
             const remote_name = split_iter.next() orelse return null;
             const remote_ref_name = ref_name[remote_name.len + 1 ..];
             return .{ .kind = .{ .remote = remote_name }, .name = remote_ref_name };
+        } else if (std.mem.eql(u8, "raw", ref_kind)) {
+            return .{ .kind = .none, .name = ref_name, .raw = true };
         } else {
-            return null;
+            return .{ .kind = .none, .name = ref_path };
         }
     }
 
