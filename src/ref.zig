@@ -46,6 +46,7 @@ pub const RefKind = union(enum) {
     head,
     tag,
     remote: []const u8,
+    other: []const u8,
 };
 
 pub const Ref = struct {
@@ -69,7 +70,8 @@ pub const Ref = struct {
         }
 
         const ref_kind = split_iter.next() orelse return null;
-        const ref_name = ref_path[refs_str.len + 1 + ref_kind.len + 1 ..];
+        const ref_name_offset = refs_str.len + 1 + ref_kind.len + 1;
+        const ref_name = if (ref_name_offset >= ref_path.len) return null else ref_path[ref_name_offset..];
 
         if (std.mem.eql(u8, "heads", ref_kind)) {
             return .{ .kind = .head, .name = ref_name };
@@ -77,10 +79,11 @@ pub const Ref = struct {
             return .{ .kind = .tag, .name = ref_name };
         } else if (std.mem.eql(u8, "remotes", ref_kind)) {
             const remote_name = split_iter.next() orelse return null;
-            const remote_ref_name = ref_name[remote_name.len + 1 ..];
+            const remote_ref_name_offset = remote_name.len + 1;
+            const remote_ref_name = if (remote_ref_name_offset >= ref_name.len) return null else ref_name[remote_ref_name_offset..];
             return .{ .kind = .{ .remote = remote_name }, .name = remote_ref_name };
         } else {
-            return null;
+            return .{ .kind = .{ .other = ref_kind }, .name = ref_name };
         }
     }
 
@@ -90,9 +93,19 @@ pub const Ref = struct {
             .head => try std.fmt.bufPrint(buffer, "refs/heads/{s}", .{self.name}),
             .tag => try std.fmt.bufPrint(buffer, "refs/tags/{s}", .{self.name}),
             .remote => |remote| try std.fmt.bufPrint(buffer, "refs/remotes/{s}/{s}", .{ remote, self.name }),
+            .other => |other| try std.fmt.bufPrint(buffer, "refs/{s}/{s}", .{ other, self.name }),
         };
     }
 };
+
+test "parse ref paths" {
+    try std.testing.expectEqualDeep(Ref{ .kind = .none, .name = "HEAD" }, Ref.initFromPath("HEAD"));
+    try std.testing.expectEqualDeep(Ref{ .kind = .head, .name = "master" }, Ref.initFromPath("refs/heads/master"));
+    try std.testing.expectEqualDeep(Ref{ .kind = .head, .name = "a/b/c" }, Ref.initFromPath("refs/heads/a/b/c"));
+    try std.testing.expectEqualDeep(Ref{ .kind = .tag, .name = "1.0.0" }, Ref.initFromPath("refs/tags/1.0.0"));
+    try std.testing.expectEqualDeep(Ref{ .kind = .{ .remote = "origin" }, .name = "master" }, Ref.initFromPath("refs/remotes/origin/master"));
+    try std.testing.expectEqualDeep(Ref{ .kind = .{ .other = "for" }, .name = "experimental" }, Ref.initFromPath("refs/for/experimental"));
+}
 
 pub fn isOid(comptime hash_kind: hash.HashKind, content: []const u8) bool {
     if (content.len != hash.hexLen(hash_kind)) {
@@ -168,6 +181,7 @@ pub const RefList = struct {
             .head => "heads",
             .tag => "tags",
             .remote => return error.NotImplemented,
+            .other => |other_name| other_name,
         };
 
         switch (repo_kind) {
@@ -337,6 +351,10 @@ pub fn read(
                     const remote_cursor = (try remotes.getCursor(hash.hashInt(repo_opts.hash, remote))) orelse return error.RefNotFound;
                     map = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_only).init(remote_cursor);
                 },
+                .other => |other_name| {
+                    const other_cursor = (try refs.getCursor(hash.hashInt(repo_opts.hash, other_name))) orelse return error.RefNotFound;
+                    map = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_only).init(other_cursor);
+                },
             }
 
             // if the ref's key hasn't been set, it doesn't exist
@@ -434,6 +452,10 @@ pub fn write(
                     const remote_cursor = try remotes.putCursor(hash.hashInt(repo_opts.hash, remote_name));
                     map = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(remote_cursor);
                 },
+                .other => |other_name| {
+                    const other_cursor = try refs.putCursor(hash.hashInt(repo_opts.hash, other_name));
+                    map = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(other_cursor);
+                },
             }
 
             const ref_name_hash = hash.hashInt(repo_opts.hash, ref.name);
@@ -512,6 +534,10 @@ pub fn remove(
                     const remotes = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(remotes_cursor);
                     const remote_cursor = try remotes.putCursor(hash.hashInt(repo_opts.hash, remote_name));
                     map = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(remote_cursor);
+                },
+                .other => |other_name| {
+                    const other_cursor = try refs.putCursor(hash.hashInt(repo_opts.hash, other_name));
+                    map = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(other_cursor);
                 },
             }
 
