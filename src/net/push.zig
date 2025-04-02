@@ -110,7 +110,7 @@ pub fn Push(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         ) !void {
             for (self.specs.items) |*spec| {
                 if (spec.refspec.src.len > 0) {
-                    spec.loid = try net.resolveRefPath(repo_kind, repo_opts, state, allocator, spec.refspec.src) orelse return error.InvalidRefPath;
+                    spec.loid = try net.resolveRefPath(repo_kind, repo_opts, state, allocator, spec.refspec.src) orelse return error.ObjectNotFound;
                 }
 
                 for (self.remote.heads.values()) |*head| {
@@ -173,7 +173,7 @@ pub fn PushSpec(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts
             errdefer self.refspec.deinit(allocator);
 
             if (self.refspec.src.len > 0) {
-                _ = try net.resolveRefPath(repo_kind, repo_opts, state, allocator, self.refspec.src) orelse return error.InvalidRefPath;
+                _ = try net.resolveRefPath(repo_kind, repo_opts, state, allocator, self.refspec.src) orelse return error.ObjectNotFound;
             }
 
             if (!std.mem.startsWith(u8, self.refspec.dst, "refs/")) {
