@@ -8,7 +8,7 @@ const rp = @import("./repo.zig");
 const pack = @import("./pack.zig");
 const chunk = @import("./chunk.zig");
 const cfg = @import("./config.zig");
-const tag = @import("./tag.zig");
+const tg = @import("./tag.zig");
 const tr = @import("./tree.zig");
 const mrg = @import("./merge.zig");
 
@@ -476,7 +476,7 @@ pub fn writeTag(
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
     allocator: std.mem.Allocator,
-    input: tag.AddTagInput,
+    input: tg.AddTagInput,
     target_oid: *const [hash.hexLen(repo_opts.hash)]u8,
 ) ![hash.hexLen(repo_opts.hash)]u8 {
     const tag_contents = blk: {
@@ -967,8 +967,8 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             switch (object.content) {
                 .blob, .tree => return error.CommitNotFound,
                 .commit => return object,
-                .tag => |tag_content| {
-                    const commit_object = try initCommit(allocator, state, &tag_content.target);
+                .tag => |tag| {
+                    const commit_object = try initCommit(allocator, state, &tag.target);
                     object.deinit();
                     return commit_object;
                 },
@@ -1094,7 +1094,7 @@ pub fn ObjectIterator(
                         .commit => {},
                     }
                 },
-                .tag => |tag_content| try self.include(&tag_content.target),
+                .tag => |tag| try self.include(&tag.target),
             }
         }
 

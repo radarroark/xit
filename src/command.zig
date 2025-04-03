@@ -9,7 +9,7 @@ const bch = @import("./branch.zig");
 const rf = @import("./ref.zig");
 const hash = @import("./hash.zig");
 const work = @import("./workdir.zig");
-const tag = @import("./tag.zig");
+const tg = @import("./tag.zig");
 
 pub const CommandKind = enum {
     init,
@@ -532,7 +532,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
             opts: work.RemoveOptions,
         },
         commit: obj.CommitMetadata(hash_kind),
-        tag: tag.TagCommand,
+        tag: tg.TagCommand,
         status,
         diff_dir: df.BasicDiffOptions(hash_kind),
         diff_added: df.BasicDiffOptions(hash_kind),
@@ -633,7 +633,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
 
                     const cmd_name = cmd_args.positional_args[0];
 
-                    var cmd: tag.TagCommand = undefined;
+                    var cmd: tg.TagCommand = undefined;
                     if (std.mem.eql(u8, "list", cmd_name)) {
                         cmd = .list;
                     } else if (std.mem.eql(u8, "add", cmd_name)) {

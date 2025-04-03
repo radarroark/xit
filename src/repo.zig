@@ -11,7 +11,7 @@ const df = @import("./diff.zig");
 const mrg = @import("./merge.zig");
 const cfg = @import("./config.zig");
 const chunk = @import("./chunk.zig");
-const tag = @import("./tag.zig");
+const tg = @import("./tag.zig");
 const tr = @import("./tree.zig");
 const net = @import("./net.zig");
 const net_refspec = @import("./net/refspec.zig");
@@ -398,22 +398,22 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             return try rf.RefList.init(repo_kind, repo_opts, state, allocator, .tag);
         }
 
-        pub fn addTag(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: tag.AddTagInput) ![hash.hexLen(repo_opts.hash)]u8 {
+        pub fn addTag(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: tg.AddTagInput) ![hash.hexLen(repo_opts.hash)]u8 {
             switch (repo_kind) {
-                .git => return try tag.add(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, allocator, input),
+                .git => return try tg.add(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, allocator, input),
                 .xit => {
                     var result: [hash.hexLen(repo_opts.hash)]u8 = undefined;
 
                     const Ctx = struct {
                         core: *Repo(repo_kind, repo_opts).Core,
                         allocator: std.mem.Allocator,
-                        input: tag.AddTagInput,
+                        input: tg.AddTagInput,
                         result: *[hash.hexLen(repo_opts.hash)]u8,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            ctx.result.* = try tag.add(repo_kind, repo_opts, state, ctx.allocator, ctx.input);
+                            ctx.result.* = try tg.add(repo_kind, repo_opts, state, ctx.allocator, ctx.input);
                         }
                     };
 
@@ -428,18 +428,18 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
-        pub fn removeTag(self: *Repo(repo_kind, repo_opts), input: tag.RemoveTagInput) !void {
+        pub fn removeTag(self: *Repo(repo_kind, repo_opts), input: tg.RemoveTagInput) !void {
             switch (repo_kind) {
-                .git => try tag.remove(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, input),
+                .git => try tg.remove(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, input),
                 .xit => {
                     const Ctx = struct {
                         core: *Repo(repo_kind, repo_opts).Core,
-                        input: tag.RemoveTagInput,
+                        input: tg.RemoveTagInput,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            try tag.remove(repo_kind, repo_opts, state, ctx.input);
+                            try tg.remove(repo_kind, repo_opts, state, ctx.input);
                         }
                     };
 
