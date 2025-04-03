@@ -492,7 +492,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
                     try history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
-                        Ctx{ .core = &self.core, .allocator = allocator, .paths = paths },
+                        Ctx{ .core = &self.core, .allocator = allocator, .paths = normalized_paths.items },
                     );
                 },
             }
