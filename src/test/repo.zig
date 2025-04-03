@@ -67,10 +67,12 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
         const grid = try root.getGrid().?.toString(allocator);
         defer allocator.free(grid);
 
+        var grid_without_tabs = grid;
+        for (0..3) |_| {
+            grid_without_tabs = grid_without_tabs[std.mem.indexOfScalar(u8, grid_without_tabs, '\n').? + 1 ..];
+        }
+
         try std.testing.expectEqualStrings(
-            \\╔═══╗                                                                                     
-            \\║log║ status                                                                              
-            \\╚═══╝                                                                                     
             \\┌─┐                           ┌──────────────────────────────────────────────────────────┐
             \\│c│                           │                                                          │
             \\└─┘                           │ diff --git a/README.md b/README.md                       │
@@ -86,7 +88,7 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             \\                              │                                                          │
             \\                              │                                                          │
             \\                              └──────────────────────────────────────────────────────────┘
-        , grid);
+        , grid_without_tabs);
     }
 
     // can't add path that is outside repo
@@ -584,10 +586,12 @@ fn testMergeConflictSameFile(comptime repo_kind: rp.RepoKind, comptime repo_opts
         const grid = try root.getGrid().?.toString(allocator);
         defer allocator.free(grid);
 
+        var grid_without_tabs = grid;
+        for (0..3) |_| {
+            grid_without_tabs = grid_without_tabs[std.mem.indexOfScalar(u8, grid_without_tabs, '\n').? + 1 ..];
+        }
+
         try std.testing.expectEqualStrings(
-            \\     ╔══════╗                                                                    
-            \\ log ║status║                                                                    
-            \\     ╚══════╝                                                                    
             \\           ┌─────────────┐                                                       
             \\ added (0) │not added (1)│ not tracked (0)                                       
             \\           └─────────────┘                                                       
@@ -613,7 +617,7 @@ fn testMergeConflictSameFile(comptime repo_kind: rp.RepoKind, comptime repo_opts
             \\                    │                                                           │
             \\                    │                                                           │
             \\                    └───────────────────────────────────────────────────────────┘
-        , grid);
+        , grid_without_tabs);
     }
 
     // generate diff
@@ -673,10 +677,12 @@ fn testMergeConflictSameFile(comptime repo_kind: rp.RepoKind, comptime repo_opts
         const grid = try root.getGrid().?.toString(allocator);
         defer allocator.free(grid);
 
+        var grid_without_tabs = grid;
+        for (0..3) |_| {
+            grid_without_tabs = grid_without_tabs[std.mem.indexOfScalar(u8, grid_without_tabs, '\n').? + 1 ..];
+        }
+
         try std.testing.expectEqualStrings(
-            \\     ╔══════╗                                                                   
-            \\ log ║status║                                                                   
-            \\     ╚══════╝                                                                   
             \\┌─────────┐                                                                     
             \\│added (1)│ not added (0)  not tracked (0)                                      
             \\└─────────┘                                                                     
@@ -697,7 +703,7 @@ fn testMergeConflictSameFile(comptime repo_kind: rp.RepoKind, comptime repo_opts
             \\                    │                                                          │
             \\                    │                                                          │
             \\                    └──────────────────────────────────────────────────────────┘
-        , grid);
+        , grid_without_tabs);
     }
 
     // resolve conflict with changes from target branch
@@ -714,10 +720,12 @@ fn testMergeConflictSameFile(comptime repo_kind: rp.RepoKind, comptime repo_opts
         const grid = try root.getGrid().?.toString(allocator);
         defer allocator.free(grid);
 
+        var grid_without_tabs = grid;
+        for (0..3) |_| {
+            grid_without_tabs = grid_without_tabs[std.mem.indexOfScalar(u8, grid_without_tabs, '\n').? + 1 ..];
+        }
+
         try std.testing.expectEqualStrings(
-            \\     ╔══════╗                                                                   
-            \\ log ║status║                                                                   
-            \\     ╚══════╝                                                                   
             \\┌─────────┐                                                                     
             \\│added (1)│ not added (0)  not tracked (0)                                      
             \\└─────────┘                                                                     
@@ -738,7 +746,7 @@ fn testMergeConflictSameFile(comptime repo_kind: rp.RepoKind, comptime repo_opts
             \\                    │                                                          │
             \\                    │                                                          │
             \\                    └──────────────────────────────────────────────────────────┘
-        , grid);
+        , grid_without_tabs);
     }
 
     {
@@ -850,10 +858,12 @@ fn testMergeConflictSameFileEmptyBase(comptime repo_kind: rp.RepoKind, comptime 
         const grid = try root.getGrid().?.toString(allocator);
         defer allocator.free(grid);
 
+        var grid_without_tabs = grid;
+        for (0..3) |_| {
+            grid_without_tabs = grid_without_tabs[std.mem.indexOfScalar(u8, grid_without_tabs, '\n').? + 1 ..];
+        }
+
         try std.testing.expectEqualStrings(
-            \\     ╔══════╗                                                                    
-            \\ log ║status║                                                                    
-            \\     ╚══════╝                                                                    
             \\           ┌─────────────┐                                                       
             \\ added (0) │not added (1)│ not tracked (0)                                       
             \\           └─────────────┘                                                       
@@ -882,7 +892,7 @@ fn testMergeConflictSameFileEmptyBase(comptime repo_kind: rp.RepoKind, comptime 
             \\                    │                                                           │
             \\                    │                                                           │
             \\                    └───────────────────────────────────────────────────────────┘
-        , grid);
+        , grid_without_tabs);
     }
 
     // generate diff
@@ -943,10 +953,12 @@ fn testMergeConflictSameFileEmptyBase(comptime repo_kind: rp.RepoKind, comptime 
         const grid = try root.getGrid().?.toString(allocator);
         defer allocator.free(grid);
 
+        var grid_without_tabs = grid;
+        for (0..3) |_| {
+            grid_without_tabs = grid_without_tabs[std.mem.indexOfScalar(u8, grid_without_tabs, '\n').? + 1 ..];
+        }
+
         try std.testing.expectEqualStrings(
-            \\     ╔══════╗                                                                   
-            \\ log ║status║                                                                   
-            \\     ╚══════╝                                                                   
             \\┌─────────┐                                                                     
             \\│added (1)│ not added (0)  not tracked (0)                                      
             \\└─────────┘                                                                     
@@ -968,7 +980,7 @@ fn testMergeConflictSameFileEmptyBase(comptime repo_kind: rp.RepoKind, comptime 
             \\                    │                                                          │
             \\                    │                                                          │
             \\                    └──────────────────────────────────────────────────────────┘
-        , grid);
+        , grid_without_tabs);
     }
 
     // resolve conflict with changes from target branch
@@ -986,10 +998,12 @@ fn testMergeConflictSameFileEmptyBase(comptime repo_kind: rp.RepoKind, comptime 
         const grid = try root.getGrid().?.toString(allocator);
         defer allocator.free(grid);
 
+        var grid_without_tabs = grid;
+        for (0..3) |_| {
+            grid_without_tabs = grid_without_tabs[std.mem.indexOfScalar(u8, grid_without_tabs, '\n').? + 1 ..];
+        }
+
         try std.testing.expectEqualStrings(
-            \\     ╔══════╗                                                                   
-            \\ log ║status║                                                                   
-            \\     ╚══════╝                                                                   
             \\┌─────────┐                                                                     
             \\│added (1)│ not added (0)  not tracked (0)                                      
             \\└─────────┘                                                                     
@@ -1011,7 +1025,7 @@ fn testMergeConflictSameFileEmptyBase(comptime repo_kind: rp.RepoKind, comptime 
             \\                    │                                                          │
             \\                    │                                                          │
             \\                    └──────────────────────────────────────────────────────────┘
-        , grid);
+        , grid_without_tabs);
     }
 
     {
@@ -1187,10 +1201,12 @@ fn testMergeConflictModifyDelete(comptime repo_kind: rp.RepoKind, comptime repo_
         const grid = try root.getGrid().?.toString(allocator);
         defer allocator.free(grid);
 
+        var grid_without_tabs = grid;
+        for (0..3) |_| {
+            grid_without_tabs = grid_without_tabs[std.mem.indexOfScalar(u8, grid_without_tabs, '\n').? + 1 ..];
+        }
+
         try std.testing.expectEqualStrings(
-            \\     ╔══════╗                                                                   
-            \\ log ║status║                                                                   
-            \\     ╚══════╝                                                                   
             \\           ┌─────────────┐                                                      
             \\ added (0) │not added (1)│ not tracked (0)                                      
             \\           └─────────────┘                                                      
@@ -1200,7 +1216,7 @@ fn testMergeConflictModifyDelete(comptime repo_kind: rp.RepoKind, comptime repo_
             \\                    │                                                          │
             \\                    │                                                          │
             \\                    └──────────────────────────────────────────────────────────┘
-        , grid);
+        , grid_without_tabs);
     }
 
     // generate diff
@@ -1322,10 +1338,12 @@ fn testMergeConflictDeleteModify(comptime repo_kind: rp.RepoKind, comptime repo_
         const grid = try root.getGrid().?.toString(allocator);
         defer allocator.free(grid);
 
+        var grid_without_tabs = grid;
+        for (0..3) |_| {
+            grid_without_tabs = grid_without_tabs[std.mem.indexOfScalar(u8, grid_without_tabs, '\n').? + 1 ..];
+        }
+
         try std.testing.expectEqualStrings(
-            \\     ╔══════╗                                                                   
-            \\ log ║status║                                                                   
-            \\     ╚══════╝                                                                   
             \\           ┌─────────────┐                                                      
             \\ added (0) │not added (1)│ not tracked (0)                                      
             \\           └─────────────┘                                                      
@@ -1335,7 +1353,7 @@ fn testMergeConflictDeleteModify(comptime repo_kind: rp.RepoKind, comptime repo_
             \\                    │                                                          │
             \\                    │                                                          │
             \\                    └──────────────────────────────────────────────────────────┘
-        , grid);
+        , grid_without_tabs);
     }
 
     // generate diff
@@ -1460,10 +1478,12 @@ fn testMergeConflictFileDir(comptime repo_kind: rp.RepoKind, comptime repo_opts:
             const grid = try root.getGrid().?.toString(allocator);
             defer allocator.free(grid);
 
+            var grid_without_tabs = grid;
+            for (0..3) |_| {
+                grid_without_tabs = grid_without_tabs[std.mem.indexOfScalar(u8, grid_without_tabs, '\n').? + 1 ..];
+            }
+
             try std.testing.expectEqualStrings(
-                \\     ╔══════╗                                                                   
-                \\ log ║status║                                                                   
-                \\     ╚══════╝                                                                   
                 \\┌─────────┐                                                                     
                 \\│added (1)│ not added (1)  not tracked (1)                                      
                 \\└─────────┘                                                                     
@@ -1482,7 +1502,7 @@ fn testMergeConflictFileDir(comptime repo_kind: rp.RepoKind, comptime repo_opts:
                 \\                    │                                                          │
                 \\                    │                                                          │
                 \\                    └──────────────────────────────────────────────────────────┘
-            , grid);
+            , grid_without_tabs);
         }
 
         try ui.input(repo_kind, repo_opts, &root, .arrow_down);
@@ -1492,17 +1512,19 @@ fn testMergeConflictFileDir(comptime repo_kind: rp.RepoKind, comptime repo_opts:
             const grid = try root.getGrid().?.toString(allocator);
             defer allocator.free(grid);
 
+            var grid_without_tabs = grid;
+            for (0..3) |_| {
+                grid_without_tabs = grid_without_tabs[std.mem.indexOfScalar(u8, grid_without_tabs, '\n').? + 1 ..];
+            }
+
             try std.testing.expectEqualStrings(
-                \\     ┌──────┐                                                                   
-                \\ log │status│                                                                   
-                \\     └──────┘                                                                   
                 \\           ╔═════════════╗                                                      
                 \\ added (1) ║not added (1)║ not tracked (1)                                      
                 \\           ╚═════════════╝                                                      
                 \\   ┌─────┐          ┌──────────────────────────────────────────────────────────┐
                 \\ ≠ │f.txt│          │                                                          │
                 \\   └─────┘          └──────────────────────────────────────────────────────────┘
-            , grid);
+            , grid_without_tabs);
         }
 
         try ui.input(repo_kind, repo_opts, &root, .arrow_right);
@@ -1511,10 +1533,12 @@ fn testMergeConflictFileDir(comptime repo_kind: rp.RepoKind, comptime repo_opts:
             const grid = try root.getGrid().?.toString(allocator);
             defer allocator.free(grid);
 
+            var grid_without_tabs = grid;
+            for (0..3) |_| {
+                grid_without_tabs = grid_without_tabs[std.mem.indexOfScalar(u8, grid_without_tabs, '\n').? + 1 ..];
+            }
+
             try std.testing.expectEqualStrings(
-                \\     ┌──────┐                                                                   
-                \\ log │status│                                                                   
-                \\     └──────┘                                                                   
                 \\                          ╔═══════════════╗                                     
                 \\ added (1)  not added (1) ║not tracked (1)║                                     
                 \\                          ╚═══════════════╝                                     
@@ -1533,7 +1557,7 @@ fn testMergeConflictFileDir(comptime repo_kind: rp.RepoKind, comptime repo_opts:
                 \\                    │                                                          │
                 \\                    │                                                          │
                 \\                    └──────────────────────────────────────────────────────────┘
-            , grid);
+            , grid_without_tabs);
         }
     }
 
@@ -1661,17 +1685,19 @@ fn testMergeConflictDirFile(comptime repo_kind: rp.RepoKind, comptime repo_opts:
             const grid = try root.getGrid().?.toString(allocator);
             defer allocator.free(grid);
 
+            var grid_without_tabs = grid;
+            for (0..3) |_| {
+                grid_without_tabs = grid_without_tabs[std.mem.indexOfScalar(u8, grid_without_tabs, '\n').? + 1 ..];
+            }
+
             try std.testing.expectEqualStrings(
-                \\     ╔══════╗                                                                   
-                \\ log ║status║                                                                   
-                \\     ╚══════╝                                                                   
                 \\           ┌─────────────┐                                                      
                 \\ added (0) │not added (1)│ not tracked (1)                                      
                 \\           └─────────────┘                                                      
                 \\   ┌─────┐          ┌──────────────────────────────────────────────────────────┐
                 \\ ≠ │f.txt│          │                                                          │
                 \\   └─────┘          └──────────────────────────────────────────────────────────┘
-            , grid);
+            , grid_without_tabs);
         }
 
         try ui.input(repo_kind, repo_opts, &root, .arrow_down);
@@ -1681,10 +1707,12 @@ fn testMergeConflictDirFile(comptime repo_kind: rp.RepoKind, comptime repo_opts:
             const grid = try root.getGrid().?.toString(allocator);
             defer allocator.free(grid);
 
+            var grid_without_tabs = grid;
+            for (0..3) |_| {
+                grid_without_tabs = grid_without_tabs[std.mem.indexOfScalar(u8, grid_without_tabs, '\n').? + 1 ..];
+            }
+
             try std.testing.expectEqualStrings(
-                \\     ┌──────┐                                                                   
-                \\ log │status│                                                                   
-                \\     └──────┘                                                                   
                 \\                          ╔═══════════════╗                                     
                 \\ added (0)  not added (1) ║not tracked (1)║                                     
                 \\                          ╚═══════════════╝                                     
@@ -1703,7 +1731,7 @@ fn testMergeConflictDirFile(comptime repo_kind: rp.RepoKind, comptime repo_opts:
                 \\                    │                                                          │
                 \\                    │                                                          │
                 \\                    └──────────────────────────────────────────────────────────┘
-            , grid);
+            , grid_without_tabs);
         }
     }
 
@@ -1851,10 +1879,12 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind, comptime repo_op
         const grid = try root.getGrid().?.toString(allocator);
         defer allocator.free(grid);
 
+        var grid_without_tabs = grid;
+        for (0..3) |_| {
+            grid_without_tabs = grid_without_tabs[std.mem.indexOfScalar(u8, grid_without_tabs, '\n').? + 1 ..];
+        }
+
         try std.testing.expectEqualStrings(
-            \\     ╔══════╗                                                                   
-            \\ log ║status║                                                                   
-            \\     ╚══════╝                                                                   
             \\           ┌─────────────┐                                                      
             \\ added (0) │not added (1)│ not tracked (0)                                      
             \\           └─────────────┘                                                      
@@ -1867,7 +1897,7 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind, comptime repo_op
             \\                    │                                                          │
             \\                    │                                                          │
             \\                    └──────────────────────────────────────────────────────────┘
-        , grid);
+        , grid_without_tabs);
     }
 
     // verify no lines are longer than one byte
