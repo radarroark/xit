@@ -11,6 +11,7 @@ const ui_root = @import("./ui/root.zig");
 const ui_log = @import("./ui/log.zig");
 const ui_diff = @import("./ui/diff.zig");
 const ui_status = @import("./ui/status.zig");
+const ui_undo = @import("./ui/undo.zig");
 const ui_config = @import("./ui/config.zig");
 const rp = @import("./repo.zig");
 const hash = @import("./hash.zig");
@@ -23,7 +24,7 @@ pub fn Widget(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
         scroll: wgt.Scroll(Widget(repo_kind, repo_opts)),
         stack: wgt.Stack(Widget(repo_kind, repo_opts)),
         ui_root: ui_root.Root(Widget(repo_kind, repo_opts), repo_kind, repo_opts),
-        ui_root_tabs: ui_root.RootTabs(Widget(repo_kind, repo_opts)),
+        ui_root_tabs: ui_root.RootTabs(Widget(repo_kind, repo_opts), repo_kind),
         ui_log: ui_log.Log(Widget(repo_kind, repo_opts), repo_kind, repo_opts),
         ui_log_commit_list: ui_log.LogCommitList(Widget(repo_kind, repo_opts), repo_kind, repo_opts),
         ui_diff: ui_diff.Diff(Widget(repo_kind, repo_opts), repo_kind, repo_opts),
@@ -32,6 +33,8 @@ pub fn Widget(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
         ui_status_tabs: ui_status.StatusTabs(Widget(repo_kind, repo_opts), repo_kind, repo_opts),
         ui_status_list: ui_status.StatusList(Widget(repo_kind, repo_opts)),
         ui_status_list_item: ui_status.StatusListItem(Widget(repo_kind, repo_opts)),
+        ui_undo: ui_undo.Undo(Widget(repo_kind, repo_opts), repo_kind, repo_opts),
+        ui_undo_list: ui_undo.UndoList(Widget(repo_kind, repo_opts), repo_kind, repo_opts),
         ui_config_list: ui_config.ConfigList(Widget(repo_kind, repo_opts), repo_kind, repo_opts),
         ui_config_list_item: ui_config.ConfigListItem(Widget(repo_kind, repo_opts)),
 

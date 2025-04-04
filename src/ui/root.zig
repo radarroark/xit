@@ -7,17 +7,18 @@ const Grid = xitui.grid.Grid;
 const Focus = xitui.focus.Focus;
 const ui_log = @import("./log.zig");
 const ui_status = @import("./status.zig");
+const ui_undo = @import("./undo.zig");
 const ui_config = @import("./config.zig");
 const rp = @import("../repo.zig");
 const hash = @import("../hash.zig");
 
-pub fn RootTabs(comptime Widget: type) type {
+pub fn RootTabs(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
     return struct {
         box: wgt.Box(Widget),
 
-        const FocusKind = enum { log, status, config };
+        const FocusKind = enum { log, status, undo, config };
 
-        pub fn init(allocator: std.mem.Allocator) !RootTabs(Widget) {
+        pub fn init(allocator: std.mem.Allocator) !RootTabs(Widget, repo_kind) {
             var box = try wgt.Box(Widget).init(allocator, null, .horiz);
             errdefer box.deinit();
 
@@ -26,6 +27,7 @@ pub fn RootTabs(comptime Widget: type) type {
                 const name = switch (focus_kind) {
                     .log => "log",
                     .status => "status",
+                    .undo => if (repo_kind == .xit) "undo" else continue,
                     .config => continue, // temporarily disable config section
                 };
                 var text_box = try wgt.TextBox(Widget).init(allocator, name, .single, .none);
@@ -34,18 +36,18 @@ pub fn RootTabs(comptime Widget: type) type {
                 try box.children.put(text_box.getFocus().id, .{ .widget = .{ .text_box = text_box }, .rect = null, .min_size = null });
             }
 
-            var ui_root_tabs = RootTabs(Widget){
+            var ui_root_tabs = RootTabs(Widget, repo_kind){
                 .box = box,
             };
             ui_root_tabs.getFocus().child_id = box.children.keys()[0];
             return ui_root_tabs;
         }
 
-        pub fn deinit(self: *RootTabs(Widget)) void {
+        pub fn deinit(self: *RootTabs(Widget, repo_kind)) void {
             self.box.deinit();
         }
 
-        pub fn build(self: *RootTabs(Widget), constraint: layout.Constraint, root_focus: *Focus) !void {
+        pub fn build(self: *RootTabs(Widget, repo_kind), constraint: layout.Constraint, root_focus: *Focus) !void {
             self.clearGrid();
             for (self.box.children.keys(), self.box.children.values()) |id, *tab| {
                 tab.widget.text_box.border_style = if (self.getFocus().child_id == id)
@@ -56,7 +58,7 @@ pub fn RootTabs(comptime Widget: type) type {
             try self.box.build(constraint, root_focus);
         }
 
-        pub fn input(self: *RootTabs(Widget), key: inp.Key, root_focus: *Focus) !void {
+        pub fn input(self: *RootTabs(Widget, repo_kind), key: inp.Key, root_focus: *Focus) !void {
             if (self.getFocus().child_id) |child_id| {
                 const children = &self.box.children;
                 if (children.getIndex(child_id)) |current_index| {
@@ -81,19 +83,19 @@ pub fn RootTabs(comptime Widget: type) type {
             }
         }
 
-        pub fn clearGrid(self: *RootTabs(Widget)) void {
+        pub fn clearGrid(self: *RootTabs(Widget, repo_kind)) void {
             self.box.clearGrid();
         }
 
-        pub fn getGrid(self: RootTabs(Widget)) ?Grid {
+        pub fn getGrid(self: RootTabs(Widget, repo_kind)) ?Grid {
             return self.box.getGrid();
         }
 
-        pub fn getFocus(self: *RootTabs(Widget)) *Focus {
+        pub fn getFocus(self: *RootTabs(Widget, repo_kind)) *Focus {
             return self.box.getFocus();
         }
 
-        pub fn getSelectedIndex(self: RootTabs(Widget)) ?usize {
+        pub fn getSelectedIndex(self: RootTabs(Widget, repo_kind)) ?usize {
             if (self.box.focus.child_id) |child_id| {
                 const children = &self.box.children;
                 return children.getIndex(child_id);
@@ -102,7 +104,7 @@ pub fn RootTabs(comptime Widget: type) type {
             }
         }
 
-        pub fn getChildFocusId(self: *RootTabs(Widget), focus_kind: FocusKind) usize {
+        pub fn getChildFocusId(self: *RootTabs(Widget, repo_kind), focus_kind: FocusKind) usize {
             return self.box.children.keys()[@intFromEnum(focus_kind)];
         }
     };
@@ -122,7 +124,7 @@ pub fn Root(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime rep
                 const focus_kind: FocusKind = @enumFromInt(focus_kind_field.value);
                 switch (focus_kind) {
                     .tabs => {
-                        var ui_root_tabs = try RootTabs(Widget).init(allocator);
+                        var ui_root_tabs = try RootTabs(Widget, repo_kind).init(allocator);
                         errdefer ui_root_tabs.deinit();
                         try box.children.put(ui_root_tabs.getFocus().id, .{ .widget = .{ .ui_root_tabs = ui_root_tabs }, .rect = null, .min_size = null });
                     },
@@ -140,6 +142,12 @@ pub fn Root(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime rep
                             var status = Widget{ .ui_status = try ui_status.Status(Widget, repo_kind, repo_opts).init(allocator, repo) };
                             errdefer status.deinit();
                             try stack.children.put(status.getFocus().id, status);
+                        }
+
+                        if (repo_kind == .xit) {
+                            var undo = Widget{ .ui_undo = try ui_undo.Undo(Widget, repo_kind, repo_opts).init(allocator, repo) };
+                            errdefer undo.deinit();
+                            try stack.children.put(undo.getFocus().id, undo);
                         }
 
                         {
@@ -198,6 +206,13 @@ pub fn Root(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime rep
                                             },
                                             .ui_status => {
                                                 if (selected_widget.ui_status.getSelectedIndex() == 0) {
+                                                    index = @intFromEnum(FocusKind.tabs);
+                                                } else {
+                                                    try child.input(key, root_focus);
+                                                }
+                                            },
+                                            .ui_undo => {
+                                                if (selected_widget.ui_undo.scrolledToTop()) {
                                                     index = @intFromEnum(FocusKind.tabs);
                                                 } else {
                                                     try child.input(key, root_focus);

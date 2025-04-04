@@ -15,6 +15,7 @@ const tg = @import("./tag.zig");
 const tr = @import("./tree.zig");
 const net = @import("./net.zig");
 const net_refspec = @import("./net/refspec.zig");
+const un = @import("./undo.zig");
 
 pub const ProgressKind = enum {
     writing_object_from_pack,
@@ -378,6 +379,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
                             ctx.result.* = try obj.writeCommit(repo_kind, repo_opts, state, ctx.allocator, ctx.metadata);
+                            try un.writeMessage(repo_opts, state, .{ .commit = ctx.metadata });
                         }
                     };
 
@@ -414,6 +416,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
                             ctx.result.* = try tg.add(repo_kind, repo_opts, state, ctx.allocator, ctx.input);
+                            try un.writeMessage(repo_opts, state, .{ .tag = .{ .add = ctx.input } });
                         }
                     };
 
@@ -440,6 +443,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
                             try tg.remove(repo_kind, repo_opts, state, ctx.input);
+                            try un.writeMessage(repo_opts, state, .{ .tag = .{ .remove = ctx.input } });
                         }
                     };
 
@@ -486,6 +490,10 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
                             try work.addPaths(repo_kind, repo_opts, state, ctx.allocator, ctx.paths);
+
+                            const joined_paths = try std.mem.join(ctx.allocator, " ", ctx.paths);
+                            defer ctx.allocator.free(joined_paths);
+                            try un.writeMessage(repo_opts, state, .{ .add = .{ .paths = joined_paths } });
                         }
                     };
 
@@ -538,6 +546,10 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
                             try work.unaddPaths(repo_kind, repo_opts, state, ctx.allocator, ctx.paths, ctx.opts);
+
+                            const joined_paths = try std.mem.join(ctx.allocator, " ", ctx.paths);
+                            defer ctx.allocator.free(joined_paths);
+                            try un.writeMessage(repo_opts, state, .{ .unadd = .{ .paths = joined_paths } });
                         }
                     };
 
@@ -603,6 +615,14 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
                             try work.removePaths(repo_kind, repo_opts, state, ctx.allocator, ctx.paths, ctx.opts);
+
+                            const joined_paths = try std.mem.join(ctx.allocator, " ", ctx.paths);
+                            defer ctx.allocator.free(joined_paths);
+                            if (ctx.opts.update_work_dir) {
+                                try un.writeMessage(repo_opts, state, .{ .rm = .{ .paths = joined_paths } });
+                            } else {
+                                try un.writeMessage(repo_opts, state, .{ .untrack = .{ .paths = joined_paths } });
+                            }
                         }
                     };
 
@@ -683,6 +703,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
                             try bch.add(repo_kind, repo_opts, state, ctx.input);
+                            try un.writeMessage(repo_opts, state, .{ .branch = .{ .add = ctx.input } });
                         }
                     };
 
@@ -707,6 +728,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
                             try bch.remove(repo_kind, repo_opts, state, ctx.input);
+                            try un.writeMessage(repo_opts, state, .{ .branch = .{ .remove = ctx.input } });
                         }
                     };
 
@@ -735,6 +757,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
                             ctx.result.* = try work.Switch(repo_kind, repo_opts).init(state, ctx.allocator, ctx.input);
+                            try un.writeMessage(repo_opts, state, .{ .switch_dir = ctx.input });
                         }
                     };
 
@@ -786,6 +809,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                                 .ref => try rf.replaceHead(repo_kind, repo_opts, state, ctx.target),
                                 .oid => |oid| try rf.updateHead(repo_kind, repo_opts, state, oid),
                             }
+                            try un.writeMessage(repo_opts, state, .{ .reset_add = ctx.target });
                         }
                     };
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
@@ -865,6 +889,8 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                                 .nothing => return error.CancelTransaction,
                                 .fast_forward, .conflict => {},
                             }
+
+                            try un.writeMessage(repo_opts, state, .{ .merge = ctx.input });
                         }
                     };
 
@@ -911,6 +937,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
                             try ctx.config.add(state, ctx.input);
+                            try un.writeMessage(repo_opts, state, .{ .config = .{ .add = ctx.input } });
                         }
                     };
 
@@ -946,6 +973,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
                             try ctx.config.remove(state, ctx.input);
+                            try un.writeMessage(repo_opts, state, .{ .config = .{ .remove = ctx.input } });
                         }
                     };
 
@@ -989,6 +1017,11 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     }
 
                     try config.add(state, .{ .name = "merge.algorithm", .value = merge_algo_str });
+
+                    switch (ctx.merge_algo) {
+                        .diff3 => try un.writeMessage(repo_opts, state, .{ .patch = .off }),
+                        .patch => try un.writeMessage(repo_opts, state, .{ .patch = .on }),
+                    }
                 }
             };
 
@@ -1061,6 +1094,8 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     }
 
                     try patch_writer.write(state, ctx.allocator, ctx.progress_ctx_maybe);
+
+                    try un.writeMessage(repo_opts, state, .{ .patch = .all });
                 }
             };
 
@@ -1106,6 +1141,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
                             try net.Remote(repo_kind, repo_opts).addConfig(state, ctx.allocator, ctx.input.name, ctx.input.value);
+                            try un.writeMessage(repo_opts, state, .{ .remote = .{ .add = ctx.input } });
                         }
                     };
 
@@ -1142,6 +1178,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
                             try net.Remote(repo_kind, repo_opts).removeConfig(state, ctx.allocator, ctx.input.name);
+                            try un.writeMessage(repo_opts, state, .{ .remote = .{ .remove = ctx.input } });
                         }
                     };
 
@@ -1191,6 +1228,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                                 ctx.obj_iter,
                                 ctx.progress_ctx_maybe,
                             );
+                            try un.writeMessage(repo_opts, state, .copy_objects);
                         }
                     };
 
@@ -1240,6 +1278,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             var remote = try net.Remote(repo_kind, repo_opts).open(state.readOnly(), ctx.allocator, ctx.remote_name);
                             defer remote.deinit(ctx.allocator);
                             try net.fetch(repo_kind, repo_opts, state, ctx.allocator, &remote, ctx.opts);
+                            try un.writeMessage(repo_opts, state, .{ .fetch = .{ .remote_name = ctx.remote_name } });
                         }
                     };
 
@@ -1301,6 +1340,10 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             var remote = try net.Remote(repo_kind, repo_opts).open(state.readOnly(), ctx.allocator, ctx.remote_name);
                             defer remote.deinit(ctx.allocator);
                             try net.push(repo_kind, repo_opts, state, ctx.allocator, &remote, ctx.opts);
+
+                            const joined_refspecs = try std.mem.join(ctx.allocator, " ", ctx.opts.refspecs orelse return error.RefspecsNotFound);
+                            defer ctx.allocator.free(joined_refspecs);
+                            try un.writeMessage(repo_opts, state, .{ .push = .{ .remote_name = ctx.remote_name, .refspecs = joined_refspecs } });
                         }
                     };
 

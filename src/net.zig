@@ -712,6 +712,9 @@ pub fn clone(
                             ctx.transport_opts,
                         ),
                     }
+
+                    const un = @import("./undo.zig");
+                    try un.writeMessage(repo_opts, state, .{ .clone = .{ .url = ctx.url } });
                 }
             };
 
