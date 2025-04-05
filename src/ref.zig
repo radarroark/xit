@@ -153,6 +153,13 @@ pub fn RefOrOid(comptime hash_kind: hash.HashKind) type {
                 return null;
             }
         }
+
+        pub fn name(self: *const RefOrOid(hash_kind)) []const u8 {
+            return switch (self.*) {
+                .ref => |ref| ref.name,
+                .oid => |oid| oid,
+            };
+        }
     };
 }
 

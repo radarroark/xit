@@ -24,23 +24,27 @@ pub fn UndoCommand(comptime hash_kind: hash.HashKind) type {
             all,
         },
         add: struct {
-            paths: []const u8,
+            paths: []const []const u8,
+            allocator: std.mem.Allocator,
         },
         unadd: struct {
-            paths: []const u8,
-        },
-        untrack: struct {
-            paths: []const u8,
+            paths: []const []const u8,
+            allocator: std.mem.Allocator,
         },
         rm: struct {
-            paths: []const u8,
+            paths: []const []const u8,
+            opts: work.RemoveOptions,
+            allocator: std.mem.Allocator,
         },
         commit: obj.CommitMetadata(hash_kind),
         tag: tg.TagCommand,
         branch: bch.BranchCommand,
         switch_dir: work.SwitchInput(hash_kind),
         reset_add: rf.RefOrOid(hash_kind),
-        merge: mrg.MergeInput(hash_kind),
+        merge: struct {
+            input: mrg.MergeInput(hash_kind),
+            allocator: std.mem.Allocator,
+        },
         config: cfg.ConfigCommand,
         remote: cfg.ConfigCommand,
         clone: struct {
@@ -51,7 +55,8 @@ pub fn UndoCommand(comptime hash_kind: hash.HashKind) type {
         },
         push: struct {
             remote_name: []const u8,
-            refspecs: []const u8,
+            refspecs: []const []const u8,
+            allocator: std.mem.Allocator,
         },
         copy_objects,
     };
@@ -70,10 +75,25 @@ pub fn writeMessage(
             .off => bufPrint(&message_buffer, "patch off", .{}),
             .all => bufPrint(&message_buffer, "patch all", .{}),
         },
-        .add => |add_cmd| bufPrint(&message_buffer, "add {s}", .{add_cmd.paths}),
-        .unadd => |unadd_cmd| bufPrint(&message_buffer, "unadd {s}", .{unadd_cmd.paths}),
-        .untrack => |untrack_cmd| bufPrint(&message_buffer, "untrack {s}", .{untrack_cmd.paths}),
-        .rm => |rm_cmd| bufPrint(&message_buffer, "rm {s}", .{rm_cmd.paths}),
+        .add => |add_cmd| blk: {
+            const joined_paths = try std.mem.join(add_cmd.allocator, " ", add_cmd.paths);
+            defer add_cmd.allocator.free(joined_paths);
+            break :blk bufPrint(&message_buffer, "add {s}", .{joined_paths});
+        },
+        .unadd => |unadd_cmd| blk: {
+            const joined_paths = try std.mem.join(unadd_cmd.allocator, " ", unadd_cmd.paths);
+            defer unadd_cmd.allocator.free(joined_paths);
+            break :blk bufPrint(&message_buffer, "unadd {s}", .{joined_paths});
+        },
+        .rm => |rm_cmd| blk: {
+            const joined_paths = try std.mem.join(rm_cmd.allocator, " ", rm_cmd.paths);
+            defer rm_cmd.allocator.free(joined_paths);
+            if (rm_cmd.opts.update_work_dir) {
+                break :blk bufPrint(&message_buffer, "rm {s}", .{joined_paths});
+            } else {
+                break :blk bufPrint(&message_buffer, "untrack {s}", .{joined_paths});
+            }
+        },
         .branch => |branch_cmd| switch (branch_cmd) {
             .list => return error.NotImplemented,
             .add => |add_branch| bufPrint(&message_buffer, "branch add {s}", .{add_branch.name}),
@@ -81,10 +101,7 @@ pub fn writeMessage(
         },
         .switch_dir => |switch_cmd| blk: {
             const target_name = if (switch_cmd.target) |target|
-                switch (target) {
-                    .ref => |ref| ref.name,
-                    .oid => |oid| oid,
-                }
+                target.name()
             else
                 "HEAD";
             break :blk switch (switch_cmd.kind) {
@@ -95,13 +112,7 @@ pub fn writeMessage(
                     bufPrint(&message_buffer, "reset {s}", .{target_name}),
             };
         },
-        .reset_add => |reset_add_cmd| blk: {
-            const target_name = switch (reset_add_cmd) {
-                .ref => |ref| ref.name,
-                .oid => |oid| oid,
-            };
-            break :blk bufPrint(&message_buffer, "reset-add {s}", .{target_name});
-        },
+        .reset_add => |reset_add_cmd| bufPrint(&message_buffer, "reset-add {s}", .{reset_add_cmd.name()}),
         .commit => |commit_cmd| if (commit_cmd.message) |message|
             bufPrint(&message_buffer, "commit -m \"{s}\"", .{message})
         else
@@ -111,9 +122,24 @@ pub fn writeMessage(
             .add => |add_tag| bufPrint(&message_buffer, "tag add {s}", .{add_tag.name}),
             .remove => |rm_tag| bufPrint(&message_buffer, "tag rm {s}", .{rm_tag.name}),
         },
-        .merge => |merge_cmd| switch (merge_cmd.kind) {
-            .full => bufPrint(&message_buffer, "merge", .{}),
-            .pick => bufPrint(&message_buffer, "cherry-pick", .{}),
+        .merge => |merge_cmd| switch (merge_cmd.input.action) {
+            .new => |new| blk: {
+                var sources = std.ArrayList([]const u8).init(merge_cmd.allocator);
+                defer sources.deinit();
+                for (new.source) |source| {
+                    try sources.append(source.name());
+                }
+                const joined_sources = try std.mem.join(merge_cmd.allocator, " ", sources.items);
+                defer merge_cmd.allocator.free(joined_sources);
+                break :blk switch (merge_cmd.input.kind) {
+                    .full => bufPrint(&message_buffer, "merge {s}", .{joined_sources}),
+                    .pick => bufPrint(&message_buffer, "cherry-pick {s}", .{joined_sources}),
+                };
+            },
+            .cont => switch (merge_cmd.input.kind) {
+                .full => bufPrint(&message_buffer, "merge --continue", .{}),
+                .pick => bufPrint(&message_buffer, "cherry-pick --continue", .{}),
+            },
         },
         .config => |config_cmd| switch (config_cmd) {
             .list => return error.NotImplemented,
@@ -127,7 +153,11 @@ pub fn writeMessage(
         },
         .clone => |clone_cmd| bufPrint(&message_buffer, "clone {s}", .{clone_cmd.url}),
         .fetch => |fetch_cmd| bufPrint(&message_buffer, "fetch {s}", .{fetch_cmd.remote_name}),
-        .push => |push_cmd| bufPrint(&message_buffer, "push {s} {s}", .{ push_cmd.remote_name, push_cmd.refspecs }),
+        .push => |push_cmd| blk: {
+            const joined_refspecs = try std.mem.join(push_cmd.allocator, " ", push_cmd.refspecs);
+            defer push_cmd.allocator.free(joined_refspecs);
+            break :blk bufPrint(&message_buffer, "push {s} {s}", .{ push_cmd.remote_name, joined_refspecs });
+        },
         .copy_objects => bufPrint(&message_buffer, "copy objects", .{}),
     };
 

@@ -490,10 +490,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
                             try work.addPaths(repo_kind, repo_opts, state, ctx.allocator, ctx.paths);
-
-                            const joined_paths = try std.mem.join(ctx.allocator, " ", ctx.paths);
-                            defer ctx.allocator.free(joined_paths);
-                            try un.writeMessage(repo_opts, state, .{ .add = .{ .paths = joined_paths } });
+                            try un.writeMessage(repo_opts, state, .{ .add = .{ .paths = ctx.paths, .allocator = ctx.allocator } });
                         }
                     };
 
@@ -546,10 +543,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
                             try work.unaddPaths(repo_kind, repo_opts, state, ctx.allocator, ctx.paths, ctx.opts);
-
-                            const joined_paths = try std.mem.join(ctx.allocator, " ", ctx.paths);
-                            defer ctx.allocator.free(joined_paths);
-                            try un.writeMessage(repo_opts, state, .{ .unadd = .{ .paths = joined_paths } });
+                            try un.writeMessage(repo_opts, state, .{ .unadd = .{ .paths = ctx.paths, .allocator = ctx.allocator } });
                         }
                     };
 
@@ -615,14 +609,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
                             try work.removePaths(repo_kind, repo_opts, state, ctx.allocator, ctx.paths, ctx.opts);
-
-                            const joined_paths = try std.mem.join(ctx.allocator, " ", ctx.paths);
-                            defer ctx.allocator.free(joined_paths);
-                            if (ctx.opts.update_work_dir) {
-                                try un.writeMessage(repo_opts, state, .{ .rm = .{ .paths = joined_paths } });
-                            } else {
-                                try un.writeMessage(repo_opts, state, .{ .untrack = .{ .paths = joined_paths } });
-                            }
+                            try un.writeMessage(repo_opts, state, .{ .rm = .{ .paths = ctx.paths, .opts = ctx.opts, .allocator = ctx.allocator } });
                         }
                     };
 
@@ -890,7 +877,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                                 .fast_forward, .conflict => {},
                             }
 
-                            try un.writeMessage(repo_opts, state, .{ .merge = ctx.input });
+                            try un.writeMessage(repo_opts, state, .{ .merge = .{ .input = ctx.input, .allocator = ctx.allocator } });
                         }
                     };
 
@@ -1340,10 +1327,11 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             var remote = try net.Remote(repo_kind, repo_opts).open(state.readOnly(), ctx.allocator, ctx.remote_name);
                             defer remote.deinit(ctx.allocator);
                             try net.push(repo_kind, repo_opts, state, ctx.allocator, &remote, ctx.opts);
-
-                            const joined_refspecs = try std.mem.join(ctx.allocator, " ", ctx.opts.refspecs orelse return error.RefspecsNotFound);
-                            defer ctx.allocator.free(joined_refspecs);
-                            try un.writeMessage(repo_opts, state, .{ .push = .{ .remote_name = ctx.remote_name, .refspecs = joined_refspecs } });
+                            try un.writeMessage(repo_opts, state, .{ .push = .{
+                                .remote_name = ctx.remote_name,
+                                .refspecs = ctx.opts.refspecs orelse return error.RefspecsNotFound,
+                                .allocator = ctx.allocator,
+                            } });
                         }
                     };
 
