@@ -196,7 +196,7 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             if (self.push_url) |push_url| allocator.free(push_url);
 
             if (self.transport) |*transport| {
-                self.disconnect(allocator) catch {};
+                self.disconnect(allocator);
 
                 transport.deinit(allocator);
 
@@ -258,9 +258,9 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             }
         }
 
-        pub fn disconnect(self: *Remote(repo_kind, repo_opts), allocator: std.mem.Allocator) !void {
+        pub fn disconnect(self: *Remote(repo_kind, repo_opts), allocator: std.mem.Allocator) void {
             if (self.connected()) {
-                try self.transport.?.close(allocator);
+                self.transport.?.close(allocator);
             }
         }
 
@@ -567,7 +567,7 @@ pub fn fetch(
     if (!remote.connected()) {
         try connect(repo_kind, repo_opts, state.readOnly(), allocator, remote, .fetch, transport_opts);
     }
-    defer remote.disconnect(allocator) catch {};
+    defer remote.disconnect(allocator);
 
     try download(repo_kind, repo_opts, state, allocator, remote, transport_opts.refspecs);
 
@@ -628,7 +628,7 @@ pub fn push(
     transport_opts: Opts(repo_opts.ProgressCtx),
 ) !void {
     try upload(repo_kind, repo_opts, state, allocator, remote, transport_opts);
-    defer remote.disconnect(allocator) catch {};
+    defer remote.disconnect(allocator);
     try updateHeads(repo_kind, repo_opts, state, allocator, remote);
 }
 

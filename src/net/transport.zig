@@ -121,10 +121,10 @@ pub fn Transport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpt
             }
         }
 
-        pub fn close(self: *Transport(repo_kind, repo_opts), allocator: std.mem.Allocator) !void {
+        pub fn close(self: *Transport(repo_kind, repo_opts), allocator: std.mem.Allocator) void {
             switch (self.*) {
                 .file => |*file| file.close(allocator),
-                .wire => |*wire| try wire.close(allocator),
+                .wire => |*wire| wire.close(allocator),
             }
         }
     };

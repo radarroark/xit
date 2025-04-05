@@ -195,7 +195,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         }
 
         pub fn deinit(self: *WireTransport(repo_kind, repo_opts), allocator: std.mem.Allocator) void {
-            self.close(allocator) catch {};
+            self.close(allocator);
 
             self.wire_state.deinit();
             allocator.destroy(self.wire_state);
@@ -706,7 +706,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         pub fn close(
             self: *WireTransport(repo_kind, repo_opts),
             allocator: std.mem.Allocator,
-        ) !void {
+        ) void {
             const action: WireAction = switch (self.direction) {
                 .fetch => .upload_pack,
                 .push => .receive_pack,
@@ -714,14 +714,16 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
 
             const flush = "0000";
             if (self.connected and !self.is_stateless) {
-                if (WireStream.initMaybe(allocator, self.wire_state, self.url orelse return error.NotConnected, action)) |stream_maybe| {
-                    if (stream_maybe) |stream| {
-                        self.wire_stream = stream;
-                    }
-                    if (self.wire_stream) |*stream| {
-                        stream.write(allocator, flush, flush.len) catch {};
-                    }
-                } else |_| {}
+                if (self.url) |url| {
+                    if (WireStream.initMaybe(allocator, self.wire_state, url, action)) |stream_maybe| {
+                        if (stream_maybe) |stream| {
+                            self.wire_stream = stream;
+                        }
+                        if (self.wire_stream) |*stream| {
+                            stream.write(allocator, flush, flush.len) catch {};
+                        }
+                    } else |_| {}
+                }
             }
 
             self.clearStream(allocator);
@@ -730,7 +732,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                 allocator.free(url);
                 self.url = null;
             }
-            try self.wire_state.close();
+            self.wire_state.close() catch {};
 
             for (self.common.items) |*pkt| {
                 pkt.deinit(allocator);
