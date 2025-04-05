@@ -55,7 +55,7 @@ fn checkoutBranch(
     allocator: std.mem.Allocator,
     remote: *net.Remote(repo_kind, repo_opts),
 ) !void {
-    const remote_name = std.mem.sliceTo(remote.name.?, 0);
+    const remote_name = remote.name orelse return error.RemoteNameNotFound;
 
     var default_branch = std.ArrayList(u8).init(allocator);
     defer default_branch.deinit();

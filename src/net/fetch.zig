@@ -90,6 +90,9 @@ pub fn downloadPack(
         return;
     }
 
-    const t = &remote.transport.?;
-    try t.downloadPack(state, allocator);
+    if (remote.transport) |*transport| {
+        try transport.downloadPack(state, allocator);
+    } else {
+        return error.TransportNotFound;
+    }
 }

@@ -260,7 +260,9 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
         pub fn disconnect(self: *Remote(repo_kind, repo_opts), allocator: std.mem.Allocator) void {
             if (self.connected()) {
-                self.transport.?.close(allocator);
+                if (self.transport) |*transport| {
+                    transport.close(allocator);
+                }
             }
         }
 
@@ -598,12 +600,13 @@ fn upload(
         remote.push = null;
     }
 
-    remote.push = try net_push.Push(repo_kind, repo_opts).init(state.readOnly(), remote, allocator);
+    var remote_push = try net_push.Push(repo_kind, repo_opts).init(state.readOnly(), remote, allocator);
+    errdefer remote_push.deinit(allocator);
 
     var added_refspecs = false;
     if (transport_opts.refspecs) |refspecs| {
         for (refspecs) |refspec| {
-            try remote.push.?.addRefSpec(state.readOnly(), allocator, refspec);
+            try remote_push.addRefSpec(state.readOnly(), allocator, refspec);
             added_refspecs = true;
         }
     }
@@ -612,11 +615,13 @@ fn upload(
             if (.fetch == spec.direction) {
                 continue;
             }
-            try remote.push.?.addRefSpec(state.readOnly(), allocator, spec.full);
+            try remote_push.addRefSpec(state.readOnly(), allocator, spec.full);
         }
     }
 
-    try remote.push.?.complete(state.readOnly(), allocator);
+    try remote_push.complete(state.readOnly(), allocator);
+
+    remote.push = remote_push;
 }
 
 pub fn push(
