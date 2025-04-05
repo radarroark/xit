@@ -53,6 +53,7 @@ pub fn negotiate(
         }
 
         for (remote.active_refspecs.items) |*spec| {
+            // Why?
             if (!rf.isOid(repo_opts.hash, spec.src)) {
                 continue;
             }
