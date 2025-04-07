@@ -53,7 +53,6 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
         refspecs: std.ArrayListUnmanaged(net_refspec.RefSpec),
         active_refspecs: std.ArrayListUnmanaged(net_refspec.RefSpec),
         transport: ?net_transport.Transport(repo_kind, repo_opts),
-        push: ?net_push.Push(repo_kind, repo_opts),
         requires_fetch: bool,
         nego: net_fetch.FetchNegotiation(repo_kind, repo_opts),
 
@@ -210,10 +209,6 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
             clearRefSpecs(allocator, &self.active_refspecs);
             self.active_refspecs.deinit(allocator);
-
-            if (self.push) |*remote_push| {
-                remote_push.deinit(allocator);
-            }
         }
 
         pub fn dupe(self: *const Remote(repo_kind, repo_opts), allocator: std.mem.Allocator) !Remote(repo_kind, repo_opts) {
@@ -340,54 +335,6 @@ fn getHeads(
     }
 
     return refs;
-}
-
-fn download(
-    comptime repo_kind: rp.RepoKind,
-    comptime repo_opts: rp.RepoOpts(repo_kind),
-    state: rp.Repo(repo_kind, repo_opts).State(.read_write),
-    allocator: std.mem.Allocator,
-    remote: *Remote(repo_kind, repo_opts),
-    refspecs_maybe: ?[]const []const u8,
-) !void {
-    var refs = try getHeads(repo_kind, repo_opts, remote, allocator);
-    defer refs.deinit(allocator);
-
-    var specs = std.ArrayListUnmanaged(net_refspec.RefSpec){};
-    defer {
-        clearRefSpecs(allocator, &specs);
-        specs.deinit(allocator);
-    }
-
-    const new_active_refspecs: *std.ArrayListUnmanaged(net_refspec.RefSpec) =
-        if (refspecs_maybe) |refspecs| blk: {
-            if (refspecs.len == 0) {
-                break :blk &remote.refspecs;
-            } else {
-                for (refspecs) |refspec| {
-                    var spec = try net_refspec.RefSpec.init(allocator, refspec, .fetch);
-                    errdefer spec.deinit(allocator);
-                    try specs.append(allocator, spec);
-                }
-                break :blk &specs;
-            }
-        } else &remote.refspecs;
-
-    clearRefSpecs(allocator, &remote.active_refspecs);
-    for (new_active_refspecs.items) |*spec| {
-        var spec_dupe = try spec.dupe(allocator);
-        errdefer spec_dupe.deinit(allocator);
-        try remote.active_refspecs.append(allocator, spec_dupe);
-    }
-
-    if (remote.push) |*remote_push| {
-        remote_push.deinit(allocator);
-        remote.push = null;
-    }
-
-    try net_fetch.negotiate(repo_kind, repo_opts, state.readOnly(), allocator, remote);
-
-    try net_fetch.downloadPack(repo_kind, repo_opts, state, allocator, remote);
 }
 
 pub fn connect(
@@ -566,12 +513,44 @@ pub fn fetch(
     }
     defer remote.disconnect(allocator);
 
-    try download(repo_kind, repo_opts, state, allocator, remote, transport_opts.refspecs);
+    var refs = try getHeads(repo_kind, repo_opts, remote, allocator);
+    defer refs.deinit(allocator);
+
+    var specs = std.ArrayListUnmanaged(net_refspec.RefSpec){};
+    defer {
+        clearRefSpecs(allocator, &specs);
+        specs.deinit(allocator);
+    }
+
+    const new_active_refspecs: *std.ArrayListUnmanaged(net_refspec.RefSpec) =
+        if (transport_opts.refspecs) |refspecs| blk: {
+            if (refspecs.len == 0) {
+                break :blk &remote.refspecs;
+            } else {
+                for (refspecs) |refspec| {
+                    var spec = try net_refspec.RefSpec.init(allocator, refspec, .fetch);
+                    errdefer spec.deinit(allocator);
+                    try specs.append(allocator, spec);
+                }
+                break :blk &specs;
+            }
+        } else &remote.refspecs;
+
+    clearRefSpecs(allocator, &remote.active_refspecs);
+    for (new_active_refspecs.items) |*spec| {
+        var spec_dupe = try spec.dupe(allocator);
+        errdefer spec_dupe.deinit(allocator);
+        try remote.active_refspecs.append(allocator, spec_dupe);
+    }
+
+    try net_fetch.negotiate(repo_kind, repo_opts, state.readOnly(), allocator, remote);
+
+    try net_fetch.downloadPack(repo_kind, repo_opts, state, allocator, remote);
 
     try updateHeads(repo_kind, repo_opts, state, allocator, remote);
 }
 
-fn upload(
+pub fn push(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_only),
@@ -590,13 +569,8 @@ fn upload(
         try remote.active_refspecs.append(allocator, spec_dupe);
     }
 
-    if (remote.push) |*remote_push| {
-        remote_push.deinit(allocator);
-        remote.push = null;
-    }
-
     var remote_push = try net_push.Push(repo_kind, repo_opts).init(state, remote, allocator);
-    errdefer remote_push.deinit(allocator);
+    defer remote_push.deinit(allocator);
 
     var added_refspecs = false;
     if (transport_opts.refspecs) |refspecs| {
@@ -616,18 +590,6 @@ fn upload(
 
     try remote_push.complete(state, allocator);
 
-    remote.push = remote_push;
-}
-
-pub fn push(
-    comptime repo_kind: rp.RepoKind,
-    comptime repo_opts: rp.RepoOpts(repo_kind),
-    state: rp.Repo(repo_kind, repo_opts).State(.read_only),
-    allocator: std.mem.Allocator,
-    remote: *Remote(repo_kind, repo_opts),
-    transport_opts: Opts(repo_opts.ProgressCtx),
-) !void {
-    try upload(repo_kind, repo_opts, state, allocator, remote, transport_opts);
     defer remote.disconnect(allocator);
 }
 
