@@ -1307,41 +1307,12 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             var new_opts = opts;
             new_opts.refspecs = refspecs.items;
 
-            switch (repo_kind) {
-                .git => {
-                    const state = State(.read_write){ .core = &self.core, .extra = .{} };
-                    var remote = try net.Remote(repo_kind, repo_opts).open(state.readOnly(), allocator, remote_name);
-                    defer remote.deinit(allocator);
-                    try net.push(repo_kind, repo_opts, state, allocator, &remote, new_opts);
-                },
-                .xit => {
-                    const Ctx = struct {
-                        core: *Repo(repo_kind, repo_opts).Core,
-                        allocator: std.mem.Allocator,
-                        remote_name: []const u8,
-                        opts: net.Opts(repo_opts.ProgressCtx),
+            var moment = try self.core.latestMoment();
+            const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
 
-                        pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
-                            var moment = try DB.HashMap(.read_write).init(cursor.*);
-                            const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            var remote = try net.Remote(repo_kind, repo_opts).open(state.readOnly(), ctx.allocator, ctx.remote_name);
-                            defer remote.deinit(ctx.allocator);
-                            try net.push(repo_kind, repo_opts, state, ctx.allocator, &remote, ctx.opts);
-                            try un.writeMessage(repo_opts, state, .{ .push = .{
-                                .remote_name = ctx.remote_name,
-                                .refspecs = ctx.opts.refspecs orelse return error.RefspecsNotFound,
-                                .allocator = ctx.allocator,
-                            } });
-                        }
-                    };
-
-                    const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
-                    try history.appendContext(
-                        .{ .slot = try history.getSlot(-1) },
-                        Ctx{ .core = &self.core, .allocator = allocator, .remote_name = remote_name, .opts = new_opts },
-                    );
-                },
-            }
+            var remote = try net.Remote(repo_kind, repo_opts).open(state, allocator, remote_name);
+            defer remote.deinit(allocator);
+            try net.push(repo_kind, repo_opts, state, allocator, &remote, new_opts);
         }
     };
 }

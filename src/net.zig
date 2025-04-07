@@ -537,11 +537,6 @@ fn updateHeads(
     allocator: std.mem.Allocator,
     remote: *Remote(repo_kind, repo_opts),
 ) !void {
-    // TODO: update heads on push
-    if (remote.push) |_| {
-        return;
-    }
-
     var tagspec = try net_refspec.RefSpec.init(allocator, net_refspec.git_refspec_tags, .fetch);
     defer tagspec.deinit(allocator);
 
@@ -579,13 +574,13 @@ pub fn fetch(
 fn upload(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
-    state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+    state: rp.Repo(repo_kind, repo_opts).State(.read_only),
     allocator: std.mem.Allocator,
     remote: *Remote(repo_kind, repo_opts),
     transport_opts: Opts(repo_opts.ProgressCtx),
 ) !void {
     if (!remote.connected()) {
-        try connect(repo_kind, repo_opts, state.readOnly(), allocator, remote, .push, transport_opts);
+        try connect(repo_kind, repo_opts, state, allocator, remote, .push, transport_opts);
     }
 
     clearRefSpecs(allocator, &remote.active_refspecs);
@@ -600,13 +595,13 @@ fn upload(
         remote.push = null;
     }
 
-    var remote_push = try net_push.Push(repo_kind, repo_opts).init(state.readOnly(), remote, allocator);
+    var remote_push = try net_push.Push(repo_kind, repo_opts).init(state, remote, allocator);
     errdefer remote_push.deinit(allocator);
 
     var added_refspecs = false;
     if (transport_opts.refspecs) |refspecs| {
         for (refspecs) |refspec| {
-            try remote_push.addRefSpec(state.readOnly(), allocator, refspec);
+            try remote_push.addRefSpec(state, allocator, refspec);
             added_refspecs = true;
         }
     }
@@ -615,11 +610,11 @@ fn upload(
             if (.fetch == spec.direction) {
                 continue;
             }
-            try remote_push.addRefSpec(state.readOnly(), allocator, spec.full);
+            try remote_push.addRefSpec(state, allocator, spec.full);
         }
     }
 
-    try remote_push.complete(state.readOnly(), allocator);
+    try remote_push.complete(state, allocator);
 
     remote.push = remote_push;
 }
@@ -627,14 +622,13 @@ fn upload(
 pub fn push(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
-    state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+    state: rp.Repo(repo_kind, repo_opts).State(.read_only),
     allocator: std.mem.Allocator,
     remote: *Remote(repo_kind, repo_opts),
     transport_opts: Opts(repo_opts.ProgressCtx),
 ) !void {
     try upload(repo_kind, repo_opts, state, allocator, remote, transport_opts);
     defer remote.disconnect(allocator);
-    try updateHeads(repo_kind, repo_opts, state, allocator, remote);
 }
 
 pub fn clone(

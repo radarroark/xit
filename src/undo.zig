@@ -53,11 +53,6 @@ pub fn UndoCommand(comptime hash_kind: hash.HashKind) type {
         fetch: struct {
             remote_name: []const u8,
         },
-        push: struct {
-            remote_name: []const u8,
-            refspecs: []const []const u8,
-            allocator: std.mem.Allocator,
-        },
         copy_objects,
     };
 }
@@ -153,11 +148,6 @@ pub fn writeMessage(
         },
         .clone => |clone_cmd| bufPrint(&message_buffer, "clone {s}", .{clone_cmd.url}),
         .fetch => |fetch_cmd| bufPrint(&message_buffer, "fetch {s}", .{fetch_cmd.remote_name}),
-        .push => |push_cmd| blk: {
-            const joined_refspecs = try std.mem.join(push_cmd.allocator, " ", push_cmd.refspecs);
-            defer push_cmd.allocator.free(joined_refspecs);
-            break :blk bufPrint(&message_buffer, "push {s} {s}", .{ push_cmd.remote_name, joined_refspecs });
-        },
         .copy_objects => bufPrint(&message_buffer, "copy objects", .{}),
     };
 
