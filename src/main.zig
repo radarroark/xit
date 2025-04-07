@@ -21,6 +21,7 @@ const mrg = @import("./merge.zig");
 const obj = @import("./object.zig");
 const tr = @import("./tree.zig");
 const rf = @import("./ref.zig");
+const net_refspec = @import("./net/refspec.zig");
 
 pub const Writers = struct {
     out: std.io.AnyWriter = std.io.null_writer.any(),
@@ -593,10 +594,25 @@ fn runCommand(
         .fetch => |fetch_cmd| {
             var clear_line = false;
             var progress_node: ?std.Progress.Node = null;
+            var refspecs = try std.ArrayList([]const u8).initCapacity(allocator, fetch_cmd.refspec_strs.len);
+            defer {
+                for (refspecs.items) |refspec| allocator.free(refspec);
+                refspecs.deinit();
+            }
+            for (fetch_cmd.refspec_strs) |refspec_str| {
+                var refspec = try net_refspec.RefSpec.init(allocator, refspec_str, .fetch);
+                defer refspec.deinit(allocator);
+                const refspec_normalized = try refspec.normalize(allocator);
+                refspecs.appendAssumeCapacity(refspec_normalized);
+            }
+
             try repo.fetch(
                 allocator,
                 fetch_cmd.remote_name,
-                .{ .progress_ctx = .{ .writers = writers, .clear_line = &clear_line, .node = &progress_node } },
+                .{
+                    .progress_ctx = .{ .writers = writers, .clear_line = &clear_line, .node = &progress_node },
+                    .refspecs = if (refspecs.items.len > 0) refspecs.items else null,
+                },
             );
         },
         .push => |push_cmd| {

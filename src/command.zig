@@ -340,6 +340,8 @@ fn commandHelp(command_kind: CommandKind) Help {
             .example =
             \\fetch from a specific remote:
             \\    xit fetch origin
+            \\fetch from specific refs from remote origin:
+            \\    xit fetch origin refspecs
             ,
         },
         .push => .{
@@ -555,6 +557,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
         },
         fetch: struct {
             remote_name: []const u8,
+            refspec_strs: []const []const u8,
         },
         push: struct {
             remote_name: []const u8,
@@ -883,10 +886,11 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                     } };
                 },
                 .fetch => {
-                    if (cmd_args.positional_args.len != 1) return null;
+                    if (cmd_args.positional_args.len < 1) return null;
 
                     return .{ .fetch = .{
                         .remote_name = cmd_args.positional_args[0],
+                        .refspec_strs = if (cmd_args.positional_args.len > 1) cmd_args.positional_args[1..] else &.{},
                     } };
                 },
                 .push => {
