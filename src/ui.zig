@@ -100,6 +100,7 @@ pub fn rootWidget(
         const child_id_maybe = switch (cmd_kind) {
             .status, .diff_dir, .diff_added => root.ui_root.box.children.values()[0].widget.ui_root_tabs.getChildFocusId(.status),
             .log => root.ui_root.box.children.values()[0].widget.ui_root_tabs.getChildFocusId(.log),
+            .config => root.ui_root.box.children.values()[0].widget.ui_root_tabs.getChildFocusId(.config),
             else => null,
         };
         if (child_id_maybe) |child_id| {

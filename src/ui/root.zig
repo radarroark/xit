@@ -16,7 +16,7 @@ pub fn RootTabs(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
     return struct {
         box: wgt.Box(Widget),
 
-        const FocusKind = enum { log, status, undo, config };
+        const FocusKind = enum { log, status, config, undo };
 
         pub fn init(allocator: std.mem.Allocator) !RootTabs(Widget, repo_kind) {
             var box = try wgt.Box(Widget).init(allocator, null, .horiz);
@@ -27,8 +27,8 @@ pub fn RootTabs(comptime Widget: type, comptime repo_kind: rp.RepoKind) type {
                 const name = switch (focus_kind) {
                     .log => "log",
                     .status => "status",
+                    .config => "config",
                     .undo => if (repo_kind == .xit) "undo" else continue,
-                    .config => continue, // temporarily disable config section
                 };
                 var text_box = try wgt.TextBox(Widget).init(allocator, name, .single, .none);
                 errdefer text_box.deinit();
@@ -144,16 +144,16 @@ pub fn Root(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime rep
                             try stack.children.put(status.getFocus().id, status);
                         }
 
-                        if (repo_kind == .xit) {
-                            var undo = Widget{ .ui_undo = try ui_undo.Undo(Widget, repo_kind, repo_opts).init(allocator, repo) };
-                            errdefer undo.deinit();
-                            try stack.children.put(undo.getFocus().id, undo);
-                        }
-
                         {
                             var config = Widget{ .ui_config_list = try ui_config.ConfigList(Widget, repo_kind, repo_opts).init(allocator, repo) };
                             errdefer config.deinit();
                             try stack.children.put(config.getFocus().id, config);
+                        }
+
+                        if (repo_kind == .xit) {
+                            var undo = Widget{ .ui_undo = try ui_undo.Undo(Widget, repo_kind, repo_opts).init(allocator, repo) };
+                            errdefer undo.deinit();
+                            try stack.children.put(undo.getFocus().id, undo);
                         }
 
                         try box.children.put(stack.getFocus().id, .{ .widget = .{ .stack = stack }, .rect = null, .min_size = null });

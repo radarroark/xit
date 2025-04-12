@@ -300,6 +300,8 @@ fn commandHelp(command_kind: CommandKind) Help {
             \\add, remove, and list config options.
             ,
             .example =
+            \\display in TUI:
+            \\    xit config
             \\add config:
             \\    xit config add core.editor vim
             \\remove config:
@@ -945,7 +947,7 @@ pub fn CommandDispatch(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash
                 if (show_help) {
                     return .{ .help = command_kind };
                 } else if (cmd_args.positional_args.len == 0 and !force_cli and switch (command_kind) {
-                    .status, .diff_dir, .diff_added, .log => true,
+                    .status, .diff_dir, .diff_added, .log, .config => true,
                     else => false,
                 }) {
                     return .{ .tui = command_kind };
