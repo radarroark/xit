@@ -513,13 +513,10 @@ fn runCommand(
                     .oid => |oid| oid.*,
                 };
                 const oid = oid_maybe orelse {
+                    var ref_path_buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
                     try writers.err.print("invalid ref: {s}\n", .{switch (ref_or_oid) {
                         .oid => |oid| oid,
-                        .ref => |ref| blk: {
-                            var ref_path_buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
-                            const ref_path = try ref.toPath(&ref_path_buffer);
-                            break :blk ref_path;
-                        },
+                        .ref => |ref| try ref.toPath(&ref_path_buffer),
                     }});
                     return error.HandledError;
                 };
