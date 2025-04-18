@@ -8,8 +8,11 @@ pub const HttpState = struct {
     sent_write_request: bool,
 
     pub fn init(allocator: std.mem.Allocator) !HttpState {
+        var client: std.http.Client = .{ .allocator = allocator };
+        try client.initDefaultProxies(allocator);
+
         return .{
-            .http_client = std.http.Client{ .allocator = allocator },
+            .http_client = client,
             .read_request = null,
             .write_request = null,
             .sent_write_request = false,
@@ -17,6 +20,9 @@ pub const HttpState = struct {
     }
 
     pub fn deinit(self: *HttpState) void {
+        if (self.http_client.http_proxy) |proxy| self.http_client.allocator.destroy(proxy);
+        if (self.http_client.https_proxy) |proxy| self.http_client.allocator.destroy(proxy);
+
         self.http_client.deinit();
         close(self);
     }
