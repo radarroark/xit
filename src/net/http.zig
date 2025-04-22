@@ -6,25 +6,31 @@ pub const HttpState = struct {
     read_request: ?std.http.Client.Request,
     write_request: ?std.http.Client.Request,
     sent_write_request: bool,
+    arena: *std.heap.ArenaAllocator,
+    allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) !HttpState {
-        var client: std.http.Client = .{ .allocator = allocator };
-        try client.initDefaultProxies(allocator);
+        var arena = try allocator.create(std.heap.ArenaAllocator);
+        arena.* = .init(allocator);
+        var client: std.http.Client = .{ .allocator = arena.allocator() };
+        try client.initDefaultProxies(arena.allocator());
 
         return .{
             .http_client = client,
             .read_request = null,
             .write_request = null,
             .sent_write_request = false,
+            .arena = arena,
+            .allocator = allocator,
         };
     }
 
     pub fn deinit(self: *HttpState) void {
-        if (self.http_client.http_proxy) |proxy| self.http_client.allocator.destroy(proxy);
-        if (self.http_client.https_proxy) |proxy| self.http_client.allocator.destroy(proxy);
-
         self.http_client.deinit();
         close(self);
+        self.arena.deinit();
+        self.allocator.destroy(self.arena);
+        self.* = undefined;
     }
 
     pub fn close(self: *HttpState) void {
