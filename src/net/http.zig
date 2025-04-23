@@ -12,6 +12,11 @@ pub const HttpState = struct {
     pub fn init(allocator: std.mem.Allocator) !HttpState {
         var arena = try allocator.create(std.heap.ArenaAllocator);
         arena.* = .init(allocator);
+        errdefer {
+            arena.deinit();
+            allocator.destroy(arena);
+        }
+
         var client: std.http.Client = .{ .allocator = arena.allocator() };
         try client.initDefaultProxies(arena.allocator());
 
