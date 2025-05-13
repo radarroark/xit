@@ -764,7 +764,6 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                 var moment = try repo.core.latestMoment();
                 if (try moment.getCursor(hash.hashInt(repo_opts.hash, "index"))) |index_cursor| {
                     var iter = try index_cursor.iterator();
-                    defer iter.deinit();
                     while (try iter.next()) |_| {
                         count += 1;
                     }
@@ -824,7 +823,6 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                 var moment = try repo.core.latestMoment();
                 if (try moment.getCursor(hash.hashInt(repo_opts.hash, "index"))) |index_cursor| {
                     var iter = try index_cursor.iterator();
-                    defer iter.deinit();
                     while (try iter.next()) |_| {
                         count += 1;
                     }

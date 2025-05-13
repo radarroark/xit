@@ -839,7 +839,6 @@ fn writeBlobWithPatches(
                 if (self.parent.current_line_id_hash) |current_line_id_hash| {
                     const children_cursor = (try self.parent.merge_live_parent_to_children.getCursor(current_line_id_hash)) orelse return error.KeyNotFound;
                     var children_iter = try children_cursor.iterator();
-                    defer children_iter.deinit();
 
                     const first_child_cursor = (try children_iter.next()) orelse return error.ExpectedChild;
                     const first_kv_pair = try first_child_cursor.readKeyValuePair();
@@ -887,7 +886,6 @@ fn writeBlobWithPatches(
                                 break;
                             }
                             var next_children_iter = try next_children_cursor.iterator();
-                            defer next_children_iter.deinit();
                             if (try next_children_iter.next()) |next_child_cursor| {
                                 if (try next_children_iter.next() != null) return error.ExpectedOneChild;
                                 const next_kv_pair = try next_child_cursor.readKeyValuePair();
@@ -918,7 +916,6 @@ fn writeBlobWithPatches(
                                 break;
                             }
                             var next_children_iter = try next_children_cursor.iterator();
-                            defer next_children_iter.deinit();
                             if (try next_children_iter.next()) |next_child_cursor| {
                                 if (try next_children_iter.next() != null) return error.ExpectedOneChild;
                                 const next_kv_pair = try next_child_cursor.readKeyValuePair();
@@ -944,7 +941,6 @@ fn writeBlobWithPatches(
                         if (self.parent.base_live_parent_to_children) |base_live_parent_to_children| {
                             while (try base_live_parent_to_children.getCursor(next_line_id_hash)) |next_children_cursor| {
                                 var next_children_iter = try next_children_cursor.iterator();
-                                defer next_children_iter.deinit();
                                 if (try next_children_iter.next()) |next_child_cursor| {
                                     if (try next_children_iter.next() != null) return error.ExpectedOneChild;
                                     const next_kv_pair = try next_child_cursor.readKeyValuePair();
@@ -1062,7 +1058,6 @@ fn writeBlobWithPatches(
 
                         const next_children_cursor = (try self.parent.merge_live_parent_to_children.getCursor(first_line_id_hash)) orelse return error.KeyNotFound;
                         var next_children_iter = try next_children_cursor.iterator();
-                        defer next_children_iter.deinit();
                         if (try next_children_iter.next()) |_| {
                             self.parent.current_line_id_hash = first_line_id_hash;
                         } else {

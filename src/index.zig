@@ -134,7 +134,6 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                 .xit => {
                     if (try state.extra.moment.getCursor(hash.hashInt(repo_opts.hash, "index"))) |index_cursor| {
                         var iter = try index_cursor.iterator();
-                        defer iter.deinit();
                         while (try iter.next()) |*next_cursor| {
                             const kv_pair = try next_cursor.readKeyValuePair();
                             const path = try kv_pair.key_cursor.readBytesAlloc(self.arena.allocator(), repo_opts.max_read_size);
@@ -654,7 +653,6 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 
                     // remove items no longer in the index
                     var iter = try index.cursor.iterator();
-                    defer iter.deinit();
                     while (try iter.next()) |*next_cursor| {
                         const kv_pair = try next_cursor.readKeyValuePair();
                         const path = try kv_pair.key_cursor.readBytesAlloc(allocator, repo_opts.max_read_size);

@@ -235,7 +235,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             .work_dir = work_dir,
                             .repo_dir = repo_dir,
                             .db_file = db_file,
-                            .db = try DB.init(allocator, .{ .file = db_file, .hash_id = .{ .id = hash.hashId(repo_opts.hash) } }),
+                            .db = try DB.init(.{ .file = db_file, .hash_id = .{ .id = hash.hashId(repo_opts.hash) } }),
                         },
                     };
 
@@ -314,7 +314,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                                 .none => {},
                                 else => blk: {
                                     const hash_id = hash.hashId(repo_opts.hash);
-                                    const db = try DB.init(allocator, .{ .file = db_file, .hash_id = .{ .id = hash_id } });
+                                    const db = try DB.init(.{ .file = db_file, .hash_id = .{ .id = hash_id } });
                                     if (db.header.hash_id.id != hash_id) return error.UnexpectedHashKind;
                                     break :blk db;
                                 },

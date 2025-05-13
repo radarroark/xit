@@ -212,7 +212,6 @@ pub const RefList = struct {
                     .{ .hash_map_get = .{ .value = hash.hashInt(repo_opts.hash, dir_name) } },
                 })) |heads_cursor| {
                     var iter = try heads_cursor.iterator();
-                    defer iter.deinit();
                     while (try iter.next()) |*next_cursor| {
                         const kv_pair = try next_cursor.readKeyValuePair();
                         const name = try kv_pair.key_cursor.readBytesAlloc(ref_list.arena.allocator(), MAX_REF_CONTENT_SIZE);

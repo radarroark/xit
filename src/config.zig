@@ -229,7 +229,6 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                 .xit => {
                     if (try state.extra.moment.getCursor(hash.hashInt(repo_opts.hash, "config"))) |config_cursor| {
                         var config_iter = try config_cursor.iterator();
-                        defer config_iter.deinit();
                         while (try config_iter.next()) |*section_cursor| {
                             const section_kv_pair = try section_cursor.readKeyValuePair();
                             const section_name = try section_kv_pair.key_cursor.readBytesAlloc(arena.allocator(), repo_opts.max_read_size);
@@ -237,7 +236,6 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                             var variables = Variables.init(arena.allocator());
 
                             var var_iter = try section_kv_pair.value_cursor.iterator();
-                            defer var_iter.deinit();
                             while (try var_iter.next()) |*var_cursor| {
                                 const var_kv_pair = try var_cursor.readKeyValuePair();
                                 const var_name = try var_kv_pair.key_cursor.readBytesAlloc(arena.allocator(), repo_opts.max_read_size);

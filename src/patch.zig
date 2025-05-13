@@ -137,7 +137,7 @@ pub fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
 
             const db_ptr = try allocator.create(DB);
             errdefer allocator.destroy(db_ptr);
-            db_ptr.* = try DB.init(allocator, .{ .file = db_file });
+            db_ptr.* = try DB.init(.{ .file = db_file });
 
             const map = try DB.HashMap(.read_write).init(db_ptr.rootCursor());
 
@@ -242,9 +242,7 @@ pub fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
                 const commit_id_int = try hash.hexToInt(repo_opts.hash, &oid_hex);
                 if (try self.parent_to_children.getCursor(commit_id_int)) |children_cursor| {
                     const children = try DB.HashMap(.read_only).init(children_cursor);
-
                     var children_iter = try children.iterator();
-                    defer children_iter.deinit();
 
                     while (try children_iter.next()) |*next_cursor| {
                         const kv_pair = try next_cursor.readKeyValuePair();
@@ -442,7 +440,6 @@ pub fn applyPatch(
 
         if (try live_parent_to_children.getCursor(current_line_id_hash)) |children_cursor| {
             var children_iter = try children_cursor.iterator();
-            defer children_iter.deinit();
 
             if (try children_iter.next()) |child_cursor| {
                 // if there are any other children, remove the line list
