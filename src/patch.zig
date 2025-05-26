@@ -83,8 +83,8 @@ pub fn writeAndApplyPatches(
             // store path
             const path_hash = hash.hashInt(repo_opts.hash, line_iter_pair.path);
             const path_set_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "path-set"));
-            const path_set = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(path_set_cursor);
-            var path_cursor = try path_set.putKeyCursor(path_hash);
+            const path_set = try rp.Repo(.xit, repo_opts).DB.HashSet(.read_write).init(path_set_cursor);
+            var path_cursor = try path_set.putCursor(path_hash);
             try path_cursor.writeIfEmpty(.{ .bytes = line_iter_pair.path });
 
             // create patch

@@ -78,8 +78,8 @@ pub fn add(
 
             // store ref name
             const ref_name_set_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "ref-name-set"));
-            const ref_name_set = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(ref_name_set_cursor);
-            var ref_name_cursor = try ref_name_set.putKeyCursor(name_hash);
+            const ref_name_set = try rp.Repo(repo_kind, repo_opts).DB.HashSet(.read_write).init(ref_name_set_cursor);
+            var ref_name_cursor = try ref_name_set.putCursor(name_hash);
             try ref_name_cursor.writeIfEmpty(.{ .bytes = name });
 
             // add ref name to refs/heads/{refname}
@@ -96,8 +96,8 @@ pub fn add(
             };
             if (oid_maybe) |oid| {
                 const ref_content_set_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "ref-content-set"));
-                const ref_content_set = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(ref_content_set_cursor);
-                var ref_content_cursor = try ref_content_set.putKeyCursor(hash.hashInt(repo_opts.hash, &oid));
+                const ref_content_set = try rp.Repo(repo_kind, repo_opts).DB.HashSet(.read_write).init(ref_content_set_cursor);
+                var ref_content_cursor = try ref_content_set.putCursor(hash.hashInt(repo_opts.hash, &oid));
                 try ref_content_cursor.writeIfEmpty(.{ .bytes = &oid });
                 try heads.put(name_hash, .{ .slot = ref_content_cursor.slot() });
             }

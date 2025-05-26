@@ -306,11 +306,11 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                 .git => try self.write(state),
                 .xit => {
                     const config_name_set_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "config-name-set"));
-                    const config_name_set = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(config_name_set_cursor);
+                    const config_name_set = try rp.Repo(repo_kind, repo_opts).DB.HashSet(.read_write).init(config_name_set_cursor);
 
                     // store section name
                     const section_name_hash = hash.hashInt(repo_opts.hash, section_name);
-                    var section_name_cursor = try config_name_set.putKeyCursor(section_name_hash);
+                    var section_name_cursor = try config_name_set.putCursor(section_name_hash);
                     try section_name_cursor.writeIfEmpty(.{ .bytes = section_name });
 
                     // add section name to config
@@ -320,7 +320,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
                     // store variable name
                     const var_name_hash = hash.hashInt(repo_opts.hash, var_name);
-                    var var_name_cursor = try config_name_set.putKeyCursor(var_name_hash);
+                    var var_name_cursor = try config_name_set.putCursor(var_name_hash);
                     try var_name_cursor.writeIfEmpty(.{ .bytes = var_name });
 
                     // add var name to config

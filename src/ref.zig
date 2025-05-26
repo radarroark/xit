@@ -467,13 +467,13 @@ pub fn write(
 
             const ref_name_hash = hash.hashInt(repo_opts.hash, ref.name);
             const ref_name_set_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "ref-name-set"));
-            const ref_name_set = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(ref_name_set_cursor);
-            var ref_name_cursor = try ref_name_set.putKeyCursor(ref_name_hash);
+            const ref_name_set = try rp.Repo(repo_kind, repo_opts).DB.HashSet(.read_write).init(ref_name_set_cursor);
+            var ref_name_cursor = try ref_name_set.putCursor(ref_name_hash);
             try ref_name_cursor.writeIfEmpty(.{ .bytes = ref.name });
             try map.putKey(ref_name_hash, .{ .slot = ref_name_cursor.slot() });
             const ref_content_set_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "ref-content-set"));
-            const ref_content_set = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(ref_content_set_cursor);
-            var ref_content_cursor = try ref_content_set.putKeyCursor(hash.hashInt(repo_opts.hash, content));
+            const ref_content_set = try rp.Repo(repo_kind, repo_opts).DB.HashSet(.read_write).init(ref_content_set_cursor);
+            var ref_content_cursor = try ref_content_set.putCursor(hash.hashInt(repo_opts.hash, content));
             try ref_content_cursor.writeIfEmpty(.{ .bytes = content });
             try map.put(ref_name_hash, .{ .slot = ref_content_cursor.slot() });
         },

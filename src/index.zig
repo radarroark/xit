@@ -695,14 +695,14 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                         }
 
                         const path_set_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "path-set"));
-                        const path_set = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(path_set_cursor);
-                        var path_cursor = try path_set.putKeyCursor(path_hash);
+                        const path_set = try rp.Repo(repo_kind, repo_opts).DB.HashSet(.read_write).init(path_set_cursor);
+                        var path_cursor = try path_set.putCursor(path_hash);
                         try path_cursor.writeIfEmpty(.{ .bytes = path });
                         try index.putKey(path_hash, .{ .slot = path_cursor.slot() });
 
                         const entry_buffer_set_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "entry-buffer-set"));
-                        const entry_buffer_set = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(entry_buffer_set_cursor);
-                        var entry_buffer_cursor = try entry_buffer_set.putKeyCursor(hash.hashInt(repo_opts.hash, entry_buffer.items));
+                        const entry_buffer_set = try rp.Repo(repo_kind, repo_opts).DB.HashSet(.read_write).init(entry_buffer_set_cursor);
+                        var entry_buffer_cursor = try entry_buffer_set.putCursor(hash.hashInt(repo_opts.hash, entry_buffer.items));
                         try entry_buffer_cursor.writeIfEmpty(.{ .bytes = entry_buffer.items });
                         try index.put(path_hash, .{ .slot = entry_buffer_cursor.slot() });
                     }
