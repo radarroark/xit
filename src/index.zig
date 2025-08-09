@@ -190,9 +190,8 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
             self.root_children.deinit();
         }
 
-        /// if path is a file, adds it as an entry to the index struct.
+        /// if path is a file or symlink, adds it as an entry to the index struct.
         /// if path is a dir, adds its children recursively.
-        /// ignoring symlinks for now but will add that later.
         pub fn addPath(
             self: *Index(repo_kind, repo_opts),
             state: rp.Repo(repo_kind, repo_opts).State(.read_write),
