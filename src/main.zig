@@ -541,23 +541,12 @@ fn runCommand(
                 try writers.out.print("\n", .{});
             }
         },
-        .merge => |merge_cmd| {
+        .merge, .cherry_pick => |merge_cmd| {
             var clear_line = false;
             var progress_node: ?std.Progress.Node = null;
             var result = try repo.merge(
                 allocator,
                 merge_cmd,
-                .{ .writers = writers, .clear_line = &clear_line, .node = &progress_node },
-            );
-            defer result.deinit();
-            try printMergeResult(repo_kind, repo_opts, &result, writers);
-        },
-        .cherry_pick => |cherry_pick_cmd| {
-            var clear_line = false;
-            var progress_node: ?std.Progress.Node = null;
-            var result = try repo.merge(
-                allocator,
-                cherry_pick_cmd,
                 .{ .writers = writers, .clear_line = &clear_line, .node = &progress_node },
             );
             defer result.deinit();

@@ -756,7 +756,7 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
 
                     return .{ .log = try source.toOwnedSlice() };
                 },
-                .merge => {
+                inline .merge, .cherry_pick => |cmd_kind| {
                     var merge_action: mrg.MergeAction(hash_kind) = undefined;
 
                     if (cmd_args.contains("--continue")) {
@@ -781,42 +781,16 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
 
                     return .{
                         .merge = .{
-                            .kind = .full,
+                            .kind = switch (cmd_kind) {
+                                .merge => .full,
+                                .cherry_pick => .pick,
+                                else => comptime unreachable,
+                            },
                             .action = merge_action,
                         },
                     };
                 },
-                .cherry_pick => {
-                    var merge_action: mrg.MergeAction(hash_kind) = undefined;
-
-                    if (cmd_args.contains("--continue")) {
-                        if (cmd_args.positional_args.len != 0) return null;
-                        merge_action = .cont;
-                    } else if (cmd_args.contains("--abort")) {
-                        if (cmd_args.positional_args.len != 0) return null;
-                        return .{ .reset_dir = .{
-                            .kind = .reset,
-                            .target = null,
-                            .update_work_dir = true,
-                            .force = true,
-                        } };
-                    } else {
-                        if (cmd_args.positional_args.len == 0) return null;
-                        var source = std.ArrayList(rf.RefOrOid(hash_kind)).init(cmd_args.arena.allocator());
-                        for (cmd_args.positional_args) |arg| {
-                            try source.append(rf.RefOrOid(hash_kind).initFromUser(arg) orelse return error.InvalidRefOrOid);
-                        }
-                        merge_action = .{ .new = .{ .source = try source.toOwnedSlice() } };
-                    }
-
-                    return .{
-                        .merge = .{
-                            .kind = .pick,
-                            .action = merge_action,
-                        },
-                    };
-                },
-                .config => {
+                inline .config, .remote => |cmd_kind| {
                     if (cmd_args.positional_args.len == 0) return null;
 
                     const cmd_name = cmd_args.positional_args[0];
@@ -847,37 +821,11 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                         return null;
                     }
 
-                    return .{ .config = cmd };
-                },
-                .remote => {
-                    if (cmd_args.positional_args.len == 0) return null;
-
-                    const cmd_name = cmd_args.positional_args[0];
-
-                    var cmd: cfg.ConfigCommand = undefined;
-                    if (std.mem.eql(u8, "list", cmd_name)) {
-                        cmd = .list;
-                    } else if (std.mem.eql(u8, "add", cmd_name)) {
-                        if (cmd_args.positional_args.len != 3) {
-                            return null;
-                        }
-                        cmd = .{ .add = .{
-                            .name = cmd_args.positional_args[1],
-                            .value = cmd_args.positional_args[2],
-                        } };
-                    } else if (std.mem.eql(u8, "rm", cmd_name)) {
-                        if (cmd_args.positional_args.len != 2) {
-                            return null;
-                        }
-                        cmd = .{ .remove = .{
-                            .name = cmd_args.positional_args[1],
-                        } };
-                    } else {
-                        try cmd_args.unused_args.put(cmd_name, {});
-                        return null;
-                    }
-
-                    return .{ .remote = cmd };
+                    return switch (cmd_kind) {
+                        .config => .{ .config = cmd },
+                        .remote => .{ .remote = cmd },
+                        else => comptime unreachable,
+                    };
                 },
                 .clone => {
                     if (cmd_args.positional_args.len != 2) return null;

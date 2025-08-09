@@ -424,7 +424,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             }
 
             switch (obj_header.kind) {
-                .commit, .tree, .blob, .tag => {
+                inline .commit, .tree, .blob, .tag => |pack_obj_kind| {
                     const start_position = try pack_file.getPos();
 
                     var stream = PackObjectStream{ .file = .{
@@ -444,12 +444,12 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                         .internal = .{
                             .basic = .{
                                 .header = .{
-                                    .kind = switch (obj_header.kind) {
+                                    .kind = switch (pack_obj_kind) {
                                         .commit => .commit,
                                         .tree => .tree,
                                         .blob => .blob,
                                         .tag => .tag,
-                                        else => unreachable,
+                                        else => comptime unreachable,
                                     },
                                     .size = size,
                                 },
