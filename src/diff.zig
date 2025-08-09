@@ -294,7 +294,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
             allocator: std.mem.Allocator,
             buffer: []const u8,
         ) !LineIterator(repo_kind, repo_opts) {
-            return try initFromBuffer(allocator, "", [_]u8{0} ** hash.byteLen(repo_opts.hash), null, buffer);
+            return try initFromBuffer(allocator, "", &[_]u8{0} ** hash.byteLen(repo_opts.hash), null, buffer);
         }
 
         pub fn convertToBuffer(self: *LineIterator(repo_kind, repo_opts)) !void {
