@@ -600,7 +600,9 @@ pub const ObjectKind = enum {
 pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return struct {
         allocator: std.mem.Allocator,
-        reader: std.io.BufferedReader(repo_opts.read_size, Reader),
+        // TODO add buffering back
+        //reader: std.io.BufferedReader(repo_opts.read_size, Reader),
+        reader: Reader,
 
         pub const Reader = switch (repo_kind) {
             .git => pack.LooseOrPackObjectReader(repo_opts),
@@ -631,26 +633,27 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
         }
 
         pub fn deinit(self: *ObjectReader(repo_kind, repo_opts)) void {
-            self.reader.unbuffered_reader.deinit(self.allocator);
+            self.reader.deinit(self.allocator);
         }
 
         pub fn reset(self: *ObjectReader(repo_kind, repo_opts)) !void {
-            try self.reader.unbuffered_reader.reset();
-            self.reader = std.io.bufferedReaderSize(repo_opts.read_size, self.reader.unbuffered_reader);
+            try self.reader.reset();
+            // TODO: add buffering back
+            //self.reader = std.io.bufferedReaderSize(repo_opts.read_size, self.reader.unbuffered_reader);
         }
 
         pub fn seekTo(self: *ObjectReader(repo_kind, repo_opts), position: u64) !void {
             try self.reset();
             switch (repo_kind) {
-                .git => try self.reader.unbuffered_reader.skipBytes(position),
-                .xit => try self.reader.unbuffered_reader.seekTo(position),
+                .git => try self.reader.skipBytes(position),
+                .xit => try self.reader.seekTo(position),
             }
         }
 
         pub fn header(self: *const ObjectReader(repo_kind, repo_opts)) ObjectHeader {
             return switch (repo_kind) {
-                .git => self.reader.unbuffered_reader.header(),
-                .xit => self.reader.unbuffered_reader.header,
+                .git => self.reader.header(),
+                .xit => self.reader.header,
             };
         }
     };
