@@ -18,10 +18,12 @@ pub const include_dir = root_path ++ "mbedtls/include";
 const library_include = root_path ++ "mbedtls/library";
 
 pub fn create(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) Library {
-    const ret = b.addStaticLibrary(.{
+    const ret = b.addLibrary(.{
         .name = "mbedtls",
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+        }),
     });
     ret.addIncludePath(.{ .cwd_relative = include_dir });
     ret.addIncludePath(.{ .cwd_relative = library_include });
