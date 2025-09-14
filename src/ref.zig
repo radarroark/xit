@@ -2,6 +2,7 @@ const std = @import("std");
 const hash = @import("./hash.zig");
 const fs = @import("./fs.zig");
 const rp = @import("./repo.zig");
+const buf_rdr = @import("./std/buffered_reader.zig");
 
 pub const MAX_REF_CONTENT_SIZE = 512;
 const REF_START_STR = "ref: ";
@@ -202,9 +203,9 @@ pub const RefList = struct {
                 };
                 defer ref_kind_dir.close();
 
-                var path = std.ArrayList([]const u8).init(allocator);
-                defer path.deinit();
-                try ref_list.addRefs(repo_opts, state, ref_kind, ref_kind_dir, &path);
+                var path = std.ArrayList([]const u8){};
+                defer path.deinit(allocator);
+                try ref_list.addRefs(repo_opts, state, ref_kind, ref_kind_dir, allocator, &path);
             },
             .xit => {
                 if (try state.extra.moment.cursor.readPath(void, &.{
@@ -236,13 +237,14 @@ pub const RefList = struct {
         state: rp.Repo(.git, repo_opts).State(.read_only),
         ref_kind: RefKind,
         dir: std.fs.Dir,
+        allocator: std.mem.Allocator,
         path: *std.ArrayList([]const u8),
     ) !void {
         var iter = dir.iterate();
         while (try iter.next()) |entry| {
-            var next_path = try path.clone();
-            defer next_path.deinit();
-            try next_path.append(entry.name);
+            var next_path = try path.clone(allocator);
+            defer next_path.deinit(allocator);
+            try next_path.append(allocator, entry.name);
             switch (entry.kind) {
                 .file => {
                     const name = try fs.joinPath(self.arena.allocator(), next_path.items);
@@ -251,7 +253,7 @@ pub const RefList = struct {
                 .directory => {
                     var next_dir = try dir.openDir(entry.name, .{ .iterate = true });
                     defer next_dir.close();
-                    try self.addRefs(repo_opts, state, ref_kind, next_dir, &next_path);
+                    try self.addRefs(repo_opts, state, ref_kind, next_dir, allocator, &next_path);
                 },
                 else => {},
             }
@@ -298,7 +300,7 @@ pub fn read(
             // look for loose ref
             if (state.core.repo_dir.openFile(ref_path, .{ .mode = .read_only })) |ref_file| {
                 defer ref_file.close();
-                const size = try ref_file.reader().readAll(buffer);
+                const size = try ref_file.deprecatedReader().readAll(buffer);
                 const ref_content = std.mem.sliceTo(buffer[0..size], '\n');
                 return RefOrOid(repo_opts.hash).initFromDb(ref_content);
             } else |err| switch (err) {
@@ -310,7 +312,7 @@ pub fn read(
             if (state.core.repo_dir.openFile("packed-refs", .{ .mode = .read_only })) |packed_refs_file| {
                 defer packed_refs_file.close();
 
-                var buffered_reader = std.io.bufferedReaderSize(repo_opts.read_size, packed_refs_file.reader());
+                var buffered_reader = buf_rdr.bufferedReaderSize(repo_opts.read_size, packed_refs_file.deprecatedReader());
                 const reader = buffered_reader.reader();
 
                 var read_buffer = [_]u8{0} ** repo_opts.max_read_size;

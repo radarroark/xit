@@ -13,7 +13,7 @@ pub fn FileTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
     return struct {
         url: ?[]u8,
         direction: net.Direction,
-        heads: std.ArrayListUnmanaged(net.RemoteHead(repo_kind, repo_opts)),
+        heads: std.ArrayList(net.RemoteHead(repo_kind, repo_opts)),
         connected: bool,
         remote_repo: ?rp.Repo(.git, remote_repo_opts),
         opts: net_transport.Opts(repo_opts.ProgressCtx),
@@ -24,7 +24,7 @@ pub fn FileTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             return .{
                 .url = null,
                 .direction = .fetch,
-                .heads = std.ArrayListUnmanaged(net.RemoteHead(repo_kind, repo_opts)){},
+                .heads = std.ArrayList(net.RemoteHead(repo_kind, repo_opts)){},
                 .connected = false,
                 .remote_repo = null,
                 .opts = opts,
@@ -254,12 +254,12 @@ pub fn FileTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             }
 
             {
-                var head_name = std.ArrayList(u8).init(allocator);
-                errdefer head_name.deinit();
-                try head_name.appendSlice(ref_path);
-                try head_name.appendSlice("^{}");
+                var head_name = std.ArrayList(u8){};
+                errdefer head_name.deinit(allocator);
+                try head_name.appendSlice(allocator, ref_path);
+                try head_name.appendSlice(allocator, "^{}");
 
-                head = net.RemoteHead(repo_kind, repo_opts).init(try head_name.toOwnedSlice());
+                head = net.RemoteHead(repo_kind, repo_opts).init(try head_name.toOwnedSlice(allocator));
                 head.oid = object.content.tag.target;
 
                 try self.heads.append(allocator, head);

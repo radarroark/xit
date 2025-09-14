@@ -363,7 +363,7 @@ fn commandHelp(command_kind: CommandKind) Help {
     };
 }
 
-pub fn printHelp(cmd_kind_maybe: ?CommandKind, writer: std.io.AnyWriter) !void {
+pub fn printHelp(cmd_kind_maybe: ?CommandKind, writer: *std.Io.Writer) !void {
     const print_indent = comptime blk: {
         var indent = 0;
         for (0..@typeInfo(CommandKind).@"enum".fields.len) |i| {
@@ -431,7 +431,7 @@ pub const CommandArgs = struct {
             allocator.destroy(arena);
         }
 
-        var positional_args = std.ArrayList([]const u8).init(arena.allocator());
+        var positional_args = std.ArrayList([]const u8){};
         var map_args = std.StringArrayHashMap(?[]const u8).init(arena.allocator());
         var unused_args = std.StringArrayHashMap(void).init(arena.allocator());
 
@@ -454,11 +454,11 @@ pub const CommandArgs = struct {
                 }
 
                 // in any other case, just consider it a positional arg
-                try positional_args.append(arg);
+                try positional_args.append(arena.allocator(), arg);
             }
         }
 
-        const args_slice = try positional_args.toOwnedSlice();
+        const args_slice = try positional_args.toOwnedSlice(arena.allocator());
         if (args_slice.len == 0) {
             return .{
                 .allocator = allocator,
@@ -748,13 +748,13 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                     return .{ .restore = .{ .path = cmd_args.positional_args[0] } };
                 },
                 .log => {
-                    var source = std.ArrayList(rf.RefOrOid(hash_kind)).init(cmd_args.arena.allocator());
+                    var source = std.ArrayList(rf.RefOrOid(hash_kind)){};
                     for (cmd_args.positional_args) |arg| {
                         const ref_or_oid = rf.RefOrOid(hash_kind).initFromUser(arg) orelse return error.InvalidRefOrOid;
-                        try source.append(ref_or_oid);
+                        try source.append(cmd_args.arena.allocator(), ref_or_oid);
                     }
 
-                    return .{ .log = try source.toOwnedSlice() };
+                    return .{ .log = try source.toOwnedSlice(cmd_args.arena.allocator()) };
                 },
                 inline .merge, .cherry_pick => |cmd_kind| {
                     var merge_action: mrg.MergeAction(hash_kind) = undefined;
@@ -772,11 +772,11 @@ pub fn Command(comptime repo_kind: rp.RepoKind, comptime hash_kind: hash.HashKin
                         } };
                     } else {
                         if (cmd_args.positional_args.len == 0) return null;
-                        var source = std.ArrayList(rf.RefOrOid(hash_kind)).init(cmd_args.arena.allocator());
+                        var source = std.ArrayList(rf.RefOrOid(hash_kind)){};
                         for (cmd_args.positional_args) |arg| {
-                            try source.append(rf.RefOrOid(hash_kind).initFromUser(arg) orelse return error.InvalidRefOrOid);
+                            try source.append(cmd_args.arena.allocator(), rf.RefOrOid(hash_kind).initFromUser(arg) orelse return error.InvalidRefOrOid);
                         }
-                        merge_action = .{ .new = .{ .source = try source.toOwnedSlice() } };
+                        merge_action = .{ .new = .{ .source = try source.toOwnedSlice(cmd_args.arena.allocator()) } };
                     }
 
                     return .{
@@ -925,9 +925,6 @@ test "command" {
     const repo_kind = rp.RepoKind.git;
     const hash_kind = hash.HashKind.sha1;
     const allocator = std.testing.allocator;
-
-    var args = std.ArrayList([]const u8).init(allocator);
-    defer args.deinit();
 
     {
         var cmd_args = try CommandArgs.init(allocator, &.{ "add", "--cli" });

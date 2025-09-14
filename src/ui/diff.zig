@@ -38,7 +38,7 @@ pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime rep
                 .iter_arena = std.heap.ArenaAllocator.init(allocator),
                 .file_iter = null,
                 .hunk_iter = null,
-                .bufs = std.ArrayList([]const u8).init(allocator),
+                .bufs = std.ArrayList([]const u8){},
             };
         }
 
@@ -47,7 +47,7 @@ pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime rep
                 self.allocator.free(buf);
             }
             self.iter_arena.deinit();
-            self.bufs.deinit();
+            self.bufs.deinit(self.allocator);
             self.box.deinit();
         }
 
@@ -69,7 +69,7 @@ pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime rep
                         if (self.hunk_iter) |*hunk_iter| {
                             if (hunk_iter.header_lines.items.len > 0) {
                                 try self.addLines(hunk_iter.header_lines.items);
-                                hunk_iter.header_lines.clearAndFree();
+                                hunk_iter.header_lines.clearAndFree(hunk_iter.arena.allocator());
                             }
                             if (try hunk_iter.next(self.iter_arena.allocator())) |*hunk_ptr| {
                                 try self.addHunk(hunk_iter, hunk_ptr);
@@ -192,7 +192,7 @@ pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime rep
             for (self.bufs.items) |buf| {
                 self.allocator.free(buf);
             }
-            self.bufs.clearAndFree();
+            self.bufs.clearAndFree(self.allocator);
 
             // reset the arena
             self.file_iter = null;
@@ -213,22 +213,22 @@ pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime rep
 
         pub fn addLines(self: *Diff(Widget, repo_kind, repo_opts), lines: []const []const u8) !void {
             const buf = blk: {
-                var arr = std.ArrayList(u8).init(self.allocator);
-                errdefer arr.deinit();
-                const writer = arr.writer();
+                var arr = std.ArrayList(u8){};
+                errdefer arr.deinit(self.allocator);
+                const writer = arr.writer(self.allocator);
 
                 // add header
                 for (lines) |line| {
                     try writer.print("{s}\n", .{line});
                 }
 
-                break :blk try arr.toOwnedSlice();
+                break :blk try arr.toOwnedSlice(self.allocator);
             };
 
             // add buffer
             {
                 errdefer self.allocator.free(buf);
-                try self.bufs.append(buf);
+                try self.bufs.append(self.allocator, buf);
             }
 
             // add new diff widget
@@ -243,9 +243,9 @@ pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime rep
             hunk: *const df.Hunk(repo_kind, repo_opts),
         ) !void {
             const buf = blk: {
-                var arr = std.ArrayList(u8).init(self.allocator);
-                errdefer arr.deinit();
-                const writer = arr.writer();
+                var arr = std.ArrayList(u8){};
+                errdefer arr.deinit(self.allocator);
+                const writer = arr.writer(self.allocator);
 
                 // create buffer from hunk
                 const offsets = hunk.offsets();
@@ -276,13 +276,13 @@ pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime rep
                     });
                 }
 
-                break :blk try arr.toOwnedSlice();
+                break :blk try arr.toOwnedSlice(self.allocator);
             };
 
             // add buffer
             {
                 errdefer self.allocator.free(buf);
-                try self.bufs.append(buf);
+                try self.bufs.append(self.allocator, buf);
             }
 
             // add new diff widget

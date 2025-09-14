@@ -146,9 +146,9 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         url: ?[]u8,
         direction: net.Direction,
         caps: Capabilities,
-        refs: std.ArrayListUnmanaged(net_pkt.Ref(repo_kind, repo_opts)),
-        heads: std.ArrayListUnmanaged(net.RemoteHead(repo_kind, repo_opts)),
-        common: std.ArrayListUnmanaged(net_pkt.Pkt(repo_kind, repo_opts)),
+        refs: std.ArrayList(net_pkt.Ref(repo_kind, repo_opts)),
+        heads: std.ArrayList(net.RemoteHead(repo_kind, repo_opts)),
+        common: std.ArrayList(net_pkt.Pkt(repo_kind, repo_opts)),
         is_stateless: bool,
         have_refs: bool,
         connected: bool,
@@ -176,9 +176,9 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                 .url = null,
                 .direction = .fetch,
                 .caps = .{},
-                .refs = std.ArrayListUnmanaged(net_pkt.Ref(repo_kind, repo_opts)){},
-                .heads = std.ArrayListUnmanaged(net.RemoteHead(repo_kind, repo_opts)){},
-                .common = std.ArrayListUnmanaged(net_pkt.Pkt(repo_kind, repo_opts)){},
+                .refs = std.ArrayList(net_pkt.Ref(repo_kind, repo_opts)){},
+                .heads = std.ArrayList(net.RemoteHead(repo_kind, repo_opts)){},
+                .common = std.ArrayList(net_pkt.Pkt(repo_kind, repo_opts)){},
                 .is_stateless = switch (wire_kind) {
                     .http => true,
                     .raw => false,
@@ -243,12 +243,12 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
 
             var first_ref = if (self.refs.items.len > 0) self.refs.items[0] else return error.InvalidRefs;
 
-            var symrefs = std.ArrayList(net_refspec.RefSpec).init(allocator);
+            var symrefs = std.ArrayList(net_refspec.RefSpec){};
             defer {
                 for (symrefs.items) |*spec| {
                     spec.deinit(allocator);
                 }
-                symrefs.deinit();
+                symrefs.deinit(allocator);
             }
 
             self.caps = try Capabilities.init(allocator, if (first_ref.capabilities) |caps| caps else null, &symrefs);
@@ -263,7 +263,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                 self.refs.clearAndFree(allocator);
             }
 
-            try self.updateHeads(allocator, &symrefs);
+            try self.updateHeads(allocator, symrefs.items);
 
             if (self.is_stateless) {
                 self.clearStream(allocator);
@@ -317,8 +317,8 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
 
             const stream = &(self.wire_stream orelse return error.StreamNotFound);
 
-            var buffer = std.ArrayList(u8).init(allocator);
-            defer buffer.deinit();
+            var buffer = std.ArrayList(u8){};
+            defer buffer.deinit(allocator);
 
             try pktline(allocator, &buffer, git_push.specs.items);
             try stream.write(allocator, buffer.items.ptr, buffer.items.len);
@@ -376,8 +376,8 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         ) !void {
             self.caps.shallow = false;
 
-            var buffer = std.ArrayList(u8).init(allocator);
-            defer buffer.deinit();
+            var buffer = std.ArrayList(u8){};
+            defer buffer.deinit(allocator);
 
             try net_pkt.bufferWants(repo_kind, repo_opts, allocator, fetch_data, &self.caps, &buffer);
 
@@ -412,11 +412,11 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
 
                 i += 1;
                 if (i % 20 == 0) {
-                    try buffer.appendSlice("0000");
+                    try buffer.appendSlice(allocator, "0000");
 
                     try self.negotiationStep(allocator, buffer.items);
 
-                    buffer.clearAndFree();
+                    buffer.clearAndFree(allocator);
 
                     if (self.caps.multi_ack or self.caps.multi_ack_detailed) {
                         while (true) {
@@ -462,7 +462,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                 }
             }
 
-            try buffer.appendSlice("0009done\n");
+            try buffer.appendSlice(allocator, "0009done\n");
 
             try self.negotiationStep(allocator, buffer.items);
 
@@ -481,26 +481,26 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
 
         fn pktline(allocator: std.mem.Allocator, buffer: *std.ArrayList(u8), specs: []net_push.PushSpec(repo_kind, repo_opts)) !void {
             for (specs, 0..) |*spec, i| {
-                var line = std.ArrayList(u8).init(allocator);
-                defer line.deinit();
+                var line = std.ArrayList(u8){};
+                defer line.deinit(allocator);
 
                 var command_size_buf = [_]u8{'0'} ** 4;
 
-                try line.writer().print("{s}{s} {s} {s}", .{ &command_size_buf, &spec.roid, &spec.loid, spec.refspec.dst });
+                try line.writer(allocator).print("{s}{s} {s} {s}", .{ &command_size_buf, &spec.roid, &spec.loid, spec.refspec.dst });
 
                 if (i == 0) {
-                    try line.writer().print("\x00 report-status side-band-64k", .{});
+                    try line.writer(allocator).print("\x00 report-status side-band-64k", .{});
                 }
 
-                try line.append('\n');
+                try line.append(allocator, '\n');
 
                 try net_pkt.commandSize(&command_size_buf, line.items.len);
                 @memcpy(line.items[0..4], &command_size_buf);
 
-                try buffer.appendSlice(line.items);
+                try buffer.appendSlice(allocator, line.items);
             }
 
-            try buffer.appendSlice("0000");
+            try buffer.appendSlice(allocator, "0000");
         }
 
         fn negotiationStep(
@@ -749,17 +749,17 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             }
         }
 
-        fn updateHeads(self: *WireTransport(repo_kind, repo_opts), allocator: std.mem.Allocator, symrefs: *std.ArrayList(net_refspec.RefSpec)) !void {
+        fn updateHeads(self: *WireTransport(repo_kind, repo_opts), allocator: std.mem.Allocator, symrefs: []net_refspec.RefSpec) !void {
             self.heads.clearAndFree(allocator);
 
             for (self.refs.items) |*ref| {
-                var buffer = std.ArrayList(u8).init(allocator);
-                defer buffer.deinit();
+                var buffer = std.ArrayList(u8){};
+                defer buffer.deinit(allocator);
 
-                for (symrefs.items) |*spec| {
-                    buffer.clearAndFree();
+                for (symrefs) |*spec| {
+                    buffer.clearAndFree(allocator);
                     if (net_refspec.matches(spec.src, ref.head.name)) {
-                        try net_refspec.transform(&buffer, spec, ref.head.name);
+                        try net_refspec.transform(allocator, &buffer, spec, ref.head.name);
                         if (ref.head.symref) |target| allocator.free(target);
                         ref.head.symref = try allocator.dupe(u8, buffer.items);
                     }
@@ -907,7 +907,7 @@ pub const Capabilities = struct {
                 var spec = try net_refspec.RefSpec.init(allocator, symref, .fetch);
                 errdefer spec.deinit(allocator);
 
-                try symrefs.append(spec);
+                try symrefs.append(allocator, spec);
             } else if (std.mem.startsWith(u8, cap, "allow-tip-sha1-in-want")) {
                 self.allow_tip_sha1_in_want = true;
                 self.common = true;

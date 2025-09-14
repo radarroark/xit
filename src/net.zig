@@ -50,8 +50,8 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
         url: ?[]const u8,
         push_url: ?[]const u8,
         heads: std.StringArrayHashMapUnmanaged(RemoteHead(repo_kind, repo_opts)),
-        refspecs: std.ArrayListUnmanaged(net_refspec.RefSpec),
-        active_refspecs: std.ArrayListUnmanaged(net_refspec.RefSpec),
+        refspecs: std.ArrayList(net_refspec.RefSpec),
+        active_refspecs: std.ArrayList(net_refspec.RefSpec),
         transport: ?net_transport.Transport(repo_kind, repo_opts),
         requires_fetch: bool,
         nego: net_fetch.FetchNegotiation(repo_kind, repo_opts),
@@ -95,8 +95,8 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             remote.name = try allocator.dupe(u8, name);
 
             remote.heads = try std.StringArrayHashMapUnmanaged(RemoteHead(repo_kind, repo_opts)).init(allocator, &.{}, &.{});
-            remote.refspecs = std.ArrayListUnmanaged(net_refspec.RefSpec){};
-            remote.active_refspecs = std.ArrayListUnmanaged(net_refspec.RefSpec){};
+            remote.refspecs = std.ArrayList(net_refspec.RefSpec){};
+            remote.active_refspecs = std.ArrayList(net_refspec.RefSpec){};
 
             const remote_section_name = try std.fmt.allocPrint(allocator, "remote.{s}", .{name});
             defer allocator.free(remote_section_name);
@@ -227,8 +227,8 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             }
 
             remote.heads = try std.StringArrayHashMapUnmanaged(RemoteHead(repo_kind, repo_opts)).init(allocator, &.{}, &.{});
-            remote.refspecs = std.ArrayListUnmanaged(net_refspec.RefSpec){};
-            remote.active_refspecs = std.ArrayListUnmanaged(net_refspec.RefSpec){};
+            remote.refspecs = std.ArrayList(net_refspec.RefSpec){};
+            remote.active_refspecs = std.ArrayList(net_refspec.RefSpec){};
 
             for (self.refspecs.items) |*spec| {
                 var spec_dupe = try spec.dupe(allocator);
@@ -312,7 +312,7 @@ pub fn matchingRefSpec(
     return null;
 }
 
-pub fn clearRefSpecs(allocator: std.mem.Allocator, arr: *std.ArrayListUnmanaged(net_refspec.RefSpec)) void {
+pub fn clearRefSpecs(allocator: std.mem.Allocator, arr: *std.ArrayList(net_refspec.RefSpec)) void {
     for (arr.items) |*spec| {
         spec.deinit(allocator);
     }
@@ -420,20 +420,20 @@ fn updateHead(
     head: *RemoteHead(repo_kind, repo_opts),
     tagspec: *net_refspec.RefSpec,
 ) !void {
-    var ref_path = std.ArrayList(u8).init(allocator);
-    defer ref_path.deinit();
+    var ref_path = std.ArrayList(u8){};
+    defer ref_path.deinit(allocator);
 
     if (!net_refspec.validateName(head.name, false)) {
         return;
     }
 
     if (net_refspec.matches(tagspec.src, head.name)) {
-        try ref_path.appendSlice(head.name);
+        try ref_path.appendSlice(allocator, head.name);
     }
 
     if (net_refspec.matches(spec.src, head.name)) {
         if (spec.dst.len > 0) {
-            try net_refspec.transform(&ref_path, spec, head.name);
+            try net_refspec.transform(allocator, &ref_path, spec, head.name);
         } else {
             return;
         }
@@ -516,13 +516,13 @@ pub fn fetch(
     var refs = try getHeads(repo_kind, repo_opts, remote, allocator);
     defer refs.deinit(allocator);
 
-    var specs = std.ArrayListUnmanaged(net_refspec.RefSpec){};
+    var specs = std.ArrayList(net_refspec.RefSpec){};
     defer {
         clearRefSpecs(allocator, &specs);
         specs.deinit(allocator);
     }
 
-    const new_active_refspecs: *std.ArrayListUnmanaged(net_refspec.RefSpec) =
+    const new_active_refspecs: *std.ArrayList(net_refspec.RefSpec) =
         if (transport_opts.refspecs) |refspecs| blk: {
             if (refspecs.len == 0) {
                 break :blk &remote.refspecs;

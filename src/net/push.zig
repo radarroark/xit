@@ -15,7 +15,7 @@ pub fn Push(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         unpack_ok: bool,
         obj_iter: obj.ObjectIterator(repo_kind, repo_opts, .raw),
 
-        specs: std.ArrayListUnmanaged(PushSpec(repo_kind, repo_opts)),
+        specs: std.ArrayList(PushSpec(repo_kind, repo_opts)),
 
         pub fn init(
             state: rp.Repo(repo_kind, repo_opts).State(.read_only),
@@ -29,7 +29,7 @@ pub fn Push(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                 .remote = remote,
                 .unpack_ok = false,
                 .obj_iter = obj_iter,
-                .specs = std.ArrayListUnmanaged(PushSpec(repo_kind, repo_opts)){},
+                .specs = std.ArrayList(PushSpec(repo_kind, repo_opts)){},
             };
         }
 

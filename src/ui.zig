@@ -181,6 +181,6 @@ pub fn start(
         }, root.getFocus());
 
         // TODO: do variable sleep with target frame rate
-        std.time.sleep(5000000);
+        std.Thread.sleep(5000000);
     }
 }

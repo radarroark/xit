@@ -57,8 +57,8 @@ pub fn main() !void {
         try copyDir(src_repo_dir, dest_repo_dir);
     }
 
-    var args = std.ArrayList([]const u8).init(allocator);
-    defer args.deinit();
+    var args = std.ArrayList([]const u8){};
+    defer args.deinit(allocator);
 
     var patch_enabled = false;
 
@@ -69,11 +69,13 @@ pub fn main() !void {
         if (std.mem.eql(u8, "--patch", arg)) {
             patch_enabled = true;
         } else {
-            try args.append(arg);
+            try args.append(allocator, arg);
         }
     }
 
-    const writers = xit.main.Writers{ .out = std.io.getStdOut().writer().any(), .err = std.io.getStdErr().writer().any() };
+    var stdout_writer = std.fs.File.stdout().writer(&.{});
+    var stderr_writer = std.fs.File.stderr().writer(&.{});
+    const writers = xit.main.Writers{ .out = &stdout_writer.interface, .err = &stderr_writer.interface };
 
     {
         var git_repo = try rp.Repo(.git, .{}).open(allocator, .{ .cwd = temp_dir });
@@ -92,12 +94,12 @@ pub fn main() !void {
             };
         }
 
-        var commits = std.ArrayList(obj.Object(.git, .{}, .full)).init(allocator);
+        var commits = std.ArrayList(obj.Object(.git, .{}, .full)){};
         defer {
             for (commits.items) |*commit| {
                 commit.deinit();
             }
-            commits.deinit();
+            commits.deinit(allocator);
         }
 
         var log_iter = try git_repo.log(allocator, null);
@@ -106,7 +108,7 @@ pub fn main() !void {
         while (try log_iter.next()) |commit| {
             {
                 errdefer commit.deinit();
-                try commits.append(commit.*);
+                try commits.append(allocator, commit.*);
             }
             commit_count += 1;
             if (commit_count == COMMIT_COUNT) {

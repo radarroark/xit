@@ -5,6 +5,7 @@ pub const HttpState = struct {
     http_client: std.http.Client,
     read_request: ?std.http.Client.Request,
     write_request: ?std.http.Client.Request,
+    body_writer: ?std.http.BodyWriter,
     sent_write_request: bool,
     arena: *std.heap.ArenaAllocator,
     allocator: std.mem.Allocator,
@@ -24,6 +25,7 @@ pub const HttpState = struct {
             .http_client = client,
             .read_request = null,
             .write_request = null,
+            .body_writer = null,
             .sent_write_request = false,
             .arena = arena,
             .allocator = allocator,
@@ -47,6 +49,7 @@ pub const HttpState = struct {
             req.deinit();
             self.write_request = null;
         }
+        self.body_writer = null;
         self.sent_write_request = false;
     }
 };
@@ -83,12 +86,13 @@ pub const HttpStream = struct {
         buffer: [*]const u8,
         len: usize,
     ) !void {
-        if (self.wire_state.write_request) |*req| {
-            try req.writeAll(buffer[0..len]);
+        if (self.wire_state.body_writer) |*body_writer| {
+            try body_writer.writer.writeAll(buffer[0..len]);
+            try body_writer.flush();
         } else {
             var request = try HttpRequest.init(allocator, self, len);
             defer request.deinit(allocator);
-            self.wire_state.write_request = try self.initWriteRequest(&request, buffer[0..len]);
+            try self.initWriteRequest(&request, buffer[0..len]);
         }
     }
 
@@ -99,76 +103,69 @@ pub const HttpStream = struct {
         len: usize,
     ) !usize {
         switch (self.service.method) {
-            .GET => if (self.wire_state.read_request) |*req| {
-                return try req.reader().read(buffer[0..len]);
-            } else {
-                var out_len: usize = 0;
-                self.wire_state.read_request = try self.initReadRequest(allocator, buffer[0..len], &out_len);
-                return out_len;
-            },
+            .GET => return if (self.wire_state.read_request) |*req|
+                try readAny(&req.reader.interface, buffer[0..len]) orelse {
+                    req.deinit();
+                    self.wire_state.read_request = null;
+                    return 0;
+                }
+            else
+                try self.initReadRequest(allocator, buffer[0..len]),
             .POST => return if (self.wire_state.write_request) |*req|
-                try self.readPost(allocator, req, buffer, len)
+                try self.readPost(req, buffer[0..len]) orelse {
+                    req.deinit();
+                    self.wire_state.write_request = null;
+                    self.wire_state.body_writer = null;
+                    self.wire_state.sent_write_request = false;
+                    return 0;
+                }
             else
                 0,
             else => return error.UnexpectedHttpMethod,
         }
     }
 
+    fn readAny(reader: *std.Io.Reader, buffer: []u8) !?usize {
+        const size = try reader.readSliceShort(buffer);
+        if (size == 0) return null;
+        return size;
+    }
+
     fn initReadRequest(
         self: *HttpStream,
         allocator: std.mem.Allocator,
         buffer: []u8,
-        out_len: *usize,
-    ) !std.http.Client.Request {
+    ) !usize {
         var request = try HttpRequest.init(allocator, self, 0);
         defer request.deinit(allocator);
 
-        var response = HttpResponse{
-            .status = undefined,
-            .content_type = null,
-            .location = null,
-        };
-        defer response.deinit(allocator);
-
         const uri = try std.Uri.parse(request.url);
 
-        var server_header_buffer: [1024]u8 = undefined;
-        var req = try self.wire_state.http_client.open(request.method, uri, .{
-            .server_header_buffer = &server_header_buffer,
+        var req = try self.wire_state.http_client.request(request.method, uri, .{
             .keep_alive = false,
         });
         errdefer req.deinit();
 
-        try req.send();
-        try req.wait();
+        try req.sendBodiless();
 
-        out_len.* = try req.reader().read(buffer);
+        var response = try req.receiveHead(&.{});
+        const head = response.head;
+        const out_len = try readAny(response.reader(&.{}), buffer) orelse return error.UnexpectedEndOfStream;
+        try self.handleResponse(head, true);
 
-        if (req.response.content_type) |content_type| {
-            response.content_type = try allocator.dupe(u8, content_type);
-        }
+        self.wire_state.read_request = req;
 
-        if (req.response.location) |location| {
-            response.location = try allocator.dupe(u8, location);
-        }
-
-        response.status = req.response.status;
-
-        try self.handleResponse(&response, true);
-
-        return req;
+        return out_len;
     }
 
     fn initWriteRequest(
         self: *HttpStream,
         request: *const HttpRequest,
         buffer: []const u8,
-    ) !std.http.Client.Request {
+    ) !void {
         const uri = try std.Uri.parse(request.url);
 
-        var server_header_buffer: [1024]u8 = undefined;
-        var req = try self.wire_state.http_client.open(request.method, uri, .{
-            .server_header_buffer = &server_header_buffer,
+        var req = try self.wire_state.http_client.request(request.method, uri, .{
             .keep_alive = false,
         });
         errdefer req.deinit();
@@ -185,70 +182,45 @@ pub const HttpStream = struct {
             .{ .name = "accept", .value = request.accept },
         };
 
-        try req.send();
-        try req.writeAll(buffer);
+        var body_writer = try req.sendBody(&.{});
+        try body_writer.writer.writeAll(buffer);
+        try body_writer.flush();
 
-        return req;
+        self.wire_state.write_request = req;
+        self.wire_state.body_writer = body_writer;
     }
 
     fn readPost(
         self: *HttpStream,
-        allocator: std.mem.Allocator,
         req: *std.http.Client.Request,
-        buffer: [*]u8,
-        buffer_size: usize,
-    ) !usize {
-        var out_len: usize = 0;
-
+        buffer: []u8,
+    ) !?usize {
         if (!self.wire_state.sent_write_request) {
-            try req.finish();
-            try req.wait();
+            var body_writer = self.wire_state.body_writer orelse return error.BodyWriterNotFound;
+            try body_writer.end();
+
+            const response = try req.receiveHead(&.{});
+            try self.handleResponse(response.head, false);
+
             self.wire_state.sent_write_request = true;
         }
 
-        var response = HttpResponse{
-            .status = undefined,
-            .content_type = null,
-            .location = null,
-        };
-        defer response.deinit(allocator);
-
-        if (req.response.content_type) |content_type| {
-            response.content_type = try allocator.dupe(u8, content_type);
-        }
-
-        if (req.response.location) |location| {
-            response.location = try allocator.dupe(u8, location);
-        }
-
-        response.status = req.response.status;
-
-        try self.handleResponse(&response, false);
-
-        out_len = try req.reader().read(buffer[0..buffer_size]);
-
-        if (out_len == 0) {
-            req.deinit();
-            self.wire_state.write_request = null;
-            self.wire_state.sent_write_request = false;
-        }
-
-        return out_len;
+        return try readAny(req.reader.in, buffer);
     }
 
     fn handleResponse(
         self: *HttpStream,
-        response: *HttpResponse,
+        head: std.http.Client.Response.Head,
         allow_replay: bool,
     ) !void {
-        const is_redirect = response.status == .moved_permanently or
-            response.status == .found or
-            response.status == .see_other or
-            response.status == .temporary_redirect or
-            response.status == .permanent_redirect;
+        const is_redirect = head.status == .moved_permanently or
+            head.status == .found or
+            head.status == .see_other or
+            head.status == .temporary_redirect or
+            head.status == .permanent_redirect;
 
         if (allow_replay and is_redirect) {
-            if (response.location) |_| {
+            if (head.location) |_| {
                 return error.HttpRedirectNotImplemented;
             } else {
                 return error.HttpRedirectWithoutLocation;
@@ -258,17 +230,17 @@ pub const HttpStream = struct {
             return error.HttpRedirectUnexpected;
         }
 
-        if (response.status == .unauthorized or response.status == .proxy_auth_required) {
+        if (head.status == .unauthorized or head.status == .proxy_auth_required) {
             return error.HttpUnauthorized;
         }
 
-        if (response.status != .ok) {
-            const status_code: c_int = @intFromEnum(response.status);
+        if (head.status != .ok) {
+            const status_code: c_int = @intFromEnum(head.status);
             _ = status_code;
             return error.HttpStatusCodeUnexpected;
         }
 
-        if (response.content_type) |content_type| {
+        if (head.content_type) |content_type| {
             if (!std.mem.eql(u8, content_type, self.service.response_type)) {
                 return error.HttpContentTypeInvalid;
             }
@@ -341,13 +313,13 @@ const HttpRequest = struct {
         const path = try std.fmt.allocPrint(allocator, "{s}{s}", .{ base_path, stream.service.url });
         defer allocator.free(path);
 
-        var buffer = std.ArrayList(u8).init(allocator);
-        defer buffer.deinit();
+        var uri_writer = std.Io.Writer.Allocating.init(allocator);
+        defer uri_writer.deinit();
 
         uri.path = .{ .percent_encoded = path };
-        try uri.writeToStream(.{ .scheme = true, .authority = true, .path = true, .port = true }, buffer.writer());
+        try uri.writeToStream(&uri_writer.writer, .{ .scheme = true, .authority = true, .path = true, .port = true });
 
-        const url = try allocator.dupe(u8, buffer.items);
+        const url = try allocator.dupe(u8, uri_writer.written());
         errdefer allocator.free(url);
 
         return .{
@@ -363,16 +335,5 @@ const HttpRequest = struct {
 
     fn deinit(self: *HttpRequest, allocator: std.mem.Allocator) void {
         allocator.free(self.url);
-    }
-};
-
-const HttpResponse = struct {
-    status: std.http.Status,
-    content_type: ?[]const u8,
-    location: ?[]const u8,
-
-    fn deinit(self: HttpResponse, allocator: std.mem.Allocator) void {
-        if (self.content_type) |content_type| allocator.free(content_type);
-        if (self.location) |location| allocator.free(location);
     }
 };

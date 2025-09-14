@@ -339,38 +339,38 @@ pub fn StatusContent(comptime Widget: type, comptime repo_kind: rp.RepoKind, com
         const FocusKind = enum { status_list, diff };
 
         pub fn init(allocator: std.mem.Allocator, repo: *rp.Repo(repo_kind, repo_opts), status: *work.Status(repo_kind, repo_opts), selected: work.IndexStatusKind) !StatusContent(Widget, repo_kind, repo_opts) {
-            var filtered_statuses = std.ArrayList(StatusItem).init(allocator);
-            errdefer filtered_statuses.deinit();
+            var filtered_statuses = std.ArrayList(StatusItem){};
+            errdefer filtered_statuses.deinit(allocator);
 
             switch (selected) {
                 .added => {
                     for (status.index_added.keys()) |path| {
-                        try filtered_statuses.append(.{ .kind = .{ .added = .created }, .path = path });
+                        try filtered_statuses.append(allocator, .{ .kind = .{ .added = .created }, .path = path });
                     }
                     for (status.index_modified.keys()) |path| {
-                        try filtered_statuses.append(.{ .kind = .{ .added = .modified }, .path = path });
+                        try filtered_statuses.append(allocator, .{ .kind = .{ .added = .modified }, .path = path });
                     }
                     for (status.index_deleted.keys()) |path| {
-                        try filtered_statuses.append(.{ .kind = .{ .added = .deleted }, .path = path });
+                        try filtered_statuses.append(allocator, .{ .kind = .{ .added = .deleted }, .path = path });
                     }
                     for (status.resolved_conflicts.keys()) |path| {
-                        try filtered_statuses.append(.{ .kind = .{ .added = .conflict }, .path = path });
+                        try filtered_statuses.append(allocator, .{ .kind = .{ .added = .conflict }, .path = path });
                     }
                 },
                 .not_added => {
                     for (status.work_dir_modified.values()) |entry| {
-                        try filtered_statuses.append(.{ .kind = .{ .not_added = .modified }, .path = entry.path });
+                        try filtered_statuses.append(allocator, .{ .kind = .{ .not_added = .modified }, .path = entry.path });
                     }
                     for (status.work_dir_deleted.keys()) |path| {
-                        try filtered_statuses.append(.{ .kind = .{ .not_added = .deleted }, .path = path });
+                        try filtered_statuses.append(allocator, .{ .kind = .{ .not_added = .deleted }, .path = path });
                     }
                     for (status.unresolved_conflicts.keys()) |path| {
-                        try filtered_statuses.append(.{ .kind = .{ .not_added = .conflict }, .path = path });
+                        try filtered_statuses.append(allocator, .{ .kind = .{ .not_added = .conflict }, .path = path });
                     }
                 },
                 .not_tracked => {
                     for (status.untracked.values()) |entry| {
-                        try filtered_statuses.append(.{ .kind = .not_tracked, .path = entry.path });
+                        try filtered_statuses.append(allocator, .{ .kind = .not_tracked, .path = entry.path });
                     }
                 },
             }
@@ -409,7 +409,7 @@ pub fn StatusContent(comptime Widget: type, comptime repo_kind: rp.RepoKind, com
 
         pub fn deinit(self: *StatusContent(Widget, repo_kind, repo_opts)) void {
             self.box.deinit();
-            self.filtered_statuses.deinit();
+            self.filtered_statuses.deinit(self.allocator);
         }
 
         pub fn build(self: *StatusContent(Widget, repo_kind, repo_opts), constraint: layout.Constraint, root_focus: *Focus) !void {

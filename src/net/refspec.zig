@@ -210,7 +210,7 @@ pub const RefSpec = struct {
     }
 };
 
-pub fn transform(out: *std.ArrayList(u8), spec: *const RefSpec, name: []const u8) !void {
+pub fn transform(allocator: std.mem.Allocator, out: *std.ArrayList(u8), spec: *const RefSpec, name: []const u8) !void {
     if (!matches(spec.src, name)) {
         return error.RefSpecDoesNotMatch;
     }
@@ -228,11 +228,11 @@ pub fn transform(out: *std.ArrayList(u8), spec: *const RefSpec, name: []const u8
         const from_part_len = name[from_star_offset..].len - from[from_star_offset + 1 ..].len;
         const from_part = name[from_star_offset .. from_star_offset + from_part_len];
 
-        out.clearAndFree();
-        try out.appendSlice(to_start);
-        try out.appendSlice(from_part);
-        try out.appendSlice(to_end);
+        out.clearAndFree(allocator);
+        try out.appendSlice(allocator, to_start);
+        try out.appendSlice(allocator, from_part);
+        try out.appendSlice(allocator, to_end);
     } else {
-        try out.appendSlice(spec.dst);
+        try out.appendSlice(allocator, spec.dst);
     }
 }

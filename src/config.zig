@@ -125,7 +125,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     var config_file = try state.core.repo_dir.createFile("config", .{ .read = true, .truncate = false });
                     defer config_file.close();
 
-                    const reader = config_file.reader();
+                    const reader = config_file.deprecatedReader();
                     var buf = [_]u8{0} ** repo_opts.max_read_size;
 
                     // for each line...
@@ -134,11 +134,11 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                         var iter = text.iterator();
                         var next_cursor: usize = 0;
 
-                        var token_kinds = std.ArrayList(CharKind).init(allocator);
-                        defer token_kinds.deinit();
+                        var token_kinds = std.ArrayList(CharKind){};
+                        defer token_kinds.deinit(allocator);
 
-                        var token_ranges = std.ArrayList(struct { start: usize, end: usize }).init(allocator);
-                        defer token_ranges.deinit();
+                        var token_ranges = std.ArrayList(struct { start: usize, end: usize }){};
+                        defer token_ranges.deinit(allocator);
 
                         var current_token_maybe: ?struct { kind: CharKind, start: usize } = null;
 
@@ -160,8 +160,8 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                                     continue;
                                 } else if (current_token.kind == .quote and char_kind == .quote) {
                                     // the quote terminated, so save the current token
-                                    try token_kinds.append(current_token.kind);
-                                    try token_ranges.append(.{ .start = current_token.start, .end = next_cursor });
+                                    try token_kinds.append(allocator, current_token.kind);
+                                    try token_ranges.append(allocator, .{ .start = current_token.start, .end = next_cursor });
                                     current_token_maybe = null;
                                     continue;
                                 } else if (current_token.kind == char_kind or current_token.kind == .comment or current_token.kind == .quote) {
@@ -174,8 +174,8 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                                         .whitespace, .comment => {},
                                         else => {
                                             // the char kind changed, so save the current token
-                                            try token_kinds.append(current_token.kind);
-                                            try token_ranges.append(.{ .start = current_token.start, .end = cursor });
+                                            try token_kinds.append(allocator, current_token.kind);
+                                            try token_ranges.append(allocator, .{ .start = current_token.start, .end = cursor });
                                         },
                                     }
                                 }
@@ -191,16 +191,16 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                             switch (current_token.kind) {
                                 .whitespace, .comment => {},
                                 else => {
-                                    try token_kinds.append(current_token.kind);
-                                    try token_ranges.append(.{ .start = current_token.start, .end = next_cursor });
+                                    try token_kinds.append(allocator, current_token.kind);
+                                    try token_ranges.append(allocator, .{ .start = current_token.start, .end = next_cursor });
                                 },
                             }
                         }
 
                         // get all the tokens from the line using the ranges
-                        var tokens = std.ArrayList([]const u8).init(arena.allocator());
+                        var tokens = std.ArrayList([]const u8){};
                         for (token_ranges.items) |range| {
-                            try tokens.append(try arena.allocator().dupe(u8, line[range.start..range.end]));
+                            try tokens.append(arena.allocator(), try arena.allocator().dupe(u8, line[range.start..range.end]));
                         }
 
                         // parse the lines and update the sections/variables
@@ -408,35 +408,35 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
         }
 
         fn escapeStr(allocator: std.mem.Allocator, str: []const u8) ![]u8 {
-            var arr = std.ArrayList(u8).init(allocator);
-            errdefer arr.deinit();
+            var arr = std.ArrayList(u8){};
+            errdefer arr.deinit(allocator);
             for (str) |ch| {
                 if (escapeChar(ch)) |esc_ch| {
-                    try arr.append('\\');
-                    try arr.append(esc_ch);
+                    try arr.append(allocator, '\\');
+                    try arr.append(allocator, esc_ch);
                 } else {
-                    try arr.append(ch);
+                    try arr.append(allocator, ch);
                 }
             }
-            return try arr.toOwnedSlice();
+            return try arr.toOwnedSlice(allocator);
         }
 
         fn unescapeStr(allocator: std.mem.Allocator, str: []const u8) ![]u8 {
-            var arr = std.ArrayList(u8).init(allocator);
-            errdefer arr.deinit();
+            var arr = std.ArrayList(u8){};
+            errdefer arr.deinit(allocator);
             var i: usize = 0;
             while (i < str.len) {
                 const char = str[i];
                 if (char == '\\') {
                     const next_char = if (i + 1 < str.len) str[i + 1] else return error.InvalidEscapeInString;
-                    try arr.append(unescapeChar(next_char) orelse return error.InvalidEscapeInString);
+                    try arr.append(allocator, unescapeChar(next_char) orelse return error.InvalidEscapeInString);
                     i += 1;
                 } else {
-                    try arr.append(char);
+                    try arr.append(allocator, char);
                 }
                 i += 1;
             }
-            return try arr.toOwnedSlice();
+            return try arr.toOwnedSlice(allocator);
         }
     };
 }

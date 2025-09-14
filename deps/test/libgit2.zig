@@ -21,16 +21,18 @@ pub fn create(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
 ) !Library {
-    const ret = b.addStaticLibrary(.{
+    const ret = b.addLibrary(.{
         .name = "git2",
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+        }),
     });
 
-    var flags = std.ArrayList([]const u8).init(b.allocator);
-    defer flags.deinit();
+    var flags = std.ArrayList([]const u8){};
+    defer flags.deinit(b.allocator);
 
-    try flags.appendSlice(&.{
+    try flags.appendSlice(b.allocator, &.{
         "-DLIBGIT2_NO_FEATURES_H",
         "-DGIT_TRACE=1",
         "-DGIT_THREADS=1",
@@ -48,13 +50,13 @@ pub fn create(
     });
 
     if (target.result.os.tag == .windows) {
-        try flags.append("-DGIT_IO_WSAPOLL");
+        try flags.append(b.allocator, "-DGIT_IO_WSAPOLL");
     } else {
-        try flags.append("-DGIT_IO_POLL=1");
+        try flags.append(b.allocator, "-DGIT_IO_POLL=1");
     }
 
     if (64 == target.result.ptrBitWidth()) {
-        try flags.append("-DGIT_ARCH_64=1");
+        try flags.append(b.allocator, "-DGIT_ARCH_64=1");
     }
 
     ret.addCSourceFiles(.{
@@ -64,7 +66,7 @@ pub fn create(
     });
 
     if (target.result.os.tag == .windows) {
-        try flags.appendSlice(&.{
+        try flags.appendSlice(b.allocator, &.{
             "-DGIT_WIN32",
             "-DGIT_WINHTTP",
         });

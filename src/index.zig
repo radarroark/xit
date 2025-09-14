@@ -5,6 +5,7 @@ const hash = @import("./hash.zig");
 const fs = @import("./fs.zig");
 const rp = @import("./repo.zig");
 const tr = @import("./tree.zig");
+const buf_rdr = @import("./std/buffered_reader.zig");
 
 pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return struct {
@@ -75,7 +76,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     };
                     defer index_file.close();
 
-                    const reader = index_file.reader();
+                    const reader = index_file.deprecatedReader();
                     const signature = try reader.readBytesNoEof(4);
 
                     if (!std.mem.eql(u8, "DIRC", &signature)) {
@@ -223,7 +224,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     defer file.close();
 
                     // make reader
-                    var buffered_reader = std.io.bufferedReaderSize(repo_opts.read_size, file.reader());
+                    var buffered_reader = buf_rdr.bufferedReaderSize(repo_opts.read_size, file.deprecatedReader());
                     const reader = buffered_reader.reader();
 
                     // write object
@@ -424,10 +425,10 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                 .blob => try self.addTreeEntryFile(tree_entry, path_parts, object.len, 0),
                 .tree => |tree| {
                     for (tree.entries.keys(), tree.entries.values()) |path_part, *child_tree_entry| {
-                        var child_path = std.ArrayList([]const u8).init(allocator);
-                        defer child_path.deinit();
-                        try child_path.appendSlice(path_parts);
-                        try child_path.append(path_part);
+                        var child_path = std.ArrayList([]const u8){};
+                        defer child_path.deinit(allocator);
+                        try child_path.appendSlice(allocator, path_parts);
+                        try child_path.append(allocator, path_part);
                         try self.addTreeEntry(state, allocator, child_tree_entry, child_path.items);
                     }
                 },
@@ -516,10 +517,10 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
             if (child_paths_maybe) |child_paths| {
                 const child_paths_array = child_paths.value_ptr.*.keys();
                 // make a copy of the paths because removePath will modify it
-                var child_paths_array_copy = std.ArrayList([]const u8).init(self.allocator);
-                defer child_paths_array_copy.deinit();
+                var child_paths_array_copy = std.ArrayList([]const u8){};
+                defer child_paths_array_copy.deinit(self.allocator);
                 for (child_paths_array) |child_path| {
-                    try child_paths_array_copy.append(child_path);
+                    try child_paths_array_copy.append(self.allocator, child_path);
                 }
                 for (child_paths_array_copy.items) |child_path| {
                     try self.removePath(child_path, removed_paths_maybe);
@@ -613,9 +614,9 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     for (self.entries.values()) |*entries_for_path| {
                         for (entries_for_path) |entry_maybe| {
                             if (entry_maybe) |entry| {
-                                var entry_buffer = std.ArrayList(u8).init(allocator);
-                                defer entry_buffer.deinit();
-                                const writer = entry_buffer.writer();
+                                var entry_buffer = std.ArrayList(u8){};
+                                defer entry_buffer.deinit(allocator);
+                                const writer = entry_buffer.writer(allocator);
                                 try writer.writeInt(u32, entry.ctime_secs, .big);
                                 try writer.writeInt(u32, entry.ctime_nsecs, .big);
                                 try writer.writeInt(u32, entry.mtime_secs, .big);
@@ -663,9 +664,9 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     }
 
                     for (self.entries.keys(), self.entries.values()) |path, *entries_for_path| {
-                        var entry_buffer = std.ArrayList(u8).init(allocator);
-                        defer entry_buffer.deinit();
-                        const writer = entry_buffer.writer();
+                        var entry_buffer = std.ArrayList(u8){};
+                        defer entry_buffer.deinit(allocator);
+                        const writer = entry_buffer.writer(allocator);
 
                         for (entries_for_path) |entry_maybe| {
                             if (entry_maybe) |entry| {

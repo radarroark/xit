@@ -261,25 +261,24 @@ fn writeBlobWithDiff3(
     var diff3_iter = try df.Diff3Iterator(repo_kind, repo_opts).init(allocator, &base_iter, &target_iter, &source_iter);
     defer diff3_iter.deinit();
 
-    var line_buffer = std.ArrayList([]const u8).init(allocator);
+    var line_buffer = std.ArrayList([]const u8){};
     defer {
         for (line_buffer.items) |buffer| {
             allocator.free(buffer);
         }
-        line_buffer.deinit();
+        line_buffer.deinit(allocator);
     }
 
     const LineRange = struct {
-        allocator: std.mem.Allocator,
         lines: std.ArrayList([]const u8),
 
         fn init(inner_allocator: std.mem.Allocator, iter: *df.LineIterator(repo_kind, repo_opts), range_maybe: ?df.Diff3Iterator(repo_kind, repo_opts).Range) !@This() {
-            var lines = std.ArrayList([]const u8).init(inner_allocator);
+            var lines = std.ArrayList([]const u8){};
             errdefer {
                 for (lines.items) |line| {
                     inner_allocator.free(line);
                 }
-                lines.deinit();
+                lines.deinit(inner_allocator);
             }
             if (range_maybe) |range| {
                 for (range.begin..range.end) |line_num| {
@@ -288,21 +287,20 @@ fn writeBlobWithDiff3(
                     {
                         const line_dupe = try inner_allocator.dupe(u8, line);
                         errdefer inner_allocator.free(line_dupe);
-                        try lines.append(line_dupe);
+                        try lines.append(inner_allocator, line_dupe);
                     }
                 }
             }
             return .{
-                .allocator = inner_allocator,
                 .lines = lines,
             };
         }
 
-        fn deinit(self: *@This()) void {
+        fn deinit(self: *@This(), inner_allocator: std.mem.Allocator) void {
             for (self.lines.items) |line| {
-                self.allocator.free(line);
+                inner_allocator.free(line);
             }
-            self.lines.deinit();
+            self.lines.deinit(inner_allocator);
         }
 
         fn eql(self: @This(), other: @This()) bool {
@@ -408,34 +406,34 @@ fn writeBlobWithDiff3(
                                 {
                                     const line_dupe = try self.parent.allocator.dupe(u8, line);
                                     errdefer self.parent.allocator.free(line_dupe);
-                                    try self.parent.line_buffer.append(line_dupe);
+                                    try self.parent.line_buffer.append(self.parent.allocator, line_dupe);
                                 }
                                 self.parent.current_line = self.parent.line_buffer.items[0];
                             }
                         },
                         .conflict => |conflict| {
                             var base_lines = try LineRange.init(self.parent.allocator, self.parent.base_iter, conflict.o_range);
-                            defer base_lines.deinit();
+                            defer base_lines.deinit(self.parent.allocator);
                             var target_lines = try LineRange.init(self.parent.allocator, self.parent.target_iter, conflict.a_range);
-                            defer target_lines.deinit();
+                            defer target_lines.deinit(self.parent.allocator);
                             var source_lines = try LineRange.init(self.parent.allocator, self.parent.source_iter, conflict.b_range);
-                            defer source_lines.deinit();
+                            defer source_lines.deinit(self.parent.allocator);
 
                             // if base == target or target == source, return source to autoresolve conflict
                             if (base_lines.eql(target_lines) or target_lines.eql(source_lines)) {
                                 if (source_lines.lines.items.len > 0) {
-                                    try self.parent.line_buffer.appendSlice(source_lines.lines.items);
+                                    try self.parent.line_buffer.appendSlice(self.parent.allocator, source_lines.lines.items);
                                     self.parent.current_line = self.parent.line_buffer.items[0];
-                                    source_lines.lines.clearAndFree();
+                                    source_lines.lines.clearAndFree(self.parent.allocator);
                                 }
                                 return self.readStep(buf);
                             }
                             // if base == source, return target to autoresolve conflict
                             else if (base_lines.eql(source_lines)) {
                                 if (target_lines.lines.items.len > 0) {
-                                    try self.parent.line_buffer.appendSlice(target_lines.lines.items);
+                                    try self.parent.line_buffer.appendSlice(self.parent.allocator, target_lines.lines.items);
                                     self.parent.current_line = self.parent.line_buffer.items[0];
-                                    target_lines.lines.clearAndFree();
+                                    target_lines.lines.clearAndFree(self.parent.allocator);
                                 }
                                 return self.readStep(buf);
                             }
@@ -445,31 +443,31 @@ fn writeBlobWithDiff3(
                             const target_marker = try self.parent.allocator.dupe(u8, self.parent.target_marker);
                             {
                                 errdefer self.parent.allocator.free(target_marker);
-                                try self.parent.line_buffer.append(target_marker);
+                                try self.parent.line_buffer.append(self.parent.allocator, target_marker);
                             }
-                            try self.parent.line_buffer.appendSlice(target_lines.lines.items);
-                            target_lines.lines.clearAndFree();
+                            try self.parent.line_buffer.appendSlice(self.parent.allocator, target_lines.lines.items);
+                            target_lines.lines.clearAndFree(self.parent.allocator);
 
                             const base_marker = try self.parent.allocator.dupe(u8, self.parent.base_marker);
                             {
                                 errdefer self.parent.allocator.free(base_marker);
-                                try self.parent.line_buffer.append(base_marker);
+                                try self.parent.line_buffer.append(self.parent.allocator, base_marker);
                             }
-                            try self.parent.line_buffer.appendSlice(base_lines.lines.items);
-                            base_lines.lines.clearAndFree();
+                            try self.parent.line_buffer.appendSlice(self.parent.allocator, base_lines.lines.items);
+                            base_lines.lines.clearAndFree(self.parent.allocator);
 
                             const separate_marker = try self.parent.allocator.dupe(u8, self.parent.separate_marker);
                             {
                                 errdefer self.parent.allocator.free(separate_marker);
-                                try self.parent.line_buffer.append(separate_marker);
+                                try self.parent.line_buffer.append(self.parent.allocator, separate_marker);
                             }
 
-                            try self.parent.line_buffer.appendSlice(source_lines.lines.items);
-                            source_lines.lines.clearAndFree();
+                            try self.parent.line_buffer.appendSlice(self.parent.allocator, source_lines.lines.items);
+                            source_lines.lines.clearAndFree(self.parent.allocator);
                             const source_marker = try self.parent.allocator.dupe(u8, self.parent.source_marker);
                             {
                                 errdefer self.parent.allocator.free(source_marker);
-                                try self.parent.line_buffer.append(source_marker);
+                                try self.parent.line_buffer.append(self.parent.allocator, source_marker);
                             }
 
                             self.parent.current_line = self.parent.line_buffer.items[0];
@@ -491,7 +489,7 @@ fn writeBlobWithDiff3(
             for (self.line_buffer.items) |buffer| {
                 self.allocator.free(buffer);
             }
-            self.line_buffer.clearAndFree();
+            self.line_buffer.clearAndFree(self.allocator);
             self.current_line = null;
             self.has_conflict = false;
 
@@ -585,8 +583,8 @@ fn writeBlobWithPatches(
     const source_snapshot_cursor = (try commit_id_to_snapshot.getCursor(try hash.hexToInt(repo_opts.hash, source_oid))) orelse return error.KeyNotFound;
     const source_snapshot = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(source_snapshot_cursor);
 
-    var patch_ids = std.ArrayList(hash.HashInt(repo_opts.hash)).init(allocator);
-    defer patch_ids.deinit();
+    var patch_ids = std.ArrayList(hash.HashInt(repo_opts.hash)){};
+    defer patch_ids.deinit(allocator);
 
     const path_hash = hash.hashInt(repo_opts.hash, path);
 
@@ -611,7 +609,7 @@ fn writeBlobWithPatches(
                     var patch_id_buffer = [_]u8{0} ** hash.byteLen(repo_opts.hash);
                     _ = try patch_id_cursor.readBytes(&patch_id_buffer);
                     const patch_id = hash.bytesToInt(repo_opts.hash, &patch_id_buffer);
-                    try patch_ids.append(patch_id);
+                    try patch_ids.append(allocator, patch_id);
                 }
             }
         }
@@ -664,12 +662,12 @@ fn writeBlobWithPatches(
     const patch_id_to_offset_list_cursor = (try state.extra.moment.getCursor(hash.hashInt(repo_opts.hash, "patch-id->offset-list"))) orelse return error.KeyNotFound;
     const patch_id_to_offset_list = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(patch_id_to_offset_list_cursor);
 
-    var line_buffer = std.ArrayList([]const u8).init(allocator);
+    var line_buffer = std.ArrayList([]const u8){};
     defer {
         for (line_buffer.items) |buffer| {
             allocator.free(buffer);
         }
-        line_buffer.deinit();
+        line_buffer.deinit(allocator);
     }
 
     const readLine = struct {
@@ -704,7 +702,6 @@ fn writeBlobWithPatches(
     }.readLine;
 
     const LineRange = struct {
-        allocator: std.mem.Allocator,
         lines: std.ArrayList([]const u8),
 
         fn init(
@@ -713,30 +710,29 @@ fn writeBlobWithPatches(
             patch_id_to_offset_list_ptr: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_only),
             line_ids: []patch.LineId(repo_opts.hash),
         ) !@This() {
-            var lines = std.ArrayList([]const u8).init(inner_allocator);
+            var lines = std.ArrayList([]const u8){};
             errdefer {
                 for (lines.items) |line| {
                     inner_allocator.free(line);
                 }
-                lines.deinit();
+                lines.deinit(inner_allocator);
             }
             for (line_ids) |line_id| {
                 var offset_list_cursor = (try patch_id_to_offset_list_ptr.getCursor(line_id.patch_id)) orelse return error.KeyNotFound;
                 const line = try readLine(inner_state, inner_allocator, &offset_list_cursor, line_id);
                 errdefer inner_allocator.free(line);
-                try lines.append(line);
+                try lines.append(inner_allocator, line);
             }
             return .{
-                .allocator = inner_allocator,
                 .lines = lines,
             };
         }
 
-        fn deinit(self: *@This()) void {
+        fn deinit(self: *@This(), inner_allocator: std.mem.Allocator) void {
             for (self.lines.items) |line| {
-                self.allocator.free(line);
+                inner_allocator.free(line);
             }
-            self.lines.deinit();
+            self.lines.deinit(inner_allocator);
         }
 
         fn eql(self: @This(), other: @This()) bool {
@@ -870,8 +866,8 @@ fn writeBlobWithPatches(
                             else
                                 .{ second_line_id, second_line_id_hash, first_line_id, first_line_id_hash };
 
-                        var target_line_ids = std.ArrayList(patch.LineId(repo_opts.hash)).init(self.parent.allocator);
-                        defer target_line_ids.deinit();
+                        var target_line_ids = std.ArrayList(patch.LineId(repo_opts.hash)){};
+                        defer target_line_ids.deinit(self.parent.allocator);
 
                         var join_line_id_hash_maybe: ?hash.HashInt(repo_opts.hash) = null;
 
@@ -880,7 +876,7 @@ fn writeBlobWithPatches(
                         var next_line_id_hash = target_line_id_hash;
                         while (try self.parent.target_live_parent_to_children.getCursor(next_line_id_hash)) |next_children_cursor| {
                             if (null == try self.parent.source_live_parent_to_children.getCursor(next_line_id_hash)) {
-                                try target_line_ids.append(next_line_id);
+                                try target_line_ids.append(self.parent.allocator, next_line_id);
                             } else {
                                 join_line_id_hash_maybe = next_line_id_hash;
                                 break;
@@ -902,15 +898,15 @@ fn writeBlobWithPatches(
                             }
                         }
 
-                        var source_line_ids = std.ArrayList(patch.LineId(repo_opts.hash)).init(self.parent.allocator);
-                        defer source_line_ids.deinit();
+                        var source_line_ids = std.ArrayList(patch.LineId(repo_opts.hash)){};
+                        defer source_line_ids.deinit(self.parent.allocator);
 
                         // find the source line ids that aren't in target
                         next_line_id = source_line_id;
                         next_line_id_hash = source_line_id_hash;
                         while (try self.parent.source_live_parent_to_children.getCursor(next_line_id_hash)) |next_children_cursor| {
                             if (null == try self.parent.target_live_parent_to_children.getCursor(next_line_id_hash)) {
-                                try source_line_ids.append(next_line_id);
+                                try source_line_ids.append(self.parent.allocator, next_line_id);
                             } else {
                                 if (next_line_id_hash != join_line_id_hash_maybe) return error.ExpectedJoinLine;
                                 break;
@@ -932,8 +928,8 @@ fn writeBlobWithPatches(
                             }
                         }
 
-                        var base_line_ids = std.ArrayList(patch.LineId(repo_opts.hash)).init(self.parent.allocator);
-                        defer base_line_ids.deinit();
+                        var base_line_ids = std.ArrayList(patch.LineId(repo_opts.hash)){};
+                        defer base_line_ids.deinit(self.parent.allocator);
 
                         // find the base line ids up to (but not including) the join line id if it exists,
                         // or until the end of the file
@@ -954,12 +950,12 @@ fn writeBlobWithPatches(
                                     next_line_id_hash = hash.hashInt(repo_opts.hash, next_child_slice);
                                     if (join_line_id_hash_maybe) |join_line_id_hash| {
                                         if (next_line_id_hash != join_line_id_hash) {
-                                            try base_line_ids.append(next_line_id);
+                                            try base_line_ids.append(self.parent.allocator, next_line_id);
                                         } else {
                                             break;
                                         }
                                     } else {
-                                        try base_line_ids.append(next_line_id);
+                                        try base_line_ids.append(self.parent.allocator, next_line_id);
                                     }
                                 } else {
                                     break;
@@ -990,27 +986,27 @@ fn writeBlobWithPatches(
                         }
 
                         var base_lines = try LineRange.init(self.parent.state, self.parent.allocator, self.parent.patch_id_to_offset_list, base_line_ids.items);
-                        defer base_lines.deinit();
+                        defer base_lines.deinit(self.parent.allocator);
                         var target_lines = try LineRange.init(self.parent.state, self.parent.allocator, self.parent.patch_id_to_offset_list, target_line_ids.items);
-                        defer target_lines.deinit();
+                        defer target_lines.deinit(self.parent.allocator);
                         var source_lines = try LineRange.init(self.parent.state, self.parent.allocator, self.parent.patch_id_to_offset_list, source_line_ids.items);
-                        defer source_lines.deinit();
+                        defer source_lines.deinit(self.parent.allocator);
 
                         // if base == target or target == source, return source to autoresolve conflict
                         if (base_lines.eql(target_lines) or target_lines.eql(source_lines)) {
                             if (source_lines.lines.items.len > 0) {
-                                try self.parent.line_buffer.appendSlice(source_lines.lines.items);
+                                try self.parent.line_buffer.appendSlice(self.parent.allocator, source_lines.lines.items);
                                 self.parent.current_line = self.parent.line_buffer.items[0];
-                                source_lines.lines.clearAndFree();
+                                source_lines.lines.clearAndFree(self.parent.allocator);
                             }
                             return self.readStep(buf);
                         }
                         // if base == source, return target to autoresolve conflict
                         else if (base_lines.eql(source_lines)) {
                             if (target_lines.lines.items.len > 0) {
-                                try self.parent.line_buffer.appendSlice(target_lines.lines.items);
+                                try self.parent.line_buffer.appendSlice(self.parent.allocator, target_lines.lines.items);
                                 self.parent.current_line = self.parent.line_buffer.items[0];
-                                target_lines.lines.clearAndFree();
+                                target_lines.lines.clearAndFree(self.parent.allocator);
                             }
                             return self.readStep(buf);
                         }
@@ -1020,31 +1016,31 @@ fn writeBlobWithPatches(
                         const target_marker = try self.parent.allocator.dupe(u8, self.parent.target_marker);
                         {
                             errdefer self.parent.allocator.free(target_marker);
-                            try self.parent.line_buffer.append(target_marker);
+                            try self.parent.line_buffer.append(self.parent.allocator, target_marker);
                         }
-                        try self.parent.line_buffer.appendSlice(target_lines.lines.items);
-                        target_lines.lines.clearAndFree();
+                        try self.parent.line_buffer.appendSlice(self.parent.allocator, target_lines.lines.items);
+                        target_lines.lines.clearAndFree(self.parent.allocator);
 
                         const base_marker = try self.parent.allocator.dupe(u8, self.parent.base_marker);
                         {
                             errdefer self.parent.allocator.free(base_marker);
-                            try self.parent.line_buffer.append(base_marker);
+                            try self.parent.line_buffer.append(self.parent.allocator, base_marker);
                         }
-                        try self.parent.line_buffer.appendSlice(base_lines.lines.items);
-                        base_lines.lines.clearAndFree();
+                        try self.parent.line_buffer.appendSlice(self.parent.allocator, base_lines.lines.items);
+                        base_lines.lines.clearAndFree(self.parent.allocator);
 
                         const separate_marker = try self.parent.allocator.dupe(u8, self.parent.separate_marker);
                         {
                             errdefer self.parent.allocator.free(separate_marker);
-                            try self.parent.line_buffer.append(separate_marker);
+                            try self.parent.line_buffer.append(self.parent.allocator, separate_marker);
                         }
 
-                        try self.parent.line_buffer.appendSlice(source_lines.lines.items);
-                        source_lines.lines.clearAndFree();
+                        try self.parent.line_buffer.appendSlice(self.parent.allocator, source_lines.lines.items);
+                        source_lines.lines.clearAndFree(self.parent.allocator);
                         const source_marker = try self.parent.allocator.dupe(u8, self.parent.source_marker);
                         {
                             errdefer self.parent.allocator.free(source_marker);
-                            try self.parent.line_buffer.append(source_marker);
+                            try self.parent.line_buffer.append(self.parent.allocator, source_marker);
                         }
 
                         self.parent.current_line = self.parent.line_buffer.items[0];
@@ -1053,7 +1049,7 @@ fn writeBlobWithPatches(
                         var offset_list_cursor = (try self.parent.patch_id_to_offset_list.getCursor(first_line_id.patch_id)) orelse return error.KeyNotFound;
                         const line = try readLine(self.parent.state, self.parent.allocator, &offset_list_cursor, first_line_id);
                         errdefer self.parent.allocator.free(line);
-                        try self.parent.line_buffer.append(line);
+                        try self.parent.line_buffer.append(self.parent.allocator, line);
                         self.parent.current_line = self.parent.line_buffer.items[0];
 
                         const next_children_cursor = (try self.parent.merge_live_parent_to_children.getCursor(first_line_id_hash)) orelse return error.KeyNotFound;
@@ -1075,7 +1071,7 @@ fn writeBlobWithPatches(
             for (self.line_buffer.items) |buffer| {
                 self.allocator.free(buffer);
             }
-            self.line_buffer.clearAndFree();
+            self.line_buffer.clearAndFree(self.allocator);
             self.current_line = null;
             self.current_line_id_hash = hash.hashInt(repo_opts.hash, &patch.LineId(repo_opts.hash).first_bytes);
             self.has_conflict = false;

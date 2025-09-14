@@ -2,6 +2,8 @@ const std = @import("std");
 const hash = @import("./hash.zig");
 const rp = @import("./repo.zig");
 const obj = @import("./object.zig");
+const zlib = @import("./std/zlib.zig");
+const flate = @import("./std/flate.zig");
 
 pub fn PackObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return struct {
@@ -16,7 +18,7 @@ pub fn PackObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
         pub fn init(allocator: std.mem.Allocator, pack_file_path: []const u8) !PackObjectIterator(repo_kind, repo_opts) {
             var pack_file = try std.fs.openFileAbsolute(pack_file_path, .{ .mode = .read_only });
             errdefer pack_file.close();
-            const reader = pack_file.reader();
+            const reader = pack_file.deprecatedReader();
 
             // parse header
             const sig = try reader.readBytesNoEof(4);
@@ -172,7 +174,7 @@ const PackObjectHeader = packed struct {
     extra: bool,
 };
 
-const ZlibStream = std.compress.flate.inflate.Decompressor(.zlib, std.fs.File.Reader);
+const ZlibStream = flate.inflate.Decompressor(.zlib, std.fs.File.DeprecatedReader);
 
 /// contains the stream used to read a pack object.
 /// it can either be read from a file on disk or from an in-memory buffer.
@@ -236,7 +238,7 @@ const PackObjectStream = union(enum) {
                 try file.pack_file.seekTo(file.start_position);
                 file.* = .{
                     .pack_file = file.pack_file,
-                    .zlib_stream = std.compress.zlib.decompressor(file.pack_file.reader()),
+                    .zlib_stream = zlib.decompressor(file.pack_file.deprecatedReader()),
                     .start_position = file.start_position,
                 };
             },
@@ -381,7 +383,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
 
             var pack_file = try std.fs.openFileAbsolute(pack_file_path, .{ .mode = .read_only });
             defer pack_file.close();
-            const reader = pack_file.reader();
+            const reader = pack_file.deprecatedReader();
 
             // parse header
             const sig = try reader.readBytesNoEof(4);
@@ -401,7 +403,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             var pack_file = try std.fs.openFileAbsolute(pack_file_path, .{ .mode = .read_only });
             errdefer pack_file.close();
             try pack_file.seekTo(position);
-            const reader = pack_file.reader();
+            const reader = pack_file.deprecatedReader();
 
             // parse object header
             const obj_header: PackObjectHeader = @bitCast(try reader.readByte());
@@ -429,7 +431,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
 
                     var stream = PackObjectStream{ .file = .{
                         .pack_file = pack_file,
-                        .zlib_stream = std.compress.zlib.decompressor(reader),
+                        .zlib_stream = zlib.decompressor(reader),
                         .start_position = start_position,
                     } };
                     errdefer stream.deinit();
@@ -538,12 +540,12 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             // creation of the PackObjectReader because it would cause them
             // to be initialized recursively. since delta chains can get
             // really long, that can lead to a stack overflow.
-            var delta_objects = std.ArrayList(*PackObjectReader(repo_kind, repo_opts)).init(allocator);
-            defer delta_objects.deinit();
+            var delta_objects = std.ArrayList(*PackObjectReader(repo_kind, repo_opts)){};
+            defer delta_objects.deinit(allocator);
             var last_object = self;
             while (last_object.internal == .delta) {
                 try last_object.initDelta(allocator, state);
-                try delta_objects.append(last_object);
+                try delta_objects.append(allocator, last_object);
                 last_object = if (last_object.internal.delta.state) |delta_state|
                     switch (delta_state.base_reader.*) {
                         .pack => |*pack| pack,
@@ -588,8 +590,8 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             const pack_file = self.stream.file.pack_file;
             const start_position = self.stream.file.start_position;
 
-            const reader = pack_file.reader();
-            var zlib_stream = std.compress.zlib.decompressor(reader);
+            const reader = pack_file.deprecatedReader();
+            var zlib_stream = zlib.decompressor(reader);
             const zlib_reader = zlib_stream.reader();
 
             // get size of base object (little endian variable length format)
@@ -628,8 +630,8 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                 }
             }
 
-            var chunks = std.ArrayList(DeltaChunk).init(allocator);
-            errdefer chunks.deinit();
+            var chunks = std.ArrayList(DeltaChunk){};
+            errdefer chunks.deinit(allocator);
 
             var cache = std.AutoArrayHashMap(Location, []const u8).init(allocator);
             errdefer cache.deinit();
@@ -654,7 +656,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                         if (next_byte.value == 0) { // reserved instruction
                             continue;
                         }
-                        try chunks.append(.{
+                        try chunks.append(allocator, .{
                             .location = .{
                                 .offset = bytes_read,
                                 .size = next_byte.value,
@@ -682,7 +684,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                             .offset = copy_offset,
                             .size = if (copy_size == 0) 0x10000 else copy_size,
                         };
-                        try chunks.append(.{
+                        try chunks.append(allocator, .{
                             .location = loc,
                             .kind = .copy_from_base,
                         });
@@ -801,7 +803,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     if (delta.state) |*state| {
                         state.base_reader.deinit(allocator);
                         allocator.destroy(state.base_reader);
-                        state.chunks.deinit();
+                        state.chunks.deinit(allocator);
                         state.cache.deinit();
                         state.cache_arena.deinit();
                         allocator.destroy(state.cache_arena);
@@ -972,7 +974,7 @@ pub fn LooseOrPackObjectReader(comptime repo_opts: rp.RepoOpts(.git)) type {
             };
             errdefer object_file.close();
 
-            var stream = std.compress.zlib.decompressor(object_file.reader());
+            var stream = zlib.decompressor(object_file.deprecatedReader());
             const obj_header = try obj.readObjectHeader(stream.reader());
 
             return .{
@@ -1002,7 +1004,7 @@ pub fn LooseOrPackObjectReader(comptime repo_opts: rp.RepoOpts(.git)) type {
             switch (self.*) {
                 .loose => {
                     try self.loose.file.seekTo(0);
-                    self.loose.stream = std.compress.zlib.decompressor(self.loose.file.reader());
+                    self.loose.stream = zlib.decompressor(self.loose.file.deprecatedReader());
                     try self.loose.stream.reader().skipUntilDelimiterOrEof(0);
                 },
                 .pack => try self.pack.reset(),
@@ -1071,7 +1073,7 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
         mode: union(enum) {
             header,
             object: struct {
-                stream: ?std.compress.flate.deflate.Compressor(.zlib, std.ArrayList(u8).Writer),
+                stream: ?flate.deflate.Compressor(.zlib, std.ArrayList(u8).Writer),
             },
             footer,
             finished,
@@ -1080,9 +1082,9 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
         pub fn init(allocator: std.mem.Allocator, obj_iter: *obj.ObjectIterator(repo_kind, repo_opts, .raw)) !?PackObjectWriter(repo_kind, repo_opts) {
             var self = PackObjectWriter(repo_kind, repo_opts){
                 .allocator = allocator,
-                .objects = std.ArrayList(obj.Object(repo_kind, repo_opts, .raw)).init(allocator),
+                .objects = std.ArrayList(obj.Object(repo_kind, repo_opts, .raw)){},
                 .object_index = 0,
-                .out_bytes = std.ArrayList(u8).init(allocator),
+                .out_bytes = std.ArrayList(u8){},
                 .out_index = 0,
                 .hasher = hash.Hasher(repo_opts.hash).init(),
                 .mode = .header,
@@ -1091,14 +1093,14 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
 
             while (try obj_iter.next()) |object| {
                 errdefer object.deinit();
-                try self.objects.append(object.*);
+                try self.objects.append(allocator, object.*);
             }
 
             if (self.objects.items.len == 0) {
                 return null;
             }
 
-            const writer = self.out_bytes.writer();
+            const writer = self.out_bytes.writer(allocator);
             _ = try writer.write("PACK");
             try writer.writeInt(u32, 2, .big); // version
             try writer.writeInt(u32, @intCast(self.objects.items.len), .big);
@@ -1112,8 +1114,8 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             for (self.objects.items) |*object| {
                 object.deinit();
             }
-            self.objects.deinit();
-            self.out_bytes.deinit();
+            self.objects.deinit(self.allocator);
+            self.out_bytes.deinit(self.allocator);
         }
 
         pub fn read(self: *PackObjectWriter(repo_kind, repo_opts), buffer: []u8) !usize {
@@ -1131,11 +1133,11 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     @memcpy(buffer[0..size], self.out_bytes.items[self.out_index .. self.out_index + size]);
                     self.hasher.update(buffer[0..size]);
                     if (size < buffer.len) {
-                        self.out_bytes.clearAndFree();
+                        self.out_bytes.clearAndFree(self.allocator);
                         self.out_index = 0;
                         self.mode = .{
                             .object = .{
-                                .stream = try std.compress.zlib.compressor(self.out_bytes.writer(), .{ .level = .default }),
+                                .stream = try zlib.compressor(self.out_bytes.writer(self.allocator), .{ .level = .default }),
                             },
                         };
                     } else {
@@ -1152,7 +1154,7 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                         return size;
                     } else {
                         // everything in out_bytes has been written, so we can clear it
-                        self.out_bytes.clearAndFree();
+                        self.out_bytes.clearAndFree(self.allocator);
                         self.out_index = 0;
 
                         if (o.stream) |*stream| {
@@ -1185,7 +1187,7 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                             self.mode = .footer;
                             var hash_buffer = [_]u8{0} ** hash.byteLen(repo_opts.hash);
                             self.hasher.final(&hash_buffer);
-                            try self.out_bytes.appendSlice(&hash_buffer);
+                            try self.out_bytes.appendSlice(self.allocator, &hash_buffer);
                         }
                         return 0;
                     }
@@ -1194,7 +1196,7 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     const size = @min(self.out_bytes.items.len - self.out_index, buffer.len);
                     @memcpy(buffer[0..size], self.out_bytes.items[self.out_index .. self.out_index + size]);
                     if (size < buffer.len) {
-                        self.out_bytes.clearAndFree();
+                        self.out_bytes.clearAndFree(self.allocator);
                         self.out_index = 0;
                         self.mode = .finished;
                     } else {
@@ -1226,7 +1228,7 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                 .extra = first_size_parts.high_bits > 0,
             };
 
-            const writer = self.out_bytes.writer();
+            const writer = self.out_bytes.writer(self.allocator);
             try writer.writeByte(@bitCast(obj_header));
 
             // set size of object (little endian variable length format)
@@ -1258,7 +1260,7 @@ fn findOid(
     oid_list_pos: u64,
     index: usize,
 ) ![hash.byteLen(hash_kind)]u8 {
-    const reader = idx_file.reader();
+    const reader = idx_file.deprecatedReader();
     const oid_pos = oid_list_pos + (index * hash.byteLen(hash_kind));
     try idx_file.seekTo(oid_pos);
     return try reader.readBytesNoEof(hash.byteLen(hash_kind));
@@ -1310,7 +1312,7 @@ fn findOffset(
     oid_list_pos: u64,
     index: usize,
 ) !u64 {
-    const reader = idx_file.reader();
+    const reader = idx_file.deprecatedReader();
 
     const entry_count = fanout_table[fanout_table.len - 1];
     const crc_size: u64 = 4;
@@ -1341,7 +1343,7 @@ fn searchPackIndex(
     idx_file: std.fs.File,
     oid_bytes: *const [hash.byteLen(hash_kind)]u8,
 ) !?u64 {
-    const reader = idx_file.reader();
+    const reader = idx_file.deprecatedReader();
 
     const header = try reader.readBytesNoEof(4);
     const version = if (!std.mem.eql(u8, &.{ 255, 116, 79, 99 }, &header)) 1 else try reader.readInt(u32, .big);

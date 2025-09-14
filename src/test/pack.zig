@@ -165,12 +165,12 @@ test "pack" {
     {
         var pack_dir = try work_dir.openDir(".git/objects/pack", .{ .iterate = true });
         defer pack_dir.close();
-        var entries = std.ArrayList([]const u8).init(allocator);
-        defer entries.deinit();
+        var entries = std.ArrayList([]const u8){};
+        defer entries.deinit(allocator);
         var iter = pack_dir.iterate();
         while (try iter.next()) |entry| {
             switch (entry.kind) {
-                .file => try entries.append(entry.name),
+                .file => try entries.append(allocator, entry.name),
                 else => {},
             }
         }

@@ -59,12 +59,12 @@ pub const Mode = packed struct(u32) {
     },
     padding: u16 = 0,
 
-    pub fn init(meta: std.fs.File.Metadata) Mode {
+    pub fn init(stat: std.fs.File.Stat) Mode {
         const is_executable = switch (builtin.os.tag) {
             .windows => false,
-            else => meta.permissions().inner.unixHas(std.fs.File.PermissionsUnix.Class.user, .execute),
+            else => std.fs.File.PermissionsUnix.unixHas(.{ .mode = stat.mode }, .user, .execute),
         };
-        const obj_type: Mode.ObjectType = switch (meta.kind()) {
+        const obj_type: Mode.ObjectType = switch (stat.kind) {
             .sym_link => .symbolic_link,
             else => .regular_file,
         };
@@ -123,9 +123,9 @@ pub const Times = struct {
     mtime_secs: u32,
     mtime_nsecs: u32,
 
-    pub fn init(meta: std.fs.File.Metadata) Times {
-        const ctime = meta.created() orelse 0;
-        const mtime = meta.modified();
+    pub fn init(stat: std.fs.File.Stat) Times {
+        const ctime = stat.ctime;
+        const mtime = stat.mtime;
         return .{
             .ctime_secs = @intCast(@divTrunc(ctime, std.time.ns_per_s)),
             .ctime_nsecs = @intCast(@mod(ctime, std.time.ns_per_s)),
@@ -196,23 +196,23 @@ pub const Metadata = struct {
 
         // on windows, openFile returns error.IsDir on a dir.
         // so we need to call openDir in that case.
-        var meta: std.fs.File.Metadata = undefined;
-        var stat: Stat = undefined;
+        var stat: std.fs.File.Stat = undefined;
+        var fstat: Stat = undefined;
         if (parent_dir.openFile(path, .{ .mode = .read_only })) |file| {
             defer file.close();
-            meta = try file.metadata();
-            stat = try Stat.init(file.handle);
+            stat = try file.stat();
+            fstat = try Stat.init(file.handle);
         } else |err| switch (err) {
             error.IsDir => {
                 var dir = try parent_dir.openDir(path, .{});
                 defer dir.close();
-                meta = try dir.metadata();
-                stat = try Stat.init(dir.fd);
+                stat = try dir.stat();
+                fstat = try Stat.init(dir.fd);
             },
             else => |e| return e,
         }
 
-        return try initFromFileMetadata(meta, stat);
+        return try initFromFileMetadata(stat, fstat);
     }
 
     pub fn initFromFile(file: std.fs.File) !Metadata {
@@ -220,13 +220,13 @@ pub const Metadata = struct {
         return initFromFileMetadata(meta, try Stat.init(file.handle));
     }
 
-    pub fn initFromFileMetadata(file_meta: std.fs.File.Metadata, stat: Stat) !Metadata {
+    pub fn initFromFileMetadata(stat: std.fs.File.Stat, fstat: Stat) !Metadata {
         return .{
-            .kind = file_meta.kind(),
-            .times = Times.init(file_meta),
-            .stat = stat,
-            .mode = Mode.init(file_meta),
-            .size = file_meta.size(),
+            .kind = stat.kind,
+            .times = Times.init(stat),
+            .stat = fstat,
+            .mode = Mode.init(stat),
+            .size = stat.size,
         };
     }
 };
@@ -289,11 +289,11 @@ pub fn relativePath(allocator: std.mem.Allocator, work_dir: std.fs.Dir, cwd: std
 }
 
 pub fn splitPath(allocator: std.mem.Allocator, path: []const u8) ![]const []const u8 {
-    var path_parts = std.ArrayList([]const u8).init(allocator);
-    errdefer path_parts.deinit();
+    var path_parts = std.ArrayList([]const u8){};
+    errdefer path_parts.deinit(allocator);
     var path_iter = try std.fs.path.componentIterator(path);
     while (path_iter.next()) |component| {
-        try path_parts.append(component.name);
+        try path_parts.append(allocator, component.name);
     }
-    return try path_parts.toOwnedSlice();
+    return try path_parts.toOwnedSlice(allocator);
 }

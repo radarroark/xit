@@ -135,7 +135,7 @@ fn spawnSsh(
     url: []const u8,
     command_maybe: ?[]const u8,
 ) !void {
-    var args = std.ArrayList([]const u8).init(wire_state.arena.allocator());
+    var args = std.ArrayList([]const u8){};
 
     const command = if (command_maybe) |cmd| cmd else "ssh";
 
@@ -143,14 +143,14 @@ fn spawnSsh(
     var arg_iter = try std.process.ArgIteratorGeneral(.{ .single_quotes = true }).init(wire_state.allocator, command);
     defer arg_iter.deinit();
     while (arg_iter.next()) |arg| {
-        try args.append(arg);
+        try args.append(wire_state.arena.allocator(), arg);
     }
 
     const uri = try parseUri(url);
 
     if (uri.port) |port| {
-        try args.append("-p");
-        try args.append(try std.fmt.allocPrint(wire_state.arena.allocator(), "{}", .{port}));
+        try args.append(wire_state.arena.allocator(), "-p");
+        try args.append(wire_state.arena.allocator(), try std.fmt.allocPrint(wire_state.arena.allocator(), "{}", .{port}));
     }
 
     if (uri.user) |user| {
@@ -163,7 +163,7 @@ fn spawnSsh(
                 .raw => |s| s,
                 .percent_encoded => |s| s,
             };
-            try args.append(try std.fmt.allocPrint(wire_state.arena.allocator(), "{s}@{s}", .{ user_str, host_str }));
+            try args.append(wire_state.arena.allocator(), try std.fmt.allocPrint(wire_state.arena.allocator(), "{s}@{s}", .{ user_str, host_str }));
         }
     } else {
         if (uri.host) |host| {
@@ -171,7 +171,7 @@ fn spawnSsh(
                 .raw => |s| s,
                 .percent_encoded => |s| s,
             };
-            try args.append(try wire_state.arena.allocator().dupe(u8, host_str));
+            try args.append(wire_state.arena.allocator(), try wire_state.arena.allocator().dupe(u8, host_str));
         }
     }
 
@@ -180,15 +180,15 @@ fn spawnSsh(
         .list_receive_pack => "git-receive-pack",
         else => return error.InvalidAction,
     };
-    try args.append(try wire_state.arena.allocator().dupe(u8, sub_command));
+    try args.append(wire_state.arena.allocator(), try wire_state.arena.allocator().dupe(u8, sub_command));
 
     const path_str = switch (uri.path) {
         .raw => |s| s,
         .percent_encoded => |s| s,
     };
-    try args.append(try wire_state.arena.allocator().dupe(u8, path_str));
+    try args.append(wire_state.arena.allocator(), try wire_state.arena.allocator().dupe(u8, path_str));
 
-    const ssh_cmdline = try args.toOwnedSlice();
+    const ssh_cmdline = try args.toOwnedSlice(wire_state.arena.allocator());
 
     var process = std.process.Child.init(ssh_cmdline, wire_state.allocator);
     process.stdin_behavior = .Pipe;

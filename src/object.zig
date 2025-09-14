@@ -11,14 +11,16 @@ const cfg = @import("./config.zig");
 const tg = @import("./tag.zig");
 const tr = @import("./tree.zig");
 const mrg = @import("./merge.zig");
+const buf_rdr = @import("./std/buffered_reader.zig");
+const zlib = @import("./std/zlib.zig");
 
 fn compressZlib(comptime read_size: usize, in: std.fs.File, out: std.fs.File) !void {
     // init stream from input file
-    var zlib_stream = try std.compress.zlib.compressor(out.writer(), .{ .level = .default });
+    var zlib_stream = try zlib.compressor(out.deprecatedWriter(), .{ .level = .default });
 
     // write the compressed data to the output file
     try in.seekTo(0);
-    const reader = in.reader();
+    const reader = in.deprecatedReader();
     var buf = [_]u8{0} ** read_size;
     while (true) {
         // read from file
@@ -152,10 +154,10 @@ const Tree = struct {
                 var subtree = try Tree.init(allocator);
                 defer subtree.deinit();
 
-                var child_names = std.ArrayList([]const u8).init(allocator);
-                defer child_names.deinit();
+                var child_names = std.ArrayList([]const u8){};
+                defer child_names.deinit(allocator);
                 for (children.keys()) |child| {
-                    try child_names.append(child);
+                    try child_names.append(allocator, child);
                 }
 
                 try subtree.addIndexEntries(
@@ -292,12 +294,12 @@ fn sign(
         sig_file.close();
         state.core.repo_dir.deleteFile(sig_file_name) catch {};
     }
-    const sig_file_reader = sig_file.reader();
-    var sig_lines = std.ArrayList([]const u8).init(arena.allocator());
+    const sig_file_reader = sig_file.deprecatedReader();
+    var sig_lines = std.ArrayList([]const u8){};
     while (try sig_file_reader.readUntilDelimiterOrEofAlloc(arena.allocator(), '\n', repo_opts.max_read_size)) |line| {
-        try sig_lines.append(line);
+        try sig_lines.append(arena.allocator(), line);
     }
-    return try sig_lines.toOwnedSlice();
+    return try sig_lines.toOwnedSlice(arena.allocator());
 }
 
 pub fn CommitMetadata(comptime hash_kind: hash.HashKind) type {
@@ -372,11 +374,11 @@ pub fn writeCommit(
         var config = try cfg.Config(repo_kind, repo_opts).init(state.readOnly(), arena.allocator());
         defer config.deinit();
 
-        var metadata_lines = std.ArrayList([]const u8).init(arena.allocator());
+        var metadata_lines = std.ArrayList([]const u8){};
 
-        try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "tree {s}", .{tree_hash_hex}));
+        try metadata_lines.append(arena.allocator(), try std.fmt.allocPrint(arena.allocator(), "tree {s}", .{tree_hash_hex}));
         for (parent_oids) |parent_oid| {
-            try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "parent {s}", .{parent_oid}));
+            try metadata_lines.append(arena.allocator(), try std.fmt.allocPrint(arena.allocator(), "parent {s}", .{parent_oid}));
         }
 
         const ts = if (repo_opts.is_test) 0 else std.time.timestamp();
@@ -388,31 +390,31 @@ pub fn writeCommit(
             const email = user_section.get("email") orelse return error.UserConfigNotFound;
             break :auth_blk try std.fmt.allocPrint(arena.allocator(), "{s} <{s}>", .{ name, email });
         };
-        try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "author {s} {} +0000", .{ author, ts }));
+        try metadata_lines.append(arena.allocator(), try std.fmt.allocPrint(arena.allocator(), "author {s} {} +0000", .{ author, ts }));
 
         const committer = metadata.committer orelse author;
-        try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "committer {s} {} +0000", .{ committer, ts }));
+        try metadata_lines.append(arena.allocator(), try std.fmt.allocPrint(arena.allocator(), "committer {s} {} +0000", .{ committer, ts }));
 
-        try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "\n{s}", .{metadata.message orelse ""}));
+        try metadata_lines.append(arena.allocator(), try std.fmt.allocPrint(arena.allocator(), "\n{s}", .{metadata.message orelse ""}));
 
         // sign if key is in config
         if (config.sections.get("user")) |user_section| {
             if (user_section.get("signingkey")) |signing_key| {
                 const sig_lines = try sign(repo_kind, repo_opts, state.readOnly(), allocator, &arena, metadata_lines.items, signing_key);
 
-                var header_lines = std.ArrayList([]const u8).init(allocator);
-                defer header_lines.deinit();
+                var header_lines = std.ArrayList([]const u8){};
+                defer header_lines.deinit(allocator);
                 for (sig_lines, 0..) |line, i| {
                     const sig_line = if (i == 0)
                         try std.fmt.allocPrint(arena.allocator(), "gpgsig {s}", .{line})
                     else
                         try std.fmt.allocPrint(arena.allocator(), " {s}", .{line});
-                    try header_lines.append(sig_line);
+                    try header_lines.append(allocator, sig_line);
                 }
 
                 const message = metadata_lines.pop() orelse unreachable; // remove the message
-                try metadata_lines.appendSlice(header_lines.items); // add the sig
-                try metadata_lines.append(message); // add the message back
+                try metadata_lines.appendSlice(arena.allocator(), header_lines.items); // add the sig
+                try metadata_lines.append(arena.allocator(), message); // add the message back
             }
         }
 
@@ -486,7 +488,7 @@ pub fn writeTag(
         var config = try cfg.Config(repo_kind, repo_opts).init(state.readOnly(), arena.allocator());
         defer config.deinit();
 
-        var metadata_lines = std.ArrayList([]const u8).init(arena.allocator());
+        var metadata_lines = std.ArrayList([]const u8){};
 
         const kind = kind_blk: {
             var obj = try Object(repo_kind, repo_opts, .raw).init(allocator, state.readOnly(), target_oid);
@@ -494,9 +496,9 @@ pub fn writeTag(
             break :kind_blk obj.content;
         };
 
-        try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "object {s}", .{target_oid}));
-        try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "type {s}", .{kind.name()}));
-        try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "tag {s}", .{input.name}));
+        try metadata_lines.append(arena.allocator(), try std.fmt.allocPrint(arena.allocator(), "object {s}", .{target_oid}));
+        try metadata_lines.append(arena.allocator(), try std.fmt.allocPrint(arena.allocator(), "type {s}", .{kind.name()}));
+        try metadata_lines.append(arena.allocator(), try std.fmt.allocPrint(arena.allocator(), "tag {s}", .{input.name}));
 
         const ts = if (repo_opts.is_test) 0 else std.time.timestamp();
 
@@ -507,15 +509,15 @@ pub fn writeTag(
             const email = user_section.get("email") orelse return error.UserConfigNotFound;
             break :auth_blk try std.fmt.allocPrint(arena.allocator(), "{s} <{s}>", .{ name, email });
         };
-        try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "tagger {s} {} +0000", .{ tagger, ts }));
+        try metadata_lines.append(arena.allocator(), try std.fmt.allocPrint(arena.allocator(), "tagger {s} {} +0000", .{ tagger, ts }));
 
-        try metadata_lines.append(try std.fmt.allocPrint(arena.allocator(), "\n{s}", .{input.message orelse ""}));
+        try metadata_lines.append(arena.allocator(), try std.fmt.allocPrint(arena.allocator(), "\n{s}", .{input.message orelse ""}));
 
         // sign if key is in config
         if (config.sections.get("user")) |user_section| {
             if (user_section.get("signingkey")) |signing_key| {
                 const sig_lines = try sign(repo_kind, repo_opts, state.readOnly(), allocator, &arena, metadata_lines.items, signing_key);
-                try metadata_lines.appendSlice(sig_lines);
+                try metadata_lines.appendSlice(arena.allocator(), sig_lines);
             }
         }
 
@@ -600,7 +602,7 @@ pub const ObjectKind = enum {
 pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return struct {
         allocator: std.mem.Allocator,
-        reader: std.io.BufferedReader(repo_opts.read_size, Reader),
+        reader: buf_rdr.BufferedReader(repo_opts.read_size, Reader),
 
         pub const Reader = switch (repo_kind) {
             .git => pack.LooseOrPackObjectReader(repo_opts),
@@ -617,14 +619,14 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                     const reader = try pack.LooseOrPackObjectReader(repo_opts).init(allocator, state, oid);
                     return .{
                         .allocator = allocator,
-                        .reader = std.io.bufferedReaderSize(repo_opts.read_size, reader),
+                        .reader = buf_rdr.bufferedReaderSize(repo_opts.read_size, reader),
                     };
                 },
                 .xit => {
                     const reader = try chunk.ChunkObjectReader(repo_opts).init(allocator, state, oid);
                     return .{
                         .allocator = allocator,
-                        .reader = std.io.bufferedReaderSize(repo_opts.read_size, reader),
+                        .reader = buf_rdr.bufferedReaderSize(repo_opts.read_size, reader),
                     };
                 },
             }
@@ -636,7 +638,7 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
 
         pub fn reset(self: *ObjectReader(repo_kind, repo_opts)) !void {
             try self.reader.unbuffered_reader.reset();
-            self.reader = std.io.bufferedReaderSize(repo_opts.read_size, self.reader.unbuffered_reader);
+            self.reader = buf_rdr.bufferedReaderSize(repo_opts.read_size, self.reader.unbuffered_reader);
         }
 
         pub fn seekTo(self: *ObjectReader(repo_kind, repo_opts), position: u64) !void {
@@ -820,7 +822,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                         }
                         position += tree_hash_slice.len + 1;
 
-                        var parent_oids = std.ArrayList([hash.hexLen(repo_opts.hash)]u8).init(arena.allocator());
+                        var parent_oids = std.ArrayList([hash.hexLen(repo_opts.hash)]u8){};
                         var metadata = CommitMetadata(repo_opts.hash){};
 
                         // read the metadata
@@ -841,7 +843,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                                     if (value.len != hash.hexLen(repo_opts.hash)) {
                                         return error.InvalidObject;
                                     }
-                                    try parent_oids.append(value[0..comptime hash.hexLen(repo_opts.hash)].*);
+                                    try parent_oids.append(arena.allocator(), value[0..comptime hash.hexLen(repo_opts.hash)].*);
                                 } else if (std.mem.eql(u8, "author", key)) {
                                     metadata.author = value;
                                 } else if (std.mem.eql(u8, "committer", key)) {
@@ -996,10 +998,15 @@ pub fn ObjectIterator(
         allocator: std.mem.Allocator,
         core: *rp.Repo(repo_kind, repo_opts).Core,
         moment: rp.Repo(repo_kind, repo_opts).Moment(.read_only),
-        oid_queue: std.DoublyLinkedList([hash.hexLen(repo_opts.hash)]u8),
+        oid_queue: std.DoublyLinkedList,
         oid_excludes: std.AutoHashMap([hash.hexLen(repo_opts.hash)]u8, void),
         object: Object(repo_kind, repo_opts, load_kind),
         options: ObjectIteratorOptions,
+
+        const OidAndNode = struct {
+            oid: [hash.hexLen(repo_opts.hash)]u8,
+            node: std.DoublyLinkedList.Node,
+        };
 
         pub fn init(
             allocator: std.mem.Allocator,
@@ -1010,7 +1017,7 @@ pub fn ObjectIterator(
                 .allocator = allocator,
                 .core = state.core,
                 .moment = state.extra.moment.*,
-                .oid_queue = std.DoublyLinkedList([hash.hexLen(repo_opts.hash)]u8){},
+                .oid_queue = std.DoublyLinkedList{},
                 .oid_excludes = std.AutoHashMap([hash.hexLen(repo_opts.hash)]u8, void).init(allocator),
                 .object = undefined,
                 .options = options,
@@ -1019,7 +1026,8 @@ pub fn ObjectIterator(
 
         pub fn deinit(self: *ObjectIterator(repo_kind, repo_opts, load_kind)) void {
             while (self.oid_queue.popFirst()) |node| {
-                self.allocator.destroy(node);
+                const oid_and_node: *OidAndNode = @fieldParentPtr("node", node);
+                self.allocator.destroy(oid_and_node);
             }
             self.oid_excludes.deinit();
         }
@@ -1027,8 +1035,9 @@ pub fn ObjectIterator(
         pub fn next(self: *ObjectIterator(repo_kind, repo_opts, load_kind)) !?*Object(repo_kind, repo_opts, load_kind) {
             const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = self.core, .extra = .{ .moment = &self.moment } };
             while (self.oid_queue.popFirst()) |node| {
-                const next_oid = node.data;
-                self.allocator.destroy(node);
+                const oid_and_node: *OidAndNode = @fieldParentPtr("node", node);
+                const next_oid = oid_and_node.oid;
+                self.allocator.destroy(oid_and_node);
 
                 if (!self.oid_excludes.contains(next_oid)) {
                     try self.oid_excludes.put(next_oid, {});
@@ -1097,10 +1106,11 @@ pub fn ObjectIterator(
 
         pub fn include(self: *ObjectIterator(repo_kind, repo_opts, load_kind), oid: *const [hash.hexLen(repo_opts.hash)]u8) !void {
             if (!self.oid_excludes.contains(oid.*)) {
-                var node = try self.allocator.create(std.DoublyLinkedList([hash.hexLen(repo_opts.hash)]u8).Node);
-                errdefer self.allocator.destroy(node);
-                node.data = oid.*;
-                self.oid_queue.append(node);
+                var oid_and_node = try self.allocator.create(OidAndNode);
+                errdefer self.allocator.free(oid_and_node);
+                oid_and_node.oid = oid.*;
+                oid_and_node.node = .{};
+                self.oid_queue.append(&oid_and_node.node);
             }
         }
 

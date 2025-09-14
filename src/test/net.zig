@@ -247,18 +247,22 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
                     .http => {
                         const ServerHandler = struct {
                             fn run(core: *Core) !void {
+                                var send_buffer = [_]u8{0} ** 1024;
+                                var recv_buffer = [_]u8{0} ** 1024;
+
                                 accept: while (true) {
                                     const conn = try core.net_server.accept();
                                     defer conn.stream.close();
 
-                                    var header_buffer = [_]u8{0} ** 1024;
-                                    var http_server = std.http.Server.init(conn, &header_buffer);
+                                    var conn_br = conn.stream.reader(&recv_buffer);
+                                    var conn_bw = conn.stream.writer(&send_buffer);
+                                    var http_server = std.http.Server.init(conn_br.interface(), &conn_bw.interface);
 
-                                    while (http_server.state == .ready) {
+                                    while (http_server.reader.state == .ready) {
                                         // give server some time to receive the request.
                                         // without it, POST requests sometimes don't have all the
                                         // expected data in their bodies because they use chunked encoding.
-                                        std.time.sleep(std.time.ns_per_s * 0.5);
+                                        std.Thread.sleep(std.time.ns_per_s * 0.5);
 
                                         var request = http_server.receiveHead() catch |err| switch (err) {
                                             error.HttpConnectionClosing => continue :accept,
@@ -294,8 +298,8 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
                                             try env_map.put("QUERY_STRING", query.percent_encoded);
                                         }
 
-                                        var accept = std.ArrayList([]const u8).init(core.allocator);
-                                        defer accept.deinit();
+                                        var accept = std.ArrayList([]const u8){};
+                                        defer accept.deinit(core.allocator);
 
                                         var keep_alive = false;
 
@@ -312,7 +316,7 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
                                             } else if (std.ascii.eqlIgnoreCase(header_name, "referer")) {
                                                 try env_map.put("HTTP_REFERER", header_value);
                                             } else if (std.ascii.eqlIgnoreCase(header_name, "accept")) {
-                                                try accept.append(header_value);
+                                                try accept.append(core.allocator, header_value);
                                             } else if (std.ascii.eqlIgnoreCase(header_name, "user-agent")) {
                                                 try env_map.put("HTTP_USER_AGENT", header_value);
                                             } else if (std.ascii.eqlIgnoreCase(header_name, "connection")) {
@@ -335,15 +339,15 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
                                         try process.spawn();
 
                                         if (request.head.method == .POST) {
-                                            const reader = try request.reader();
-                                            const request_body = try reader.readAllAlloc(core.allocator, 1024 * 1024);
+                                            const reader = try request.readerExpectContinue(&.{});
+                                            const request_body = try reader.allocRemaining(core.allocator, .unlimited);
                                             defer core.allocator.free(request_body);
                                             try process.stdin.?.writeAll(request_body);
                                         }
 
-                                        var stdout = std.ArrayListUnmanaged(u8){};
+                                        var stdout = std.ArrayList(u8){};
                                         defer stdout.deinit(core.allocator);
-                                        var stderr = std.ArrayListUnmanaged(u8){};
+                                        var stderr = std.ArrayList(u8){};
                                         defer stderr.deinit(core.allocator);
                                         try process.collectOutput(core.allocator, &stdout, &stderr, 1024 * 1024);
 
@@ -351,11 +355,12 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
 
                                         if (stderr.items.len > 0) {
                                             std.debug.print("Error from git-http-backend:\n{s}\n", .{stderr.items});
-                                            try http_server.connection.stream.writeAll("HTTP/1.1 500 Internal Server Error\r\n\r\n");
+                                            try http_server.out.writeAll("HTTP/1.1 500 Internal Server Error\r\n\r\n");
                                         } else {
-                                            try http_server.connection.stream.writeAll("HTTP/1.1 200 OK\r\n");
-                                            try http_server.connection.stream.writeAll(stdout.items);
+                                            try http_server.out.writeAll("HTTP/1.1 200 OK\r\n");
+                                            try http_server.out.writeAll(stdout.items);
                                         }
+                                        try http_server.out.flush();
 
                                         if (!keep_alive) {
                                             continue :accept;
@@ -372,7 +377,7 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
             }
 
             // give server some time to start
-            std.time.sleep(std.time.ns_per_s * 0.5);
+            std.Thread.sleep(std.time.ns_per_s * 0.5);
         }
 
         fn stop(self: *Server(transport_def)) void {
@@ -510,9 +515,9 @@ fn testFetch(
         .{ .refspecs = refspecs, .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
     ) catch |err| {
         if (false) {
-            var stdout = std.ArrayListUnmanaged(u8){};
+            var stdout = std.ArrayList(u8){};
             defer stdout.deinit(allocator);
-            var stderr = std.ArrayListUnmanaged(u8){};
+            var stderr = std.ArrayList(u8){};
             defer stderr.deinit(allocator);
             try server.core.process.collectOutput(allocator, &stdout, &stderr, 1024 * 1024);
             if (stdout.items.len > 0) std.debug.print("server output:\n{s}\n", .{stdout.items});
@@ -557,9 +562,9 @@ fn testFetch(
         .{ .refspecs = refspecs, .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
     ) catch |err| {
         if (false) {
-            var stdout = std.ArrayListUnmanaged(u8){};
+            var stdout = std.ArrayList(u8){};
             defer stdout.deinit(allocator);
-            var stderr = std.ArrayListUnmanaged(u8){};
+            var stderr = std.ArrayList(u8){};
             defer stderr.deinit(allocator);
             try server.core.process.collectOutput(allocator, &stdout, &stderr, 1024 * 1024);
             if (stdout.items.len > 0) std.debug.print("server output:\n{s}\n", .{stdout.items});
@@ -701,9 +706,9 @@ fn testPush(
         .{ .refspecs = refspecs, .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
     ) catch |err| {
         if (false) {
-            var stdout = std.ArrayListUnmanaged(u8){};
+            var stdout = std.ArrayList(u8){};
             defer stdout.deinit(allocator);
-            var stderr = std.ArrayListUnmanaged(u8){};
+            var stderr = std.ArrayList(u8){};
             defer stderr.deinit(allocator);
             try server.core.process.collectOutput(allocator, &stdout, &stderr, 1024 * 1024);
             if (stdout.items.len > 0) std.debug.print("server output:\n{s}\n", .{stdout.items});
@@ -947,9 +952,9 @@ fn testClone(
         .{ .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
     ) catch |err| {
         if (false) {
-            var stdout = std.ArrayListUnmanaged(u8){};
+            var stdout = std.ArrayList(u8){};
             defer stdout.deinit(allocator);
-            var stderr = std.ArrayListUnmanaged(u8){};
+            var stderr = std.ArrayList(u8){};
             defer stderr.deinit(allocator);
             try server.core.process.collectOutput(allocator, &stdout, &stderr, 1024 * 1024);
             if (stdout.items.len > 0) std.debug.print("server output:\n{s}\n", .{stdout.items});

@@ -62,8 +62,8 @@ pub fn TreeDiff(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts
                 while (iter.next()) |old_entry| {
                     const old_key = old_entry.key_ptr.*;
                     const old_value = old_entry.value_ptr.*;
-                    var path_list = if (path_list_maybe) |path_list| try path_list.clone() else std.ArrayList([]const u8).init(self.arena.allocator());
-                    try path_list.append(old_key);
+                    var path_list = if (path_list_maybe) |path_list| try path_list.clone(self.arena.allocator()) else std.ArrayList([]const u8){};
+                    try path_list.append(self.arena.allocator(), old_key);
                     const path = try fs.joinPath(self.arena.allocator(), path_list.items);
                     if (new_entries.get(old_key)) |new_value| {
                         if (!old_value.eql(new_value)) {
@@ -89,8 +89,8 @@ pub fn TreeDiff(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts
                 while (iter.next()) |new_entry| {
                     const new_key = new_entry.key_ptr.*;
                     const new_value = new_entry.value_ptr.*;
-                    var path_list = if (path_list_maybe) |path_list| try path_list.clone() else std.ArrayList([]const u8).init(self.arena.allocator());
-                    try path_list.append(new_key);
+                    var path_list = if (path_list_maybe) |path_list| try path_list.clone(self.arena.allocator()) else std.ArrayList([]const u8){};
+                    try path_list.append(self.arena.allocator(), new_key);
                     const path = try fs.joinPath(self.arena.allocator(), path_list.items);
                     if (old_entries.get(new_key)) |_| {
                         continue;

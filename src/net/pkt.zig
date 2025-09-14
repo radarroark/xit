@@ -155,7 +155,7 @@ pub fn bufferHave(
     try commandSize(&command_size_buf, line.len);
     @memcpy(line[0..4], &command_size_buf);
 
-    try buf.appendSlice(line);
+    try buf.appendSlice(allocator, line);
 }
 
 fn bufferWantWithCaps(
@@ -166,42 +166,42 @@ fn bufferWantWithCaps(
     caps: *const net_wire.Capabilities,
     buf: *std.ArrayList(u8),
 ) !void {
-    var line = std.ArrayList(u8).init(allocator);
-    defer line.deinit();
+    var line = std.ArrayList(u8){};
+    defer line.deinit(allocator);
 
     var command_size_buf = [_]u8{'0'} ** 4;
 
-    try line.writer().print("{s}{s}{s} ", .{ &command_size_buf, PKT_WANT_PREFIX, &head.oid });
+    try line.writer(allocator).print("{s}{s}{s} ", .{ &command_size_buf, PKT_WANT_PREFIX, &head.oid });
 
     if (caps.multi_ack_detailed) {
-        try line.appendSlice("multi_ack_detailed ");
+        try line.appendSlice(allocator, "multi_ack_detailed ");
     } else if (caps.multi_ack) {
-        try line.appendSlice("multi_ack ");
+        try line.appendSlice(allocator, "multi_ack ");
     }
 
     if (caps.side_band_64k) {
-        try line.appendSlice("side-band-64k ");
+        try line.appendSlice(allocator, "side-band-64k ");
     } else if (caps.side_band) {
-        try line.appendSlice("side-band ");
+        try line.appendSlice(allocator, "side-band ");
     }
 
     if (caps.include_tag) {
-        try line.appendSlice("include-tag ");
+        try line.appendSlice(allocator, "include-tag ");
     }
 
     if (caps.thin_pack) {
-        try line.appendSlice("thin-pack ");
+        try line.appendSlice(allocator, "thin-pack ");
     }
 
     if (caps.ofs_delta) {
-        try line.appendSlice("ofs-delta ");
+        try line.appendSlice(allocator, "ofs-delta ");
     }
 
     if (caps.shallow) {
-        try line.appendSlice("shallow ");
+        try line.appendSlice(allocator, "shallow ");
     }
 
-    try line.append('\n');
+    try line.append(allocator, '\n');
 
     const PKT_MAX_WANTLEN = (PKT_LEN_SIZE + PKT_WANT_PREFIX.len + hash.hexLen(repo_opts.hash) + 1);
 
@@ -212,7 +212,7 @@ fn bufferWantWithCaps(
     try commandSize(&command_size_buf, line.items.len);
     @memcpy(line.items[0..4], &command_size_buf);
 
-    try buf.appendSlice(line.items);
+    try buf.appendSlice(allocator, line.items);
 }
 
 pub fn bufferWants(
@@ -252,10 +252,10 @@ pub fn bufferWants(
         try commandSize(&command_size_buf, line.len);
         @memcpy(line[0..4], &command_size_buf);
 
-        try buf.appendSlice(line);
+        try buf.appendSlice(allocator, line);
     }
 
-    try buf.appendSlice("0000");
+    try buf.appendSlice(allocator, "0000");
 }
 
 fn dataPkt(

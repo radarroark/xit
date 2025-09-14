@@ -27,7 +27,7 @@ pub fn UndoList(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime
                 arena.* = std.heap.ArenaAllocator.init(allocator);
 
                 // init txes
-                const txes = std.ArrayList(?[]const u8).init(arena.allocator());
+                const txes = std.ArrayList(?[]const u8){};
 
                 var inner_box = try wgt.Box(Widget).init(allocator, null, .vert);
                 errdefer inner_box.deinit();
@@ -186,7 +186,7 @@ pub fn UndoList(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime
                 defer self.allocator.free(msg_value);
 
                 const msg = try std.fmt.allocPrint(self.arena.allocator(), "{} - {s}", .{ ii, msg_value });
-                try self.txes.append(msg);
+                try self.txes.append(self.arena.allocator(), msg);
 
                 const inner_box = &self.scroll.child.box;
                 var text_box = try wgt.TextBox(Widget).init(self.allocator, msg, .hidden, .none);

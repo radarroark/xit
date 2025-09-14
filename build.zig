@@ -10,9 +10,11 @@ pub fn build(b: *std.Build) !void {
     {
         const exe = b.addExecutable(.{
             .name = "xit",
-            .root_source_file = b.path("src/main.zig"),
-            .target = target,
-            .optimize = optimize,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/main.zig"),
+                .target = target,
+                .optimize = optimize,
+            }),
         });
         //exe.root_module.addAnonymousImport("xitdb", .{ .root_source_file = b.path("../xitdb/src/lib.zig") });
         //exe.root_module.addAnonymousImport("xitui", .{ .root_source_file = b.path("../xitui/src/lib.zig") });
@@ -21,6 +23,7 @@ pub fn build(b: *std.Build) !void {
         if (.windows == builtin.os.tag) {
             exe.linkLibC();
         }
+        exe.use_llvm = true;
         b.installArtifact(exe);
 
         const run_cmd = b.addRunArtifact(exe);
@@ -47,14 +50,17 @@ pub fn build(b: *std.Build) !void {
     {
         const exe = b.addExecutable(.{
             .name = "try",
-            .root_source_file = b.path("src/try.zig"),
-            .target = target,
-            .optimize = optimize,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/try.zig"),
+                .target = target,
+                .optimize = optimize,
+            }),
         });
         exe.root_module.addImport("xit", xit);
         if (.windows == builtin.os.tag) {
             exe.linkLibC();
         }
+        exe.use_llvm = true;
         b.installArtifact(exe);
 
         const run_cmd = b.addRunArtifact(exe);
@@ -81,8 +87,11 @@ pub fn build(b: *std.Build) !void {
         z.link(git2.step);
 
         const unit_tests = b.addTest(.{
-            .root_source_file = b.path("src/test.zig"),
-            .optimize = optimize,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/test.zig"),
+                .target = target,
+                .optimize = optimize,
+            }),
             .filters = test_filters,
         });
         unit_tests.root_module.addImport("xit", xit);
@@ -99,8 +108,11 @@ pub fn build(b: *std.Build) !void {
     // testnet
     {
         const unit_tests = b.addTest(.{
-            .root_source_file = b.path("src/testnet.zig"),
-            .optimize = optimize,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/testnet.zig"),
+                .target = target,
+                .optimize = optimize,
+            }),
             .filters = test_filters,
         });
         unit_tests.root_module.addImport("xit", xit);

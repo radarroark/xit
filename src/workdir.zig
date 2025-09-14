@@ -214,8 +214,8 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     defer dir.close();
                     var iter = dir.iterate();
 
-                    var child_untracked = std.ArrayList(Status(repo_kind, repo_opts).Entry).init(allocator);
-                    defer child_untracked.deinit();
+                    var child_untracked = std.ArrayList(Status(repo_kind, repo_opts).Entry){};
+                    defer child_untracked.deinit(allocator);
                     var contains_file = false;
 
                     while (try iter.next()) |entry| {
@@ -237,7 +237,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                         contains_file = contains_file or is_file;
                         if (is_file and is_untracked) break; // no need to continue because child_untracked will be discarded anyway
 
-                        try child_untracked.appendSlice(grandchild_untracked.values());
+                        try child_untracked.appendSlice(allocator, grandchild_untracked.values());
                     }
 
                     // add the dir if it isn't tracked and contains a file
@@ -303,7 +303,7 @@ pub fn indexDiffersFromWorkDir(
                     const header = try std.fmt.bufPrint(&header_buffer, "blob {}\x00", .{meta.size});
 
                     var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-                    try hash.hashReader(repo_opts.hash, repo_opts.read_size, file.reader(), header, &oid);
+                    try hash.hashReader(repo_opts.hash, repo_opts.read_size, file.deprecatedReader(), header, &oid);
                     if (!std.mem.eql(u8, &entry.oid, &oid)) {
                         return true;
                     }
@@ -507,7 +507,7 @@ pub fn objectToFile(
             defer out_file.close();
 
             // write the decompressed data to the output file
-            const writer = out_file.writer();
+            const writer = out_file.deprecatedWriter();
             var buf = [_]u8{0} ** repo_opts.read_size;
             while (true) {
                 // read from file

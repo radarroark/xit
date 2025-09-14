@@ -353,7 +353,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         const xitdb = @import("xitdb");
 
                         try self.core.db_file.seekTo(0);
-                        const header = try xitdb.DatabaseHeader.read(self.core.db_file.reader());
+                        const header = try xitdb.DatabaseHeader.read(self.core.db_file.deprecatedReader());
                         try header.validate();
 
                         return hash.hashKind(header.hash_id.id, header.hash_size) orelse error.InvalidHashKind;
@@ -460,14 +460,14 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             var arena = std.heap.ArenaAllocator.init(allocator);
             defer arena.deinit();
 
-            var normalized_paths = std.ArrayList([]const u8).init(arena.allocator());
+            var normalized_paths = std.ArrayList([]const u8){};
             for (paths) |path| {
                 const rel_path = try fs.relativePath(allocator, self.core.work_dir, self.core.init_opts.cwd, path);
                 defer allocator.free(rel_path);
                 const path_parts = try fs.splitPath(allocator, rel_path);
                 defer allocator.free(path_parts);
                 const normalized_path = try fs.joinPath(arena.allocator(), path_parts);
-                try normalized_paths.append(normalized_path);
+                try normalized_paths.append(arena.allocator(), normalized_path);
             }
 
             switch (repo_kind) {
@@ -512,14 +512,14 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             var arena = std.heap.ArenaAllocator.init(allocator);
             defer arena.deinit();
 
-            var normalized_paths = std.ArrayList([]const u8).init(arena.allocator());
+            var normalized_paths = std.ArrayList([]const u8){};
             for (paths) |path| {
                 const rel_path = try fs.relativePath(allocator, self.core.work_dir, self.core.init_opts.cwd, path);
                 defer allocator.free(rel_path);
                 const path_parts = try fs.splitPath(allocator, rel_path);
                 defer allocator.free(path_parts);
                 const normalized_path = try fs.joinPath(arena.allocator(), path_parts);
-                try normalized_paths.append(normalized_path);
+                try normalized_paths.append(arena.allocator(), normalized_path);
             }
 
             switch (repo_kind) {
@@ -578,14 +578,14 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             var arena = std.heap.ArenaAllocator.init(allocator);
             defer arena.deinit();
 
-            var normalized_paths = std.ArrayList([]const u8).init(arena.allocator());
+            var normalized_paths = std.ArrayList([]const u8){};
             for (paths) |path| {
                 const rel_path = try fs.relativePath(allocator, self.core.work_dir, self.core.init_opts.cwd, path);
                 defer allocator.free(rel_path);
                 const path_parts = try fs.splitPath(allocator, rel_path);
                 defer allocator.free(path_parts);
                 const normalized_path = try fs.joinPath(arena.allocator(), path_parts);
-                try normalized_paths.append(normalized_path);
+                try normalized_paths.append(arena.allocator(), normalized_path);
             }
 
             switch (repo_kind) {
@@ -1286,10 +1286,10 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             force: bool,
             opts: net.Opts(repo_opts.ProgressCtx),
         ) !void {
-            var refspecs = std.ArrayList([]const u8).init(allocator);
-            defer refspecs.deinit();
+            var refspecs = std.ArrayList([]const u8){};
+            defer refspecs.deinit(allocator);
             if (opts.refspecs) |opts_refspecs| {
-                try refspecs.appendSlice(opts_refspecs);
+                try refspecs.appendSlice(allocator, opts_refspecs);
             }
 
             var refspec = try net_refspec.RefSpec.init(allocator, refspec_str, .push);
@@ -1302,7 +1302,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             const refspec_normalized = try refspec.normalize(allocator);
             defer allocator.free(refspec_normalized);
 
-            try refspecs.append(refspec_normalized);
+            try refspecs.append(allocator, refspec_normalized);
 
             var new_opts = opts;
             new_opts.refspecs = refspecs.items;

@@ -23,12 +23,12 @@ pub fn LogCommitList(comptime Widget: type, comptime repo_kind: rp.RepoKind, com
         pub fn init(allocator: std.mem.Allocator, repo: *rp.Repo(repo_kind, repo_opts)) !LogCommitList(Widget, repo_kind, repo_opts) {
             var self = blk: {
                 // init commits
-                var commits = std.ArrayList(obj.Object(repo_kind, repo_opts, .full)).init(allocator);
+                var commits = std.ArrayList(obj.Object(repo_kind, repo_opts, .full)){};
                 errdefer {
                     for (commits.items) |*commit| {
                         commit.deinit();
                     }
-                    commits.deinit();
+                    commits.deinit(allocator);
                 }
 
                 // walk the commits
@@ -65,7 +65,7 @@ pub fn LogCommitList(comptime Widget: type, comptime repo_kind: rp.RepoKind, com
                 commit_object.deinit();
             }
             self.commit_iter.deinit();
-            self.commits.deinit();
+            self.commits.deinit(self.allocator);
             self.scroll.deinit();
         }
 
@@ -175,7 +175,7 @@ pub fn LogCommitList(comptime Widget: type, comptime repo_kind: rp.RepoKind, com
                 if (try self.commit_iter.next()) |commit_object| {
                     {
                         errdefer commit_object.deinit();
-                        try self.commits.append(commit_object.*);
+                        try self.commits.append(self.allocator, commit_object.*);
                     }
 
                     const inner_box = &self.scroll.child.box;

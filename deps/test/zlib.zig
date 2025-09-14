@@ -19,10 +19,12 @@ pub const Library = struct {
 };
 
 pub fn create(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) Library {
-    const ret = b.addStaticLibrary(.{
+    const ret = b.addLibrary(.{
         .name = "z",
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+        }),
     });
     ret.linkLibC();
     ret.addCSourceFiles(.{

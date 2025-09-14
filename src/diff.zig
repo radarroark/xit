@@ -84,11 +84,11 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                 .regular_file => {
                     var file = try state.core.work_dir.openFile(path, .{ .mode = .read_only });
                     errdefer file.close();
-                    const file_size = (try file.metadata()).size();
+                    const file_size = (try file.stat()).size;
                     const header = try std.fmt.allocPrint(allocator, "blob {}\x00", .{file_size});
                     defer allocator.free(header);
                     var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-                    try hash.hashReader(repo_opts.hash, repo_opts.read_size, file.reader(), header, &oid);
+                    try hash.hashReader(repo_opts.hash, repo_opts.read_size, file.deprecatedReader(), header, &oid);
                     try file.seekTo(0);
 
                     var iter = LineIterator(repo_kind, repo_opts){
@@ -156,15 +156,15 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
 
             // treat submodules as binary files so they are ignored in diffs and patches
             if (entry.mode.content.object_type == .gitlink) {
-                var offsets = std.ArrayList(usize).init(allocator);
-                errdefer offsets.deinit();
+                var offsets = std.ArrayList(usize){};
+                errdefer offsets.deinit(allocator);
                 return .{
                     .allocator = allocator,
                     .path = path,
                     .oid = entry.oid,
                     .oid_hex = oid_hex,
                     .mode = entry.mode,
-                    .line_offsets = try offsets.toOwnedSlice(),
+                    .line_offsets = try offsets.toOwnedSlice(allocator),
                     .current_line = 0,
                     .source = .binary,
                 };
@@ -203,15 +203,15 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
             // treat submodules as binary files so they are ignored in diffs and patches
             if (mode_maybe) |mode| {
                 if (mode.content.object_type == .gitlink) {
-                    var offsets = std.ArrayList(usize).init(allocator);
-                    errdefer offsets.deinit();
+                    var offsets = std.ArrayList(usize){};
+                    errdefer offsets.deinit(allocator);
                     return .{
                         .allocator = allocator,
                         .path = path,
                         .oid = oid.*,
                         .oid_hex = oid_hex,
                         .mode = mode_maybe,
-                        .line_offsets = try offsets.toOwnedSlice(),
+                        .line_offsets = try offsets.toOwnedSlice(allocator),
                         .current_line = 0,
                         .source = .binary,
                     };
@@ -262,11 +262,11 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                 allocator.destroy(arena);
             }
 
-            var lines = std.ArrayList([]const u8).init(arena.allocator());
-            errdefer lines.deinit();
+            var lines = std.ArrayList([]const u8){};
+            errdefer lines.deinit(arena.allocator());
 
             while (try reader.readUntilDelimiterOrEofAlloc(arena.allocator(), '\n', repo_opts.max_line_size)) |line| {
-                try lines.append(line);
+                try lines.append(arena.allocator(), line);
             }
 
             var iter = LineIterator(repo_kind, repo_opts){
@@ -280,7 +280,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                 .source = .{
                     .buffer = .{
                         .arena = arena,
-                        .lines = try lines.toOwnedSlice(),
+                        .lines = try lines.toOwnedSlice(arena.allocator()),
                     },
                 },
             };
@@ -305,22 +305,22 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                 self.allocator.destroy(arena);
             }
 
-            var lines = std.ArrayList([]const u8).init(arena.allocator());
-            errdefer lines.deinit();
+            var lines = std.ArrayList([]const u8){};
+            errdefer lines.deinit(arena.allocator());
 
             try self.reset();
 
             while (try self.next()) |line| {
                 defer self.free(line);
                 const dupe = try arena.allocator().dupe(u8, line);
-                try lines.append(dupe);
+                try lines.append(arena.allocator(), dupe);
             }
 
             self.source.deinit(self.allocator);
             self.source = .{
                 .buffer = .{
                     .arena = arena,
-                    .lines = try lines.toOwnedSlice(),
+                    .lines = try lines.toOwnedSlice(arena.allocator()),
                 },
             };
         }
@@ -331,8 +331,8 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                     if (object.eof) {
                         return null;
                     }
-                    var line_arr = std.ArrayList(u8).init(self.allocator);
-                    errdefer line_arr.deinit();
+                    var line_arr = std.ArrayList(u8){};
+                    errdefer line_arr.deinit(self.allocator);
                     var buffer = [_]u8{0} ** 1;
                     while (true) {
                         const size = try object.object_reader.reader.read(&buffer);
@@ -345,10 +345,10 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                             if (line_arr.items.len == repo_opts.max_line_size) {
                                 return error.StreamTooLong;
                             }
-                            try line_arr.append(buffer[0]);
+                            try line_arr.append(self.allocator, buffer[0]);
                         }
                     }
-                    const line = try line_arr.toOwnedSlice();
+                    const line = try line_arr.toOwnedSlice(self.allocator);
                     self.current_line += 1;
                     return line;
                 },
@@ -356,13 +356,13 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                     if (work_dir.eof) {
                         return null;
                     }
-                    var line_arr = std.ArrayList(u8).init(self.allocator);
-                    errdefer line_arr.deinit();
-                    work_dir.file.reader().streamUntilDelimiter(line_arr.writer(), '\n', repo_opts.max_line_size) catch |err| switch (err) {
+                    var line_arr = std.ArrayList(u8){};
+                    errdefer line_arr.deinit(self.allocator);
+                    work_dir.file.deprecatedReader().streamUntilDelimiter(line_arr.writer(self.allocator), '\n', repo_opts.max_line_size) catch |err| switch (err) {
                         error.EndOfStream => work_dir.eof = true,
                         else => |e| return e,
                     };
-                    const line = try line_arr.toOwnedSlice();
+                    const line = try line_arr.toOwnedSlice(self.allocator);
                     self.current_line += 1;
                     return line;
                 },
@@ -450,8 +450,8 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
         /// reads each line to populate line_offsets and ensure
         /// that there is no binary data.
         fn validateLines(self: *LineIterator(repo_kind, repo_opts)) !void {
-            var offsets = std.ArrayList(usize).init(self.allocator);
-            errdefer offsets.deinit();
+            var offsets = std.ArrayList(usize){};
+            errdefer offsets.deinit(self.allocator);
             var last_pos: usize = 0;
             var convert_to_binary = false;
 
@@ -472,17 +472,17 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                     break;
                 }
 
-                try offsets.append(last_pos);
+                try offsets.append(self.allocator, last_pos);
                 last_pos += line.len + 1;
             }
 
             if (convert_to_binary) {
                 self.source.deinit(self.allocator);
                 self.source = .binary;
-                offsets.clearAndFree();
+                offsets.clearAndFree(self.allocator);
             }
 
-            self.line_offsets = try offsets.toOwnedSlice();
+            self.line_offsets = try offsets.toOwnedSlice(self.allocator);
         }
     };
 }
@@ -601,10 +601,10 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp
                                     const zz = w - k;
                                     if (zz >= 1 - hh and zz < hh and x + self.b[@intCast(z + zz - z * @divFloor(zz, z))] >= n) {
                                         if (h > 1 or x != u) {
-                                            try self.stack.append(i + x);
-                                            try self.stack.append(n - x);
-                                            try self.stack.append(j + y);
-                                            try self.stack.append(m - y);
+                                            try self.stack.append(self.allocator, i + x);
+                                            try self.stack.append(self.allocator, n - x);
+                                            try self.stack.append(self.allocator, j + y);
+                                            try self.stack.append(self.allocator, m - y);
                                             n = u;
                                             m = v;
                                             z = 2 * (@min(n, m) + 1);
@@ -633,10 +633,10 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp
                                     const zz = w - k;
                                     if (zz >= -hh and zz <= hh and x + self.b[@intCast(zz - z * @divFloor(zz, z))] >= n) {
                                         if (h > 0 or x != u) {
-                                            try self.stack.append(i + n - u);
-                                            try self.stack.append(u);
-                                            try self.stack.append(j + m - v);
-                                            try self.stack.append(v);
+                                            try self.stack.append(self.allocator, i + n - u);
+                                            try self.stack.append(self.allocator, u);
+                                            try self.stack.append(self.allocator, j + m - v);
+                                            try self.stack.append(self.allocator, v);
                                             n = n - x;
                                             m = m - y;
                                             z = 2 * (@min(n, m) + 1);
@@ -720,8 +720,8 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp
 
             return MyersDiffIterator(repo_kind, repo_opts){
                 .allocator = allocator,
-                .cache = std.ArrayList(Edit).init(allocator),
-                .stack = std.ArrayList(isize).init(allocator),
+                .cache = std.ArrayList(Edit){},
+                .stack = std.ArrayList(isize){},
                 .action = .push,
                 .b = b,
                 .i = @intCast(i),
@@ -759,7 +759,7 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp
                 for (self.x_index..sx, self.y_index..sy) |old_idx, new_idx| {
                     const old_offset = self.line_iter_a.line_offsets[old_idx];
                     const new_offset = self.line_iter_b.line_offsets[new_idx];
-                    try self.cache.append(.{
+                    try self.cache.append(self.allocator, .{
                         .eql = .{
                             .old_line = .{ .num = old_idx, .offset = old_offset },
                             .new_line = .{ .num = new_idx, .offset = new_offset },
@@ -769,7 +769,7 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp
 
                 for (sx..ex) |old_idx| {
                     const old_offset = self.line_iter_a.line_offsets[old_idx];
-                    try self.cache.append(.{
+                    try self.cache.append(self.allocator, .{
                         .del = .{
                             .old_line = .{ .num = old_idx, .offset = old_offset },
                         },
@@ -778,7 +778,7 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp
 
                 for (sy..ey) |new_idx| {
                     const new_offset = self.line_iter_b.line_offsets[new_idx];
-                    try self.cache.append(.{
+                    try self.cache.append(self.allocator, .{
                         .ins = .{
                             .new_line = .{ .num = new_idx, .offset = new_offset },
                         },
@@ -789,7 +789,7 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp
                     for (ex..self.line_iter_a.count(), ey..self.line_iter_b.count()) |old_idx, new_idx| {
                         const old_offset = self.line_iter_a.line_offsets[old_idx];
                         const new_offset = self.line_iter_b.line_offsets[new_idx];
-                        try self.cache.append(.{
+                        try self.cache.append(self.allocator, .{
                             .eql = .{
                                 .old_line = .{ .num = old_idx, .offset = old_offset },
                                 .new_line = .{ .num = new_idx, .offset = new_offset },
@@ -840,8 +840,8 @@ pub fn MyersDiffIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp
 
         pub fn deinit(self: *MyersDiffIterator(repo_kind, repo_opts)) void {
             self.allocator.free(self.b);
-            self.cache.deinit();
-            self.stack.deinit();
+            self.cache.deinit(self.allocator);
+            self.stack.deinit(self.allocator);
         }
     };
 }
@@ -870,10 +870,10 @@ test "myers diff" {
         };
         var myers_diff_iter = try MyersDiffIterator(repo_kind, repo_opts).init(allocator, &line_iter1, &line_iter2);
         defer myers_diff_iter.deinit();
-        var actual_diff = std.ArrayList(Edit).init(allocator);
-        defer actual_diff.deinit();
+        var actual_diff = std.ArrayList(Edit){};
+        defer actual_diff.deinit(allocator);
         while (try myers_diff_iter.next()) |edit| {
-            try actual_diff.append(edit);
+            try actual_diff.append(allocator, edit);
         }
         try std.testing.expectEqual(expected_diff.len, actual_diff.items.len);
         for (expected_diff, actual_diff.items) |expected, actual| {
@@ -893,10 +893,10 @@ test "myers diff" {
         };
         var myers_diff_iter = try MyersDiffIterator(repo_kind, repo_opts).init(allocator, &line_iter1, &line_iter2);
         defer myers_diff_iter.deinit();
-        var actual_diff = std.ArrayList(Edit).init(allocator);
-        defer actual_diff.deinit();
+        var actual_diff = std.ArrayList(Edit){};
+        defer actual_diff.deinit(allocator);
         while (try myers_diff_iter.next()) |edit| {
-            try actual_diff.append(edit);
+            try actual_diff.append(allocator, edit);
         }
         try std.testing.expectEqual(expected_diff.len, actual_diff.items.len);
         for (expected_diff, actual_diff.items) |expected, actual| {
@@ -1142,7 +1142,7 @@ test "diff3" {
 
 pub fn Hunk(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return struct {
-        edits: std.ArrayListUnmanaged(Edit),
+        edits: std.ArrayList(Edit),
 
         pub fn deinit(self: *Hunk(repo_kind, repo_opts), allocator: std.mem.Allocator) void {
             self.edits.deinit(allocator);
@@ -1205,49 +1205,49 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                 allocator.destroy(arena);
             }
 
-            var header_lines = std.ArrayList([]const u8).init(arena.allocator());
+            var header_lines = std.ArrayList([]const u8){};
 
-            try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "diff --git a/{s} b/{s}", .{ line_iter_a.path, line_iter_b.path }));
+            try header_lines.append(arena.allocator(), try std.fmt.allocPrint(arena.allocator(), "diff --git a/{s} b/{s}", .{ line_iter_a.path, line_iter_b.path }));
 
             var mode_maybe: ?fs.Mode = null;
 
             if (line_iter_a.mode) |a_mode| {
                 if (line_iter_b.mode) |b_mode| {
                     if (!a_mode.eqlExact(b_mode)) {
-                        try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "old mode {s}", .{a_mode.toStr()}));
-                        try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "new mode {s}", .{b_mode.toStr()}));
+                        try header_lines.append(arena.allocator(), try std.fmt.allocPrint(arena.allocator(), "old mode {s}", .{a_mode.toStr()}));
+                        try header_lines.append(arena.allocator(), try std.fmt.allocPrint(arena.allocator(), "new mode {s}", .{b_mode.toStr()}));
                     } else {
                         mode_maybe = a_mode;
                     }
                 } else {
-                    try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "deleted file mode {s}", .{a_mode.toStr()}));
+                    try header_lines.append(arena.allocator(), try std.fmt.allocPrint(arena.allocator(), "deleted file mode {s}", .{a_mode.toStr()}));
                 }
             } else {
                 if (line_iter_b.mode) |b_mode| {
-                    try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "new file mode {s}", .{b_mode.toStr()}));
+                    try header_lines.append(arena.allocator(), try std.fmt.allocPrint(arena.allocator(), "new file mode {s}", .{b_mode.toStr()}));
                 }
             }
 
             if (!std.mem.eql(u8, &line_iter_a.oid, &line_iter_b.oid)) {
                 if (mode_maybe) |mode| {
-                    try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "index {s}..{s} {s}", .{
+                    try header_lines.append(arena.allocator(), try std.fmt.allocPrint(arena.allocator(), "index {s}..{s} {s}", .{
                         line_iter_a.oid_hex[0..7],
                         line_iter_b.oid_hex[0..7],
                         mode.toStr(),
                     }));
                 } else {
-                    try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "index {s}..{s}", .{
+                    try header_lines.append(arena.allocator(), try std.fmt.allocPrint(arena.allocator(), "index {s}..{s}", .{
                         line_iter_a.oid_hex[0..7],
                         line_iter_b.oid_hex[0..7],
                     }));
                 }
 
-                try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "--- a/{s}", .{line_iter_a.path}));
+                try header_lines.append(arena.allocator(), try std.fmt.allocPrint(arena.allocator(), "--- a/{s}", .{line_iter_a.path}));
 
                 if (line_iter_b.mode != null) {
-                    try header_lines.append(try std.fmt.allocPrint(arena.allocator(), "+++ b/{s}", .{line_iter_b.path}));
+                    try header_lines.append(arena.allocator(), try std.fmt.allocPrint(arena.allocator(), "+++ b/{s}", .{line_iter_b.path}));
                 } else {
-                    try header_lines.append("+++ /dev/null");
+                    try header_lines.append(arena.allocator(), "+++ /dev/null");
                 }
             }
 
@@ -1264,7 +1264,7 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                 .found_edit = false,
                 .margin = 0,
                 .next_hunk = Hunk(repo_kind, repo_opts){
-                    .edits = std.ArrayListUnmanaged(Edit){},
+                    .edits = std.ArrayList(Edit){},
                 },
             };
         }
@@ -1305,7 +1305,7 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                         if (self.found_edit) {
                             const hunk = self.next_hunk;
                             self.next_hunk = Hunk(repo_kind, repo_opts){
-                                .edits = std.ArrayListUnmanaged(Edit){},
+                                .edits = std.ArrayList(Edit){},
                             };
                             self.found_edit = false;
                             self.margin = 0;
@@ -1320,7 +1320,7 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                             // return the last hunk
                             const hunk = self.next_hunk;
                             self.next_hunk = Hunk(repo_kind, repo_opts){
-                                .edits = std.ArrayListUnmanaged(Edit){},
+                                .edits = std.ArrayList(Edit){},
                             };
                             self.found_edit = false;
                             self.margin = 0;
@@ -1351,7 +1351,7 @@ pub fn HunkIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
             self.margin = 0;
             self.next_hunk.deinit(allocator);
             self.next_hunk = Hunk(repo_kind, repo_opts){
-                .edits = std.ArrayListUnmanaged(Edit){},
+                .edits = std.ArrayList(Edit){},
             };
         }
     };

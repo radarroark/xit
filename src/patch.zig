@@ -5,6 +5,7 @@ const df = @import("./diff.zig");
 const obj = @import("./object.zig");
 const tr = @import("./tree.zig");
 const cfg = @import("./config.zig");
+const buf_rdr = @import("./std/buffered_reader.zig");
 
 // a globally-unique id representing a line.
 // it's just the hash of the patch it came from,
@@ -331,7 +332,7 @@ pub fn applyPatch(
     var parent_to_added_child = std.AutoArrayHashMap(hash.HashInt(repo_opts.hash), [LineId(repo_opts.hash).byte_size]u8).init(allocator);
     defer parent_to_added_child.deinit();
 
-    var buffered_reader = std.io.bufferedReaderSize(repo_opts.read_size, try change_list_cursor.reader());
+    var buffered_reader = buf_rdr.bufferedReaderSize(repo_opts.read_size, try change_list_cursor.reader());
     const change_list_reader = buffered_reader.reader();
     while (true) {
         const change_kind = change_list_reader.readInt(u8, .big) catch |err| switch (err) {
@@ -510,16 +511,16 @@ fn writePatch(
     const patch_id_to_offset_list = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(patch_id_to_offset_list_cursor);
     var offset_list_cursor = try patch_id_to_offset_list.putCursor(patch_hash);
 
-    var patch_entries = std.ArrayList([]const u8).init(allocator);
-    defer patch_entries.deinit();
+    var patch_entries = std.ArrayList([]const u8){};
+    defer patch_entries.deinit(allocator);
 
-    var patch_offsets = std.ArrayList(u64).init(allocator);
-    defer patch_offsets.deinit();
+    var patch_offsets = std.ArrayList(u64){};
+    defer patch_offsets.deinit(allocator);
 
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    try createPatchEntries(repo_opts, moment, snapshot, &arena, &myers_diff_iter, path_hash, patch_hash, &patch_entries, &patch_offsets);
+    try createPatchEntries(repo_opts, moment, snapshot, allocator, &arena, &myers_diff_iter, path_hash, patch_hash, &patch_entries, &patch_offsets);
 
     var change_list_writer = try change_list_cursor.writer();
     for (patch_entries.items) |patch_entry| {
@@ -546,16 +547,16 @@ fn patchHash(
     new_oid: *const [hash.byteLen(repo_opts.hash)]u8,
     path_hash: hash.HashInt(repo_opts.hash),
 ) ![hash.byteLen(repo_opts.hash)]u8 {
-    var patch_entries = std.ArrayList([]const u8).init(allocator);
-    defer patch_entries.deinit();
+    var patch_entries = std.ArrayList([]const u8){};
+    defer patch_entries.deinit(allocator);
 
-    var patch_offsets = std.ArrayList(u64).init(allocator);
-    defer patch_offsets.deinit();
+    var patch_offsets = std.ArrayList(u64){};
+    defer patch_offsets.deinit(allocator);
 
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    try createPatchEntries(repo_opts, moment, snapshot, &arena, myers_diff_iter, path_hash, 0, &patch_entries, &patch_offsets);
+    try createPatchEntries(repo_opts, moment, snapshot, allocator, &arena, myers_diff_iter, path_hash, 0, &patch_entries, &patch_offsets);
 
     var hasher = hash.Hasher(repo_opts.hash).init();
 
@@ -579,6 +580,7 @@ fn createPatchEntries(
     comptime repo_opts: rp.RepoOpts(.xit),
     moment: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write),
     snapshot: *const rp.Repo(.xit, repo_opts).DB.HashMap(.read_write),
+    allocator: std.mem.Allocator,
     arena: *std.heap.ArenaAllocator,
     myers_diff_iter: *df.MyersDiffIterator(.xit, repo_opts),
     path_hash: hash.HashInt(repo_opts.hash),
@@ -625,11 +627,11 @@ fn createPatchEntries(
                 try line_id_reader.readNoEof(&line_id_bytes);
 
                 if (last_line.origin == .new) {
-                    var buffer = std.ArrayList(u8).init(arena.allocator());
-                    try buffer.writer().writeInt(u8, @intFromEnum(ChangeKind.new_edge), .big);
-                    try buffer.writer().writeAll(&line_id_bytes);
-                    try buffer.writer().writeInt(LineId(repo_opts.hash).Int, @bitCast(last_line.id), .big);
-                    try patch_entries.append(buffer.items);
+                    var buffer = std.ArrayList(u8){};
+                    try buffer.writer(arena.allocator()).writeInt(u8, @intFromEnum(ChangeKind.new_edge), .big);
+                    try buffer.writer(arena.allocator()).writeAll(&line_id_bytes);
+                    try buffer.writer(arena.allocator()).writeInt(LineId(repo_opts.hash).Int, @bitCast(last_line.id), .big);
+                    try patch_entries.append(allocator, buffer.items);
                 }
 
                 var stream = std.io.fixedBufferStream(&line_id_bytes);
@@ -644,21 +646,21 @@ fn createPatchEntries(
                     .patch_id = patch_hash,
                 };
 
-                var buffer = std.ArrayList(u8).init(arena.allocator());
-                try buffer.writer().writeInt(u8, @intFromEnum(ChangeKind.new_edge), .big);
-                try buffer.writer().writeInt(LineId(repo_opts.hash).Int, @bitCast(line_id), .big);
-                try buffer.writer().writeInt(LineId(repo_opts.hash).Int, @bitCast(last_line.id), .big);
-                try patch_entries.append(buffer.items);
+                var buffer = std.ArrayList(u8){};
+                try buffer.writer(arena.allocator()).writeInt(u8, @intFromEnum(ChangeKind.new_edge), .big);
+                try buffer.writer(arena.allocator()).writeInt(LineId(repo_opts.hash).Int, @bitCast(line_id), .big);
+                try buffer.writer(arena.allocator()).writeInt(LineId(repo_opts.hash).Int, @bitCast(last_line.id), .big);
+                try patch_entries.append(allocator, buffer.items);
 
-                try patch_offsets.append(ins.new_line.offset);
+                try patch_offsets.append(allocator, ins.new_line.offset);
 
                 new_line_count += 1;
 
                 last_line = .{ .id = line_id, .origin = .new };
             },
             .del => |del| {
-                var buffer = std.ArrayList(u8).init(arena.allocator());
-                try buffer.writer().writeInt(u8, @intFromEnum(ChangeKind.delete_line), .big);
+                var buffer = std.ArrayList(u8){};
+                try buffer.writer(arena.allocator()).writeInt(u8, @intFromEnum(ChangeKind.delete_line), .big);
 
                 var line_id_list_cursor = line_id_list_cursor_maybe orelse return error.LineListNotFound;
                 var line_id_list_reader = try line_id_list_cursor.reader();
@@ -677,9 +679,9 @@ fn createPatchEntries(
                 var line_id_bytes = [_]u8{0} ** LineId(repo_opts.hash).byte_size;
                 try line_id_reader.readNoEof(&line_id_bytes);
 
-                try buffer.writer().writeAll(&line_id_bytes);
+                try buffer.writer(arena.allocator()).writeAll(&line_id_bytes);
 
-                try patch_entries.append(buffer.items);
+                try patch_entries.append(allocator, buffer.items);
 
                 last_line = .{ .id = last_line.id, .origin = .new };
             },

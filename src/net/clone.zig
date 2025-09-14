@@ -9,6 +9,7 @@ const rf = @import("../ref.zig");
 fn defaultBranch(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
+    allocator: std.mem.Allocator,
     remote: *net.Remote(repo_kind, repo_opts),
     out: *std.ArrayList(u8),
 ) !void {
@@ -19,7 +20,7 @@ fn defaultBranch(
     }
 
     if (heads[0].symref) |symref| {
-        try out.appendSlice(symref);
+        try out.appendSlice(allocator, symref);
         return;
     }
 
@@ -42,7 +43,7 @@ fn defaultBranch(
     }
 
     if (head_maybe) |head| {
-        try out.appendSlice(head.name);
+        try out.appendSlice(allocator, head.name);
     } else {
         return error.DefaultBranchNotFound;
     }
@@ -57,9 +58,9 @@ fn checkoutBranch(
 ) !void {
     const remote_name = remote.name orelse return error.RemoteNameNotFound;
 
-    var default_branch = std.ArrayList(u8).init(allocator);
-    defer default_branch.deinit();
-    try defaultBranch(repo_kind, repo_opts, remote, &default_branch);
+    var default_branch = std.ArrayList(u8){};
+    defer default_branch.deinit(allocator);
+    try defaultBranch(repo_kind, repo_opts, allocator, remote, &default_branch);
 
     const default_branch_ref = rf.Ref.initFromPath(default_branch.items, .head) orelse return error.InvalidRef;
     const remote_branch_name = default_branch_ref.name;

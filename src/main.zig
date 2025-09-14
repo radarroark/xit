@@ -24,8 +24,8 @@ const rf = @import("./ref.zig");
 const net_refspec = @import("./net/refspec.zig");
 
 pub const Writers = struct {
-    out: std.io.AnyWriter = std.io.null_writer.any(),
-    err: std.io.AnyWriter = std.io.null_writer.any(),
+    out: *std.Io.Writer,
+    err: *std.Io.Writer,
 };
 
 const ProgressCtx = struct {
@@ -506,7 +506,7 @@ fn runCommand(
         .restore => |restore_cmd| try repo.restore(allocator, restore_cmd.path),
         .log => |heads| {
             var start_oids = try std.ArrayList([hash.hexLen(repo_opts.hash)]u8).initCapacity(allocator, heads.len);
-            defer start_oids.deinit();
+            defer start_oids.deinit(allocator);
             for (heads) |ref_or_oid| {
                 const oid_maybe = switch (ref_or_oid) {
                     .ref => |ref| try repo.readRef(ref),
@@ -587,7 +587,7 @@ fn runCommand(
             var refspecs = try std.ArrayList([]const u8).initCapacity(allocator, fetch_cmd.refspec_strs.len);
             defer {
                 for (refspecs.items) |refspec| allocator.free(refspec);
-                refspecs.deinit();
+                refspecs.deinit(allocator);
             }
             for (fetch_cmd.refspec_strs) |refspec_str| {
                 var refspec = try net_refspec.RefSpec.init(allocator, refspec_str, .fetch);
@@ -709,17 +709,20 @@ pub fn main() !u8 {
         _ = debug_allocator.deinit();
     };
 
-    var args = std.ArrayList([]const u8).init(allocator);
-    defer args.deinit();
+    var args = std.ArrayList([]const u8){};
+    defer args.deinit(allocator);
 
     var arg_it = try std.process.argsWithAllocator(allocator);
     defer arg_it.deinit();
     _ = arg_it.skip();
     while (arg_it.next()) |arg| {
-        try args.append(arg);
+        try args.append(allocator, arg);
     }
 
-    const writers = Writers{ .out = std.io.getStdOut().writer().any(), .err = std.io.getStdErr().writer().any() };
+    var stdout_writer = std.fs.File.stdout().writer(&.{});
+    var stderr_writer = std.fs.File.stderr().writer(&.{});
+    const writers = Writers{ .out = &stdout_writer.interface, .err = &stderr_writer.interface };
+
     runPrint(.xit, .{}, allocator, args.items, std.fs.cwd(), writers) catch |err| switch (err) {
         error.HandledError => return 1,
         else => |e| return e,
