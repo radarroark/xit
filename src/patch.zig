@@ -5,7 +5,6 @@ const df = @import("./diff.zig");
 const obj = @import("./object.zig");
 const tr = @import("./tree.zig");
 const cfg = @import("./config.zig");
-const buf_rdr = @import("./std/buffered_reader.zig");
 
 // a globally-unique id representing a line.
 // it's just the hash of the patch it came from,
@@ -111,10 +110,7 @@ pub fn writeAndApplyPatches(
     // parent commit and copying it. we don't want that snapshot to
     // be mutable, so we have to make xitdb think the transaction
     // just started.
-    // TODO: this should definitely be a feature in it xitdb because
-    // doing it manually like this is pretty hacky.
-    try state.core.db.core.seekFromEnd(0);
-    state.core.db.tx_start = try state.core.db.core.getPos();
+    state.core.db.tx_start = try state.core.db.core.getSize();
 }
 
 pub fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
@@ -332,18 +328,17 @@ pub fn applyPatch(
     var parent_to_added_child = std.AutoArrayHashMap(hash.HashInt(repo_opts.hash), [LineId(repo_opts.hash).byte_size]u8).init(allocator);
     defer parent_to_added_child.deinit();
 
-    var buffered_reader = buf_rdr.bufferedReaderSize(repo_opts.read_size, try change_list_cursor.reader());
-    const change_list_reader = buffered_reader.reader();
+    var change_list_reader = try change_list_cursor.reader();
     while (true) {
-        const change_kind = change_list_reader.readInt(u8, .big) catch |err| switch (err) {
+        const change_kind = change_list_reader.interface.takeInt(u8, .big) catch |err| switch (err) {
             error.EndOfStream => break,
             else => |e| return e,
         };
 
         switch (try std.meta.intToEnum(ChangeKind, change_kind)) {
             .new_edge => {
-                const line_id_int = try change_list_reader.readInt(LineId(repo_opts.hash).Int, .big);
-                const parent_line_id_int = try change_list_reader.readInt(LineId(repo_opts.hash).Int, .big);
+                const line_id_int = try change_list_reader.interface.takeInt(LineId(repo_opts.hash).Int, .big);
+                const parent_line_id_int = try change_list_reader.interface.takeInt(LineId(repo_opts.hash).Int, .big);
 
                 const line_id_bytes = hash.intToBytes(LineId(repo_opts.hash).Int, line_id_int);
                 const line_id_hash = hash.hashInt(repo_opts.hash, &line_id_bytes);
@@ -390,7 +385,7 @@ pub fn applyPatch(
                 }
             },
             .delete_line => {
-                const line_id_int = try change_list_reader.readInt(LineId(repo_opts.hash).Int, .big);
+                const line_id_int = try change_list_reader.interface.takeInt(LineId(repo_opts.hash).Int, .big);
                 const line_id_bytes = hash.intToBytes(LineId(repo_opts.hash).Int, line_id_int);
                 const line_id_hash = hash.hashInt(repo_opts.hash, &line_id_bytes);
 
@@ -455,10 +450,10 @@ pub fn applyPatch(
                     var kv_pair_cursor = try child_cursor.readKeyValuePair();
                     var key_reader = try kv_pair_cursor.key_cursor.reader();
                     var child_bytes = [_]u8{0} ** LineId(repo_opts.hash).byte_size;
-                    try key_reader.readNoEof(&child_bytes);
+                    try key_reader.interface.readSliceAll(&child_bytes);
 
                     const line_id_position = kv_pair_cursor.key_cursor.slot().value;
-                    try line_id_list_writer.writeInt(u64, line_id_position, .big);
+                    try line_id_list_writer.interface.writeInt(u64, line_id_position, .big);
 
                     var stream = std.io.fixedBufferStream(&child_bytes);
                     var reader = stream.reader();
@@ -524,14 +519,14 @@ fn writePatch(
 
     var change_list_writer = try change_list_cursor.writer();
     for (patch_entries.items) |patch_entry| {
-        try change_list_writer.writeAll(patch_entry);
+        try change_list_writer.interface.writeAll(patch_entry);
     }
     try change_list_writer.finish();
 
     var offset_list_writer = try offset_list_cursor.writer();
-    try offset_list_writer.writeAll(new_oid);
+    try offset_list_writer.interface.writeAll(new_oid);
     for (patch_offsets.items) |patch_offset| {
-        try offset_list_writer.writeInt(u64, patch_offset, .big);
+        try offset_list_writer.interface.writeInt(u64, patch_offset, .big);
     }
     try offset_list_writer.finish();
 
@@ -613,7 +608,7 @@ fn createPatchEntries(
                 var line_id_list_reader = try line_id_list_cursor.reader();
                 try line_id_list_reader.seekTo(eql.old_line.num * @sizeOf(u64));
 
-                const line_id_position = try line_id_list_reader.readInt(u64, .big);
+                const line_id_position = try line_id_list_reader.interface.takeInt(u64, .big);
                 var line_id_cursor = rp.Repo(.xit, repo_opts).DB.Cursor(.read_only){
                     .slot_ptr = .{
                         .position = null,
@@ -624,7 +619,7 @@ fn createPatchEntries(
 
                 var line_id_reader = try line_id_cursor.reader();
                 var line_id_bytes = [_]u8{0} ** LineId(repo_opts.hash).byte_size;
-                try line_id_reader.readNoEof(&line_id_bytes);
+                try line_id_reader.interface.readSliceAll(&line_id_bytes);
 
                 if (last_line.origin == .new) {
                     var buffer = std.ArrayList(u8){};
@@ -666,7 +661,7 @@ fn createPatchEntries(
                 var line_id_list_reader = try line_id_list_cursor.reader();
                 try line_id_list_reader.seekTo(del.old_line.num * @sizeOf(u64));
 
-                const line_id_position = try line_id_list_reader.readInt(u64, .big);
+                const line_id_position = try line_id_list_reader.interface.takeInt(u64, .big);
                 var line_id_cursor = rp.Repo(.xit, repo_opts).DB.Cursor(.read_only){
                     .slot_ptr = .{
                         .position = null,
@@ -677,7 +672,7 @@ fn createPatchEntries(
 
                 var line_id_reader = try line_id_cursor.reader();
                 var line_id_bytes = [_]u8{0} ** LineId(repo_opts.hash).byte_size;
-                try line_id_reader.readNoEof(&line_id_bytes);
+                try line_id_reader.interface.readSliceAll(&line_id_bytes);
 
                 try buffer.writer(arena.allocator()).writeAll(&line_id_bytes);
 

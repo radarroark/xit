@@ -376,8 +376,8 @@ pub fn writeChunks(
         // this is useful so we can find the total size of the object
         // by looking at the last offset.
         offset += chunk.len;
-        try writer.writeAll(&chunk_hash_bytes);
-        try writer.writeInt(u64, offset, .big);
+        try writer.interface.writeAll(&chunk_hash_bytes);
+        try writer.interface.writeInt(u64, offset, .big);
     }
 
     // finish writing to db
@@ -406,14 +406,14 @@ fn findChunkIndex(
 
         // note: we are storing the *end* offsets of each chunk
         try chunk_info_reader.seekTo(mid * chunk_info_size + chunk_hash_size);
-        const end_offset = try chunk_info_reader.readInt(u64, .big);
+        const end_offset = try chunk_info_reader.interface.takeInt(u64, .big);
 
         if (position < end_offset) {
             if (mid > 0) {
                 // since we store end offsets, the offset of the previous
                 // chunk is the actual offset of `mid`
                 try chunk_info_reader.seekTo((mid - 1) * chunk_info_size + chunk_hash_size);
-                const mid_offset = try chunk_info_reader.readInt(u64, .big);
+                const mid_offset = try chunk_info_reader.interface.takeInt(u64, .big);
 
                 if (position >= mid_offset) {
                     return mid;
@@ -429,7 +429,7 @@ fn findChunkIndex(
     }
 
     try chunk_info_reader.seekTo(right * chunk_info_size + chunk_hash_size);
-    const right_offset = try chunk_info_reader.readInt(u64, .big);
+    const right_offset = try chunk_info_reader.interface.takeInt(u64, .big);
     if (position < right_offset) {
         return right;
     }
@@ -459,11 +459,11 @@ pub fn readChunk(
         break :blk 0;
     } else blk: {
         try chunk_info_reader.seekTo(chunk_info_position - chunk_offset_size);
-        break :blk try chunk_info_reader.readInt(u64, .big);
+        break :blk try chunk_info_reader.interface.takeInt(u64, .big);
     };
     const chunk_offset = object_position - object_offset;
     var chunk_hash_bytes = [_]u8{0} ** chunk_hash_size;
-    try chunk_info_reader.readNoEof(&chunk_hash_bytes);
+    try chunk_info_reader.interface.readSliceAll(&chunk_hash_bytes);
     const chunk_hash_hex = std.fmt.bytesToHex(chunk_hash_bytes, .lower);
 
     // open the chunk file
@@ -516,7 +516,7 @@ pub fn ChunkObjectReader(comptime repo_opts: rp.RepoOpts(.xit)) type {
         position: u64,
         header: obj.ObjectHeader,
 
-        pub const Error = ZlibStream.Reader.Error || std.fs.File.OpenError || rp.Repo(.xit, repo_opts).DB.Cursor(.read_only).Reader.Error || error{ InvalidOffset, InvalidEnumTag, WrongChunkChecksum };
+        pub const Error = ZlibStream.Reader.Error || std.fs.File.OpenError || std.Io.Reader.Error || error{ InvalidOffset, InvalidEnumTag, WrongChunkChecksum };
 
         pub fn init(allocator: std.mem.Allocator, state: rp.Repo(.xit, repo_opts).State(.read_only), oid: *const [hash.hexLen(repo_opts.hash)]u8) !ChunkObjectReader(repo_opts) {
             // chunk info map
@@ -535,8 +535,8 @@ pub fn ChunkObjectReader(comptime repo_opts: rp.RepoOpts(.xit)) type {
                     break :blk 0;
                 } else {
                     // the last 8 bytes in the chunk info contain the object size
-                    try reader.seekFromEnd(-@sizeOf(u64));
-                    const size = try reader.readInt(u64, .big);
+                    try reader.seekTo(reader.size - @sizeOf(u64));
+                    const size = try reader.interface.takeInt(u64, .big);
                     try reader.seekTo(0);
                     break :blk size;
                 }

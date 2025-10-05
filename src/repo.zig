@@ -352,8 +352,10 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     .none => {
                         const xitdb = @import("xitdb");
 
-                        try self.core.db_file.seekTo(0);
-                        const header = try xitdb.DatabaseHeader.read(self.core.db_file.deprecatedReader());
+                        var buffer = [_]u8{0} ** @sizeOf(xitdb.DatabaseHeader);
+                        var reader = self.core.db_file.reader(&buffer);
+                        try reader.seekTo(0);
+                        const header = try xitdb.DatabaseHeader.read(&reader.interface);
                         try header.validate();
 
                         return hash.hashKind(header.hash_id.id, header.hash_size) orelse error.InvalidHashKind;
