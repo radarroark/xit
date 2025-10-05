@@ -16,8 +16,6 @@ pub fn build(b: *std.Build) !void {
                 .optimize = optimize,
             }),
         });
-        //exe.root_module.addAnonymousImport("xitdb", .{ .root_source_file = b.path("../xitdb/src/lib.zig") });
-        //exe.root_module.addAnonymousImport("xitui", .{ .root_source_file = b.path("../xitui/src/lib.zig") });
         exe.root_module.addImport("xitdb", b.dependency("xitdb", .{}).module("xitdb"));
         exe.root_module.addImport("xitui", b.dependency("xitui", .{}).module("xitui"));
         if (.windows == builtin.os.tag) {
@@ -41,8 +39,6 @@ pub fn build(b: *std.Build) !void {
     const xit = b.addModule("xit", .{
         .root_source_file = b.path("src/lib.zig"),
     });
-    //xit.addAnonymousImport("xitdb", .{ .root_source_file = b.path("../xitdb/src/lib.zig") });
-    //xit.addAnonymousImport("xitui", .{ .root_source_file = b.path("../xitui/src/lib.zig") });
     xit.addImport("xitdb", b.dependency("xitdb", .{}).module("xitdb"));
     xit.addImport("xitui", b.dependency("xitui", .{}).module("xitui"));
 

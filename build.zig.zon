@@ -5,10 +5,12 @@
         .xitdb = .{
             .url = "git+https://github.com/radarroark/xitdb#b2372251ef1512f85f7898729aefb0a0ae1bae79",
             .hash = "xitdb-0.0.0-EEFkxtsHBABG-R0lOFkz2l4evVngspBiHRbAZUeSwiJD",
+            //.path = "../xitdb",
         },
         .xitui = .{
             .url = "git+https://github.com/radarroark/xitui#4f7918feb8dd8b5fbab60ef9fbea21e129e4ca3d",
             .hash = "xitui-0.0.0--YPVyHURAQDVxjCN_2zZcRupwhsYBI66OLOWrTXM4c42",
+            //.path = "../xitui",
         },
     },
     .paths = .{
