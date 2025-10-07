@@ -5,7 +5,6 @@ const hash = @import("./hash.zig");
 const fs = @import("./fs.zig");
 const rp = @import("./repo.zig");
 const tr = @import("./tree.zig");
-const buf_rdr = @import("./std/buffered_reader.zig");
 
 pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return struct {
@@ -224,12 +223,12 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     defer file.close();
 
                     // make reader
-                    var buffered_reader = buf_rdr.bufferedReaderSize(repo_opts.read_size, file.deprecatedReader());
-                    const reader = buffered_reader.reader();
+                    var read_buffer = [_]u8{0} ** repo_opts.read_size;
+                    var reader = file.reader(&read_buffer);
 
                     // write object
                     var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-                    try obj.writeObject(repo_kind, repo_opts, state, file, reader, .{ .kind = .blob, .size = meta.size }, &oid);
+                    try obj.writeObject(repo_kind, repo_opts, state, &reader, reader.interface.adaptToOldInterface(), .{ .kind = .blob, .size = meta.size }, &oid);
 
                     // get the mode
                     // on windows, if a tree entry was supplied to this fn and its hash

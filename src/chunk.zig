@@ -5,7 +5,6 @@ const fs = @import("./fs.zig");
 const obj = @import("./object.zig");
 const zlib = @import("./std/zlib.zig");
 const flate = @import("./std/flate.zig");
-const buf_rdr = @import("./std/buffered_reader.zig");
 
 // reordering is a breaking change
 const CompressKind = enum(u8) {
@@ -473,17 +472,17 @@ pub fn readChunk(
     defer chunk_file.close();
 
     // make reader
-    var buffered_reader = buf_rdr.bufferedReaderSize(repo_opts.read_size, chunk_file.deprecatedReader());
-    const chunk_reader = buffered_reader.reader();
+    var read_buffer = [_]u8{0} ** repo_opts.read_size;
+    var chunk_reader = chunk_file.reader(&read_buffer);
 
     // read chunk, decompressing if necessary
-    const compress_kind = try std.meta.intToEnum(CompressKind, try chunk_reader.readByte());
+    const compress_kind = try std.meta.intToEnum(CompressKind, try chunk_reader.interface.adaptToOldInterface().readByte());
     switch (compress_kind) {
         .none => {
-            const expected_checksum = try chunk_reader.readInt(u32, .big);
+            const expected_checksum = try chunk_reader.interface.adaptToOldInterface().readInt(u32, .big);
 
             var chunk_buffer = [_]u8{0} ** repo_opts.extra.chunk_opts.max_size;
-            const chunk_size = try chunk_reader.readAll(&chunk_buffer);
+            const chunk_size = try chunk_reader.interface.adaptToOldInterface().readAll(&chunk_buffer);
 
             const actual_checksum = std.hash.Adler32.hash(chunk_buffer[0..chunk_size]);
             if (actual_checksum != expected_checksum) {
@@ -496,7 +495,7 @@ pub fn readChunk(
             return read_size;
         },
         .zlib => {
-            var zlib_stream = zlib.decompressor(chunk_reader);
+            var zlib_stream = zlib.decompressor(chunk_reader.interface.adaptToOldInterface());
             try zlib_stream.reader().skipBytes(chunk_offset, .{});
             return zlib_stream.reader().read(buf) catch |err| switch (err) {
                 error.WrongZlibChecksum => error.WrongChunkChecksum,
@@ -516,7 +515,7 @@ pub fn ChunkObjectReader(comptime repo_opts: rp.RepoOpts(.xit)) type {
         position: u64,
         header: obj.ObjectHeader,
 
-        pub const Error = ZlibStream.Reader.Error || std.fs.File.OpenError || std.Io.Reader.Error || error{ InvalidOffset, InvalidEnumTag, WrongChunkChecksum };
+        pub const Error = ZlibStream.Reader.Error || std.fs.File.OpenError || std.Io.AnyReader.Error || error{ InvalidOffset, InvalidEnumTag, WrongChunkChecksum };
 
         pub fn init(allocator: std.mem.Allocator, state: rp.Repo(.xit, repo_opts).State(.read_only), oid: *const [hash.hexLen(repo_opts.hash)]u8) !ChunkObjectReader(repo_opts) {
             // chunk info map

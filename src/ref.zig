@@ -2,7 +2,6 @@ const std = @import("std");
 const hash = @import("./hash.zig");
 const fs = @import("./fs.zig");
 const rp = @import("./repo.zig");
-const buf_rdr = @import("./std/buffered_reader.zig");
 
 pub const MAX_REF_CONTENT_SIZE = 512;
 const REF_START_STR = "ref: ";
@@ -312,11 +311,11 @@ pub fn read(
             if (state.core.repo_dir.openFile("packed-refs", .{ .mode = .read_only })) |packed_refs_file| {
                 defer packed_refs_file.close();
 
-                var buffered_reader = buf_rdr.bufferedReaderSize(repo_opts.read_size, packed_refs_file.deprecatedReader());
-                const reader = buffered_reader.reader();
+                var read_buffer = [_]u8{0} ** repo_opts.read_size;
+                var reader = packed_refs_file.reader(&read_buffer);
 
-                var read_buffer = [_]u8{0} ** repo_opts.max_read_size;
-                while (try reader.readUntilDelimiterOrEof(&read_buffer, '\n')) |line| {
+                var line_buffer = [_]u8{0} ** repo_opts.max_read_size;
+                while (try reader.interface.adaptToOldInterface().readUntilDelimiterOrEof(&line_buffer, '\n')) |line| {
                     const trimmed_line = std.mem.trim(u8, line, " ");
                     if (std.mem.startsWith(u8, trimmed_line, "#")) {
                         continue;
