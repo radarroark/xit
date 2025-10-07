@@ -11,7 +11,6 @@ const cfg = @import("./config.zig");
 const tg = @import("./tag.zig");
 const tr = @import("./tree.zig");
 const mrg = @import("./merge.zig");
-const buf_rdr = @import("./std/buffered_reader.zig");
 const zlib = @import("./std/zlib.zig");
 
 fn compressZlib(comptime read_size: usize, in: std.fs.File, out: std.fs.File) !void {
@@ -602,7 +601,8 @@ pub const ObjectKind = enum {
 pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return struct {
         allocator: std.mem.Allocator,
-        reader: buf_rdr.BufferedReader(repo_opts.read_size, Reader),
+        reader: Reader,
+        interface: std.Io.Reader,
 
         pub const Reader = switch (repo_kind) {
             .git => pack.LooseOrPackObjectReader(repo_opts),
@@ -613,47 +613,61 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
             allocator: std.mem.Allocator,
             state: rp.Repo(repo_kind, repo_opts).State(.read_only),
             oid: *const [hash.hexLen(repo_opts.hash)]u8,
-        ) !@This() {
-            switch (repo_kind) {
-                .git => {
-                    const reader = try pack.LooseOrPackObjectReader(repo_opts).init(allocator, state, oid);
-                    return .{
-                        .allocator = allocator,
-                        .reader = buf_rdr.bufferedReaderSize(repo_opts.read_size, reader),
-                    };
+        ) !ObjectReader(repo_kind, repo_opts) {
+            const buffer = try allocator.alloc(u8, repo_opts.read_size);
+            errdefer allocator.free(buffer);
+
+            return .{
+                .allocator = allocator,
+                .reader = switch (repo_kind) {
+                    .git => try pack.LooseOrPackObjectReader(repo_opts).init(allocator, state, oid),
+                    .xit => try chunk.ChunkObjectReader(repo_opts).init(allocator, state, oid),
                 },
-                .xit => {
-                    const reader = try chunk.ChunkObjectReader(repo_opts).init(allocator, state, oid);
-                    return .{
-                        .allocator = allocator,
-                        .reader = buf_rdr.bufferedReaderSize(repo_opts.read_size, reader),
-                    };
+                .interface = .{
+                    .vtable = &.{ .stream = stream },
+                    .buffer = buffer,
+                    .seek = 0,
+                    .end = 0,
                 },
-            }
+            };
         }
 
         pub fn deinit(self: *ObjectReader(repo_kind, repo_opts)) void {
-            self.reader.unbuffered_reader.deinit(self.allocator);
+            self.reader.deinit(self.allocator);
+            self.allocator.free(self.interface.buffer);
         }
 
         pub fn reset(self: *ObjectReader(repo_kind, repo_opts)) !void {
-            try self.reader.unbuffered_reader.reset();
-            self.reader = buf_rdr.bufferedReaderSize(repo_opts.read_size, self.reader.unbuffered_reader);
+            try self.reader.reset();
+            self.interface.seek = 0;
+            self.interface.end = 0;
         }
 
         pub fn seekTo(self: *ObjectReader(repo_kind, repo_opts), position: u64) !void {
             try self.reset();
             switch (repo_kind) {
-                .git => try self.reader.unbuffered_reader.skipBytes(position),
-                .xit => try self.reader.unbuffered_reader.seekTo(position),
+                .git => try self.reader.skipBytes(position),
+                .xit => try self.reader.seekTo(position),
             }
         }
 
         pub fn header(self: *const ObjectReader(repo_kind, repo_opts)) ObjectHeader {
             return switch (repo_kind) {
-                .git => self.reader.unbuffered_reader.header(),
-                .xit => self.reader.unbuffered_reader.header,
+                .git => self.reader.header(),
+                .xit => self.reader.header,
             };
+        }
+
+        fn stream(io_r: *std.Io.Reader, io_w: *std.Io.Writer, limit: std.Io.Limit) std.Io.Reader.StreamError!usize {
+            const r: *ObjectReader(repo_kind, repo_opts) = @alignCast(@fieldParentPtr("interface", io_r));
+            const dest = limit.slice(try io_w.writableSliceGreedy(1));
+            const size = r.reader.read(dest) catch |err| switch (err) {
+                error.EndOfStream => |e| return e,
+                else => return error.ReadFailed,
+            };
+            if (size == 0) return error.EndOfStream;
+            io_w.advance(size);
+            return size;
         }
     };
 }
@@ -737,7 +751,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             var obj_rdr = try ObjectReader(repo_kind, repo_opts).init(allocator, state, oid);
             errdefer obj_rdr.deinit();
 
-            const reader = obj_rdr.reader.reader();
+            const reader = obj_rdr.interface.adaptToOldInterface();
 
             const arena = try allocator.create(std.heap.ArenaAllocator);
             arena.* = std.heap.ArenaAllocator.init(allocator);
@@ -1171,7 +1185,7 @@ pub fn copyFromObjectIterator(
             repo_opts,
             state,
             &object.object_reader,
-            object.object_reader.reader.reader(),
+            object.object_reader.interface.adaptToOldInterface(),
             object.object_reader.header(),
             &oid,
         );

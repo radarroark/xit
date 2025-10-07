@@ -333,19 +333,21 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                     }
                     var line_arr = std.ArrayList(u8){};
                     errdefer line_arr.deinit(self.allocator);
-                    var buffer = [_]u8{0} ** 1;
                     while (true) {
-                        const size = try object.object_reader.reader.read(&buffer);
-                        if (size == 0) {
-                            object.eof = true;
-                            break;
-                        } else if (buffer[0] == '\n') {
+                        const byte = object.object_reader.interface.takeByte() catch |err| switch (err) {
+                            error.EndOfStream => {
+                                object.eof = true;
+                                break;
+                            },
+                            else => |e| return e,
+                        };
+                        if (byte == '\n') {
                             break;
                         } else {
                             if (line_arr.items.len == repo_opts.max_line_size) {
                                 return error.StreamTooLong;
                             }
-                            try line_arr.append(self.allocator, buffer[0]);
+                            try line_arr.append(self.allocator, byte);
                         }
                     }
                     const line = try line_arr.toOwnedSlice(self.allocator);

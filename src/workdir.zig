@@ -511,7 +511,7 @@ pub fn objectToFile(
             var buf = [_]u8{0} ** repo_opts.read_size;
             while (true) {
                 // read from file
-                const size = try obj_rdr.reader.read(&buf);
+                const size = try obj_rdr.interface.readSliceShort(&buf);
                 if (size == 0) break;
                 // decompress
                 _ = try writer.write(buf[0..size]);
@@ -548,7 +548,7 @@ pub fn objectToFile(
 
                 // get path from blob content
                 var target_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-                const size = try obj_rdr.reader.reader().readAll(&target_path_buffer);
+                const size = try obj_rdr.interface.readSliceShort(&target_path_buffer);
                 const target_path = target_path_buffer[0..size];
 
                 // create parent dir(s)

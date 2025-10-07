@@ -692,7 +692,7 @@ fn writeBlobWithPatches(
             defer obj_rdr.deinit();
             try obj_rdr.seekTo(change_offset);
 
-            if (try obj_rdr.reader.reader().readUntilDelimiterOrEofAlloc(inner_allocator, '\n', repo_opts.max_line_size)) |line| {
+            if (try obj_rdr.interface.adaptToOldInterface().readUntilDelimiterOrEofAlloc(inner_allocator, '\n', repo_opts.max_line_size)) |line| {
                 return line;
             } else {
                 // empty line at the end of the file

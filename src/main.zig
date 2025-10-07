@@ -534,7 +534,7 @@ fn runCommand(
                 try writers.out.print("\n", .{});
 
                 try commit_object.object_reader.seekTo(commit_object.content.commit.message_position);
-                while (try commit_object.object_reader.reader.reader().readUntilDelimiterOrEofAlloc(allocator, '\n', repo_opts.max_read_size)) |line| {
+                while (try commit_object.object_reader.interface.adaptToOldInterface().readUntilDelimiterOrEofAlloc(allocator, '\n', repo_opts.max_read_size)) |line| {
                     defer allocator.free(line);
                     try writers.out.print("    {s}\n", .{line});
                 }

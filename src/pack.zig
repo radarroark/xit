@@ -1160,7 +1160,7 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                         if (o.stream) |*stream| {
                             const object = &self.objects.items[self.object_index];
                             var temp_buffer = [_]u8{0} ** 1024;
-                            const uncompressed_size = try object.object_reader.reader.read(&temp_buffer);
+                            const uncompressed_size = try object.object_reader.interface.readSliceShort(&temp_buffer);
 
                             if (uncompressed_size > 0) {
                                 // write to out_bytes and return so we can read it next
