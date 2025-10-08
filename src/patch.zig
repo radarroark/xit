@@ -449,13 +449,12 @@ pub fn applyPatch(
                 else {
                     var kv_pair_cursor = try child_cursor.readKeyValuePair();
                     var key_reader = try kv_pair_cursor.key_cursor.reader();
-                    var child_bytes = [_]u8{0} ** LineId(repo_opts.hash).byte_size;
-                    try key_reader.interface.readSliceAll(&child_bytes);
+                    const child_bytes = try key_reader.interface.takeArray(LineId(repo_opts.hash).byte_size);
 
                     const line_id_position = kv_pair_cursor.key_cursor.slot().value;
                     try line_id_list_writer.interface.writeInt(u64, line_id_position, .big);
 
-                    var stream = std.io.fixedBufferStream(&child_bytes);
+                    var stream = std.io.fixedBufferStream(child_bytes);
                     var reader = stream.reader();
                     current_line_id_int = try reader.readInt(LineId(repo_opts.hash).Int, .big);
                 }
@@ -618,18 +617,17 @@ fn createPatchEntries(
                 };
 
                 var line_id_reader = try line_id_cursor.reader();
-                var line_id_bytes = [_]u8{0} ** LineId(repo_opts.hash).byte_size;
-                try line_id_reader.interface.readSliceAll(&line_id_bytes);
+                const line_id_bytes = try line_id_reader.interface.takeArray(LineId(repo_opts.hash).byte_size);
 
                 if (last_line.origin == .new) {
                     var buffer = std.ArrayList(u8){};
                     try buffer.writer(arena.allocator()).writeInt(u8, @intFromEnum(ChangeKind.new_edge), .big);
-                    try buffer.writer(arena.allocator()).writeAll(&line_id_bytes);
+                    try buffer.writer(arena.allocator()).writeAll(line_id_bytes);
                     try buffer.writer(arena.allocator()).writeInt(LineId(repo_opts.hash).Int, @bitCast(last_line.id), .big);
                     try patch_entries.append(allocator, buffer.items);
                 }
 
-                var stream = std.io.fixedBufferStream(&line_id_bytes);
+                var stream = std.io.fixedBufferStream(line_id_bytes);
                 var reader = stream.reader();
                 const line_id_int = try reader.readInt(LineId(repo_opts.hash).Int, .big);
 
@@ -671,10 +669,9 @@ fn createPatchEntries(
                 };
 
                 var line_id_reader = try line_id_cursor.reader();
-                var line_id_bytes = [_]u8{0} ** LineId(repo_opts.hash).byte_size;
-                try line_id_reader.interface.readSliceAll(&line_id_bytes);
+                const line_id_bytes = try line_id_reader.interface.takeArray(LineId(repo_opts.hash).byte_size);
 
-                try buffer.writer(arena.allocator()).writeAll(&line_id_bytes);
+                try buffer.writer(arena.allocator()).writeAll(line_id_bytes);
 
                 try patch_entries.append(allocator, buffer.items);
 

@@ -461,8 +461,7 @@ pub fn readChunk(
         break :blk try chunk_info_reader.interface.takeInt(u64, .big);
     };
     const chunk_offset = object_position - object_offset;
-    var chunk_hash_bytes = [_]u8{0} ** chunk_hash_size;
-    try chunk_info_reader.interface.readSliceAll(&chunk_hash_bytes);
+    const chunk_hash_bytes = try chunk_info_reader.interface.takeArray(chunk_hash_size);
     const chunk_hash_hex = std.fmt.bytesToHex(chunk_hash_bytes, .lower);
 
     // open the chunk file

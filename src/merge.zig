@@ -682,9 +682,8 @@ fn writeBlobWithPatches(
             const hash_size = comptime hash.byteLen(repo_opts.hash);
             const offset_size = @bitSizeOf(u64) / 8;
 
-            var oid = [_]u8{0} ** hash_size;
-            try offset_list_reader.interface.readSliceAll(&oid);
-            const oid_hex = std.fmt.bytesToHex(&oid, .lower);
+            const oid = try offset_list_reader.interface.takeArray(hash_size);
+            const oid_hex = std.fmt.bytesToHex(oid, .lower);
             try offset_list_reader.seekTo(hash_size + line_id.line * offset_size);
             const change_offset = try offset_list_reader.interface.takeInt(u64, .big);
 
