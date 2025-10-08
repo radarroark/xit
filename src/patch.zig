@@ -454,9 +454,8 @@ pub fn applyPatch(
                     const line_id_position = kv_pair_cursor.key_cursor.slot().value;
                     try line_id_list_writer.interface.writeInt(u64, line_id_position, .big);
 
-                    var stream = std.io.fixedBufferStream(child_bytes);
-                    var reader = stream.reader();
-                    current_line_id_int = try reader.readInt(LineId(repo_opts.hash).Int, .big);
+                    var reader = std.Io.Reader.fixed(child_bytes);
+                    current_line_id_int = try reader.takeInt(LineId(repo_opts.hash).Int, .big);
                 }
             } else {
                 break;
@@ -627,9 +626,8 @@ fn createPatchEntries(
                     try patch_entries.append(allocator, buffer.items);
                 }
 
-                var stream = std.io.fixedBufferStream(line_id_bytes);
-                var reader = stream.reader();
-                const line_id_int = try reader.readInt(LineId(repo_opts.hash).Int, .big);
+                var reader = std.Io.Reader.fixed(line_id_bytes);
+                const line_id_int = try reader.takeInt(LineId(repo_opts.hash).Int, .big);
 
                 last_line = .{ .id = @bitCast(line_id_int), .origin = .old };
             },

@@ -315,15 +315,14 @@ pub fn indexDiffersFromWorkDir(
                 const target_path = try parent_dir.readLink(path, &target_path_buffer);
 
                 // make reader
-                var stream = std.io.fixedBufferStream(target_path);
-                const reader = stream.reader();
+                var reader = std.Io.Reader.fixed(target_path);
 
                 // create blob header
                 var header_buffer = [_]u8{0} ** 256; // should be plenty of space
                 const header = try std.fmt.bufPrint(&header_buffer, "blob {}\x00", .{meta.size});
 
                 var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-                try hash.hashReader(repo_opts.hash, repo_opts.read_size, reader, header, &oid);
+                try hash.hashReader(repo_opts.hash, repo_opts.read_size, reader.adaptToOldInterface(), header, &oid);
                 if (!std.mem.eql(u8, &entry.oid, &oid)) {
                     return true;
                 }

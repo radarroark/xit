@@ -138,9 +138,8 @@ fn FastCdc(comptime opts: FastCdcOpts) type {
                 var buffer = [_]u8{0} ** std.crypto.hash.Md5.digest_length;
                 std.crypto.hash.Md5.hash(&seed, &buffer, .{});
 
-                var stream = std.io.fixedBufferStream(&buffer);
-                const reader = stream.reader();
-                num.* = reader.readInt(u64, .big) catch unreachable;
+                var reader = std.Io.Reader.fixed(&buffer);
+                num.* = reader.takeInt(u64, .big) catch unreachable;
             }
             return nums;
         }
@@ -155,10 +154,10 @@ test "fastcdc all zeros" {
         .normalization = .level1,
     };
     const zero_buffer = [_]u8{0} ** (opts.max_size * 3);
-    var stream = std.io.fixedBufferStream(&zero_buffer);
+    var reader = std.Io.Reader.fixed(&zero_buffer);
     var iter = FastCdc(opts).init(zero_buffer.len);
     var chunk_buffer = [_]u8{0} ** opts.max_size;
-    while (try iter.next(stream.reader(), &chunk_buffer)) |chunk| {
+    while (try iter.next(reader.adaptToOldInterface(), &chunk_buffer)) |chunk| {
         try std.testing.expectEqual(opts.max_size, chunk.len);
     }
 }
@@ -171,7 +170,7 @@ test "fastcdc sekien 16k chunks" {
         .normalization = .level1,
     };
     const buffer = @embedFile("test/embed/SekienAkashita.jpg");
-    var stream = std.io.fixedBufferStream(buffer);
+    var reader = std.Io.Reader.fixed(buffer);
     var iter = FastCdc(opts).init(buffer.len);
     var chunk_buffer = [_]u8{0} ** opts.max_size;
     const expected_lengths = [_]usize{
@@ -182,7 +181,7 @@ test "fastcdc sekien 16k chunks" {
         24699,
     };
     for (expected_lengths) |expected_length| {
-        const actual_chunk = (try iter.next(stream.reader(), &chunk_buffer)).?;
+        const actual_chunk = (try iter.next(reader.adaptToOldInterface(), &chunk_buffer)).?;
         try std.testing.expectEqual(expected_length, actual_chunk.len);
     }
     try std.testing.expectEqual(0, iter.remaining);
@@ -196,7 +195,7 @@ test "fastcdc sekien 32k chunks" {
         .normalization = .level1,
     };
     const buffer = @embedFile("test/embed/SekienAkashita.jpg");
-    var stream = std.io.fixedBufferStream(buffer);
+    var reader = std.Io.Reader.fixed(buffer);
     var iter = FastCdc(opts).init(buffer.len);
     var chunk_buffer = [_]u8{0} ** opts.max_size;
     const expected_lengths = [_]usize{
@@ -204,7 +203,7 @@ test "fastcdc sekien 32k chunks" {
         42916,
     };
     for (expected_lengths) |expected_length| {
-        const actual_chunk = (try iter.next(stream.reader(), &chunk_buffer)).?;
+        const actual_chunk = (try iter.next(reader.adaptToOldInterface(), &chunk_buffer)).?;
         try std.testing.expectEqual(expected_length, actual_chunk.len);
     }
     try std.testing.expectEqual(0, iter.remaining);
@@ -218,14 +217,14 @@ test "fastcdc sekien 64k chunks" {
         .normalization = .level1,
     };
     const buffer = @embedFile("test/embed/SekienAkashita.jpg");
-    var stream = std.io.fixedBufferStream(buffer);
+    var reader = std.Io.Reader.fixed(buffer);
     var iter = FastCdc(opts).init(buffer.len);
     var chunk_buffer = [_]u8{0} ** opts.max_size;
     const expected_lengths = [_]usize{
         109466,
     };
     for (expected_lengths) |expected_length| {
-        const actual_chunk = (try iter.next(stream.reader(), &chunk_buffer)).?;
+        const actual_chunk = (try iter.next(reader.adaptToOldInterface(), &chunk_buffer)).?;
         try std.testing.expectEqual(expected_length, actual_chunk.len);
     }
     try std.testing.expectEqual(0, iter.remaining);

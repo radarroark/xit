@@ -140,22 +140,21 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                             const buffer = try kv_pair.value_cursor.readBytesAlloc(self.allocator, repo_opts.max_read_size);
                             defer self.allocator.free(buffer);
 
-                            var stream = std.io.fixedBufferStream(buffer);
-                            var reader = stream.reader();
-                            while (try stream.getPos() < buffer.len) {
+                            var reader = std.Io.Reader.fixed(buffer);
+                            while (reader.seek < reader.end) {
                                 var entry = Entry{
-                                    .ctime_secs = try reader.readInt(u32, .big),
-                                    .ctime_nsecs = try reader.readInt(u32, .big),
-                                    .mtime_secs = try reader.readInt(u32, .big),
-                                    .mtime_nsecs = try reader.readInt(u32, .big),
-                                    .dev = try reader.readInt(u32, .big),
-                                    .ino = try reader.readInt(u32, .big),
-                                    .mode = @bitCast(try reader.readInt(u32, .big)),
-                                    .uid = try reader.readInt(u32, .big),
-                                    .gid = try reader.readInt(u32, .big),
-                                    .file_size = try reader.readInt(u64, .big),
-                                    .oid = try reader.readBytesNoEof(hash.byteLen(repo_opts.hash)),
-                                    .flags = @bitCast(try reader.readInt(u16, .big)),
+                                    .ctime_secs = try reader.takeInt(u32, .big),
+                                    .ctime_nsecs = try reader.takeInt(u32, .big),
+                                    .mtime_secs = try reader.takeInt(u32, .big),
+                                    .mtime_nsecs = try reader.takeInt(u32, .big),
+                                    .dev = try reader.takeInt(u32, .big),
+                                    .ino = try reader.takeInt(u32, .big),
+                                    .mode = @bitCast(try reader.takeInt(u32, .big)),
+                                    .uid = try reader.takeInt(u32, .big),
+                                    .gid = try reader.takeInt(u32, .big),
+                                    .file_size = try reader.takeInt(u64, .big),
+                                    .oid = (try reader.takeArray(hash.byteLen(repo_opts.hash))).*,
+                                    .flags = @bitCast(try reader.takeInt(u16, .big)),
                                     .extended_flags = null, // TODO: read this if necessary
                                     .path = path,
                                 };

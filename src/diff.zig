@@ -120,15 +120,14 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                     const target_path = try state.core.work_dir.readLink(path, &target_path_buffer);
 
                     // make reader
-                    var stream = std.io.fixedBufferStream(target_path);
-                    const reader = stream.reader();
+                    var reader = std.Io.Reader.fixed(target_path);
 
                     // create blob header
                     var header_buffer = [_]u8{0} ** 256; // should be plenty of space
                     const header = try std.fmt.bufPrint(&header_buffer, "blob {}\x00", .{target_path.len});
 
                     var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-                    try hash.hashReader(repo_opts.hash, repo_opts.read_size, reader, header, &oid);
+                    try hash.hashReader(repo_opts.hash, repo_opts.read_size, reader.adaptToOldInterface(), header, &oid);
 
                     return try initFromBuffer(allocator, path, &oid, mode, target_path);
                 },
@@ -252,8 +251,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
             mode_maybe: ?fs.Mode,
             buffer: []const u8,
         ) !LineIterator(repo_kind, repo_opts) {
-            var stream = std.io.fixedBufferStream(buffer);
-            const reader = stream.reader();
+            var reader = std.Io.Reader.fixed(buffer);
 
             const arena = try allocator.create(std.heap.ArenaAllocator);
             arena.* = std.heap.ArenaAllocator.init(allocator);
@@ -265,7 +263,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
             var lines = std.ArrayList([]const u8){};
             errdefer lines.deinit(arena.allocator());
 
-            while (try reader.readUntilDelimiterOrEofAlloc(arena.allocator(), '\n', repo_opts.max_line_size)) |line| {
+            while (try reader.adaptToOldInterface().readUntilDelimiterOrEofAlloc(arena.allocator(), '\n', repo_opts.max_line_size)) |line| {
                 try lines.append(arena.allocator(), line);
             }
 

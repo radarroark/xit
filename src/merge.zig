@@ -840,9 +840,8 @@ fn writeBlobWithPatches(
                     var first_child_bytes = [_]u8{0} ** patch.LineId(repo_opts.hash).byte_size;
                     const first_child_slice = try first_kv_pair.key_cursor.readBytes(&first_child_bytes);
                     const first_line_id: patch.LineId(repo_opts.hash) = blk: {
-                        var stream = std.io.fixedBufferStream(first_child_slice);
-                        var line_id_reader = stream.reader();
-                        break :blk @bitCast(try line_id_reader.readInt(patch.LineId(repo_opts.hash).Int, .big));
+                        var line_id_reader = std.Io.Reader.fixed(first_child_slice);
+                        break :blk @bitCast(try line_id_reader.takeInt(patch.LineId(repo_opts.hash).Int, .big));
                     };
                     const first_line_id_hash = hash.hashInt(repo_opts.hash, first_child_slice);
 
@@ -853,9 +852,8 @@ fn writeBlobWithPatches(
                         var second_child_bytes = [_]u8{0} ** patch.LineId(repo_opts.hash).byte_size;
                         const second_child_slice = try second_kv_pair.key_cursor.readBytes(&second_child_bytes);
                         const second_line_id: patch.LineId(repo_opts.hash) = blk: {
-                            var stream = std.io.fixedBufferStream(second_child_slice);
-                            var line_id_reader = stream.reader();
-                            break :blk @bitCast(try line_id_reader.readInt(patch.LineId(repo_opts.hash).Int, .big));
+                            var line_id_reader = std.Io.Reader.fixed(second_child_slice);
+                            break :blk @bitCast(try line_id_reader.takeInt(patch.LineId(repo_opts.hash).Int, .big));
                         };
                         const second_line_id_hash = hash.hashInt(repo_opts.hash, second_child_slice);
 
@@ -887,9 +885,8 @@ fn writeBlobWithPatches(
                                 var next_child_bytes = [_]u8{0} ** patch.LineId(repo_opts.hash).byte_size;
                                 const next_child_slice = try next_kv_pair.key_cursor.readBytes(&next_child_bytes);
                                 next_line_id = blk: {
-                                    var stream = std.io.fixedBufferStream(next_child_slice);
-                                    var line_id_reader = stream.reader();
-                                    break :blk @bitCast(try line_id_reader.readInt(patch.LineId(repo_opts.hash).Int, .big));
+                                    var line_id_reader = std.Io.Reader.fixed(next_child_slice);
+                                    break :blk @bitCast(try line_id_reader.takeInt(patch.LineId(repo_opts.hash).Int, .big));
                                 };
                                 next_line_id_hash = hash.hashInt(repo_opts.hash, next_child_slice);
                             } else {
@@ -917,9 +914,8 @@ fn writeBlobWithPatches(
                                 var next_child_bytes = [_]u8{0} ** patch.LineId(repo_opts.hash).byte_size;
                                 const next_child_slice = try next_kv_pair.key_cursor.readBytes(&next_child_bytes);
                                 next_line_id = blk: {
-                                    var stream = std.io.fixedBufferStream(next_child_slice);
-                                    var line_id_reader = stream.reader();
-                                    break :blk @bitCast(try line_id_reader.readInt(patch.LineId(repo_opts.hash).Int, .big));
+                                    var line_id_reader = std.Io.Reader.fixed(next_child_slice);
+                                    break :blk @bitCast(try line_id_reader.takeInt(patch.LineId(repo_opts.hash).Int, .big));
                                 };
                                 next_line_id_hash = hash.hashInt(repo_opts.hash, next_child_slice);
                             } else {
@@ -942,9 +938,8 @@ fn writeBlobWithPatches(
                                     var next_child_bytes = [_]u8{0} ** patch.LineId(repo_opts.hash).byte_size;
                                     const next_child_slice = try next_kv_pair.key_cursor.readBytes(&next_child_bytes);
                                     next_line_id = blk: {
-                                        var stream = std.io.fixedBufferStream(next_child_slice);
-                                        var line_id_reader = stream.reader();
-                                        break :blk @bitCast(try line_id_reader.readInt(patch.LineId(repo_opts.hash).Int, .big));
+                                        var line_id_reader = std.Io.Reader.fixed(next_child_slice);
+                                        break :blk @bitCast(try line_id_reader.takeInt(patch.LineId(repo_opts.hash).Int, .big));
                                     };
                                     next_line_id_hash = hash.hashInt(repo_opts.hash, next_child_slice);
                                     if (join_line_id_hash_maybe) |join_line_id_hash| {
@@ -969,8 +964,7 @@ fn writeBlobWithPatches(
                             const join_parent_line_id = source_line_ids.items[source_line_ids.items.len - 1];
                             var join_parent_bytes = [_]u8{0} ** patch.LineId(repo_opts.hash).byte_size;
                             {
-                                var stream = std.io.fixedBufferStream(&join_parent_bytes);
-                                var line_id_writer = stream.writer();
+                                var line_id_writer = std.Io.Writer.fixed(&join_parent_bytes);
                                 try line_id_writer.writeInt(patch.LineId(repo_opts.hash).Int, @bitCast(join_parent_line_id), .big);
                             }
                             const join_parent_line_id_hash = hash.hashInt(repo_opts.hash, &join_parent_bytes);
