@@ -507,14 +507,12 @@ pub fn objectToFile(
             defer out_file.close();
 
             // write the decompressed data to the output file
-            const writer = out_file.deprecatedWriter();
-            var buf = [_]u8{0} ** repo_opts.read_size;
+            var writer = out_file.writer(&.{});
+            var read_buffer = [_]u8{0} ** repo_opts.read_size;
             while (true) {
-                // read from file
-                const size = try obj_rdr.interface.readSliceShort(&buf);
+                const size = try obj_rdr.interface.readSliceShort(&read_buffer);
                 if (size == 0) break;
-                // decompress
-                _ = try writer.write(buf[0..size]);
+                try writer.interface.writeAll(read_buffer[0..size]);
             }
         },
         .tree => {
@@ -548,7 +546,8 @@ pub fn objectToFile(
 
                 // get path from blob content
                 var target_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-                const size = try obj_rdr.interface.readSliceShort(&target_path_buffer);
+                var target_path_writer = std.Io.Writer.fixed(&target_path_buffer);
+                const size = try obj_rdr.interface.streamRemaining(&target_path_writer);
                 const target_path = target_path_buffer[0..size];
 
                 // create parent dir(s)

@@ -475,13 +475,14 @@ pub fn readChunk(
     var chunk_reader = chunk_file.reader(&reader_buffer);
 
     // read chunk, decompressing if necessary
-    const compress_kind = try std.meta.intToEnum(CompressKind, try chunk_reader.interface.adaptToOldInterface().readByte());
+    const compress_kind = try std.meta.intToEnum(CompressKind, try chunk_reader.interface.takeByte());
     switch (compress_kind) {
         .none => {
-            const expected_checksum = try chunk_reader.interface.adaptToOldInterface().readInt(u32, .big);
+            const expected_checksum = try chunk_reader.interface.takeInt(u32, .big);
 
-            var chunk_buffer = [_]u8{0} ** repo_opts.extra.chunk_opts.max_size;
-            const chunk_size = try chunk_reader.interface.adaptToOldInterface().readAll(&chunk_buffer);
+            var chunk_buffer = [_]u8{0} ** (repo_opts.extra.chunk_opts.max_size + 1); // add 1 so streamRemaining works
+            var chunk_writer = std.Io.Writer.fixed(&chunk_buffer);
+            const chunk_size = try chunk_reader.interface.streamRemaining(&chunk_writer);
 
             const actual_checksum = std.hash.Adler32.hash(chunk_buffer[0..chunk_size]);
             if (actual_checksum != expected_checksum) {
