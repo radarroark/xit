@@ -93,7 +93,7 @@ pub fn writeObject(
         },
         .xit => {
             const object_hash = hash.bytesToInt(repo_opts.hash, hash_bytes_buffer);
-            try chunk.writeChunks(repo_opts, state, stream.interface.adaptToOldInterface(), object_hash, header.size, header.kind.name());
+            try chunk.writeChunks(repo_opts, state, &stream.interface, object_hash, header.size, header.kind.name());
         },
     }
 }
@@ -245,8 +245,8 @@ fn writeTree(
         },
         .xit => {
             const object_hash = hash.bytesToInt(repo_opts.hash, hash_bytes_buffer);
-            var stream = std.io.fixedBufferStream(tree_contents);
-            try chunk.writeChunks(repo_opts, state, stream.reader(), object_hash, tree_contents.len, "tree");
+            var reader = std.Io.Reader.fixed(tree_contents);
+            try chunk.writeChunks(repo_opts, state, &reader, object_hash, tree_contents.len, "tree");
         },
     }
 }
@@ -460,8 +460,8 @@ pub fn writeCommit(
             try rf.writeRecur(repo_kind, repo_opts, state, "HEAD", &commit_hash_hex);
         },
         .xit => {
-            var stream = std.io.fixedBufferStream(commit_contents);
-            try chunk.writeChunks(repo_opts, state, stream.reader(), commit_hash, commit_contents.len, "commit");
+            var reader = std.Io.Reader.fixed(commit_contents);
+            try chunk.writeChunks(repo_opts, state, &reader, commit_hash, commit_contents.len, "commit");
 
             // write commit id to HEAD
             try rf.writeRecur(repo_kind, repo_opts, state, "HEAD", &commit_hash_hex);
@@ -560,8 +560,8 @@ pub fn writeTag(
             compressed_lock.success = true;
         },
         .xit => {
-            var stream = std.io.fixedBufferStream(tag_contents);
-            try chunk.writeChunks(repo_opts, state, stream.reader(), tag_hash, tag_contents.len, "tag");
+            var reader = std.Io.Reader.fixed(tag_contents);
+            try chunk.writeChunks(repo_opts, state, &reader, tag_hash, tag_contents.len, "tag");
         },
     }
 

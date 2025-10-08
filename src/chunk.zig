@@ -76,7 +76,7 @@ fn FastCdc(comptime opts: FastCdcOpts) type {
             };
         }
 
-        pub fn next(self: *FastCdc(opts), reader: anytype, buffer: *[opts.max_size]u8) !?[]const u8 {
+        pub fn next(self: *FastCdc(opts), reader: *std.Io.Reader, buffer: *[opts.max_size]u8) !?[]const u8 {
             if (self.remaining == 0) {
                 return null;
             } else {
@@ -86,10 +86,10 @@ fn FastCdc(comptime opts: FastCdcOpts) type {
             }
         }
 
-        fn read(self: FastCdc(opts), reader: anytype, buffer: *[opts.max_size]u8) ![]const u8 {
+        fn read(self: FastCdc(opts), reader: *std.Io.Reader, buffer: *[opts.max_size]u8) ![]const u8 {
             var remaining = self.remaining;
             if (remaining <= opts.min_size) {
-                try reader.readNoEof(buffer[0..remaining]);
+                @memcpy(buffer[0..remaining], try reader.take(remaining));
                 return buffer[0..remaining];
             }
 
@@ -101,11 +101,11 @@ fn FastCdc(comptime opts: FastCdcOpts) type {
             }
 
             var index = opts.min_size - 1;
-            try reader.readNoEof(buffer[0..index]);
+            @memcpy(buffer[0..index], try reader.take(index));
 
             var h: u64 = 0;
             while (index < center) {
-                const byte = try reader.readByte();
+                const byte = try reader.takeByte();
                 buffer[index] = byte;
                 h = (h << 1) +% gear_hash[byte];
                 index += 1;
@@ -116,7 +116,7 @@ fn FastCdc(comptime opts: FastCdcOpts) type {
 
             const last_pos = remaining;
             while (index < last_pos) {
-                const byte = try reader.readByte();
+                const byte = try reader.takeByte();
                 buffer[index] = byte;
                 h = (h << 1) +% gear_hash[byte];
                 index += 1;
@@ -157,7 +157,7 @@ test "fastcdc all zeros" {
     var reader = std.Io.Reader.fixed(&zero_buffer);
     var iter = FastCdc(opts).init(zero_buffer.len);
     var chunk_buffer = [_]u8{0} ** opts.max_size;
-    while (try iter.next(reader.adaptToOldInterface(), &chunk_buffer)) |chunk| {
+    while (try iter.next(&reader, &chunk_buffer)) |chunk| {
         try std.testing.expectEqual(opts.max_size, chunk.len);
     }
 }
@@ -181,7 +181,7 @@ test "fastcdc sekien 16k chunks" {
         24699,
     };
     for (expected_lengths) |expected_length| {
-        const actual_chunk = (try iter.next(reader.adaptToOldInterface(), &chunk_buffer)).?;
+        const actual_chunk = (try iter.next(&reader, &chunk_buffer)).?;
         try std.testing.expectEqual(expected_length, actual_chunk.len);
     }
     try std.testing.expectEqual(0, iter.remaining);
@@ -203,7 +203,7 @@ test "fastcdc sekien 32k chunks" {
         42916,
     };
     for (expected_lengths) |expected_length| {
-        const actual_chunk = (try iter.next(reader.adaptToOldInterface(), &chunk_buffer)).?;
+        const actual_chunk = (try iter.next(&reader, &chunk_buffer)).?;
         try std.testing.expectEqual(expected_length, actual_chunk.len);
     }
     try std.testing.expectEqual(0, iter.remaining);
@@ -224,7 +224,7 @@ test "fastcdc sekien 64k chunks" {
         109466,
     };
     for (expected_lengths) |expected_length| {
-        const actual_chunk = (try iter.next(reader.adaptToOldInterface(), &chunk_buffer)).?;
+        const actual_chunk = (try iter.next(&reader, &chunk_buffer)).?;
         try std.testing.expectEqual(expected_length, actual_chunk.len);
     }
     try std.testing.expectEqual(0, iter.remaining);
@@ -299,7 +299,7 @@ test "trimTruncatedCodepoints" {
 pub fn writeChunks(
     comptime repo_opts: rp.RepoOpts(.xit),
     state: rp.Repo(.xit, repo_opts).State(.read_write),
-    reader: anytype,
+    reader: *std.Io.Reader,
     object_hash: hash.HashInt(repo_opts.hash),
     object_len: usize,
     object_kind_name: []const u8,
