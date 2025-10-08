@@ -311,8 +311,8 @@ pub fn read(
             if (state.core.repo_dir.openFile("packed-refs", .{ .mode = .read_only })) |packed_refs_file| {
                 defer packed_refs_file.close();
 
-                var read_buffer = [_]u8{0} ** repo_opts.read_size;
-                var reader = packed_refs_file.reader(&read_buffer);
+                var reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
+                var reader = packed_refs_file.reader(&reader_buffer);
 
                 var line_buffer = [_]u8{0} ** repo_opts.max_read_size;
                 while (try reader.interface.adaptToOldInterface().readUntilDelimiterOrEof(&line_buffer, '\n')) |line| {

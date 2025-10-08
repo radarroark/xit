@@ -472,8 +472,8 @@ pub fn readChunk(
     defer chunk_file.close();
 
     // make reader
-    var read_buffer = [_]u8{0} ** repo_opts.read_size;
-    var chunk_reader = chunk_file.reader(&read_buffer);
+    var reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
+    var chunk_reader = chunk_file.reader(&reader_buffer);
 
     // read chunk, decompressing if necessary
     const compress_kind = try std.meta.intToEnum(CompressKind, try chunk_reader.interface.adaptToOldInterface().readByte());

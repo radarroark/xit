@@ -223,8 +223,8 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     defer file.close();
 
                     // make reader
-                    var read_buffer = [_]u8{0} ** repo_opts.read_size;
-                    var reader = file.reader(&read_buffer);
+                    var reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
+                    var reader = file.reader(&reader_buffer);
 
                     // write object
                     var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
