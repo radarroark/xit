@@ -18,24 +18,26 @@ pub fn PackObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
         pub fn init(allocator: std.mem.Allocator, pack_file_path: []const u8) !PackObjectIterator(repo_kind, repo_opts) {
             var pack_file = try std.fs.openFileAbsolute(pack_file_path, .{ .mode = .read_only });
             errdefer pack_file.close();
-            const reader = pack_file.deprecatedReader();
+
+            var reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
+            var reader = pack_file.reader(&reader_buffer);
 
             // parse header
-            const sig = try reader.readBytesNoEof(4);
-            if (!std.mem.eql(u8, "PACK", &sig)) {
+            const sig = try reader.interface.takeArray(4);
+            if (!std.mem.eql(u8, "PACK", sig)) {
                 return error.InvalidPackFileSig;
             }
-            const version = try reader.readInt(u32, .big);
+            const version = try reader.interface.takeInt(u32, .big);
             if (version != 2) {
                 return error.InvalidPackFileVersion;
             }
-            const obj_count = try reader.readInt(u32, .big);
+            const obj_count = try reader.interface.takeInt(u32, .big);
 
             return .{
                 .allocator = allocator,
                 .pack_file_path = pack_file_path,
                 .pack_file = pack_file,
-                .start_position = try pack_file.getPos(),
+                .start_position = reader.logicalPos(),
                 .object_count = obj_count,
                 .object_index = 0,
                 .pack_reader = undefined,
@@ -383,18 +385,20 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
 
             var pack_file = try std.fs.openFileAbsolute(pack_file_path, .{ .mode = .read_only });
             defer pack_file.close();
-            const reader = pack_file.deprecatedReader();
+
+            var reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
+            var reader = pack_file.reader(&reader_buffer);
 
             // parse header
-            const sig = try reader.readBytesNoEof(4);
-            if (!std.mem.eql(u8, "PACK", &sig)) {
+            const sig = try reader.interface.takeArray(4);
+            if (!std.mem.eql(u8, "PACK", sig)) {
                 return error.InvalidPackFileSig;
             }
-            const version = try reader.readInt(u32, .big);
+            const version = try reader.interface.takeInt(u32, .big);
             if (version != 2) {
                 return error.InvalidPackFileVersion;
             }
-            _ = try reader.readInt(u32, .big); // number of objects
+            _ = try reader.interface.takeInt(u32, .big); // number of objects
 
             return try PackObjectReader(repo_kind, repo_opts).initAtPosition(allocator, pack_file_path, pack_offset.value);
         }
@@ -1260,10 +1264,11 @@ fn findOid(
     oid_list_pos: u64,
     index: usize,
 ) ![hash.byteLen(hash_kind)]u8 {
-    const reader = idx_file.deprecatedReader();
+    var reader_buffer = [_]u8{0} ** hash.byteLen(hash_kind);
+    var reader = idx_file.reader(&reader_buffer);
     const oid_pos = oid_list_pos + (index * hash.byteLen(hash_kind));
-    try idx_file.seekTo(oid_pos);
-    return try reader.readBytesNoEof(hash.byteLen(hash_kind));
+    try reader.seekTo(oid_pos);
+    return (try reader.interface.takeArray(hash.byteLen(hash_kind))).*;
 }
 
 fn findObjectIndex(
@@ -1312,7 +1317,8 @@ fn findOffset(
     oid_list_pos: u64,
     index: usize,
 ) !u64 {
-    const reader = idx_file.deprecatedReader();
+    var reader_buffer = [_]u8{0} ** 256;
+    var reader = idx_file.reader(&reader_buffer);
 
     const entry_count = fanout_table[fanout_table.len - 1];
     const crc_size: u64 = 4;
@@ -1321,11 +1327,11 @@ fn findOffset(
     const offset_list_pos = crc_list_pos + (entry_count * crc_size);
     const offset_pos = offset_list_pos + (index * offset_size);
 
-    try idx_file.seekTo(offset_pos);
+    try reader.seekTo(offset_pos);
     const offset: packed struct {
         value: u31,
         extra: bool,
-    } = @bitCast(try reader.readInt(u32, .big));
+    } = @bitCast(try reader.interface.takeInt(u32, .big));
     if (!offset.extra) {
         return offset.value;
     }
@@ -1334,8 +1340,8 @@ fn findOffset(
     const offset64_list_pos = offset_list_pos + (entry_count * offset_size);
     const offset64_pos = offset64_list_pos + (offset.value * offset64_size);
 
-    try idx_file.seekTo(offset64_pos);
-    return try reader.readInt(u64, .big);
+    try reader.seekTo(offset64_pos);
+    return try reader.interface.takeInt(u64, .big);
 }
 
 fn searchPackIndex(
@@ -1343,19 +1349,20 @@ fn searchPackIndex(
     idx_file: std.fs.File,
     oid_bytes: *const [hash.byteLen(hash_kind)]u8,
 ) !?u64 {
-    const reader = idx_file.deprecatedReader();
+    var reader_buffer = [_]u8{0} ** 256;
+    var reader = idx_file.reader(&reader_buffer);
 
-    const header = try reader.readBytesNoEof(4);
-    const version = if (!std.mem.eql(u8, &.{ 255, 116, 79, 99 }, &header)) 1 else try reader.readInt(u32, .big);
+    const header = try reader.interface.takeArray(4);
+    const version = if (!std.mem.eql(u8, &.{ 255, 116, 79, 99 }, header)) 1 else try reader.interface.takeInt(u32, .big);
     if (version != 2) {
         return error.NotImplemented;
     }
 
     var fanout_table = [_]u32{0} ** 256;
     for (&fanout_table) |*entry| {
-        entry.* = try reader.readInt(u32, .big);
+        entry.* = try reader.interface.takeInt(u32, .big);
     }
-    const oid_list_pos = try idx_file.getPos();
+    const oid_list_pos = reader.logicalPos();
 
     if (try findObjectIndex(hash_kind, idx_file, fanout_table, oid_list_pos, oid_bytes)) |index| {
         return try findOffset(hash_kind, idx_file, fanout_table, oid_list_pos, index);

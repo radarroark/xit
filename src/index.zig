@@ -75,39 +75,47 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     };
                     defer index_file.close();
 
-                    const reader = index_file.deprecatedReader();
-                    const signature = try reader.readBytesNoEof(4);
+                    var reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
+                    var reader = index_file.reader(&reader_buffer);
 
-                    if (!std.mem.eql(u8, "DIRC", &signature)) {
+                    const signature = try reader.interface.takeArray(4);
+                    if (!std.mem.eql(u8, "DIRC", signature)) {
                         return error.InvalidSignature;
                     }
 
                     // ignoring version 3 and 4 for now
-                    self.version = try reader.readInt(u32, .big);
+                    self.version = try reader.interface.takeInt(u32, .big);
                     if (self.version != 2) {
                         return error.InvalidVersion;
                     }
 
-                    var entry_count = try reader.readInt(u32, .big);
+                    var entry_count = try reader.interface.takeInt(u32, .big);
 
                     while (entry_count > 0) {
                         entry_count -= 1;
-                        const start_pos = try reader.context.getPos();
+                        const start_pos = reader.logicalPos();
                         var entry = Entry{
-                            .ctime_secs = try reader.readInt(u32, .big),
-                            .ctime_nsecs = try reader.readInt(u32, .big),
-                            .mtime_secs = try reader.readInt(u32, .big),
-                            .mtime_nsecs = try reader.readInt(u32, .big),
-                            .dev = try reader.readInt(u32, .big),
-                            .ino = try reader.readInt(u32, .big),
-                            .mode = @bitCast(try reader.readInt(u32, .big)),
-                            .uid = try reader.readInt(u32, .big),
-                            .gid = try reader.readInt(u32, .big),
-                            .file_size = try reader.readInt(u32, .big),
-                            .oid = try reader.readBytesNoEof(hash.byteLen(repo_opts.hash)),
-                            .flags = @bitCast(try reader.readInt(u16, .big)),
+                            .ctime_secs = try reader.interface.takeInt(u32, .big),
+                            .ctime_nsecs = try reader.interface.takeInt(u32, .big),
+                            .mtime_secs = try reader.interface.takeInt(u32, .big),
+                            .mtime_nsecs = try reader.interface.takeInt(u32, .big),
+                            .dev = try reader.interface.takeInt(u32, .big),
+                            .ino = try reader.interface.takeInt(u32, .big),
+                            .mode = @bitCast(try reader.interface.takeInt(u32, .big)),
+                            .uid = try reader.interface.takeInt(u32, .big),
+                            .gid = try reader.interface.takeInt(u32, .big),
+                            .file_size = try reader.interface.takeInt(u32, .big),
+                            .oid = (try reader.interface.takeArray(hash.byteLen(repo_opts.hash))).*,
+                            .flags = @bitCast(try reader.interface.takeInt(u16, .big)),
                             .extended_flags = null, // TODO: read this if necessary
-                            .path = try reader.readUntilDelimiterAlloc(self.arena.allocator(), 0, std.fs.max_path_bytes),
+                            .path = blk: {
+                                var writer = std.Io.Writer.Allocating.init(self.arena.allocator());
+                                _ = try reader.interface.streamDelimiterLimit(&writer.writer, 0, @enumFromInt(std.fs.max_path_bytes));
+                                if (0 != try reader.interface.takeByte()) {
+                                    return error.InvalidNullPadding;
+                                }
+                                break :blk writer.written();
+                            },
                         };
                         if (entry.mode.content.unix_permission != 0o755) { // ensure mode is valid
                             entry.mode.content.unix_permission = 0o644;
@@ -115,10 +123,10 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                         if (entry.path.len != entry.flags.name_length) {
                             return error.InvalidPathSize;
                         }
-                        const entry_size = try reader.context.getPos() - start_pos;
+                        const entry_size = reader.logicalPos() - start_pos;
                         const entry_zeroes = (8 - (entry_size % 8)) % 8;
                         for (0..entry_zeroes) |_| {
-                            if (0 != try reader.readByte()) {
+                            if (0 != try reader.interface.takeByte()) {
                                 return error.InvalidNullPadding;
                             }
                         }
@@ -129,7 +137,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     // skipping for now because it will probably require changing
                     // how i read the data above. i need access to the raw bytes
                     // (before the big endian and type conversions) to do the hashing.
-                    _ = try reader.readBytesNoEof(hash.byteLen(.sha1));
+                    _ = try reader.interface.takeArray(hash.byteLen(.sha1));
                 },
                 .xit => {
                     if (try state.extra.moment.getCursor(hash.hashInt(repo_opts.hash, "index"))) |index_cursor| {

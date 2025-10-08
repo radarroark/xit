@@ -125,11 +125,12 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     var config_file = try state.core.repo_dir.createFile("config", .{ .read = true, .truncate = false });
                     defer config_file.close();
 
-                    const reader = config_file.deprecatedReader();
-                    var buf = [_]u8{0} ** repo_opts.max_read_size;
+                    var reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
+                    var reader = config_file.reader(&reader_buffer);
 
                     // for each line...
-                    while (try reader.readUntilDelimiterOrEof(&buf, '\n')) |line| {
+                    var line_buffer = [_]u8{0} ** repo_opts.max_read_size;
+                    while (try reader.interface.adaptToOldInterface().readUntilDelimiterOrEof(&line_buffer, '\n')) |line| {
                         const text = try std.unicode.Utf8View.init(line);
                         var iter = text.iterator();
                         var next_cursor: usize = 0;
