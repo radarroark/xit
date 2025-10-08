@@ -189,7 +189,7 @@ const PackObjectStream = union(enum) {
     memory: struct {
         allocator: std.mem.Allocator,
         buffer: []u8,
-        stream: std.io.FixedBufferStream([]u8),
+        interface: std.Io.Reader,
         end_position: u64,
     },
 
@@ -228,7 +228,7 @@ const PackObjectStream = union(enum) {
             .memory = .{
                 .allocator = allocator,
                 .buffer = buffer,
-                .stream = std.io.fixedBufferStream(buffer),
+                .interface = std.Io.Reader.fixed(buffer),
                 .end_position = end_position,
             },
         };
@@ -244,7 +244,7 @@ const PackObjectStream = union(enum) {
                     .start_position = file.start_position,
                 };
             },
-            .memory => |*memory| try memory.stream.seekTo(0),
+            .memory => |*memory| memory.interface.seek = 0,
         }
     }
 
@@ -262,14 +262,14 @@ const PackObjectStream = union(enum) {
     pub fn read(self: *PackObjectStream, dest: []u8) !usize {
         return switch (self.*) {
             .file => |*file| try file.zlib_stream.reader().read(dest),
-            .memory => |*memory| try memory.stream.reader().read(dest),
+            .memory => |*memory| try memory.interface.readSliceShort(dest),
         };
     }
 
     pub fn skipBytes(self: *PackObjectStream, num_bytes: u64) !void {
         switch (self.*) {
             .file => |*file| try file.zlib_stream.reader().skipBytes(num_bytes, .{}),
-            .memory => |*memory| try memory.stream.reader().skipBytes(num_bytes, .{}),
+            .memory => |*memory| memory.interface.toss(num_bytes),
         }
     }
 };
