@@ -586,39 +586,14 @@ pub fn ChunkObjectReader(comptime repo_opts: rp.RepoOpts(.xit)) type {
             self.position = offset;
         }
 
-        pub fn readNoEof(self: *ChunkObjectReader(repo_opts), dest: []u8) !void {
-            var reader = std.io.GenericReader(*ChunkObjectReader(repo_opts), Error, ChunkObjectReader(repo_opts).read){
-                .context = self,
-            };
-            try reader.readNoEof(dest);
-        }
-
-        pub fn readUntilDelimiter(self: *ChunkObjectReader(repo_opts), dest: []u8, delimiter: u8) ![]u8 {
-            var reader = std.io.GenericReader(*ChunkObjectReader(repo_opts), Error, ChunkObjectReader(repo_opts).read){
-                .context = self,
-            };
-            return try reader.readUntilDelimiter(dest, delimiter);
-        }
-
-        pub fn readUntilDelimiterAlloc(self: *ChunkObjectReader(repo_opts), allocator: std.mem.Allocator, delimiter: u8, max_size: usize) ![]u8 {
-            var reader = std.io.GenericReader(*ChunkObjectReader(repo_opts), Error, ChunkObjectReader(repo_opts).read){
-                .context = self,
-            };
-            return try reader.readUntilDelimiterAlloc(allocator, delimiter, max_size);
-        }
-
-        pub fn readAllAlloc(self: *ChunkObjectReader(repo_opts), allocator: std.mem.Allocator, max_size: usize) ![]u8 {
-            var reader = std.io.GenericReader(*ChunkObjectReader(repo_opts), Error, ChunkObjectReader(repo_opts).read){
-                .context = self,
-            };
-            return try reader.readAllAlloc(allocator, max_size);
-        }
-
         pub fn skipBytes(self: *ChunkObjectReader(repo_opts), num_bytes: u64) !void {
-            var reader = std.io.GenericReader(*ChunkObjectReader(repo_opts), Error, ChunkObjectReader(repo_opts).read){
-                .context = self,
-            };
-            try reader.skipBytes(num_bytes, .{});
+            var buf = [_]u8{0} ** 512;
+            var remaining = num_bytes;
+            while (remaining > 0) {
+                const max_size = @min(remaining, buf.len);
+                const size = try self.read(buf[0..max_size]);
+                remaining -= size;
+            }
         }
     };
 }

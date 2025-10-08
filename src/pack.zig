@@ -897,52 +897,14 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             }
         }
 
-        pub fn readNoEof(self: *PackObjectReader(repo_kind, repo_opts), dest: []u8) !void {
-            var reader = std.io.GenericReader(*PackObjectReader(repo_kind, repo_opts), Error, PackObjectReader(repo_kind, repo_opts).read){
-                .context = self,
-            };
-            try reader.readNoEof(dest);
-        }
-
-        pub fn readUntilDelimiter(self: *PackObjectReader(repo_kind, repo_opts), dest: []u8, delimiter: u8) ![]u8 {
-            var reader = std.io.GenericReader(*PackObjectReader(repo_kind, repo_opts), Error, PackObjectReader(repo_kind, repo_opts).read){
-                .context = self,
-            };
-            return reader.readUntilDelimiter(dest, delimiter) catch |err| switch (err) {
-                error.StreamTooLong => return error.EndOfStream,
-                else => |e| return e,
-            };
-        }
-
-        pub fn readUntilDelimiterAlloc(self: *PackObjectReader(repo_kind, repo_opts), allocator: std.mem.Allocator, delimiter: u8, max_size: usize) ![]u8 {
-            var reader = std.io.GenericReader(*PackObjectReader(repo_kind, repo_opts), Error, PackObjectReader(repo_kind, repo_opts).read){
-                .context = self,
-            };
-            return reader.readUntilDelimiterAlloc(allocator, delimiter, max_size) catch |err| switch (err) {
-                error.StreamTooLong => return error.EndOfStream,
-                else => |e| return e,
-            };
-        }
-
-        pub fn readAllAlloc(self: *PackObjectReader(repo_kind, repo_opts), allocator: std.mem.Allocator, max_size: usize) ![]u8 {
-            var reader = std.io.GenericReader(*PackObjectReader(repo_kind, repo_opts), Error, PackObjectReader(repo_kind, repo_opts).read){
-                .context = self,
-            };
-            return try reader.readAllAlloc(allocator, max_size);
-        }
-
-        pub fn readByte(self: *PackObjectReader(repo_kind, repo_opts)) !u8 {
-            var reader = std.io.GenericReader(*PackObjectReader(repo_kind, repo_opts), Error, PackObjectReader(repo_kind, repo_opts).read){
-                .context = self,
-            };
-            return try reader.readByte();
-        }
-
         pub fn skipBytes(self: *PackObjectReader(repo_kind, repo_opts), num_bytes: u64) !void {
-            var reader = std.io.GenericReader(*PackObjectReader(repo_kind, repo_opts), Error, PackObjectReader(repo_kind, repo_opts).read){
-                .context = self,
-            };
-            try reader.skipBytes(num_bytes, .{});
+            var buf = [_]u8{0} ** 512;
+            var remaining = num_bytes;
+            while (remaining > 0) {
+                const max_size = @min(remaining, buf.len);
+                const size = try self.read(buf[0..max_size]);
+                remaining -= size;
+            }
         }
     };
 }
@@ -1019,41 +981,6 @@ pub fn LooseOrPackObjectReader(comptime repo_opts: rp.RepoOpts(.git)) type {
             switch (self.*) {
                 .loose => return try self.loose.stream.reader().read(dest),
                 .pack => return try self.pack.read(dest),
-            }
-        }
-
-        pub fn readNoEof(self: *LooseOrPackObjectReader(repo_opts), dest: []u8) !void {
-            switch (self.*) {
-                .loose => try self.loose.stream.reader().readNoEof(dest),
-                .pack => try self.pack.readNoEof(dest),
-            }
-        }
-
-        pub fn readUntilDelimiter(self: *LooseOrPackObjectReader(repo_opts), dest: []u8, delimiter: u8) ![]u8 {
-            switch (self.*) {
-                .loose => return try self.loose.stream.reader().readUntilDelimiter(dest, delimiter),
-                .pack => return try self.pack.readUntilDelimiter(dest, delimiter),
-            }
-        }
-
-        pub fn readUntilDelimiterAlloc(self: *LooseOrPackObjectReader(repo_opts), allocator: std.mem.Allocator, delimiter: u8, max_size: usize) ![]u8 {
-            switch (self.*) {
-                .loose => return try self.loose.stream.reader().readUntilDelimiterAlloc(allocator, delimiter, max_size),
-                .pack => return try self.pack.readUntilDelimiterAlloc(allocator, delimiter, max_size),
-            }
-        }
-
-        pub fn readAllAlloc(self: *LooseOrPackObjectReader(repo_opts), allocator: std.mem.Allocator, max_size: usize) ![]u8 {
-            switch (self.*) {
-                .loose => return try self.loose.stream.reader().readAllAlloc(allocator, max_size),
-                .pack => return try self.pack.readAllAlloc(allocator, max_size),
-            }
-        }
-
-        pub fn readByte(self: *LooseOrPackObjectReader(repo_opts)) !u8 {
-            switch (self.*) {
-                .loose => return try self.loose.stream.reader().readByte(),
-                .pack => return try self.pack.readByte(),
             }
         }
 
