@@ -235,7 +235,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 
                     // write object
                     var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-                    try obj.writeObject(repo_kind, repo_opts, state, &reader, reader.interface.adaptToOldInterface(), .{ .kind = .blob, .size = meta.size }, &oid);
+                    try obj.writeObject(repo_kind, repo_opts, state, &reader, .{ .kind = .blob, .size = meta.size }, &oid);
 
                     // get the mode
                     // on windows, if a tree entry was supplied to this fn and its hash
@@ -317,12 +317,22 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     const target_path = try state.core.work_dir.readLink(path, &target_path_buffer);
 
                     // make reader
-                    var stream = std.io.fixedBufferStream(target_path);
-                    const reader = stream.reader();
+                    const Stream = struct {
+                        interface: std.Io.Reader,
+
+                        pub fn seekTo(stream_self: *@This(), offset: u64) !void {
+                            if (offset == 0) {
+                                stream_self.interface.seek = 0;
+                            } else {
+                                return error.InvalidOffset;
+                            }
+                        }
+                    };
+                    var stream = Stream{ .interface = std.Io.Reader.fixed(target_path) };
 
                     // write object
                     var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-                    try obj.writeObject(repo_kind, repo_opts, state, &stream, reader, .{ .kind = .blob, .size = meta.size }, &oid);
+                    try obj.writeObject(repo_kind, repo_opts, state, &stream, .{ .kind = .blob, .size = meta.size }, &oid);
 
                     const entry = Entry{
                         .ctime_secs = meta.times.ctime_secs,

@@ -36,7 +36,6 @@ pub fn writeObject(
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
     stream: anytype,
-    reader: anytype,
     header: ObjectHeader,
     hash_bytes_buffer: *[hash.byteLen(repo_opts.hash)]u8,
 ) !void {
@@ -45,7 +44,7 @@ pub fn writeObject(
     const header_str = try header.write(&header_bytes);
 
     // calc the hash of its contents
-    try hash.hashReader(repo_opts.hash, repo_opts.read_size, reader, header_str, hash_bytes_buffer);
+    try hash.hashReader(repo_opts.hash, repo_opts.read_size, stream.interface.adaptToOldInterface(), header_str, hash_bytes_buffer);
     const hash_hex = std.fmt.bytesToHex(hash_bytes_buffer, .lower);
 
     // reset seek pos so we can reuse the reader for copying
@@ -79,7 +78,7 @@ pub fn writeObject(
             // copy file into temp file
             var read_buffer = [_]u8{0} ** repo_opts.read_size;
             while (true) {
-                const size = try reader.read(&read_buffer);
+                const size = try stream.interface.readSliceShort(&read_buffer);
                 if (size == 0) {
                     break;
                 }
@@ -94,7 +93,7 @@ pub fn writeObject(
         },
         .xit => {
             const object_hash = hash.bytesToInt(repo_opts.hash, hash_bytes_buffer);
-            try chunk.writeChunks(repo_opts, state, reader, object_hash, header.size, header.kind.name());
+            try chunk.writeChunks(repo_opts, state, stream.interface.adaptToOldInterface(), object_hash, header.size, header.kind.name());
         },
     }
 }
@@ -661,10 +660,7 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
         fn stream(io_r: *std.Io.Reader, io_w: *std.Io.Writer, limit: std.Io.Limit) std.Io.Reader.StreamError!usize {
             const r: *ObjectReader(repo_kind, repo_opts) = @alignCast(@fieldParentPtr("interface", io_r));
             const dest = limit.slice(try io_w.writableSliceGreedy(1));
-            const size = r.reader.read(dest) catch |err| switch (err) {
-                error.EndOfStream => |e| return e,
-                else => return error.ReadFailed,
-            };
+            const size = r.reader.read(dest) catch return error.ReadFailed;
             if (size == 0) return error.EndOfStream;
             io_w.advance(size);
             return size;
@@ -1185,7 +1181,6 @@ pub fn copyFromObjectIterator(
             repo_opts,
             state,
             &object.object_reader,
-            object.object_reader.interface.adaptToOldInterface(),
             object.object_reader.header(),
             &oid,
         );
@@ -1225,27 +1220,47 @@ pub fn copyFromPackObjectIterator(
         defer pack_reader.deinit(allocator);
 
         const Stream = struct {
-            pack_reader: *pack.PackObjectReader(repo_kind, repo_opts),
+            reader: *pack.PackObjectReader(repo_kind, repo_opts),
+            interface: std.Io.Reader,
 
-            pub fn reader(stream_self: @This()) *pack.PackObjectReader(repo_kind, repo_opts) {
-                return stream_self.pack_reader;
+            pub fn init(reader: *pack.PackObjectReader(repo_kind, repo_opts), buffer: []u8) @This() {
+                return .{
+                    .reader = reader,
+                    .interface = .{
+                        .vtable = &.{ .stream = stream },
+                        .buffer = buffer,
+                        .seek = 0,
+                        .end = 0,
+                    },
+                };
             }
 
-            pub fn seekTo(stream_self: @This(), offset: usize) !void {
+            pub fn seekTo(self: *@This(), offset: usize) !void {
                 if (offset == 0) {
-                    try stream_self.pack_reader.reset();
+                    try self.reader.reset();
+                    self.interface.seek = 0;
+                    self.interface.end = 0;
                 } else {
                     return error.InvalidOffset;
                 }
             }
+
+            fn stream(io_r: *std.Io.Reader, io_w: *std.Io.Writer, limit: std.Io.Limit) std.Io.Reader.StreamError!usize {
+                const r: *@This() = @alignCast(@fieldParentPtr("interface", io_r));
+                const dest = limit.slice(try io_w.writableSliceGreedy(1));
+                const size = r.reader.read(dest) catch return error.ReadFailed;
+                if (size == 0) return error.EndOfStream;
+                io_w.advance(size);
+                return size;
+            }
         };
-        const stream = Stream{
-            .pack_reader = pack_reader,
-        };
+
+        var reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
+        var stream = Stream.init(pack_reader, &reader_buffer);
 
         var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
         const header = pack_reader.header();
-        try writeObject(repo_kind, repo_opts, state, &stream, stream.reader(), header, &oid);
+        try writeObject(repo_kind, repo_opts, state, &stream, header, &oid);
 
         if (repo_opts.ProgressCtx != void) {
             if (progress_ctx_maybe) |progress_ctx| {

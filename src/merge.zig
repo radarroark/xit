@@ -329,6 +329,7 @@ fn writeBlobWithDiff3(
         line_buffer: *std.ArrayList([]const u8),
         current_line: ?[]const u8,
         has_conflict: bool,
+        interface: std.Io.Reader,
 
         const Parent = @This();
 
@@ -492,6 +493,8 @@ fn writeBlobWithDiff3(
             self.line_buffer.clearAndFree(self.allocator);
             self.current_line = null;
             self.has_conflict = false;
+            self.interface.seek = 0;
+            self.interface.end = 0;
 
             for (0..offset) |_| {
                 _ = try self.reader().readByte();
@@ -517,6 +520,15 @@ fn writeBlobWithDiff3(
             }
             return n;
         }
+
+        fn stream(io_r: *std.Io.Reader, io_w: *std.Io.Writer, limit: std.Io.Limit) std.Io.Reader.StreamError!usize {
+            const r: *@This() = @alignCast(@fieldParentPtr("interface", io_r));
+            const dest = limit.slice(try io_w.writableSliceGreedy(1));
+            const size = r.reader().read(dest) catch return error.ReadFailed;
+            if (size == 0) return error.EndOfStream;
+            io_w.advance(size);
+            return size;
+        }
     };
 
     const target_marker = try std.fmt.allocPrint(allocator, "<<<<<<< target ({s})", .{target_name});
@@ -527,6 +539,8 @@ fn writeBlobWithDiff3(
     defer allocator.free(separate_marker);
     const source_marker = try std.fmt.allocPrint(allocator, ">>>>>>> source ({s})", .{source_name});
     defer allocator.free(source_marker);
+
+    var stream_buffer = [_]u8{0} ** repo_opts.buffer_size;
     var stream = Stream{
         .allocator = allocator,
         .target_marker = target_marker,
@@ -540,6 +554,12 @@ fn writeBlobWithDiff3(
         .line_buffer = &line_buffer,
         .current_line = null,
         .has_conflict = false,
+        .interface = .{
+            .vtable = &.{ .stream = Stream.stream },
+            .buffer = &stream_buffer,
+            .seek = 0,
+            .end = 0,
+        },
     };
 
     const header = obj.ObjectHeader{ .kind = .blob, .size = try stream.count() };
@@ -547,7 +567,7 @@ fn writeBlobWithDiff3(
     try stream.seekTo(0);
 
     var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-    try obj.writeObject(repo_kind, repo_opts, state, &stream, stream.reader(), header, &oid);
+    try obj.writeObject(repo_kind, repo_opts, state, &stream, header, &oid);
     return oid;
 }
 
@@ -763,6 +783,7 @@ fn writeBlobWithPatches(
         current_line: ?[]const u8,
         current_line_id_hash: ?hash.HashInt(repo_opts.hash),
         has_conflict: bool,
+        interface: std.Io.Reader,
 
         const Parent = @This();
 
@@ -1068,6 +1089,8 @@ fn writeBlobWithPatches(
             self.current_line = null;
             self.current_line_id_hash = hash.hashInt(repo_opts.hash, &patch.LineId(repo_opts.hash).first_bytes);
             self.has_conflict = false;
+            self.interface.seek = 0;
+            self.interface.end = 0;
 
             for (0..offset) |_| {
                 _ = try self.reader().readByte();
@@ -1093,6 +1116,15 @@ fn writeBlobWithPatches(
             }
             return n;
         }
+
+        fn stream(io_r: *std.Io.Reader, io_w: *std.Io.Writer, limit: std.Io.Limit) std.Io.Reader.StreamError!usize {
+            const r: *@This() = @alignCast(@fieldParentPtr("interface", io_r));
+            const dest = limit.slice(try io_w.writableSliceGreedy(1));
+            const size = r.reader().read(dest) catch return error.ReadFailed;
+            if (size == 0) return error.EndOfStream;
+            io_w.advance(size);
+            return size;
+        }
     };
 
     const target_marker = try std.fmt.allocPrint(allocator, "<<<<<<< target ({s})", .{target_name});
@@ -1103,6 +1135,8 @@ fn writeBlobWithPatches(
     defer allocator.free(separate_marker);
     const source_marker = try std.fmt.allocPrint(allocator, ">>>>>>> source ({s})", .{source_name});
     defer allocator.free(source_marker);
+
+    var stream_buffer = [_]u8{0} ** repo_opts.buffer_size;
     var stream = Stream{
         .state = state.readOnly(),
         .allocator = allocator,
@@ -1119,6 +1153,12 @@ fn writeBlobWithPatches(
         .current_line = null,
         .current_line_id_hash = hash.hashInt(repo_opts.hash, &patch.LineId(repo_opts.hash).first_bytes),
         .has_conflict = false,
+        .interface = .{
+            .vtable = &.{ .stream = Stream.stream },
+            .buffer = &stream_buffer,
+            .seek = 0,
+            .end = 0,
+        },
     };
 
     const header = obj.ObjectHeader{ .kind = .blob, .size = try stream.count() };
@@ -1126,7 +1166,7 @@ fn writeBlobWithPatches(
     try stream.seekTo(0);
 
     var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-    try obj.writeObject(.xit, repo_opts, state, &stream, stream.reader(), header, &oid);
+    try obj.writeObject(.xit, repo_opts, state, &stream, header, &oid);
     return oid;
 }
 
