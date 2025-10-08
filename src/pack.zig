@@ -350,7 +350,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
 
                     // serialize object header
                     var header_bytes = [_]u8{0} ** 32;
-                    const header_str = try obj.writeObjectHeader(pack_reader.header(), &header_bytes);
+                    const header_str = try pack_reader.header().write(&header_bytes);
 
                     var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
                     try hash.hashReader(repo_opts.hash, repo_opts.read_size, pack_reader, header_str, &oid);
@@ -979,7 +979,7 @@ pub fn LooseOrPackObjectReader(comptime repo_opts: rp.RepoOpts(.git)) type {
             errdefer object_file.close();
 
             var stream = zlib.decompressor(object_file.deprecatedReader());
-            const obj_header = try obj.readObjectHeader(stream.reader());
+            const obj_header = try obj.ObjectHeader.read(stream.reader());
 
             return .{
                 .loose = .{

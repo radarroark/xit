@@ -42,7 +42,7 @@ pub fn writeObject(
 ) !void {
     // serialize object header
     var header_bytes = [_]u8{0} ** 32;
-    const header_str = try writeObjectHeader(header, &header_bytes);
+    const header_str = try header.write(&header_bytes);
 
     // calc the hash of its contents
     try hash.hashReader(repo_opts.hash, repo_opts.read_size, reader, header_str, hash_bytes_buffer);
@@ -672,33 +672,33 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
     };
 }
 
-pub fn readObjectHeader(reader: anytype) !ObjectHeader {
-    const MAX_SIZE: usize = 16;
-
-    // read the object kind
-    var object_kind_buf = [_]u8{0} ** MAX_SIZE;
-    const object_kind = try reader.readUntilDelimiter(&object_kind_buf, ' ');
-
-    // read the length
-    var object_len_buf = [_]u8{0} ** MAX_SIZE;
-    const object_len_str = try reader.readUntilDelimiter(&object_len_buf, 0);
-    const object_len = try std.fmt.parseInt(u64, object_len_str, 10);
-
-    return .{
-        .kind = try ObjectKind.init(object_kind),
-        .size = object_len,
-    };
-}
-
-pub fn writeObjectHeader(header: ObjectHeader, buffer: []u8) ![]const u8 {
-    const type_name = header.kind.name();
-    const file_size = header.size;
-    return try std.fmt.bufPrint(buffer, "{s} {}\x00", .{ type_name, file_size });
-}
-
 pub const ObjectHeader = struct {
     kind: ObjectKind,
     size: u64,
+
+    pub fn read(reader: anytype) !ObjectHeader {
+        const MAX_SIZE: usize = 16;
+
+        // read the object kind
+        var object_kind_buf = [_]u8{0} ** MAX_SIZE;
+        const object_kind = try reader.readUntilDelimiter(&object_kind_buf, ' ');
+
+        // read the length
+        var object_len_buf = [_]u8{0} ** MAX_SIZE;
+        const object_len_str = try reader.readUntilDelimiter(&object_len_buf, 0);
+        const object_len = try std.fmt.parseInt(u64, object_len_str, 10);
+
+        return .{
+            .kind = try ObjectKind.init(object_kind),
+            .size = object_len,
+        };
+    }
+
+    pub fn write(self: ObjectHeader, buffer: []u8) ![]const u8 {
+        const type_name = self.kind.name();
+        const file_size = self.size;
+        return try std.fmt.bufPrint(buffer, "{s} {}\x00", .{ type_name, file_size });
+    }
 };
 
 pub fn ObjectContent(comptime hash_kind: hash.HashKind) type {
