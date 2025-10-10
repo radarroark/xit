@@ -3,13 +3,13 @@
     .version = "0.0.0",
     .dependencies = .{
         .xitdb = .{
-            .url = "git+https://github.com/radarroark/xitdb#9523030360143509c0ee98907443b20f11ccc813",
-            .hash = "xitdb-0.0.0-EEFkxvP4AwDcmM4dPZc0nfQ3dgOJDWLWZjdot0LXanGh",
+            .url = "git+https://github.com/radarroark/xitdb#1c3aa3ad0d49bee6c2841e69b1985ea41610a451",
+            .hash = "xitdb-0.0.0-EEFkxrj3AwA4_GHa6mTAULGFskusxh0pr5Bbf5Lk6XsA",
             //.path = "../xitdb",
         },
         .xitui = .{
-            .url = "git+https://github.com/radarroark/xitui#4f7918feb8dd8b5fbab60ef9fbea21e129e4ca3d",
-            .hash = "xitui-0.0.0--YPVyHURAQDVxjCN_2zZcRupwhsYBI66OLOWrTXM4c42",
+            .url = "git+https://github.com/radarroark/xitui#3fb562d72a766eb1c34fb47f8279de663b86c184",
+            .hash = "xitui-0.0.0--YPVyMowAQAiI90haduBXe0oHanynZ6FvVlGxjEdVfL7",
             //.path = "../xitui",
         },
     },
