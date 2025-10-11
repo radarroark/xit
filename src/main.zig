@@ -534,10 +534,24 @@ fn runCommand(
                 try writers.out.print("\n", .{});
 
                 try commit_object.object_reader.seekTo(commit_object.content.commit.message_position);
-                while (try commit_object.object_reader.interface.adaptToOldInterface().readUntilDelimiterOrEofAlloc(allocator, '\n', repo_opts.max_read_size)) |line| {
-                    defer allocator.free(line);
-                    try writers.out.print("    {s}\n", .{line});
+
+                // for each line...
+                while (commit_object.object_reader.interface.peekByte()) |_| {
+                    var line_writer = std.Io.Writer.Allocating.init(allocator);
+                    defer line_writer.deinit();
+                    _ = try commit_object.object_reader.interface.streamDelimiterLimit(&line_writer.writer, '\n', @enumFromInt(repo_opts.max_line_size));
+
+                    // skip delimiter
+                    if (commit_object.object_reader.interface.bufferedLen() > 0) {
+                        commit_object.object_reader.interface.toss(1);
+                    }
+
+                    try writers.out.print("    {s}\n", .{line_writer.written()});
+                } else |err| switch (err) {
+                    error.EndOfStream => {},
+                    else => |e| return e,
                 }
+
                 try writers.out.print("\n", .{});
             }
         },

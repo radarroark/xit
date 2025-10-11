@@ -299,7 +299,9 @@ pub fn read(
             // look for loose ref
             if (state.core.repo_dir.openFile(ref_path, .{ .mode = .read_only })) |ref_file| {
                 defer ref_file.close();
-                const size = try ref_file.deprecatedReader().readAll(buffer);
+                var reader = ref_file.reader(&.{});
+                var writer = std.Io.Writer.fixed(buffer);
+                const size = try reader.interface.streamRemaining(&writer);
                 const ref_content = std.mem.sliceTo(buffer[0..size], '\n');
                 return RefOrOid(repo_opts.hash).initFromDb(ref_content);
             } else |err| switch (err) {
@@ -314,8 +316,18 @@ pub fn read(
                 var reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
                 var reader = packed_refs_file.reader(&reader_buffer);
 
-                var line_buffer = [_]u8{0} ** repo_opts.max_read_size;
-                while (try reader.interface.adaptToOldInterface().readUntilDelimiterOrEof(&line_buffer, '\n')) |line| {
+                // for each line...
+                while (reader.interface.peekByte()) |_| {
+                    var line_buffer = [_]u8{0} ** repo_opts.max_read_size;
+                    var line_writer = std.Io.Writer.fixed(&line_buffer);
+                    const size = try reader.interface.streamDelimiterEnding(&line_writer, '\n');
+                    const line = line_buffer[0..size];
+
+                    // skip delimiter
+                    if (reader.interface.bufferedLen() > 0) {
+                        reader.interface.toss(1);
+                    }
+
                     const trimmed_line = std.mem.trim(u8, line, " ");
                     if (std.mem.startsWith(u8, trimmed_line, "#")) {
                         continue;
@@ -329,6 +341,9 @@ pub fn read(
                         @memcpy(buffer[0..comptime hash.hexLen(repo_opts.hash)], oid_hex);
                         return .{ .oid = buffer[0..comptime hash.hexLen(repo_opts.hash)] };
                     }
+                } else |err| switch (err) {
+                    error.EndOfStream => {},
+                    else => |e| return e,
                 }
             } else |err| switch (err) {
                 error.FileNotFound => {},

@@ -711,11 +711,21 @@ fn writeBlobWithPatches(
             defer obj_rdr.deinit();
             try obj_rdr.seekTo(change_offset);
 
-            if (try obj_rdr.interface.adaptToOldInterface().readUntilDelimiterOrEofAlloc(inner_allocator, '\n', repo_opts.max_line_size)) |line| {
-                return line;
-            } else {
+            if (obj_rdr.interface.peekByte()) |_| {
+                var line_writer = std.Io.Writer.Allocating.init(inner_allocator);
+                errdefer line_writer.deinit();
+                _ = try obj_rdr.interface.streamDelimiterLimit(&line_writer.writer, '\n', @enumFromInt(repo_opts.max_line_size));
+
+                // skip delimiter
+                if (obj_rdr.interface.bufferedLen() > 0) {
+                    obj_rdr.interface.toss(1);
+                }
+
+                return line_writer.toOwnedSlice();
+            } else |err| switch (err) {
                 // empty line at the end of the file
-                return try inner_allocator.dupe(u8, "");
+                error.EndOfStream => return try inner_allocator.dupe(u8, ""),
+                else => |e| return e,
             }
         }
     }.readLine;

@@ -286,18 +286,36 @@ fn sign(
     }
 
     // read the sig
-    const sig_file_name = content_file_name ++ ".sig";
-    const sig_file = try state.core.repo_dir.openFile(sig_file_name, .{ .mode = .read_only });
-    defer {
-        sig_file.close();
-        state.core.repo_dir.deleteFile(sig_file_name) catch {};
+    {
+        const sig_file_name = content_file_name ++ ".sig";
+        const sig_file = try state.core.repo_dir.openFile(sig_file_name, .{ .mode = .read_only });
+        defer {
+            sig_file.close();
+            state.core.repo_dir.deleteFile(sig_file_name) catch {};
+        }
+
+        var reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
+        var sig_file_reader = sig_file.reader(&reader_buffer);
+        var sig_lines = std.ArrayList([]const u8){};
+
+        // for each line...
+        while (sig_file_reader.interface.peekByte()) |_| {
+            var line_writer = std.Io.Writer.Allocating.init(arena.allocator());
+            _ = try sig_file_reader.interface.streamDelimiterLimit(&line_writer.writer, '\n', @enumFromInt(repo_opts.max_read_size));
+
+            // skip delimiter
+            if (sig_file_reader.interface.bufferedLen() > 0) {
+                sig_file_reader.interface.toss(1);
+            }
+
+            try sig_lines.append(arena.allocator(), line_writer.written());
+        } else |err| switch (err) {
+            error.EndOfStream => {},
+            else => |e| return e,
+        }
+
+        return try sig_lines.toOwnedSlice(arena.allocator());
     }
-    const sig_file_reader = sig_file.deprecatedReader();
-    var sig_lines = std.ArrayList([]const u8){};
-    while (try sig_file_reader.readUntilDelimiterOrEofAlloc(arena.allocator(), '\n', repo_opts.max_read_size)) |line| {
-        try sig_lines.append(arena.allocator(), line);
-    }
-    return try sig_lines.toOwnedSlice(arena.allocator());
 }
 
 pub fn CommitMetadata(comptime hash_kind: hash.HashKind) type {
@@ -747,8 +765,6 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             var obj_rdr = try ObjectReader(repo_kind, repo_opts).init(allocator, state, oid);
             errdefer obj_rdr.deinit();
 
-            const reader = obj_rdr.interface.adaptToOldInterface();
-
             const arena = try allocator.create(std.heap.ArenaAllocator);
             arena.* = std.heap.ArenaAllocator.init(allocator);
             errdefer {
@@ -782,16 +798,25 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     .full => {
                         var entries = std.StringArrayHashMap(tr.TreeEntry(repo_opts.hash)).init(arena.allocator());
 
-                        while (true) {
-                            const entry_mode_str = reader.readUntilDelimiterAlloc(arena.allocator(), ' ', repo_opts.max_read_size) catch |err| switch (err) {
-                                error.EndOfStream => break,
-                                else => |e| return e,
-                            };
+                        while (obj_rdr.interface.peekByte()) |_| {
+                            var entry_mode_buffer = [_]u8{0} ** 6;
+                            var entry_mode_writer = std.Io.Writer.fixed(&entry_mode_buffer);
+                            const entry_mode_size = try obj_rdr.interface.streamDelimiter(&entry_mode_writer, ' ');
+                            obj_rdr.interface.toss(1); // skip delimiter
+                            const entry_mode_str = entry_mode_buffer[0..entry_mode_size];
                             const entry_mode: fs.Mode = @bitCast(try std.fmt.parseInt(u32, entry_mode_str, 8));
-                            const entry_name = try reader.readUntilDelimiterAlloc(arena.allocator(), 0, repo_opts.max_read_size);
+
+                            var entry_name_writer = std.Io.Writer.Allocating.init(arena.allocator());
+                            _ = try obj_rdr.interface.streamDelimiterLimit(&entry_name_writer.writer, 0, @enumFromInt(repo_opts.max_read_size));
+                            obj_rdr.interface.toss(1); // skip delimiter
+
+                            const entry_name = entry_name_writer.written();
                             var entry_oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-                            try reader.readNoEof(&entry_oid);
+                            try obj_rdr.interface.readSliceAll(&entry_oid);
                             try entries.put(entry_name, .{ .oid = entry_oid, .mode = entry_mode });
+                        } else |err| switch (err) {
+                            error.EndOfStream => {},
+                            else => |e| return e,
                         }
 
                         return .{
@@ -817,27 +842,36 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                         var position: u64 = 0;
 
                         // read the content kind
-                        const content_kind = try reader.readUntilDelimiterAlloc(allocator, ' ', repo_opts.max_read_size);
-                        defer allocator.free(content_kind);
+                        var content_kind_writer = std.Io.Writer.Allocating.init(allocator);
+                        defer content_kind_writer.deinit();
+                        _ = try obj_rdr.interface.streamDelimiterLimit(&content_kind_writer.writer, ' ', @enumFromInt(repo_opts.max_read_size));
+                        obj_rdr.interface.toss(1); // skip delimiter
+                        const content_kind = content_kind_writer.written();
                         if (!std.mem.eql(u8, "tree", content_kind)) {
                             return error.InvalidObject;
                         }
                         position += content_kind.len + 1;
 
                         // read the tree hash
-                        var tree_hash = [_]u8{0} ** (hash.hexLen(repo_opts.hash) + 1);
-                        const tree_hash_slice = try reader.readUntilDelimiter(&tree_hash, '\n');
-                        if (tree_hash_slice.len != hash.hexLen(repo_opts.hash)) {
+                        var tree_hash = [_]u8{0} ** hash.hexLen(repo_opts.hash);
+                        var tree_hash_writer = std.Io.Writer.fixed(&tree_hash);
+                        const tree_hash_size = try obj_rdr.interface.streamDelimiter(&tree_hash_writer, '\n');
+                        obj_rdr.interface.toss(1); // skip delimiter
+                        if (tree_hash_size != tree_hash.len) {
                             return error.InvalidObject;
                         }
-                        position += tree_hash_slice.len + 1;
+                        position += tree_hash.len + 1;
 
                         var parent_oids = std.ArrayList([hash.hexLen(repo_opts.hash)]u8){};
                         var metadata = CommitMetadata(repo_opts.hash){};
 
                         // read the metadata
                         while (true) {
-                            const line = try reader.readUntilDelimiterAlloc(arena.allocator(), '\n', repo_opts.max_read_size);
+                            var line_writer = std.Io.Writer.Allocating.init(arena.allocator());
+                            _ = try obj_rdr.interface.streamDelimiterLimit(&line_writer.writer, '\n', @enumFromInt(repo_opts.max_read_size));
+                            obj_rdr.interface.toss(1); // skip delimiter
+
+                            const line = line_writer.written();
                             position += line.len + 1;
                             if (line.len == 0) {
                                 break;
@@ -870,21 +904,27 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                         metadata.parent_oids = parent_oids.items;
 
                         // read only the first line
-                        metadata.message = reader.readUntilDelimiterOrEofAlloc(
-                            arena.allocator(),
-                            '\n',
-                            repo_opts.max_read_size,
-                        ) catch |err| switch (err) {
-                            error.StreamTooLong => null,
-                            else => |e| return e,
-                        };
+                        {
+                            var line_writer = std.Io.Writer.Allocating.init(arena.allocator());
+                            const line_size_maybe = obj_rdr.interface.streamDelimiterLimit(&line_writer.writer, '\n', @enumFromInt(repo_opts.max_line_size)) catch |err| switch (err) {
+                                error.StreamTooLong => null,
+                                else => |e| return e,
+                            };
+
+                            // skip delimiter
+                            if (obj_rdr.interface.bufferedLen() > 0) {
+                                obj_rdr.interface.toss(1);
+                            }
+
+                            metadata.message = if (line_size_maybe != null) line_writer.written() else null;
+                        }
 
                         return .{
                             .allocator = allocator,
                             .arena = arena,
                             .content = .{
                                 .commit = .{
-                                    .tree = tree_hash_slice[0..comptime hash.hexLen(repo_opts.hash)].*,
+                                    .tree = tree_hash,
                                     .metadata = metadata,
                                     .message_position = position,
                                 },
@@ -911,7 +951,11 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                         var fields = std.StringArrayHashMap([]const u8).init(allocator);
                         defer fields.deinit();
                         while (true) {
-                            const line = try reader.readUntilDelimiterAlloc(arena.allocator(), '\n', repo_opts.max_read_size);
+                            var line_writer = std.Io.Writer.Allocating.init(arena.allocator());
+                            _ = try obj_rdr.interface.streamDelimiterLimit(&line_writer.writer, '\n', @enumFromInt(repo_opts.max_read_size));
+                            obj_rdr.interface.toss(1); // skip delimiter
+
+                            const line = line_writer.written();
                             position += line.len + 1;
                             if (line.len == 0) {
                                 break;
@@ -943,14 +987,20 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                         };
 
                         // read only the first line
-                        content.tag.message = reader.readUntilDelimiterOrEofAlloc(
-                            arena.allocator(),
-                            '\n',
-                            repo_opts.max_read_size,
-                        ) catch |err| switch (err) {
-                            error.StreamTooLong => null,
-                            else => |e| return e,
-                        };
+                        {
+                            var line_writer = std.Io.Writer.Allocating.init(arena.allocator());
+                            const line_size_maybe = obj_rdr.interface.streamDelimiterLimit(&line_writer.writer, '\n', @enumFromInt(repo_opts.max_line_size)) catch |err| switch (err) {
+                                error.StreamTooLong => null,
+                                else => |e| return e,
+                            };
+
+                            // skip delimiter
+                            if (obj_rdr.interface.bufferedLen() > 0) {
+                                obj_rdr.interface.toss(1);
+                            }
+
+                            content.tag.message = if (line_size_maybe != null) line_writer.written() else null;
+                        }
 
                         return .{
                             .allocator = allocator,

@@ -129,8 +129,17 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     var reader = config_file.reader(&reader_buffer);
 
                     // for each line...
-                    var line_buffer = [_]u8{0} ** repo_opts.max_read_size;
-                    while (try reader.interface.adaptToOldInterface().readUntilDelimiterOrEof(&line_buffer, '\n')) |line| {
+                    while (reader.interface.peekByte()) |_| {
+                        var line_buffer = [_]u8{0} ** repo_opts.max_read_size;
+                        var line_writer = std.Io.Writer.fixed(&line_buffer);
+                        const size = try reader.interface.streamDelimiterEnding(&line_writer, '\n');
+                        const line = line_buffer[0..size];
+
+                        // skip delimiter
+                        if (reader.interface.bufferedLen() > 0) {
+                            reader.interface.toss(1);
+                        }
+
                         const text = try std.unicode.Utf8View.init(line);
                         var iter = text.iterator();
                         var next_cursor: usize = 0;
@@ -220,6 +229,9 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                             },
                             .invalid => return error.InvalidLine,
                         }
+                    } else |err| switch (err) {
+                        error.EndOfStream => {},
+                        else => |e| return e,
                     }
 
                     // add the last section if necessary

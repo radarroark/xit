@@ -247,4 +247,25 @@ test "pack" {
             try std.testing.expectEqual(0, pack_reader.relative_position);
         }
     }
+
+    // read packed refs
+    {
+        var r = try rp.Repo(.git, repo_opts).open(allocator, .{ .cwd = work_dir });
+        defer r.deinit();
+
+        var packed_refs = try repo_dir.createFile("packed-refs", .{});
+        defer packed_refs.close();
+        try packed_refs.writeAll(
+            \\# pack-refs with: peeled fully-peeled sorted
+            \\5246e54744f4e1824ca280e6a2630a87959d7cf4 refs/remotes/origin/master
+            \\1ea47a890400815b24a0073f110a41530322a44f refs/remotes/sync/chunk
+            \\5246e54744f4e1824ca280e6a2630a87959d7cf4 refs/remotes/sync/master
+            \\1f6190c71bd33b37cfd885491889a0410f849f5b refs/remotes/sync/zig-0.14.0
+        );
+
+        const oid_maybe = try r.readRef(.{ .kind = .{ .remote = "sync" }, .name = "master" });
+        try std.testing.expectEqualStrings("5246e54744f4e1824ca280e6a2630a87959d7cf4", &oid_maybe.?);
+
+        try std.testing.expect(null == try r.readRef(.{ .kind = .{ .remote = "sync" }, .name = "foo" }));
+    }
 }

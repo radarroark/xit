@@ -263,8 +263,20 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
             var lines = std.ArrayList([]const u8){};
             errdefer lines.deinit(arena.allocator());
 
-            while (try reader.adaptToOldInterface().readUntilDelimiterOrEofAlloc(arena.allocator(), '\n', repo_opts.max_line_size)) |line| {
-                try lines.append(arena.allocator(), line);
+            // for each line...
+            while (reader.peekByte()) |_| {
+                var line_writer = std.Io.Writer.Allocating.init(arena.allocator());
+                _ = try reader.streamDelimiterLimit(&line_writer.writer, '\n', @enumFromInt(repo_opts.max_line_size));
+
+                // skip delimiter
+                if (reader.bufferedLen() > 0) {
+                    reader.toss(1);
+                }
+
+                try lines.append(arena.allocator(), line_writer.written());
+            } else |err| switch (err) {
+                error.EndOfStream => {},
+                else => |e| return e,
             }
 
             var iter = LineIterator(repo_kind, repo_opts){
