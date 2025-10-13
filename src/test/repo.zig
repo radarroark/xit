@@ -121,11 +121,12 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
     }
 
     {
-        const readme = try repo.core.work_dir.openFile("README.md", .{ .mode = .read_only });
-        defer readme.close();
-        const readme_content = try readme.readToEndAlloc(allocator, 1024);
-        defer allocator.free(readme_content);
-        try std.testing.expectEqualStrings("Goodbye, world!", readme_content);
+        const readme_md = try repo.core.work_dir.openFile("README.md", .{ .mode = .read_only });
+        defer readme_md.close();
+        var reader = readme_md.reader(&.{});
+        const readme_md_content = try reader.interface.allocRemaining(allocator, @enumFromInt(1024));
+        defer allocator.free(readme_md_content);
+        try std.testing.expectEqualStrings("Goodbye, world!", readme_md_content);
     }
 
     {
@@ -134,11 +135,12 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
     }
 
     {
-        const readme = try repo.core.work_dir.openFile("README.md", .{ .mode = .read_only });
-        defer readme.close();
-        const readme_content = try readme.readToEndAlloc(allocator, 1024);
-        defer allocator.free(readme_content);
-        try std.testing.expectEqualStrings("Hello, world!", readme_content);
+        const readme_md = try repo.core.work_dir.openFile("README.md", .{ .mode = .read_only });
+        defer readme_md.close();
+        var reader = readme_md.reader(&.{});
+        const readme_md_content = try reader.interface.allocRemaining(allocator, @enumFromInt(1024));
+        defer allocator.free(readme_md_content);
+        try std.testing.expectEqualStrings("Hello, world!", readme_md_content);
     }
 
     {
@@ -146,8 +148,8 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
         defer result.deinit();
     }
 
-    if (repo.core.work_dir.openFile("README.md", .{ .mode = .read_only })) |readme| {
-        readme.close();
+    if (repo.core.work_dir.openFile("README.md", .{ .mode = .read_only })) |readme_md| {
+        readme_md.close();
         return error.FileNotExpected;
     } else |err| switch (err) {
         error.FileNotFound => {},
@@ -292,7 +294,8 @@ fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
         // make sure file from commit k exists
         var master_md = try repo.core.work_dir.openFile("master.md", .{});
         defer master_md.close();
-        const master_md_content = try master_md.readToEndAlloc(allocator, 1024);
+        var reader = master_md.reader(&.{});
+        const master_md_content = try reader.interface.allocRemaining(allocator, @enumFromInt(1024));
         defer allocator.free(master_md_content);
         try std.testing.expectEqualStrings("k", master_md_content);
     }
@@ -562,7 +565,8 @@ fn testMergeConflictSameFile(comptime repo_kind: rp.RepoKind, comptime repo_opts
         // verify f.txt has conflict markers
         const f_txt = try repo.core.work_dir.openFile("f.txt", .{ .mode = .read_only });
         defer f_txt.close();
-        const f_txt_content = try f_txt.readToEndAlloc(allocator, 1024);
+        var reader = f_txt.reader(&.{});
+        const f_txt_content = try reader.interface.allocRemaining(allocator, @enumFromInt(1024));
         defer allocator.free(f_txt_content);
         const expected_f_txt_content = try std.fmt.allocPrint(allocator,
             \\a
@@ -831,7 +835,8 @@ fn testMergeConflictSameFileEmptyBase(comptime repo_kind: rp.RepoKind, comptime 
         // verify f.txt has conflict markers
         const f_txt = try repo.core.work_dir.openFile("f.txt", .{ .mode = .read_only });
         defer f_txt.close();
-        const f_txt_content = try f_txt.readToEndAlloc(allocator, 1024);
+        var reader = f_txt.reader(&.{});
+        const f_txt_content = try reader.interface.allocRemaining(allocator, @enumFromInt(1024));
         defer allocator.free(f_txt_content);
         const expected_f_txt_content = try std.fmt.allocPrint(allocator,
             \\<<<<<<< target (master)
@@ -1108,7 +1113,8 @@ fn testMergeConflictSameFileAutoresolved(comptime repo_kind: rp.RepoKind, compti
         // verify f.txt has been autoresolved
         const f_txt = try repo.core.work_dir.openFile("f.txt", .{ .mode = .read_only });
         defer f_txt.close();
-        const f_txt_content = try f_txt.readToEndAlloc(allocator, 1024);
+        var reader = f_txt.reader(&.{});
+        const f_txt_content = try reader.interface.allocRemaining(allocator, @enumFromInt(1024));
         defer allocator.free(f_txt_content);
         try std.testing.expectEqualStrings(
             \\x
@@ -1905,7 +1911,8 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind, comptime repo_op
     {
         const bin_file = try repo.core.work_dir.openFile("bin", .{ .mode = .read_only });
         defer bin_file.close();
-        const bin_file_content = try bin_file.readToEndAlloc(allocator, 1024);
+        var reader = bin_file.reader(&.{});
+        const bin_file_content = try reader.interface.allocRemaining(allocator, @enumFromInt(1024));
         defer allocator.free(bin_file_content);
         var iter = std.mem.splitScalar(u8, bin_file_content, '\n');
         while (iter.next()) |line| {
@@ -2037,7 +2044,8 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
             // verify f.txt has been autoresolved
             const f_txt = try repo.core.work_dir.openFile("f.txt", .{ .mode = .read_only });
             defer f_txt.close();
-            const f_txt_content = try f_txt.readToEndAlloc(allocator, 1024);
+            var reader = f_txt.reader(&.{});
+            const f_txt_content = try reader.interface.allocRemaining(allocator, @enumFromInt(1024));
             defer allocator.free(f_txt_content);
             switch (repo_kind) {
                 // git shuffles lines
@@ -2188,7 +2196,8 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
 
             const f_txt = try repo.core.work_dir.openFile("f.txt", .{ .mode = .read_only });
             defer f_txt.close();
-            const f_txt_content = try f_txt.readToEndAlloc(allocator, 1024);
+            var reader = f_txt.reader(&.{});
+            const f_txt_content = try reader.interface.allocRemaining(allocator, @enumFromInt(1024));
             defer allocator.free(f_txt_content);
             switch (repo_kind) {
                 .git => {
@@ -2401,7 +2410,8 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
         // verify readme.md has conflict markers
         const readme_md = try repo.core.work_dir.openFile("readme.md", .{ .mode = .read_only });
         defer readme_md.close();
-        const readme_md_content = try readme_md.readToEndAlloc(allocator, 1024);
+        var reader = readme_md.reader(&.{});
+        const readme_md_content = try reader.interface.allocRemaining(allocator, @enumFromInt(1024));
         defer allocator.free(readme_md_content);
         const expected_readme_md_content = try std.fmt.allocPrint(allocator,
             \\<<<<<<< target (master)

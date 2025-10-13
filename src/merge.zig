@@ -1813,7 +1813,11 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     };
                     defer merge_msg.close();
                     var commit_metadata: obj.CommitMetadata(repo_opts.hash) = merge_input.commit_metadata orelse .{};
-                    commit_metadata.message = try merge_msg.readToEndAlloc(arena.allocator(), repo_opts.max_read_size);
+                    {
+                        var reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
+                        var reader = merge_msg.reader(&reader_buffer);
+                        commit_metadata.message = try reader.interface.allocRemaining(arena.allocator(), @enumFromInt(repo_opts.max_read_size));
+                    }
 
                     // we need to return the source name but we don't have it,
                     // so just copy the source oid into a buffer and return that instead
