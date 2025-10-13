@@ -690,17 +690,22 @@ pub const ObjectHeader = struct {
     kind: ObjectKind,
     size: u64,
 
-    pub fn read(reader: anytype) !ObjectHeader {
+    pub fn read(reader: *std.Io.Reader) !ObjectHeader {
         const MAX_SIZE: usize = 16;
 
         // read the object kind
         var object_kind_buf = [_]u8{0} ** MAX_SIZE;
-        const object_kind = try reader.readUntilDelimiter(&object_kind_buf, ' ');
+        var object_kind_writer = std.Io.Writer.fixed(&object_kind_buf);
+        const object_kind_size = try reader.streamDelimiter(&object_kind_writer, ' ');
+        const object_kind = object_kind_buf[0..object_kind_size];
+        reader.toss(1); // skip delimiter
 
         // read the length
         var object_len_buf = [_]u8{0} ** MAX_SIZE;
-        const object_len_str = try reader.readUntilDelimiter(&object_len_buf, 0);
-        const object_len = try std.fmt.parseInt(u64, object_len_str, 10);
+        var object_len_writer = std.Io.Writer.fixed(&object_len_buf);
+        const object_len_size = try reader.streamDelimiter(&object_len_writer, 0);
+        const object_len = try std.fmt.parseInt(u64, object_len_buf[0..object_len_size], 10);
+        reader.toss(1); // skip delimiter
 
         return .{
             .kind = try ObjectKind.init(object_kind),

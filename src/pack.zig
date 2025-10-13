@@ -966,7 +966,13 @@ pub fn LooseOrPackObjectReader(comptime repo_opts: rp.RepoOpts(.git)) type {
             errdefer object_file.close();
 
             var stream = zlib.decompressor(object_file.deprecatedReader());
-            const obj_header = try obj.ObjectHeader.read(stream.reader());
+            var reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
+            var reader = stream.reader().adaptToNewApi(&reader_buffer);
+            const obj_header = try obj.ObjectHeader.read(&reader.new_interface);
+
+            try object_file.seekTo(0);
+            stream = zlib.decompressor(object_file.deprecatedReader());
+            try stream.reader().skipBytes(reader.new_interface.seek, .{});
 
             return .{
                 .loose = .{
