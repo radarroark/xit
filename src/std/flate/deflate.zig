@@ -1,5 +1,5 @@
 const std = @import("std");
-const io = std.io;
+const Io = @import("../Io.zig");
 const assert = std.debug.assert;
 const testing = std.testing;
 const expect = testing.expect;
@@ -355,14 +355,14 @@ fn Deflate(comptime container: Container, comptime WriterType: type, comptime Bl
 
         // Writer interface
 
-        pub const Writer = io.GenericWriter(*Self, Error, write);
+        pub const Writer = Io.GenericWriter(*Self, Error, write);
         pub const Error = BlockWriterType.Error;
 
         /// Write `input` of uncompressed data.
         /// See compress.
         pub fn write(self: *Self, input: []const u8) !usize {
-            var fbs = io.fixedBufferStream(input);
-            try self.compress(fbs.reader());
+            var reader = std.Io.Reader.fixed(input);
+            self.compress(Io.adaptToOldInterface(&reader)) catch unreachable;
             return input.len;
         }
 
@@ -512,13 +512,13 @@ fn SimpleCompressor(
 
         // Writer interface
 
-        pub const Writer = io.Writer(*Self, Error, write);
+        pub const Writer = Io.Writer(*Self, Error, write);
         pub const Error = BlockWriterType.Error;
 
         // Write `input` of uncompressed data.
         pub fn write(self: *Self, input: []const u8) !usize {
-            var fbs = io.fixedBufferStream(input);
-            try self.compress(fbs.reader());
+            var reader = std.Io.Reader.fixed(input);
+            self.compress(Io.adaptToOldInterface(&reader)) catch unreachable;
             return input.len;
         }
 
