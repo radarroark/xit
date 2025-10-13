@@ -368,13 +368,26 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                     if (work_dir.eof) {
                         return null;
                     }
-                    var line_arr = std.ArrayList(u8){};
-                    errdefer line_arr.deinit(self.allocator);
-                    work_dir.file.deprecatedReader().streamUntilDelimiter(line_arr.writer(self.allocator), '\n', repo_opts.max_line_size) catch |err| switch (err) {
-                        error.EndOfStream => work_dir.eof = true,
-                        else => |e| return e,
-                    };
-                    const line = try line_arr.toOwnedSlice(self.allocator);
+
+                    var line_writer = std.Io.Writer.Allocating.init(self.allocator);
+                    errdefer line_writer.deinit();
+
+                    var reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
+                    var reader = work_dir.file.reader(&reader_buffer);
+                    try reader.seekTo(try work_dir.file.getPos());
+                    _ = try reader.interface.streamDelimiterLimit(&line_writer.writer, '\n', @enumFromInt(repo_opts.max_line_size));
+
+                    // skip delimiter
+                    if (reader.interface.bufferedLen() > 0) {
+                        reader.interface.toss(1);
+                    } else {
+                        work_dir.eof = true;
+                    }
+
+                    // update file seek position
+                    try work_dir.file.seekTo(reader.logicalPos());
+
+                    const line = try line_writer.toOwnedSlice();
                     self.current_line += 1;
                     return line;
                 },
