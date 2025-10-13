@@ -630,30 +630,29 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     for (self.entries.values()) |*entries_for_path| {
                         for (entries_for_path) |entry_maybe| {
                             if (entry_maybe) |entry| {
-                                var entry_buffer = std.ArrayList(u8){};
-                                defer entry_buffer.deinit(allocator);
-                                const writer = entry_buffer.writer(allocator);
-                                try writer.writeInt(u32, entry.ctime_secs, .big);
-                                try writer.writeInt(u32, entry.ctime_nsecs, .big);
-                                try writer.writeInt(u32, entry.mtime_secs, .big);
-                                try writer.writeInt(u32, entry.mtime_nsecs, .big);
-                                try writer.writeInt(u32, entry.dev, .big);
-                                try writer.writeInt(u32, entry.ino, .big);
-                                try writer.writeInt(u32, @as(u32, @bitCast(entry.mode)), .big);
-                                try writer.writeInt(u32, entry.uid, .big);
-                                try writer.writeInt(u32, entry.gid, .big);
-                                try writer.writeInt(u32, entry.file_size, .big);
-                                try writer.writeAll(&entry.oid);
-                                try writer.writeInt(u16, @as(u16, @bitCast(entry.flags)), .big);
-                                try writer.writeAll(entry.path);
-                                try writer.writeByte(0);
-                                const entry_size = entry_buffer.items.len;
+                                var entry_buffer_writer = std.Io.Writer.Allocating.init(allocator);
+                                defer entry_buffer_writer.deinit();
+                                try entry_buffer_writer.writer.writeInt(u32, entry.ctime_secs, .big);
+                                try entry_buffer_writer.writer.writeInt(u32, entry.ctime_nsecs, .big);
+                                try entry_buffer_writer.writer.writeInt(u32, entry.mtime_secs, .big);
+                                try entry_buffer_writer.writer.writeInt(u32, entry.mtime_nsecs, .big);
+                                try entry_buffer_writer.writer.writeInt(u32, entry.dev, .big);
+                                try entry_buffer_writer.writer.writeInt(u32, entry.ino, .big);
+                                try entry_buffer_writer.writer.writeInt(u32, @as(u32, @bitCast(entry.mode)), .big);
+                                try entry_buffer_writer.writer.writeInt(u32, entry.uid, .big);
+                                try entry_buffer_writer.writer.writeInt(u32, entry.gid, .big);
+                                try entry_buffer_writer.writer.writeInt(u32, entry.file_size, .big);
+                                try entry_buffer_writer.writer.writeAll(&entry.oid);
+                                try entry_buffer_writer.writer.writeInt(u16, @as(u16, @bitCast(entry.flags)), .big);
+                                try entry_buffer_writer.writer.writeAll(entry.path);
+                                try entry_buffer_writer.writer.writeByte(0);
+                                const entry_size = entry_buffer_writer.written().len;
                                 const entry_zeroes = (8 - (entry_size % 8)) % 8;
                                 for (0..entry_zeroes) |_| {
-                                    try writer.writeByte(0);
+                                    try entry_buffer_writer.writer.writeByte(0);
                                 }
-                                try lock_file.writeAll(entry_buffer.items);
-                                hasher.update(entry_buffer.items);
+                                try lock_file.writeAll(entry_buffer_writer.written());
+                                hasher.update(entry_buffer_writer.written());
                             }
                         }
                     }
@@ -680,24 +679,23 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     }
 
                     for (self.entries.keys(), self.entries.values()) |path, *entries_for_path| {
-                        var entry_buffer = std.ArrayList(u8){};
-                        defer entry_buffer.deinit(allocator);
-                        const writer = entry_buffer.writer(allocator);
+                        var entry_buffer_writer = std.Io.Writer.Allocating.init(allocator);
+                        defer entry_buffer_writer.deinit();
 
                         for (entries_for_path) |entry_maybe| {
                             if (entry_maybe) |entry| {
-                                try writer.writeInt(u32, entry.ctime_secs, .big);
-                                try writer.writeInt(u32, entry.ctime_nsecs, .big);
-                                try writer.writeInt(u32, entry.mtime_secs, .big);
-                                try writer.writeInt(u32, entry.mtime_nsecs, .big);
-                                try writer.writeInt(u32, entry.dev, .big);
-                                try writer.writeInt(u32, entry.ino, .big);
-                                try writer.writeInt(u32, @as(u32, @bitCast(entry.mode)), .big);
-                                try writer.writeInt(u32, entry.uid, .big);
-                                try writer.writeInt(u32, entry.gid, .big);
-                                try writer.writeInt(u64, entry.file_size, .big);
-                                try writer.writeAll(&entry.oid);
-                                try writer.writeInt(u16, @as(u16, @bitCast(entry.flags)), .big);
+                                try entry_buffer_writer.writer.writeInt(u32, entry.ctime_secs, .big);
+                                try entry_buffer_writer.writer.writeInt(u32, entry.ctime_nsecs, .big);
+                                try entry_buffer_writer.writer.writeInt(u32, entry.mtime_secs, .big);
+                                try entry_buffer_writer.writer.writeInt(u32, entry.mtime_nsecs, .big);
+                                try entry_buffer_writer.writer.writeInt(u32, entry.dev, .big);
+                                try entry_buffer_writer.writer.writeInt(u32, entry.ino, .big);
+                                try entry_buffer_writer.writer.writeInt(u32, @as(u32, @bitCast(entry.mode)), .big);
+                                try entry_buffer_writer.writer.writeInt(u32, entry.uid, .big);
+                                try entry_buffer_writer.writer.writeInt(u32, entry.gid, .big);
+                                try entry_buffer_writer.writer.writeInt(u64, entry.file_size, .big);
+                                try entry_buffer_writer.writer.writeAll(&entry.oid);
+                                try entry_buffer_writer.writer.writeInt(u16, @as(u16, @bitCast(entry.flags)), .big);
                             }
                         }
 
@@ -705,7 +703,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                         if (try index.getKeyCursor(path_hash)) |existing_entry_cursor| {
                             const existing_entry = try existing_entry_cursor.readBytesAlloc(allocator, repo_opts.max_read_size);
                             defer allocator.free(existing_entry);
-                            if (std.mem.eql(u8, entry_buffer.items, existing_entry)) {
+                            if (std.mem.eql(u8, entry_buffer_writer.written(), existing_entry)) {
                                 continue;
                             }
                         }
@@ -718,8 +716,8 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 
                         const entry_buffer_set_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "entry-buffer-set"));
                         const entry_buffer_set = try rp.Repo(repo_kind, repo_opts).DB.HashSet(.read_write).init(entry_buffer_set_cursor);
-                        var entry_buffer_cursor = try entry_buffer_set.putCursor(hash.hashInt(repo_opts.hash, entry_buffer.items));
-                        try entry_buffer_cursor.writeIfEmpty(.{ .bytes = entry_buffer.items });
+                        var entry_buffer_cursor = try entry_buffer_set.putCursor(hash.hashInt(repo_opts.hash, entry_buffer_writer.written()));
+                        try entry_buffer_cursor.writeIfEmpty(.{ .bytes = entry_buffer_writer.written() });
                         try index.put(path_hash, .{ .slot = entry_buffer_cursor.slot() });
                     }
                 },

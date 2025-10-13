@@ -96,8 +96,8 @@ pub const RawStream = struct {
 };
 
 fn sendCommand(stream: *RawStream) !void {
-    var buffer = std.ArrayList(u8){};
-    defer buffer.deinit(stream.allocator);
+    var buffer = std.Io.Writer.Allocating.init(stream.allocator);
+    defer buffer.deinit();
 
     const uri = try std.Uri.parse(stream.url);
     const path = switch (uri.path) {
@@ -112,12 +112,14 @@ fn sendCommand(stream: *RawStream) !void {
 
     var command_size_buf = [_]u8{'0'} ** 4;
 
-    try buffer.writer(stream.allocator).print("{s}{s} {s}\x00host={s}\x00", .{ &command_size_buf, stream.cmd, path, host_str });
+    try buffer.writer.print("{s}{s} {s}\x00host={s}\x00", .{ &command_size_buf, stream.cmd, path, host_str });
 
-    try net_pkt.commandSize(&command_size_buf, buffer.items.len);
-    @memcpy(buffer.items[0..4], &command_size_buf);
+    var written = buffer.written();
 
-    try stream.io.writeAll(buffer.items.ptr, buffer.items.len);
+    try net_pkt.commandSize(&command_size_buf, written.len);
+    @memcpy(written[0..4], &command_size_buf);
+
+    try stream.io.writeAll(written.ptr, written.len);
 
     stream.sent_command = true;
 }

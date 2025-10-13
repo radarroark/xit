@@ -213,16 +213,15 @@ pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime rep
 
         pub fn addLines(self: *Diff(Widget, repo_kind, repo_opts), lines: []const []const u8) !void {
             const buf = blk: {
-                var arr = std.ArrayList(u8){};
-                errdefer arr.deinit(self.allocator);
-                const writer = arr.writer(self.allocator);
+                var writer = std.Io.Writer.Allocating.init(self.allocator);
+                errdefer writer.deinit();
 
                 // add header
                 for (lines) |line| {
-                    try writer.print("{s}\n", .{line});
+                    try writer.writer.print("{s}\n", .{line});
                 }
 
-                break :blk try arr.toOwnedSlice(self.allocator);
+                break :blk try writer.toOwnedSlice();
             };
 
             // add buffer
@@ -243,13 +242,12 @@ pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime rep
             hunk: *const df.Hunk(repo_kind, repo_opts),
         ) !void {
             const buf = blk: {
-                var arr = std.ArrayList(u8){};
-                errdefer arr.deinit(self.allocator);
-                const writer = arr.writer(self.allocator);
+                var writer = std.Io.Writer.Allocating.init(self.allocator);
+                errdefer writer.deinit();
 
                 // create buffer from hunk
                 const offsets = hunk.offsets();
-                try writer.print("@@ -{},{} +{},{} @@\n", .{
+                try writer.writer.print("@@ -{},{} +{},{} @@\n", .{
                     offsets.del_start,
                     offsets.del_count,
                     offsets.ins_start,
@@ -266,7 +264,7 @@ pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime rep
                         .ins => hunk_iter.line_iter_b.free(line),
                         .del => hunk_iter.line_iter_a.free(line),
                     };
-                    try writer.print("{s} {s}\n", .{
+                    try writer.writer.print("{s} {s}\n", .{
                         switch (edit) {
                             .eql => " ",
                             .ins => "+",
@@ -276,7 +274,7 @@ pub fn Diff(comptime Widget: type, comptime repo_kind: rp.RepoKind, comptime rep
                     });
                 }
 
-                break :blk try arr.toOwnedSlice(self.allocator);
+                break :blk try writer.toOwnedSlice();
             };
 
             // add buffer

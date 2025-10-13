@@ -619,11 +619,11 @@ fn createPatchEntries(
                 const line_id_bytes = try line_id_reader.interface.takeArray(LineId(repo_opts.hash).byte_size);
 
                 if (last_line.origin == .new) {
-                    var buffer = std.ArrayList(u8){};
-                    try buffer.writer(arena.allocator()).writeInt(u8, @intFromEnum(ChangeKind.new_edge), .big);
-                    try buffer.writer(arena.allocator()).writeAll(line_id_bytes);
-                    try buffer.writer(arena.allocator()).writeInt(LineId(repo_opts.hash).Int, @bitCast(last_line.id), .big);
-                    try patch_entries.append(allocator, buffer.items);
+                    var buffer = std.Io.Writer.Allocating.init(arena.allocator());
+                    try buffer.writer.writeInt(u8, @intFromEnum(ChangeKind.new_edge), .big);
+                    try buffer.writer.writeAll(line_id_bytes);
+                    try buffer.writer.writeInt(LineId(repo_opts.hash).Int, @bitCast(last_line.id), .big);
+                    try patch_entries.append(allocator, buffer.written());
                 }
 
                 var reader = std.Io.Reader.fixed(line_id_bytes);
@@ -637,11 +637,11 @@ fn createPatchEntries(
                     .patch_id = patch_hash,
                 };
 
-                var buffer = std.ArrayList(u8){};
-                try buffer.writer(arena.allocator()).writeInt(u8, @intFromEnum(ChangeKind.new_edge), .big);
-                try buffer.writer(arena.allocator()).writeInt(LineId(repo_opts.hash).Int, @bitCast(line_id), .big);
-                try buffer.writer(arena.allocator()).writeInt(LineId(repo_opts.hash).Int, @bitCast(last_line.id), .big);
-                try patch_entries.append(allocator, buffer.items);
+                var buffer = std.Io.Writer.Allocating.init(arena.allocator());
+                try buffer.writer.writeInt(u8, @intFromEnum(ChangeKind.new_edge), .big);
+                try buffer.writer.writeInt(LineId(repo_opts.hash).Int, @bitCast(line_id), .big);
+                try buffer.writer.writeInt(LineId(repo_opts.hash).Int, @bitCast(last_line.id), .big);
+                try patch_entries.append(allocator, buffer.written());
 
                 try patch_offsets.append(allocator, ins.new_line.offset);
 
@@ -650,8 +650,8 @@ fn createPatchEntries(
                 last_line = .{ .id = line_id, .origin = .new };
             },
             .del => |del| {
-                var buffer = std.ArrayList(u8){};
-                try buffer.writer(arena.allocator()).writeInt(u8, @intFromEnum(ChangeKind.delete_line), .big);
+                var buffer = std.Io.Writer.Allocating.init(arena.allocator());
+                try buffer.writer.writeInt(u8, @intFromEnum(ChangeKind.delete_line), .big);
 
                 var line_id_list_cursor = line_id_list_cursor_maybe orelse return error.LineListNotFound;
                 var line_id_list_reader = try line_id_list_cursor.reader();
@@ -669,9 +669,9 @@ fn createPatchEntries(
                 var line_id_reader = try line_id_cursor.reader();
                 const line_id_bytes = try line_id_reader.interface.takeArray(LineId(repo_opts.hash).byte_size);
 
-                try buffer.writer(arena.allocator()).writeAll(line_id_bytes);
+                try buffer.writer.writeAll(line_id_bytes);
 
-                try patch_entries.append(allocator, buffer.items);
+                try patch_entries.append(allocator, buffer.written());
 
                 last_line = .{ .id = last_line.id, .origin = .new };
             },

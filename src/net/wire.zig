@@ -481,23 +481,25 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
 
         fn pktline(allocator: std.mem.Allocator, buffer: *std.ArrayList(u8), specs: []net_push.PushSpec(repo_kind, repo_opts)) !void {
             for (specs, 0..) |*spec, i| {
-                var line = std.ArrayList(u8){};
-                defer line.deinit(allocator);
+                var line = std.Io.Writer.Allocating.init(allocator);
+                defer line.deinit();
 
                 var command_size_buf = [_]u8{'0'} ** 4;
 
-                try line.writer(allocator).print("{s}{s} {s} {s}", .{ &command_size_buf, &spec.roid, &spec.loid, spec.refspec.dst });
+                try line.writer.print("{s}{s} {s} {s}", .{ &command_size_buf, &spec.roid, &spec.loid, spec.refspec.dst });
 
                 if (i == 0) {
-                    try line.writer(allocator).print("\x00 report-status side-band-64k", .{});
+                    try line.writer.print("\x00 report-status side-band-64k", .{});
                 }
 
-                try line.append(allocator, '\n');
+                try line.writer.writeByte('\n');
 
-                try net_pkt.commandSize(&command_size_buf, line.items.len);
-                @memcpy(line.items[0..4], &command_size_buf);
+                var written = line.written();
 
-                try buffer.appendSlice(allocator, line.items);
+                try net_pkt.commandSize(&command_size_buf, written.len);
+                @memcpy(written[0..4], &command_size_buf);
+
+                try buffer.appendSlice(allocator, written);
             }
 
             try buffer.appendSlice(allocator, "0000");

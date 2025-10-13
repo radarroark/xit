@@ -166,53 +166,55 @@ fn bufferWantWithCaps(
     caps: *const net_wire.Capabilities,
     buf: *std.ArrayList(u8),
 ) !void {
-    var line = std.ArrayList(u8){};
-    defer line.deinit(allocator);
+    var line = std.Io.Writer.Allocating.init(allocator);
+    defer line.deinit();
 
     var command_size_buf = [_]u8{'0'} ** 4;
 
-    try line.writer(allocator).print("{s}{s}{s} ", .{ &command_size_buf, PKT_WANT_PREFIX, &head.oid });
+    try line.writer.print("{s}{s}{s} ", .{ &command_size_buf, PKT_WANT_PREFIX, &head.oid });
 
     if (caps.multi_ack_detailed) {
-        try line.appendSlice(allocator, "multi_ack_detailed ");
+        try line.writer.writeAll("multi_ack_detailed ");
     } else if (caps.multi_ack) {
-        try line.appendSlice(allocator, "multi_ack ");
+        try line.writer.writeAll("multi_ack ");
     }
 
     if (caps.side_band_64k) {
-        try line.appendSlice(allocator, "side-band-64k ");
+        try line.writer.writeAll("side-band-64k ");
     } else if (caps.side_band) {
-        try line.appendSlice(allocator, "side-band ");
+        try line.writer.writeAll("side-band ");
     }
 
     if (caps.include_tag) {
-        try line.appendSlice(allocator, "include-tag ");
+        try line.writer.writeAll("include-tag ");
     }
 
     if (caps.thin_pack) {
-        try line.appendSlice(allocator, "thin-pack ");
+        try line.writer.writeAll("thin-pack ");
     }
 
     if (caps.ofs_delta) {
-        try line.appendSlice(allocator, "ofs-delta ");
+        try line.writer.writeAll("ofs-delta ");
     }
 
     if (caps.shallow) {
-        try line.appendSlice(allocator, "shallow ");
+        try line.writer.writeAll("shallow ");
     }
 
-    try line.append(allocator, '\n');
+    try line.writer.writeByte('\n');
 
     const PKT_MAX_WANTLEN = (PKT_LEN_SIZE + PKT_WANT_PREFIX.len + hash.hexLen(repo_opts.hash) + 1);
 
-    if (line.items.len > (PKT_MAX_SIZE - (PKT_MAX_WANTLEN + 1))) {
+    var written = line.written();
+
+    if (written.len > (PKT_MAX_SIZE - (PKT_MAX_WANTLEN + 1))) {
         return error.InvalidPacket;
     }
 
-    try commandSize(&command_size_buf, line.items.len);
-    @memcpy(line.items[0..4], &command_size_buf);
+    try commandSize(&command_size_buf, written.len);
+    @memcpy(written[0..4], &command_size_buf);
 
-    try buf.appendSlice(allocator, line.items);
+    try buf.appendSlice(allocator, written);
 }
 
 pub fn bufferWants(
