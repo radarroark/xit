@@ -12,14 +12,15 @@ const tg = @import("./tag.zig");
 const tr = @import("./tree.zig");
 const mrg = @import("./merge.zig");
 const zlib = @import("./std/zlib.zig");
+const Io = @import("./std/Io.zig");
 
 fn compressZlib(comptime read_size: usize, in: std.fs.File, out: std.fs.File) !void {
     // init stream from input file
-    var zlib_stream = try zlib.compressor(out.deprecatedWriter(), .{ .level = .default });
+    var zlib_stream = try zlib.compressor(Io.deprecatedFileWriter(out), .{ .level = .default });
 
     // write the compressed data to the output file
     try in.seekTo(0);
-    const reader = in.deprecatedReader();
+    const reader = Io.deprecatedFileReader(in);
     var buf = [_]u8{0} ** read_size;
     while (true) {
         // read from file

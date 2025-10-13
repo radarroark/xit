@@ -5,6 +5,7 @@ const fs = @import("./fs.zig");
 const obj = @import("./object.zig");
 const zlib = @import("./std/zlib.zig");
 const flate = @import("./std/flate.zig");
+const Io = @import("./std/Io.zig");
 
 // reordering is a breaking change
 const CompressKind = enum(u8) {
@@ -343,8 +344,9 @@ pub fn writeChunks(
                 // we must first trim them. if we don't do this, non-English text will
                 // sometimes fail to validate as utf8 and thus won't get compressed.
                 if (repo_opts.extra.compress_chunks and std.unicode.utf8ValidateSlice(trimTruncatedCodepoints(chunk))) {
-                    try lock.lock_file.deprecatedWriter().writeByte(@intFromEnum(CompressKind.zlib));
-                    var zlib_stream = try zlib.compressor(lock.lock_file.deprecatedWriter(), .{ .level = .default });
+                    const file_writer = Io.deprecatedFileWriter(lock.lock_file);
+                    try file_writer.writeByte(@intFromEnum(CompressKind.zlib));
+                    var zlib_stream = try zlib.compressor(file_writer, .{ .level = .default });
                     try zlib_stream.writer().writeAll(chunk);
                     try zlib_stream.finish();
 
@@ -361,9 +363,10 @@ pub fn writeChunks(
 
                 // write the chunk uncompressed
                 if (!lock.success) {
-                    try lock.lock_file.deprecatedWriter().writeByte(@intFromEnum(CompressKind.none));
-                    try lock.lock_file.deprecatedWriter().writeInt(u32, std.hash.Adler32.hash(chunk), .big);
-                    try lock.lock_file.writeAll(chunk);
+                    var file_writer = lock.lock_file.writer(&.{});
+                    try file_writer.interface.writeByte(@intFromEnum(CompressKind.none));
+                    try file_writer.interface.writeInt(u32, std.hash.Adler32.hash(chunk), .big);
+                    try file_writer.interface.writeAll(chunk);
                     lock.success = true;
                 }
             },
@@ -495,7 +498,7 @@ pub fn readChunk(
             return read_size;
         },
         .zlib => {
-            var zlib_stream = zlib.decompressor(chunk_reader.interface.adaptToOldInterface());
+            var zlib_stream = zlib.decompressor(Io.adaptToOldInterface(&chunk_reader.interface));
             try zlib_stream.reader().skipBytes(chunk_offset, .{});
             return zlib_stream.reader().read(buf) catch |err| switch (err) {
                 error.WrongZlibChecksum => error.WrongChunkChecksum,
@@ -505,7 +508,7 @@ pub fn readChunk(
     }
 }
 
-const ZlibStream = flate.inflate.Decompressor(.zlib, std.fs.File.DeprecatedReader);
+const ZlibStream = flate.inflate.Decompressor(.zlib, Io.DeprecatedFileReader);
 
 pub fn ChunkObjectReader(comptime repo_opts: rp.RepoOpts(.xit)) type {
     return struct {

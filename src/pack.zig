@@ -4,6 +4,9 @@ const rp = @import("./repo.zig");
 const obj = @import("./object.zig");
 const zlib = @import("./std/zlib.zig");
 const flate = @import("./std/flate.zig");
+const Io = @import("./std/Io.zig");
+const GenericReader = Io.GenericReader;
+const GenericWriter = Io.GenericWriter;
 
 pub fn PackObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return struct {
@@ -178,7 +181,7 @@ const PackObjectHeader = packed struct {
     extra: bool,
 };
 
-const ZlibStream = flate.inflate.Decompressor(.zlib, std.fs.File.DeprecatedReader);
+const ZlibStream = flate.inflate.Decompressor(.zlib, Io.DeprecatedFileReader);
 
 /// contains the stream used to read a pack object.
 /// it can either be read from a file on disk or from an in-memory buffer.
@@ -242,7 +245,7 @@ const PackObjectStream = union(enum) {
                 try file.pack_file.seekTo(file.start_position);
                 file.* = .{
                     .pack_file = file.pack_file,
-                    .zlib_stream = zlib.decompressor(file.pack_file.deprecatedReader()),
+                    .zlib_stream = zlib.decompressor(Io.deprecatedFileReader(file.pack_file)),
                     .start_position = file.start_position,
                 };
             },
@@ -433,7 +436,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             var pack_file = try pack_dir.openFile(pack_file_name, .{ .mode = .read_only });
             errdefer pack_file.close();
             try pack_file.seekTo(position);
-            const reader = pack_file.deprecatedReader();
+            const reader = Io.deprecatedFileReader(pack_file);
 
             // parse object header
             const obj_header: PackObjectHeader = @bitCast(try reader.readByte());
@@ -624,7 +627,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             const pack_file = self.stream.file.pack_file;
             const start_position = self.stream.file.start_position;
 
-            const reader = pack_file.deprecatedReader();
+            const reader = Io.deprecatedFileReader(pack_file);
             var zlib_stream = zlib.decompressor(reader);
             const zlib_reader = zlib_stream.reader();
 
@@ -973,13 +976,13 @@ pub fn LooseOrPackObjectReader(comptime repo_opts: rp.RepoOpts(.git)) type {
             };
             errdefer object_file.close();
 
-            var stream = zlib.decompressor(object_file.deprecatedReader());
+            var stream = zlib.decompressor(Io.deprecatedFileReader(object_file));
             var reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
             var reader = stream.reader().adaptToNewApi(&reader_buffer);
             const obj_header = try obj.ObjectHeader.read(&reader.new_interface);
 
             try object_file.seekTo(0);
-            stream = zlib.decompressor(object_file.deprecatedReader());
+            stream = zlib.decompressor(Io.deprecatedFileReader(object_file));
             try stream.reader().skipBytes(reader.new_interface.seek, .{});
 
             return .{
@@ -1009,7 +1012,7 @@ pub fn LooseOrPackObjectReader(comptime repo_opts: rp.RepoOpts(.git)) type {
             switch (self.*) {
                 .loose => {
                     try self.loose.file.seekTo(0);
-                    self.loose.stream = zlib.decompressor(self.loose.file.deprecatedReader());
+                    self.loose.stream = zlib.decompressor(Io.deprecatedFileReader(self.loose.file));
                     try self.loose.stream.reader().skipUntilDelimiterOrEof(0);
                 },
                 .pack => try self.pack.reset(),
@@ -1043,7 +1046,7 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
         mode: union(enum) {
             header,
             object: struct {
-                stream: ?flate.deflate.Compressor(.zlib, std.ArrayList(u8).Writer),
+                stream: ?flate.deflate.Compressor(.zlib, Io.DeprecatedArrayListWriter),
             },
             footer,
             finished,
@@ -1070,7 +1073,7 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                 return null;
             }
 
-            const writer = self.out_bytes.writer(allocator);
+            const writer = Io.deprecatedArrayListWriter(&self.out_bytes, allocator);
             _ = try writer.write("PACK");
             try writer.writeInt(u32, 2, .big); // version
             try writer.writeInt(u32, @intCast(self.objects.items.len), .big);
@@ -1107,7 +1110,7 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                         self.out_index = 0;
                         self.mode = .{
                             .object = .{
-                                .stream = try zlib.compressor(self.out_bytes.writer(self.allocator), .{ .level = .default }),
+                                .stream = try zlib.compressor(Io.deprecatedArrayListWriter(&self.out_bytes, self.allocator), .{ .level = .default }),
                             },
                         };
                     } else {
@@ -1198,7 +1201,7 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                 .extra = first_size_parts.high_bits > 0,
             };
 
-            const writer = self.out_bytes.writer(self.allocator);
+            const writer = Io.deprecatedArrayListWriter(&self.out_bytes, self.allocator);
             try writer.writeByte(@bitCast(obj_header));
 
             // set size of object (little endian variable length format)
