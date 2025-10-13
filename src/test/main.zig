@@ -207,8 +207,11 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                     const header = try std.fmt.allocPrint(allocator, "blob {}\x00", .{file_size});
                     defer allocator.free(header);
 
+                    var reader_buffer = [_]u8{0} ** 1024;
+                    var reader = readme.reader(&reader_buffer);
+
                     var sha1_bytes_buffer = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-                    try hash.hashReader(repo_opts.hash, repo_opts.read_size, readme.deprecatedReader(), header, &sha1_bytes_buffer);
+                    try hash.hashReader(repo_opts.hash, repo_opts.read_size, &reader.interface, header, &sha1_bytes_buffer);
                     const sha1_hex = std.fmt.bytesToHex(&sha1_bytes_buffer, .lower);
 
                     var oid: c.git_oid = undefined;

@@ -81,7 +81,7 @@ pub fn Hasher(comptime hash_kind: HashKind) type {
 pub fn hashReader(
     comptime hash_kind: HashKind,
     comptime read_size: usize,
-    reader: anytype,
+    reader: *std.Io.Reader,
     header_maybe: ?[]const u8,
     out: *[byteLen(hash_kind)]u8,
 ) !void {
@@ -91,7 +91,7 @@ pub fn hashReader(
         hasher.update(header);
     }
     while (true) {
-        const size = try reader.read(&buffer);
+        const size = try reader.readSliceShort(&buffer);
         if (size == 0) {
             break;
         }

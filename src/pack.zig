@@ -352,8 +352,33 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     var header_bytes = [_]u8{0} ** 32;
                     const header_str = try pack_reader.header().write(&header_bytes);
 
+                    // expose pack_reader as new interface so we can hash it
+                    const Stream = struct {
+                        reader: *PackObjectReader(repo_kind, repo_opts),
+                        interface: std.Io.Reader,
+
+                        fn stream(r: *std.Io.Reader, w: *std.Io.Writer, limit: std.Io.Limit) std.Io.Reader.StreamError!usize {
+                            const a: *@This() = @alignCast(@fieldParentPtr("interface", r));
+                            const buf = limit.slice(try w.writableSliceGreedy(1));
+                            const n = a.reader.read(buf) catch return error.ReadFailed;
+                            if (n == 0) return error.EndOfStream;
+                            w.advance(n);
+                            return n;
+                        }
+                    };
+                    var reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
+                    var stream = Stream{
+                        .reader = pack_reader,
+                        .interface = .{
+                            .buffer = &reader_buffer,
+                            .vtable = &.{ .stream = Stream.stream },
+                            .seek = 0,
+                            .end = 0,
+                        },
+                    };
+
                     var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-                    try hash.hashReader(repo_opts.hash, repo_opts.read_size, pack_reader, header_str, &oid);
+                    try hash.hashReader(repo_opts.hash, repo_opts.read_size, &stream.interface, header_str, &oid);
 
                     if (std.mem.eql(u8, oid_hex, &std.fmt.bytesToHex(oid, .lower))) {
                         try pack_reader.reset();

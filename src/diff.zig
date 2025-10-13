@@ -87,8 +87,15 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                     const file_size = (try file.stat()).size;
                     const header = try std.fmt.allocPrint(allocator, "blob {}\x00", .{file_size});
                     defer allocator.free(header);
+
+                    var reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
+                    var reader = file.reader(&reader_buffer);
+
                     var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-                    try hash.hashReader(repo_opts.hash, repo_opts.read_size, file.deprecatedReader(), header, &oid);
+                    hash.hashReader(repo_opts.hash, repo_opts.read_size, &reader.interface, header, &oid) catch |err| switch (err) {
+                        error.ReadFailed => |e| return reader.err orelse e,
+                        else => |e| return e,
+                    };
                     try file.seekTo(0);
 
                     var iter = LineIterator(repo_kind, repo_opts){
@@ -127,7 +134,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                     const header = try std.fmt.bufPrint(&header_buffer, "blob {}\x00", .{target_path.len});
 
                     var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-                    try hash.hashReader(repo_opts.hash, repo_opts.read_size, reader.adaptToOldInterface(), header, &oid);
+                    try hash.hashReader(repo_opts.hash, repo_opts.read_size, &reader, header, &oid);
 
                     return try initFromBuffer(allocator, path, &oid, mode, target_path);
                 },

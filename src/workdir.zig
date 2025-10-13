@@ -302,8 +302,11 @@ pub fn indexDiffersFromWorkDir(
                     var header_buffer = [_]u8{0} ** 256; // should be plenty of space
                     const header = try std.fmt.bufPrint(&header_buffer, "blob {}\x00", .{meta.size});
 
+                    var reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
+                    var reader = file.reader(&reader_buffer);
+
                     var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-                    try hash.hashReader(repo_opts.hash, repo_opts.read_size, file.deprecatedReader(), header, &oid);
+                    try hash.hashReader(repo_opts.hash, repo_opts.read_size, &reader.interface, header, &oid);
                     if (!std.mem.eql(u8, &entry.oid, &oid)) {
                         return true;
                     }
@@ -322,7 +325,7 @@ pub fn indexDiffersFromWorkDir(
                 const header = try std.fmt.bufPrint(&header_buffer, "blob {}\x00", .{meta.size});
 
                 var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-                try hash.hashReader(repo_opts.hash, repo_opts.read_size, reader.adaptToOldInterface(), header, &oid);
+                try hash.hashReader(repo_opts.hash, repo_opts.read_size, &reader, header, &oid);
                 if (!std.mem.eql(u8, &entry.oid, &oid)) {
                     return true;
                 }

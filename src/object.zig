@@ -44,7 +44,7 @@ pub fn writeObject(
     const header_str = try header.write(&header_bytes);
 
     // calc the hash of its contents
-    try hash.hashReader(repo_opts.hash, repo_opts.read_size, stream.interface.adaptToOldInterface(), header_str, hash_bytes_buffer);
+    try hash.hashReader(repo_opts.hash, repo_opts.read_size, &stream.interface, header_str, hash_bytes_buffer);
     const hash_hex = std.fmt.bytesToHex(hash_bytes_buffer, .lower);
 
     // reset seek pos so we can reuse the reader for copying
