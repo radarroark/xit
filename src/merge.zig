@@ -1809,7 +1809,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 
                     // read the merge message
                     var commit_metadata: obj.CommitMetadata(repo_opts.hash) = merge_input.commit_metadata orelse .{};
-                    commit_metadata.message = state.core.repo_dir.readFileAlloc(arena.allocator(), merge_msg_name, repo_opts.max_read_size) catch |err| switch (err) {
+                    commit_metadata.message = state.core.repo_dir.readFileAlloc(merge_msg_name, arena.allocator(), @enumFromInt(repo_opts.max_read_size)) catch |err| switch (err) {
                         error.FileNotFound => return error.MergeMessageNotFound,
                         else => |e| return e,
                     };
