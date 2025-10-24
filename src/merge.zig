@@ -1807,17 +1807,11 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     const source_oid = try rf.readRecur(repo_kind, repo_opts, state.readOnly(), .{ .ref = .{ .kind = .none, .name = merge_head_name } }) orelse return error.MergeHeadNotFound;
 
                     // read the merge message
-                    const merge_msg = state.core.repo_dir.openFile(merge_msg_name, .{ .mode = .read_only }) catch |err| switch (err) {
+                    var commit_metadata: obj.CommitMetadata(repo_opts.hash) = merge_input.commit_metadata orelse .{};
+                    commit_metadata.message = state.core.repo_dir.readFileAlloc(arena.allocator(), merge_msg_name, repo_opts.max_read_size) catch |err| switch (err) {
                         error.FileNotFound => return error.MergeMessageNotFound,
                         else => |e| return e,
                     };
-                    defer merge_msg.close();
-                    var commit_metadata: obj.CommitMetadata(repo_opts.hash) = merge_input.commit_metadata orelse .{};
-                    {
-                        var reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
-                        var reader = merge_msg.reader(&reader_buffer);
-                        commit_metadata.message = try reader.interface.allocRemaining(arena.allocator(), @enumFromInt(repo_opts.max_read_size));
-                    }
 
                     // we need to return the source name but we don't have it,
                     // so just copy the source oid into a buffer and return that instead

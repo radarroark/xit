@@ -679,10 +679,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // the work dir was updated
     {
-        const hello_txt = try work_dir.openFile("hello.txt", .{ .mode = .read_only });
-        defer hello_txt.close();
-        var reader = hello_txt.reader(&.{});
-        const content = try reader.interface.allocRemaining(allocator, @enumFromInt(1024));
+        const content = try work_dir.readFileAlloc(allocator, "hello.txt", 1024);
         defer allocator.free(content);
         try std.testing.expectEqualStrings(hello_txt_content, content);
 
@@ -707,10 +704,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // the work dir was updated
     {
-        const hello_txt = try work_dir.openFile("hello.txt", .{ .mode = .read_only });
-        defer hello_txt.close();
-        var reader = hello_txt.reader(&.{});
-        const content = try reader.interface.allocRemaining(allocator, @enumFromInt(1024));
+        const content = try work_dir.readFileAlloc(allocator, "hello.txt", 1024);
         defer allocator.free(content);
         try std.testing.expectEqualStrings(new_hello_txt_content, content);
 
@@ -1451,20 +1445,14 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
         // change from stuff exists
         {
-            const stuff_txt = try work_dir.openFile("stuff.txt", .{ .mode = .read_only });
-            defer stuff_txt.close();
-            var reader = stuff_txt.reader(&.{});
-            const content = try reader.interface.allocRemaining(allocator, @enumFromInt(1024));
+            const content = try work_dir.readFileAlloc(allocator, "stuff.txt", 1024);
             defer allocator.free(content);
             try std.testing.expectEqualStrings("this was made on the stuff branch, commit 4!", content);
         }
 
         // change from master still exists
         {
-            const goodbye_txt = try work_dir.openFile("goodbye.txt", .{ .mode = .read_only });
-            defer goodbye_txt.close();
-            var reader = goodbye_txt.reader(&.{});
-            const content = try reader.interface.allocRemaining(allocator, @enumFromInt(1024));
+            const content = try work_dir.readFileAlloc(allocator, "goodbye.txt", 1024);
             defer allocator.free(content);
             try std.testing.expectEqualStrings("goodbye, world once again!", content);
         }
