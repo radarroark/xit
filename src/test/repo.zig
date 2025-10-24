@@ -123,7 +123,7 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
     }
 
     {
-        const readme_md_content = try repo.core.work_dir.readFileAlloc(allocator, "README.md", 1024);
+        const readme_md_content = try repo.core.work_dir.readFileAlloc("README.md", allocator, @enumFromInt(1024));
         defer allocator.free(readme_md_content);
         try std.testing.expectEqualStrings("Goodbye, world!", readme_md_content);
     }
@@ -134,7 +134,7 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
     }
 
     {
-        const readme_md_content = try repo.core.work_dir.readFileAlloc(allocator, "README.md", 1024);
+        const readme_md_content = try repo.core.work_dir.readFileAlloc("README.md", allocator, @enumFromInt(1024));
         defer allocator.free(readme_md_content);
         try std.testing.expectEqualStrings("Hello, world!", readme_md_content);
     }
@@ -290,7 +290,7 @@ fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
         try std.testing.expectEqual(commit_k, head_oid);
 
         // make sure file from commit k exists
-        const master_md_content = try repo.core.work_dir.readFileAlloc(allocator, "master.md", 1024);
+        const master_md_content = try repo.core.work_dir.readFileAlloc("master.md", allocator, @enumFromInt(1024));
         defer allocator.free(master_md_content);
         try std.testing.expectEqualStrings("k", master_md_content);
     }
@@ -544,7 +544,7 @@ fn testMergeConflictSameFile(comptime repo_kind: rp.RepoKind, comptime repo_opts
         try std.testing.expect(.conflict == merge.result);
 
         // verify f.txt has conflict markers
-        const f_txt_content = try repo.core.work_dir.readFileAlloc(allocator, "f.txt", 1024);
+        const f_txt_content = try repo.core.work_dir.readFileAlloc("f.txt", allocator, @enumFromInt(1024));
         defer allocator.free(f_txt_content);
         const expected_f_txt_content = try std.fmt.allocPrint(allocator,
             \\a
@@ -814,7 +814,7 @@ fn testMergeConflictSameFileEmptyBase(comptime repo_kind: rp.RepoKind, comptime 
         try std.testing.expect(.conflict == merge.result);
 
         // verify f.txt has conflict markers
-        const f_txt_content = try repo.core.work_dir.readFileAlloc(allocator, "f.txt", 1024);
+        const f_txt_content = try repo.core.work_dir.readFileAlloc("f.txt", allocator, @enumFromInt(1024));
         defer allocator.free(f_txt_content);
         const expected_f_txt_content = try std.fmt.allocPrint(allocator,
             \\<<<<<<< target (master)
@@ -1092,7 +1092,7 @@ fn testMergeConflictSameFileAutoresolved(comptime repo_kind: rp.RepoKind, compti
         try std.testing.expect(.success == merge.result);
 
         // verify f.txt has been autoresolved
-        const f_txt_content = try repo.core.work_dir.readFileAlloc(allocator, "f.txt", 1024);
+        const f_txt_content = try repo.core.work_dir.readFileAlloc("f.txt", allocator, @enumFromInt(1024));
         defer allocator.free(f_txt_content);
         try std.testing.expectEqualStrings(
             \\x
@@ -2078,7 +2078,7 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind, comptime repo_op
     // verify no lines are longer than one byte
     // so we know that conflict markers haven't been added
     {
-        const bin_file_content = try repo.core.work_dir.readFileAlloc(allocator, "bin", 1024);
+        const bin_file_content = try repo.core.work_dir.readFileAlloc("bin", allocator, @enumFromInt(1024));
         defer allocator.free(bin_file_content);
         var iter = std.mem.splitScalar(u8, bin_file_content, '\n');
         while (iter.next()) |line| {
@@ -2211,7 +2211,7 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
             try std.testing.expect(.success == merge.result);
 
             // verify f.txt has been autoresolved
-            const f_txt_content = try repo.core.work_dir.readFileAlloc(allocator, "f.txt", 1024);
+            const f_txt_content = try repo.core.work_dir.readFileAlloc("f.txt", allocator, @enumFromInt(1024));
             defer allocator.free(f_txt_content);
             switch (repo_kind) {
                 // git shuffles lines
@@ -2360,7 +2360,7 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
             var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
             defer merge.deinit();
 
-            const f_txt_content = try repo.core.work_dir.readFileAlloc(allocator, "f.txt", 1024);
+            const f_txt_content = try repo.core.work_dir.readFileAlloc("f.txt", allocator, @enumFromInt(1024));
             defer allocator.free(f_txt_content);
             switch (repo_kind) {
                 .git => {
@@ -2575,7 +2575,7 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
         try std.testing.expect(.conflict == merge.result);
 
         // verify readme.md has conflict markers
-        const readme_md_content = try repo.core.work_dir.readFileAlloc(allocator, "readme.md", 1024);
+        const readme_md_content = try repo.core.work_dir.readFileAlloc("readme.md", allocator, @enumFromInt(1024));
         defer allocator.free(readme_md_content);
         const expected_readme_md_content = try std.fmt.allocPrint(allocator,
             \\<<<<<<< target (master)

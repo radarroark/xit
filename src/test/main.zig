@@ -687,7 +687,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // the work dir was updated
     {
-        const content = try work_dir.readFileAlloc(allocator, "hello.txt", 1024);
+        const content = try work_dir.readFileAlloc("hello.txt", allocator, @enumFromInt(1024));
         defer allocator.free(content);
         try std.testing.expectEqualStrings(hello_txt_content, content);
 
@@ -712,7 +712,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // the work dir was updated
     {
-        const content = try work_dir.readFileAlloc(allocator, "hello.txt", 1024);
+        const content = try work_dir.readFileAlloc("hello.txt", allocator, @enumFromInt(1024));
         defer allocator.free(content);
         try std.testing.expectEqualStrings(new_hello_txt_content, content);
 
@@ -1453,14 +1453,14 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
         // change from stuff exists
         {
-            const content = try work_dir.readFileAlloc(allocator, "stuff.txt", 1024);
+            const content = try work_dir.readFileAlloc("stuff.txt", allocator, @enumFromInt(1024));
             defer allocator.free(content);
             try std.testing.expectEqualStrings("this was made on the stuff branch, commit 4!", content);
         }
 
         // change from master still exists
         {
-            const content = try work_dir.readFileAlloc(allocator, "goodbye.txt", 1024);
+            const content = try work_dir.readFileAlloc("goodbye.txt", allocator, @enumFromInt(1024));
             defer allocator.free(content);
             try std.testing.expectEqualStrings("goodbye, world once again!", content);
         }
