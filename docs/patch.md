@@ -16,9 +16,11 @@ Performance
 
   * However, this is a tradeoff. By skipping the intermediate changes, the three-way merge is missing useful information. This can lead to a bad merge, where changes from the source branch end up [in the wrong place](https://tahoe-lafs.org/~zooko/badmerge/simple.html). It also can potentially lead to unnecessary merge conflicts, as explained below.
 
-  * Darcs had an additional performance problem in which some merges could end up taking an exponentially long time. This problem was specific to Darcs, though, because it used operational transforms when applying patches. Pijul (and xit) solves this by using a CRDT to represent the history of a file, and patch application is merely about updating this CRDT.
+  * Darcs had an additional performance problem in which some merges could end up taking an exponentially long time. This problem was specific to Darcs, though, because it used operational transforms when applying patches. Pijul solves this by using a CRDT to represent the history of a file, and patch application is merely about updating this CRDT.
 
     * I realize "because CRDT" isn't a great explanation for why it's faster, but it does sound good. I even started using it in totally inappropriate situations. Why should I buy your product? Because CRDT. Why haven't you paid the electric bill yet? Because CRDT. Why were you speeding, sir? Because CRDT.
+
+    * The solution in xit is similar to Pijul, but quite a bit simpler because it doesn't actually need to be a CRDT. Darcs and Pijul are "pure" patch-based VCSes whose patches are shared over the network and can arrive out-of-order, so their data structures must be robust enough to give the same result regardless of the order they are applied. As discussed below, xit is a hybrid system that only shares the snapshot-based history over the network, and only generates patches locally. This means that it doesn't need to care about out-of-order patch application.
 
 Merge Conflicts
 
