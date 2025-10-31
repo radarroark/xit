@@ -295,8 +295,8 @@ pub fn applyPatch(
         return;
     } else {
         const patch_id_set_cursor = try snapshot.putCursor(hash.hashInt(repo_opts.hash, "patch-id-set"));
-        const patch_id_set = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(patch_id_set_cursor);
-        try patch_id_set.putKey(patch_hash, .{ .slot = .{ .tag = .none } });
+        const patch_id_set = try rp.Repo(.xit, repo_opts).DB.HashSet(.read_write).init(patch_id_set_cursor);
+        try patch_id_set.put(patch_hash, .{ .slot = .{ .tag = .none } });
     }
 
     var change_list_cursor = (try moment.cursor.readPath(void, &.{
@@ -306,7 +306,7 @@ pub fn applyPatch(
 
     // get path slot
     const path_set_cursor = (try moment.getCursor(hash.hashInt(repo_opts.hash, "path-set"))) orelse return error.KeyNotFound;
-    const path_set = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(path_set_cursor);
+    const path_set = try rp.Repo(.xit, repo_opts).DB.HashSet(.read_only).init(path_set_cursor);
     const path_slot = try path_set.getSlot(path_hash);
 
     // init live-parent->children line map
@@ -583,7 +583,7 @@ fn createPatchEntries(
 ) !void {
     // get path slot
     const path_set_cursor = (try moment.getCursor(hash.hashInt(repo_opts.hash, "path-set"))) orelse return error.KeyNotFound;
-    const path_set = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(path_set_cursor);
+    const path_set = try rp.Repo(.xit, repo_opts).DB.HashSet(.read_only).init(path_set_cursor);
     const path_slot = try path_set.getSlot(path_hash);
 
     // init line list
