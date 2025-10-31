@@ -5,9 +5,12 @@ const net_wire = @import("./wire.zig");
 
 pub const Opts = struct {
     command: ?[]const u8 = null,
+    upload_pack_command: []const u8 = "git-upload-pack",
+    receive_pack_command: []const u8 = "git-receive-pack",
 };
 
 pub const SshState = struct {
+    opts: Opts,
     process: ?std.process.Child,
     allocator: std.mem.Allocator,
     arena: *std.heap.ArenaAllocator,
@@ -48,6 +51,7 @@ pub const SshState = struct {
         };
 
         return .{
+            .opts = opts,
             .process = null,
             .allocator = allocator,
             .arena = arena_ptr,
@@ -176,8 +180,8 @@ fn spawnSsh(
     }
 
     const sub_command = switch (wire_action) {
-        .list_upload_pack => "git-upload-pack",
-        .list_receive_pack => "git-receive-pack",
+        .list_upload_pack => wire_state.opts.upload_pack_command,
+        .list_receive_pack => wire_state.opts.receive_pack_command,
         else => return error.InvalidAction,
     };
     try args.append(wire_state.arena.allocator(), try wire_state.arena.allocator().dupe(u8, sub_command));
