@@ -51,10 +51,10 @@ xit switch master
 xit merge stuff
 ```
 
-The networking commands are a work in progress, but they're good enough to try out. Currently, ssh works best (http is supported but there's a regression in zig 0.15 related to it). Here's what a clone and push look like:
+The networking commands are a work in progress, but they're good enough to try out. Here's what a clone and push look like:
 
 ```
-xit clone git@github.com:radarroark/xitstarter.git myrepo
+xit clone https://github.com/radarroark/xitstarter myrepo
 cd myrepo
 
 echo hello > readme.md
