@@ -637,9 +637,13 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
 
             var bytes_read: u64 = 0;
 
-            const reader = Io.deprecatedFileReader(self.stream.file.pack_file);
-            var zlib_stream = zlib.decompressor(reader);
-            const zlib_reader = zlib_stream.reader();
+            var file_reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
+            var file_reader = self.stream.file.pack_file.reader(&file_reader_buffer);
+            var zlib_stream_buffer = [_]u8{0} ** std.compress.flate.max_window_len;
+            var zlib_stream: std.compress.flate.Decompress = .init(&file_reader.interface, .zlib, &zlib_stream_buffer);
+
+            // make the reader's seek pos the same as the underlying file's
+            try file_reader.seekTo(try self.stream.file.pack_file.getPos());
 
             // get size of base object (little endian variable length format)
             var base_size: u64 = 0;
@@ -650,7 +654,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     const next_byte: packed struct {
                         value: u7,
                         extra: bool,
-                    } = @bitCast(try zlib_reader.readByte());
+                    } = @bitCast(try zlib_stream.reader.takeByte());
                     bytes_read += 1;
                     cont = next_byte.extra;
                     const value: u64 = next_byte.value;
@@ -668,7 +672,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     const next_byte: packed struct {
                         value: u7,
                         extra: bool,
-                    } = @bitCast(try zlib_reader.readByte());
+                    } = @bitCast(try zlib_stream.reader.takeByte());
                     bytes_read += 1;
                     cont = next_byte.extra;
                     const value: u64 = next_byte.value;
@@ -694,7 +698,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                 const next_byte: packed struct {
                     value: u7,
                     high_bit: u1,
-                } = @bitCast(try zlib_reader.readByte());
+                } = @bitCast(try zlib_stream.reader.takeByte());
                 bytes_read += 1;
 
                 switch (next_byte.high_bit) {
@@ -710,7 +714,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                             },
                             .kind = .add_new,
                         });
-                        try zlib_reader.skipBytes(next_byte.value, .{});
+                        _ = try zlib_stream.reader.take(next_byte.value);
                         bytes_read += next_byte.value;
                     },
                     // copy data
@@ -721,7 +725,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                             const mask: u7 = @as(u7, 1) << i;
                             i += 1;
                             if (next_byte.value & mask != 0) {
-                                val.* = try zlib_reader.readByte();
+                                val.* = try zlib_stream.reader.takeByte();
                                 bytes_read += 1;
                             }
                         }
@@ -739,6 +743,9 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     },
                 }
             }
+
+            // make the underlying file's seek pos the same as the reader's
+            try self.stream.file.pack_file.seekTo(file_reader.logicalPos());
 
             const SortCtx = struct {
                 keys: []Location,
