@@ -176,14 +176,16 @@ const PackObjectHeader = packed struct {
     extra: bool,
 };
 
-const ZlibStream = flate.inflate.Decompressor(.zlib, Io.DeprecatedFileReader);
-
 /// contains the stream used to read a pack object.
 /// it can either be read from a file on disk or from an in-memory buffer.
 const PackObjectStream = union(enum) {
     file: struct {
+        allocator: std.mem.Allocator,
         pack_file: std.fs.File,
-        zlib_stream: ZlibStream,
+        pack_file_reader: *std.fs.File.Reader,
+        pack_file_reader_buffer: []u8,
+        zlib_stream: *std.compress.flate.Decompress,
+        zlib_stream_buffer: []u8,
         start_position: u64,
     },
     memory: struct {
@@ -193,9 +195,44 @@ const PackObjectStream = union(enum) {
         end_position: u64,
     },
 
+    pub fn initFile(comptime buffer_size: usize, allocator: std.mem.Allocator, pack_file: std.fs.File, start_position: u64) !PackObjectStream {
+        const reader_buffer = try allocator.alloc(u8, buffer_size);
+        errdefer allocator.free(reader_buffer);
+
+        const reader = try allocator.create(std.fs.File.Reader);
+        errdefer allocator.destroy(reader);
+        reader.* = pack_file.reader(reader_buffer);
+        try reader.seekTo(start_position);
+
+        const zlib_stream_buffer = try allocator.alloc(u8, std.compress.flate.max_window_len);
+        errdefer allocator.free(zlib_stream_buffer);
+
+        const zlib_stream = try allocator.create(std.compress.flate.Decompress);
+        errdefer allocator.destroy(zlib_stream);
+        zlib_stream.* = .init(&reader.interface, .zlib, zlib_stream_buffer);
+
+        return .{
+            .file = .{
+                .allocator = allocator,
+                .pack_file = pack_file,
+                .pack_file_reader = reader,
+                .pack_file_reader_buffer = reader_buffer,
+                .zlib_stream = zlib_stream,
+                .zlib_stream_buffer = zlib_stream_buffer,
+                .start_position = start_position,
+            },
+        };
+    }
+
     pub fn deinit(self: *PackObjectStream) void {
         switch (self.*) {
-            .file => |*file| file.pack_file.close(),
+            .file => |*file| {
+                file.pack_file.close();
+                file.allocator.destroy(file.pack_file_reader);
+                file.allocator.free(file.pack_file_reader_buffer);
+                file.allocator.destroy(file.zlib_stream);
+                file.allocator.free(file.zlib_stream_buffer);
+            },
             .memory => |*memory| memory.allocator.free(memory.buffer),
         }
     }
@@ -235,23 +272,19 @@ const PackObjectStream = union(enum) {
     pub fn reset(self: *PackObjectStream) !void {
         switch (self.*) {
             .file => |*file| {
-                try file.pack_file.seekTo(file.start_position);
-                file.* = .{
-                    .pack_file = file.pack_file,
-                    .zlib_stream = zlib.decompressor(Io.deprecatedFileReader(file.pack_file)),
-                    .start_position = file.start_position,
-                };
+                file.pack_file_reader.* = file.pack_file.reader(file.pack_file_reader_buffer);
+                try file.pack_file_reader.seekTo(file.start_position);
+                file.zlib_stream.* = .init(&file.pack_file_reader.interface, .zlib, file.zlib_stream_buffer);
             },
             .memory => |*memory| memory.interface.seek = 0,
         }
     }
 
-    pub fn getEndPos(self: *PackObjectStream) !usize {
+    pub fn getEndPos(self: *PackObjectStream) !u64 {
         switch (self.*) {
             .file => |*file| {
-                // make sure the stream is at the end so the file position is correct
-                while (try file.zlib_stream.next()) |_| {}
-                return try file.pack_file.getPos();
+                _ = try file.zlib_stream.reader.discardRemaining();
+                return file.pack_file_reader.logicalPos();
             },
             .memory => |*memory| return memory.end_position,
         }
@@ -259,14 +292,14 @@ const PackObjectStream = union(enum) {
 
     pub fn read(self: *PackObjectStream, dest: []u8) !usize {
         return switch (self.*) {
-            .file => |*file| try file.zlib_stream.reader().read(dest),
+            .file => |*file| try file.zlib_stream.reader.readSliceShort(dest),
             .memory => |*memory| try memory.interface.readSliceShort(dest),
         };
     }
 
     pub fn skipBytes(self: *PackObjectStream, num_bytes: u64) !void {
         switch (self.*) {
-            .file => |*file| try file.zlib_stream.reader().skipBytes(num_bytes, .{}),
+            .file => |*file| _ = try file.zlib_stream.reader.take(num_bytes),
             .memory => |*memory| memory.interface.toss(num_bytes),
         }
     }
@@ -426,11 +459,14 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
         fn initAtPosition(allocator: std.mem.Allocator, pack_dir: std.fs.Dir, pack_file_name: []const u8, position: u64) !PackObjectReader(repo_kind, repo_opts) {
             var pack_file = try pack_dir.openFile(pack_file_name, .{ .mode = .read_only });
             errdefer pack_file.close();
-            try pack_file.seekTo(position);
-            const reader = Io.deprecatedFileReader(pack_file);
+
+            var file_reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
+            var file_reader = pack_file.reader(&file_reader_buffer);
+            try file_reader.seekTo(position);
+            const reader = &file_reader.interface;
 
             // parse object header
-            const obj_header: PackObjectHeader = @bitCast(try reader.readByte());
+            const obj_header: PackObjectHeader = @bitCast(try reader.takeByte());
 
             // get size of object (little endian variable length format)
             var size: u64 = obj_header.size;
@@ -441,7 +477,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     const next_byte: packed struct {
                         value: u7,
                         extra: bool,
-                    } = @bitCast(try reader.readByte());
+                    } = @bitCast(try reader.takeByte());
                     cont = next_byte.extra;
                     const value: u64 = next_byte.value;
                     size |= (value << shift);
@@ -451,13 +487,12 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
 
             switch (obj_header.kind) {
                 inline .commit, .tree, .blob, .tag => |pack_obj_kind| {
-                    const start_position = try pack_file.getPos();
+                    const start_position = file_reader.logicalPos();
 
-                    var stream = PackObjectStream{ .file = .{
-                        .pack_file = pack_file,
-                        .zlib_stream = zlib.decompressor(reader),
-                        .start_position = start_position,
-                    } };
+                    // make the underlying file's seek pos the same as the reader's
+                    try pack_file.seekTo(start_position);
+
+                    var stream = try PackObjectStream.initFile(repo_opts.buffer_size, allocator, pack_file, start_position);
                     errdefer stream.deinit();
                     if (size <= max_buffer_size) {
                         try stream.convertToBuffer(allocator, size);
@@ -491,7 +526,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                             const next_byte: packed struct {
                                 value: u7,
                                 extra: bool,
-                            } = @bitCast(try reader.readByte());
+                            } = @bitCast(try reader.takeByte());
                             offset = (offset << 7) | next_byte.value;
                             if (!next_byte.extra) {
                                 break;
@@ -506,14 +541,16 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     const pack_file_name_copy = try allocator.dupe(u8, pack_file_name);
                     errdefer allocator.free(pack_file_name_copy);
 
-                    const start_position = try pack_file.getPos();
+                    const start_position = file_reader.logicalPos();
+
+                    // make the underlying file's seek pos the same as the reader's
+                    try pack_file.seekTo(start_position);
+
+                    var stream = try PackObjectStream.initFile(repo_opts.buffer_size, allocator, pack_file, start_position);
+                    errdefer stream.deinit();
 
                     return .{
-                        .stream = .{ .file = .{
-                            .pack_file = pack_file,
-                            .zlib_stream = undefined,
-                            .start_position = start_position,
-                        } },
+                        .stream = stream,
                         .relative_position = 0,
                         .size = size,
                         .internal = .{
@@ -531,16 +568,18 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     };
                 },
                 .ref_delta => {
-                    const base_oid = try reader.readBytesNoEof(hash.byteLen(repo_opts.hash));
+                    const base_oid = try reader.takeArray(hash.byteLen(repo_opts.hash));
 
-                    const start_position = try pack_file.getPos();
+                    const start_position = file_reader.logicalPos();
+
+                    // make the underlying file's seek pos the same as the reader's
+                    try pack_file.seekTo(start_position);
+
+                    var stream = try PackObjectStream.initFile(repo_opts.buffer_size, allocator, pack_file, start_position);
+                    errdefer stream.deinit();
 
                     return .{
-                        .stream = .{ .file = .{
-                            .pack_file = pack_file,
-                            .zlib_stream = undefined,
-                            .start_position = start_position,
-                        } },
+                        .stream = stream,
                         .relative_position = 0,
                         .size = size,
                         .internal = .{
@@ -615,12 +654,13 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
 
             var bytes_read: u64 = 0;
 
-            const pack_file = self.stream.file.pack_file;
-            const start_position = self.stream.file.start_position;
+            var file_reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
+            var file_reader = self.stream.file.pack_file.reader(&file_reader_buffer);
+            var zlib_stream_buffer = [_]u8{0} ** std.compress.flate.max_window_len;
+            var zlib_stream: std.compress.flate.Decompress = .init(&file_reader.interface, .zlib, &zlib_stream_buffer);
 
-            const reader = Io.deprecatedFileReader(pack_file);
-            var zlib_stream = zlib.decompressor(reader);
-            const zlib_reader = zlib_stream.reader();
+            // make the reader's seek pos the same as the underlying file's
+            try file_reader.seekTo(try self.stream.file.pack_file.getPos());
 
             // get size of base object (little endian variable length format)
             var base_size: u64 = 0;
@@ -631,7 +671,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     const next_byte: packed struct {
                         value: u7,
                         extra: bool,
-                    } = @bitCast(try zlib_reader.readByte());
+                    } = @bitCast(try zlib_stream.reader.takeByte());
                     bytes_read += 1;
                     cont = next_byte.extra;
                     const value: u64 = next_byte.value;
@@ -649,7 +689,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     const next_byte: packed struct {
                         value: u7,
                         extra: bool,
-                    } = @bitCast(try zlib_reader.readByte());
+                    } = @bitCast(try zlib_stream.reader.takeByte());
                     bytes_read += 1;
                     cont = next_byte.extra;
                     const value: u64 = next_byte.value;
@@ -675,7 +715,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                 const next_byte: packed struct {
                     value: u7,
                     high_bit: u1,
-                } = @bitCast(try zlib_reader.readByte());
+                } = @bitCast(try zlib_stream.reader.takeByte());
                 bytes_read += 1;
 
                 switch (next_byte.high_bit) {
@@ -691,7 +731,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                             },
                             .kind = .add_new,
                         });
-                        try zlib_reader.skipBytes(next_byte.value, .{});
+                        _ = try zlib_stream.reader.take(next_byte.value);
                         bytes_read += next_byte.value;
                     },
                     // copy data
@@ -702,7 +742,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                             const mask: u7 = @as(u7, 1) << i;
                             i += 1;
                             if (next_byte.value & mask != 0) {
-                                val.* = try zlib_reader.readByte();
+                                val.* = try zlib_stream.reader.takeByte();
                                 bytes_read += 1;
                             }
                         }
@@ -721,6 +761,9 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                 }
             }
 
+            // make the underlying file's seek pos the same as the reader's
+            try self.stream.file.pack_file.seekTo(file_reader.logicalPos());
+
             const SortCtx = struct {
                 keys: []Location,
                 pub fn lessThan(ctx: @This(), a_index: usize, b_index: usize) bool {
@@ -734,18 +777,12 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             };
             cache.sort(SortCtx{ .keys = cache.keys() });
 
-            var stream = PackObjectStream{ .file = .{
-                .pack_file = pack_file,
-                .zlib_stream = zlib_stream,
-                .start_position = start_position,
-            } };
-            errdefer stream.deinit();
             if (self.size <= max_buffer_size) {
-                try stream.convertToBuffer(allocator, self.size);
+                try self.stream.convertToBuffer(allocator, self.size);
             }
 
             self.* = .{
-                .stream = stream,
+                .stream = self.stream,
                 .relative_position = bytes_read,
                 .size = self.size,
                 .internal = .{
@@ -940,7 +977,10 @@ pub fn LooseOrPackObjectReader(comptime repo_opts: rp.RepoOpts(.git)) type {
     return union(enum) {
         loose: struct {
             file: std.fs.File,
-            stream: ZlibStream,
+            file_reader: *std.fs.File.Reader,
+            file_reader_buffer: []u8,
+            zlib_stream: *std.compress.flate.Decompress,
+            zlib_stream_buffer: []u8,
             header: obj.ObjectHeader,
         },
         pack: PackObjectReader(.git, repo_opts),
@@ -965,60 +1005,75 @@ pub fn LooseOrPackObjectReader(comptime repo_opts: rp.RepoOpts(.git)) type {
             };
             errdefer object_file.close();
 
-            var stream = zlib.decompressor(Io.deprecatedFileReader(object_file));
-            var reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
-            var reader = stream.reader().adaptToNewApi(&reader_buffer);
-            const obj_header = try obj.ObjectHeader.read(&reader.new_interface);
+            const reader_buffer = try allocator.alloc(u8, repo_opts.buffer_size);
+            errdefer allocator.free(reader_buffer);
 
-            try object_file.seekTo(0);
-            stream = zlib.decompressor(Io.deprecatedFileReader(object_file));
-            try stream.reader().skipBytes(reader.new_interface.seek, .{});
+            const reader = try allocator.create(std.fs.File.Reader);
+            errdefer allocator.destroy(reader);
+            reader.* = object_file.reader(reader_buffer);
+
+            const zlib_stream_buffer = try allocator.alloc(u8, std.compress.flate.max_window_len);
+            errdefer allocator.free(zlib_stream_buffer);
+
+            const zlib_stream = try allocator.create(std.compress.flate.Decompress);
+            errdefer allocator.destroy(zlib_stream);
+            zlib_stream.* = .init(&reader.interface, .zlib, zlib_stream_buffer);
 
             return .{
                 .loose = .{
                     .file = object_file,
-                    .stream = stream,
-                    .header = obj_header,
+                    .file_reader = reader,
+                    .file_reader_buffer = reader_buffer,
+                    .zlib_stream = zlib_stream,
+                    .zlib_stream_buffer = zlib_stream_buffer,
+                    .header = try obj.ObjectHeader.read(&zlib_stream.reader),
                 },
             };
         }
 
         pub fn deinit(self: *LooseOrPackObjectReader(repo_opts), allocator: std.mem.Allocator) void {
             switch (self.*) {
-                .loose => self.loose.file.close(),
-                .pack => self.pack.deinit(allocator),
+                .loose => |*loose| {
+                    loose.file.close();
+                    allocator.destroy(loose.file_reader);
+                    allocator.destroy(loose.zlib_stream);
+                    allocator.free(loose.file_reader_buffer);
+                    allocator.free(loose.zlib_stream_buffer);
+                },
+                .pack => |*pack| pack.deinit(allocator),
             }
         }
 
         pub fn header(self: LooseOrPackObjectReader(repo_opts)) obj.ObjectHeader {
             return switch (self) {
-                .loose => self.loose.header,
-                .pack => self.pack.header(),
+                .loose => |loose| loose.header,
+                .pack => |pack| pack.header(),
             };
         }
 
         pub fn reset(self: *LooseOrPackObjectReader(repo_opts)) !void {
             switch (self.*) {
-                .loose => {
-                    try self.loose.file.seekTo(0);
-                    self.loose.stream = zlib.decompressor(Io.deprecatedFileReader(self.loose.file));
-                    try self.loose.stream.reader().skipUntilDelimiterOrEof(0);
+                .loose => |*loose| {
+                    loose.file_reader.* = loose.file.reader(loose.file_reader_buffer);
+                    try loose.file_reader.seekTo(0);
+                    loose.zlib_stream.* = .init(&loose.file_reader.interface, .zlib, loose.zlib_stream_buffer);
+                    _ = try loose.zlib_stream.reader.discardDelimiterInclusive(0);
                 },
-                .pack => try self.pack.reset(),
+                .pack => |*pack| try pack.reset(),
             }
         }
 
         pub fn read(self: *LooseOrPackObjectReader(repo_opts), dest: []u8) !usize {
             switch (self.*) {
-                .loose => return try self.loose.stream.reader().read(dest),
-                .pack => return try self.pack.read(dest),
+                .loose => |*loose| return try loose.zlib_stream.reader.readSliceShort(dest),
+                .pack => |*pack| return try pack.read(dest),
             }
         }
 
         pub fn skipBytes(self: *LooseOrPackObjectReader(repo_opts), num_bytes: u64) !void {
             switch (self.*) {
-                .loose => try self.loose.stream.reader().skipBytes(num_bytes, .{}),
-                .pack => try self.pack.skipBytes(num_bytes),
+                .loose => |*loose| _ = try loose.zlib_stream.reader.take(num_bytes),
+                .pack => |*pack| try pack.skipBytes(num_bytes),
             }
         }
     };
