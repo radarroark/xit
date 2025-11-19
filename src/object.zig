@@ -11,25 +11,17 @@ const cfg = @import("./config.zig");
 const tg = @import("./tag.zig");
 const tr = @import("./tree.zig");
 const mrg = @import("./merge.zig");
-const zlib = @import("./std/zlib.zig");
-const Io = @import("./std/Io.zig");
 
-fn compressZlib(comptime read_size: usize, in: std.fs.File, out: std.fs.File) !void {
-    // init stream from input file
-    var zlib_stream = try zlib.compressor(Io.deprecatedFileWriter(out), .{ .level = .default });
-
-    // write the compressed data to the output file
-    try in.seekTo(0);
-    const reader = Io.deprecatedFileReader(in);
-    var buf = [_]u8{0} ** read_size;
-    while (true) {
-        // read from file
-        const size = try reader.read(&buf);
-        if (size == 0) break;
-        // compress
-        try zlib_stream.writer().writeAll(buf[0..size]);
-    }
-    try zlib_stream.finish();
+fn compressZlib(comptime buffer_size: usize, in: std.fs.File, out: std.fs.File) !void {
+    var rbuf = [_]u8{0} ** buffer_size;
+    var wbuf = [_]u8{0} ** buffer_size;
+    var dbuf = [_]u8{0} ** std.compress.flate.max_window_len;
+    var r = in.reader(&rbuf);
+    var w = out.writer(&wbuf);
+    var d = try std.compress.flate.Compress.init(&w.interface, &dbuf, .zlib, .default);
+    _ = try r.interface.streamRemaining(&d.writer);
+    try d.writer.flush();
+    try w.interface.flush();
 }
 
 pub fn writeObject(
@@ -89,7 +81,7 @@ pub fn writeObject(
             // create compressed lock file
             var compressed_lock = try fs.LockFile.init(hash_prefix_dir, hash_suffix);
             defer compressed_lock.deinit();
-            try compressZlib(repo_opts.read_size, lock.lock_file, compressed_lock.lock_file);
+            try compressZlib(repo_opts.buffer_size, lock.lock_file, compressed_lock.lock_file);
             compressed_lock.success = true;
         },
         .xit => {
@@ -241,7 +233,7 @@ fn writeTree(
             // create compressed lock file
             var compressed_lock = try fs.LockFile.init(tree_hash_prefix_dir, tree_hash_suffix);
             defer compressed_lock.deinit();
-            try compressZlib(repo_opts.read_size, lock.lock_file, compressed_lock.lock_file);
+            try compressZlib(repo_opts.buffer_size, lock.lock_file, compressed_lock.lock_file);
             compressed_lock.success = true;
         },
         .xit => {
@@ -479,7 +471,7 @@ pub fn writeCommit(
             // create compressed lock file
             var compressed_lock = try fs.LockFile.init(commit_hash_prefix_dir, commit_hash_suffix);
             defer compressed_lock.deinit();
-            try compressZlib(repo_opts.read_size, lock.lock_file, compressed_lock.lock_file);
+            try compressZlib(repo_opts.buffer_size, lock.lock_file, compressed_lock.lock_file);
             compressed_lock.success = true;
 
             // write commit id to HEAD
@@ -582,7 +574,7 @@ pub fn writeTag(
             // create compressed lock file
             var compressed_lock = try fs.LockFile.init(tag_hash_prefix_dir, tag_hash_suffix);
             defer compressed_lock.deinit();
-            try compressZlib(repo_opts.read_size, lock.lock_file, compressed_lock.lock_file);
+            try compressZlib(repo_opts.buffer_size, lock.lock_file, compressed_lock.lock_file);
             compressed_lock.success = true;
         },
         .xit => {
