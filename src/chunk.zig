@@ -344,11 +344,14 @@ pub fn writeChunks(
                 // we must first trim them. if we don't do this, non-English text will
                 // sometimes fail to validate as utf8 and thus won't get compressed.
                 if (repo_opts.extra.compress_chunks and std.unicode.utf8ValidateSlice(trimTruncatedCodepoints(chunk))) {
-                    const file_writer = Io.deprecatedFileWriter(lock.lock_file);
-                    try file_writer.writeByte(@intFromEnum(CompressKind.zlib));
-                    var zlib_stream = try zlib.compressor(file_writer, .{ .level = .default });
-                    try zlib_stream.writer().writeAll(chunk);
-                    try zlib_stream.finish();
+                    var wbuf = [_]u8{0} ** repo_opts.buffer_size;
+                    var file_writer = lock.lock_file.writer(&wbuf);
+                    try file_writer.interface.writeByte(@intFromEnum(CompressKind.zlib));
+                    var dbuf = [_]u8{0} ** std.compress.flate.max_window_len;
+                    var zlib_stream = try std.compress.flate.Compress.init(&file_writer.interface, &dbuf, .zlib, .default);
+                    try zlib_stream.writer.writeAll(chunk);
+                    try zlib_stream.writer.flush();
+                    try file_writer.interface.flush();
 
                     // abort compression if it didn't make it smaller
                     const compress_kind_size = @sizeOf(CompressKind);
