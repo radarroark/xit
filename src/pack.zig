@@ -458,11 +458,14 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
         fn initAtPosition(allocator: std.mem.Allocator, pack_file_path: []const u8, position: u64) !PackObjectReader(repo_kind, repo_opts) {
             var pack_file = try std.fs.openFileAbsolute(pack_file_path, .{ .mode = .read_only });
             errdefer pack_file.close();
-            try pack_file.seekTo(position);
-            const reader = Io.deprecatedFileReader(pack_file);
+
+            var file_reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
+            var file_reader = pack_file.reader(&file_reader_buffer);
+            try file_reader.seekTo(position);
+            const reader = &file_reader.interface;
 
             // parse object header
-            const obj_header: PackObjectHeader = @bitCast(try reader.readByte());
+            const obj_header: PackObjectHeader = @bitCast(try reader.takeByte());
 
             // get size of object (little endian variable length format)
             var size: u64 = obj_header.size;
@@ -473,7 +476,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     const next_byte: packed struct {
                         value: u7,
                         extra: bool,
-                    } = @bitCast(try reader.readByte());
+                    } = @bitCast(try reader.takeByte());
                     cont = next_byte.extra;
                     const value: u64 = next_byte.value;
                     size |= (value << shift);
@@ -483,7 +486,10 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
 
             switch (obj_header.kind) {
                 inline .commit, .tree, .blob, .tag => |pack_obj_kind| {
-                    const start_position = try pack_file.getPos();
+                    const start_position = file_reader.logicalPos();
+
+                    // make the underlying file's seek pos the same as the reader's
+                    try pack_file.seekTo(start_position);
 
                     var stream = try PackObjectStream.initFile(repo_opts.buffer_size, allocator, pack_file, start_position);
                     errdefer stream.deinit();
@@ -519,7 +525,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                             const next_byte: packed struct {
                                 value: u7,
                                 extra: bool,
-                            } = @bitCast(try reader.readByte());
+                            } = @bitCast(try reader.takeByte());
                             offset = (offset << 7) | next_byte.value;
                             if (!next_byte.extra) {
                                 break;
@@ -531,7 +537,10 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     const pack_file_path_copy = try allocator.dupe(u8, pack_file_path);
                     errdefer allocator.free(pack_file_path_copy);
 
-                    const start_position = try pack_file.getPos();
+                    const start_position = file_reader.logicalPos();
+
+                    // make the underlying file's seek pos the same as the reader's
+                    try pack_file.seekTo(start_position);
 
                     var stream = try PackObjectStream.initFile(repo_opts.buffer_size, allocator, pack_file, start_position);
                     errdefer stream.deinit();
@@ -554,9 +563,12 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     };
                 },
                 .ref_delta => {
-                    const base_oid = try reader.readBytesNoEof(hash.byteLen(repo_opts.hash));
+                    const base_oid = try reader.takeArray(hash.byteLen(repo_opts.hash));
 
-                    const start_position = try pack_file.getPos();
+                    const start_position = file_reader.logicalPos();
+
+                    // make the underlying file's seek pos the same as the reader's
+                    try pack_file.seekTo(start_position);
 
                     var stream = try PackObjectStream.initFile(repo_opts.buffer_size, allocator, pack_file, start_position);
                     errdefer stream.deinit();
