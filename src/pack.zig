@@ -2,11 +2,6 @@ const std = @import("std");
 const hash = @import("./hash.zig");
 const rp = @import("./repo.zig");
 const obj = @import("./object.zig");
-const zlib = @import("./std/zlib.zig");
-const flate = @import("./std/flate.zig");
-const Io = @import("./std/Io.zig");
-const GenericReader = Io.GenericReader;
-const GenericWriter = Io.GenericWriter;
 
 pub fn PackObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return struct {
