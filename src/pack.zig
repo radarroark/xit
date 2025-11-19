@@ -193,8 +193,8 @@ const PackObjectStream = union(enum) {
         end_position: u64,
     },
 
-    pub fn initFile(allocator: std.mem.Allocator, pack_file: std.fs.File, start_position: u64) !PackObjectStream {
-        const reader_buffer = try allocator.alloc(u8, 1024);
+    pub fn initFile(comptime buffer_size: usize, allocator: std.mem.Allocator, pack_file: std.fs.File, start_position: u64) !PackObjectStream {
+        const reader_buffer = try allocator.alloc(u8, buffer_size);
         errdefer allocator.free(reader_buffer);
 
         const reader = try allocator.create(std.fs.File.Reader);
@@ -485,7 +485,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                 inline .commit, .tree, .blob, .tag => |pack_obj_kind| {
                     const start_position = try pack_file.getPos();
 
-                    var stream = try PackObjectStream.initFile(allocator, pack_file, start_position);
+                    var stream = try PackObjectStream.initFile(repo_opts.buffer_size, allocator, pack_file, start_position);
                     errdefer stream.deinit();
                     if (size <= max_buffer_size) {
                         try stream.convertToBuffer(allocator, size);
@@ -533,7 +533,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
 
                     const start_position = try pack_file.getPos();
 
-                    var stream = try PackObjectStream.initFile(allocator, pack_file, start_position);
+                    var stream = try PackObjectStream.initFile(repo_opts.buffer_size, allocator, pack_file, start_position);
                     errdefer stream.deinit();
 
                     return .{
@@ -558,7 +558,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
 
                     const start_position = try pack_file.getPos();
 
-                    var stream = try PackObjectStream.initFile(allocator, pack_file, start_position);
+                    var stream = try PackObjectStream.initFile(repo_opts.buffer_size, allocator, pack_file, start_position);
                     errdefer stream.deinit();
 
                     return .{
