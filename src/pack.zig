@@ -1064,13 +1064,14 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
         allocator: std.mem.Allocator,
         objects: std.ArrayList(obj.Object(repo_kind, repo_opts, .raw)),
         object_index: usize,
-        out_bytes: std.ArrayList(u8),
+        out_bytes: std.Io.Writer.Allocating,
         out_index: usize,
+        stream_buffer: [std.compress.flate.max_window_len]u8,
         hasher: hash.Hasher(repo_opts.hash),
         mode: union(enum) {
             header,
             object: struct {
-                stream: ?flate.deflate.Compressor(.zlib, Io.DeprecatedArrayListWriter),
+                stream: ?std.compress.flate.Compress,
             },
             footer,
             finished,
@@ -1081,8 +1082,9 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                 .allocator = allocator,
                 .objects = std.ArrayList(obj.Object(repo_kind, repo_opts, .raw)){},
                 .object_index = 0,
-                .out_bytes = std.ArrayList(u8){},
+                .out_bytes = try .initCapacity(allocator, repo_opts.buffer_size),
                 .out_index = 0,
+                .stream_buffer = [_]u8{0} ** std.compress.flate.max_window_len,
                 .hasher = hash.Hasher(repo_opts.hash).init(),
                 .mode = .header,
             };
@@ -1097,10 +1099,9 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                 return null;
             }
 
-            const writer = Io.deprecatedArrayListWriter(&self.out_bytes, allocator);
-            _ = try writer.write("PACK");
-            try writer.writeInt(u32, 2, .big); // version
-            try writer.writeInt(u32, @intCast(self.objects.items.len), .big);
+            _ = try self.out_bytes.writer.write("PACK");
+            try self.out_bytes.writer.writeInt(u32, 2, .big); // version
+            try self.out_bytes.writer.writeInt(u32, @intCast(self.objects.items.len), .big);
 
             try self.writeObjectHeader();
 
@@ -1112,7 +1113,7 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                 object.deinit();
             }
             self.objects.deinit(self.allocator);
-            self.out_bytes.deinit(self.allocator);
+            self.out_bytes.deinit();
         }
 
         pub fn read(self: *PackObjectWriter(repo_kind, repo_opts), buffer: []u8) !usize {
@@ -1126,15 +1127,16 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
         fn readStep(self: *PackObjectWriter(repo_kind, repo_opts), buffer: []u8) !usize {
             switch (self.mode) {
                 .header => {
-                    const size = @min(self.out_bytes.items.len - self.out_index, buffer.len);
-                    @memcpy(buffer[0..size], self.out_bytes.items[self.out_index .. self.out_index + size]);
+                    const size = @min(self.out_bytes.written().len - self.out_index, buffer.len);
+                    @memcpy(buffer[0..size], self.out_bytes.written()[self.out_index .. self.out_index + size]);
                     self.hasher.update(buffer[0..size]);
                     if (size < buffer.len) {
-                        self.out_bytes.clearAndFree(self.allocator);
+                        self.out_bytes.deinit();
+                        self.out_bytes = try .initCapacity(self.allocator, repo_opts.buffer_size);
                         self.out_index = 0;
                         self.mode = .{
                             .object = .{
-                                .stream = try zlib.compressor(Io.deprecatedArrayListWriter(&self.out_bytes, self.allocator), .{ .level = .default }),
+                                .stream = try .init(&self.out_bytes.writer, &self.stream_buffer, .zlib, .default),
                             },
                         };
                     } else {
@@ -1143,15 +1145,16 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     return size;
                 },
                 .object => |*o| {
-                    if (self.out_index < self.out_bytes.items.len) {
-                        const size = @min(self.out_bytes.items.len - self.out_index, buffer.len);
-                        @memcpy(buffer[0..size], self.out_bytes.items[self.out_index .. self.out_index + size]);
+                    if (self.out_index < self.out_bytes.written().len) {
+                        const size = @min(self.out_bytes.written().len - self.out_index, buffer.len);
+                        @memcpy(buffer[0..size], self.out_bytes.written()[self.out_index .. self.out_index + size]);
                         self.hasher.update(buffer[0..size]);
                         self.out_index += size;
                         return size;
                     } else {
                         // everything in out_bytes has been written, so we can clear it
-                        self.out_bytes.clearAndFree(self.allocator);
+                        self.out_bytes.deinit();
+                        self.out_bytes = try .initCapacity(self.allocator, repo_opts.buffer_size);
                         self.out_index = 0;
 
                         if (o.stream) |*stream| {
@@ -1162,14 +1165,14 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                             if (uncompressed_size > 0) {
                                 // write to out_bytes and return so we can read it next
                                 // time this fn is called
-                                _ = try stream.write(temp_buffer[0..uncompressed_size]);
+                                _ = try stream.writer.write(temp_buffer[0..uncompressed_size]);
                                 return 0;
                             } else {
-                                try stream.finish();
+                                try stream.writer.flush();
                                 o.stream = null;
                                 // if finish() added more data to out_bytes,
                                 // return so we can read it next time this fn is called
-                                if (self.out_index < self.out_bytes.items.len) {
+                                if (self.out_index < self.out_bytes.written().len) {
                                     return 0;
                                 }
                             }
@@ -1184,16 +1187,17 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                             self.mode = .footer;
                             var hash_buffer = [_]u8{0} ** hash.byteLen(repo_opts.hash);
                             self.hasher.final(&hash_buffer);
-                            try self.out_bytes.appendSlice(self.allocator, &hash_buffer);
+                            try self.out_bytes.writer.writeAll(&hash_buffer);
                         }
                         return 0;
                     }
                 },
                 .footer => {
-                    const size = @min(self.out_bytes.items.len - self.out_index, buffer.len);
-                    @memcpy(buffer[0..size], self.out_bytes.items[self.out_index .. self.out_index + size]);
+                    const size = @min(self.out_bytes.written().len - self.out_index, buffer.len);
+                    @memcpy(buffer[0..size], self.out_bytes.written()[self.out_index .. self.out_index + size]);
                     if (size < buffer.len) {
-                        self.out_bytes.clearAndFree(self.allocator);
+                        self.out_bytes.deinit();
+                        self.out_bytes = try .initCapacity(self.allocator, repo_opts.buffer_size);
                         self.out_index = 0;
                         self.mode = .finished;
                     } else {
@@ -1225,8 +1229,7 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                 .extra = first_size_parts.high_bits > 0,
             };
 
-            const writer = Io.deprecatedArrayListWriter(&self.out_bytes, self.allocator);
-            try writer.writeByte(@bitCast(obj_header));
+            try self.out_bytes.writer.writeByte(@bitCast(obj_header));
 
             // set size of object (little endian variable length format)
             var next_size = first_size_parts.high_bits;
@@ -1242,7 +1245,7 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     .value = size_parts.low_bits,
                     .extra = size_parts.high_bits > 0,
                 };
-                try writer.writeByte(@bitCast(next_byte));
+                try self.out_bytes.writer.writeByte(@bitCast(next_byte));
                 next_size = size_parts.high_bits;
             }
         }
