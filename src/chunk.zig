@@ -507,8 +507,6 @@ pub fn readChunk(
     }
 }
 
-const ZlibStream = flate.inflate.Decompressor(.zlib, Io.DeprecatedFileReader);
-
 pub fn ChunkObjectReader(comptime repo_opts: rp.RepoOpts(.xit)) type {
     return struct {
         repo_dir: std.fs.Dir,
@@ -516,8 +514,6 @@ pub fn ChunkObjectReader(comptime repo_opts: rp.RepoOpts(.xit)) type {
         chunk_info_reader: rp.Repo(.xit, repo_opts).DB.Cursor(.read_only).Reader,
         position: u64,
         header: obj.ObjectHeader,
-
-        pub const Error = ZlibStream.Reader.Error || std.fs.File.OpenError || std.Io.AnyReader.Error || error{ InvalidOffset, InvalidEnumTag, WrongChunkChecksum };
 
         pub fn init(allocator: std.mem.Allocator, state: rp.Repo(.xit, repo_opts).State(.read_only), oid: *const [hash.hexLen(repo_opts.hash)]u8) !ChunkObjectReader(repo_opts) {
             // chunk info map
