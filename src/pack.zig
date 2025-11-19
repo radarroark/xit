@@ -93,11 +93,6 @@ fn PackOrChunkObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: 
             .xit => @import("./chunk.zig").ChunkObjectReader(repo_opts),
         };
 
-        const Error = switch (repo_kind) {
-            .git => error{},
-            .xit => ChunkObjectReader.Error,
-        };
-
         pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
             switch (self.*) {
                 .pack => |*pack| pack.deinit(allocator),
@@ -197,8 +192,6 @@ const PackObjectStream = union(enum) {
         interface: std.Io.Reader,
         end_position: u64,
     },
-
-    pub const Error = ZlibStream.Reader.Error;
 
     pub fn deinit(self: *PackObjectStream) void {
         switch (self.*) {
@@ -327,8 +320,6 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
 
         // objects larger than this (in bytes) will not be read entirely into memory
         const max_buffer_size = 50_000_000;
-
-        pub const Error = PackObjectStream.Error || PackOrChunkObjectReader(repo_kind, repo_opts).Error || error{ Unseekable, UnexpectedEndOfStream, InvalidDeltaCache };
 
         pub fn init(
             allocator: std.mem.Allocator,
@@ -953,8 +944,6 @@ pub fn LooseOrPackObjectReader(comptime repo_opts: rp.RepoOpts(.git)) type {
             header: obj.ObjectHeader,
         },
         pack: PackObjectReader(.git, repo_opts),
-
-        pub const Error = PackObjectReader(.git, repo_opts).Error;
 
         pub fn init(
             allocator: std.mem.Allocator,
