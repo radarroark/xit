@@ -3,9 +3,6 @@ const hash = @import("./hash.zig");
 const rp = @import("./repo.zig");
 const fs = @import("./fs.zig");
 const obj = @import("./object.zig");
-const zlib = @import("./std/zlib.zig");
-const flate = @import("./std/flate.zig");
-const Io = @import("./std/Io.zig");
 
 // reordering is a breaking change
 const CompressKind = enum(u8) {
