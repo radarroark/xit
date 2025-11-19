@@ -3,9 +3,6 @@ const hash = @import("./hash.zig");
 const rp = @import("./repo.zig");
 const fs = @import("./fs.zig");
 const obj = @import("./object.zig");
-const zlib = @import("./std/zlib.zig");
-const flate = @import("./std/flate.zig");
-const Io = @import("./std/Io.zig");
 
 // reordering is a breaking change
 const CompressKind = enum(u8) {
@@ -500,12 +497,10 @@ pub fn readChunk(
             return read_size;
         },
         .zlib => {
-            var zlib_stream = zlib.decompressor(Io.adaptToOldInterface(&chunk_reader.interface));
-            try zlib_stream.reader().skipBytes(chunk_offset, .{});
-            return zlib_stream.reader().read(buf) catch |err| switch (err) {
-                error.WrongZlibChecksum => error.WrongChunkChecksum,
-                else => |e| e,
-            };
+            var zlib_stream_buffer = [_]u8{0} ** std.compress.flate.max_window_len;
+            var zlib_stream: std.compress.flate.Decompress = .init(&chunk_reader.interface, .zlib, &zlib_stream_buffer);
+            _ = try zlib_stream.reader.take(chunk_offset);
+            return try zlib_stream.reader.readSliceShort(buf);
         },
     }
 }
