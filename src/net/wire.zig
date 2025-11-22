@@ -152,7 +152,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         is_stateless: bool,
         have_refs: bool,
         connected: bool,
-        buffer: Buffer(repo_kind, repo_opts),
+        buffer: *Buffer(repo_kind, repo_opts),
         opts: net_transport.Opts(repo_opts.ProgressCtx),
 
         pub fn init(
@@ -170,6 +170,10 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             };
             errdefer wire_state.deinit();
 
+            var buffer = try allocator.create(Buffer(repo_kind, repo_opts));
+            errdefer allocator.destroy(buffer);
+            buffer.len = 0;
+
             return .{
                 .wire_state = wire_state,
                 .wire_stream = null,
@@ -186,10 +190,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                 },
                 .have_refs = false,
                 .connected = false,
-                .buffer = .{
-                    .len = 0,
-                    .data = [_]u8{0} ** repo_opts.net_read_size,
-                },
+                .buffer = buffer,
                 .opts = opts,
             };
         }
@@ -208,6 +209,8 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             self.refs.deinit(allocator);
 
             self.common.deinit(allocator);
+
+            allocator.destroy(self.buffer);
         }
 
         pub fn connect(
