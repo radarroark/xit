@@ -104,7 +104,7 @@ pub const HttpStream = struct {
     ) !usize {
         switch (self.service.method) {
             .GET => return if (self.wire_state.read_request) |*req|
-                try readAny(req.reader.in, buffer[0..len]) orelse {
+                try readAny(&req.reader.interface, buffer[0..len]) orelse {
                     req.deinit();
                     self.wire_state.read_request = null;
                     return 0;
@@ -195,7 +195,7 @@ pub const HttpStream = struct {
         req: *std.http.Client.Request,
         buffer: []u8,
     ) !?usize {
-        var reader = req.reader.in;
+        var reader = &req.reader.interface;
 
         if (!self.wire_state.sent_write_request) {
             var body_writer = self.wire_state.body_writer orelse return error.BodyWriterNotFound;
