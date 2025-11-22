@@ -67,6 +67,28 @@ test "xit clone" {
     try testClone(.xit, .{ .is_test = true }, .file, 0, allocator);
 }
 
+test "git fetch large" {
+    const allocator = std.testing.allocator;
+    try testFetchLarge(.git, .{ .is_test = true }, .{ .wire = .http }, 3019, allocator);
+    if (true) return; // skip the rest for now because they're slow
+    if (.windows != builtin.os.tag) {
+        try testFetchLarge(.git, .{ .is_test = true }, .{ .wire = .raw }, 3020, allocator);
+        try testFetchLarge(.git, .{ .is_test = true }, .{ .wire = .ssh }, 3021, allocator);
+    }
+    try testFetchLarge(.git, .{ .is_test = true }, .file, 0, allocator);
+}
+
+test "git push large" {
+    const allocator = std.testing.allocator;
+    try testPushLarge(.git, .{ .is_test = true }, .{ .wire = .http }, 3022, allocator);
+    if (true) return; // skip the rest for now because they're slow
+    if (.windows != builtin.os.tag) {
+        try testPushLarge(.git, .{ .is_test = true }, .{ .wire = .raw }, 3023, allocator);
+        try testPushLarge(.git, .{ .is_test = true }, .{ .wire = .ssh }, 3024, allocator);
+    }
+    try testPushLarge(.git, .{ .is_test = true }, .file, 0, allocator);
+}
+
 fn Server(comptime transport_def: net.TransportDefinition) type {
     return struct {
         core: Core,
@@ -976,4 +998,295 @@ fn testClone(
     var current_branch_buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
     const head = try client_repo.head(&current_branch_buffer);
     try std.testing.expectEqualStrings("main", head.ref.name);
+}
+
+fn testFetchLarge(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    comptime transport_def: net.TransportDefinition,
+    comptime port: u16,
+    allocator: std.mem.Allocator,
+) !void {
+    const temp_dir_name = "temp-testnet-fetch-large";
+
+    // create the temp dir
+    const cwd = std.fs.cwd();
+    var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
+    if (temp_dir_or_err) |*temp_dir| {
+        temp_dir.close();
+        try cwd.deleteTree(temp_dir_name);
+    } else |_| {}
+    var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
+    defer cwd.deleteTree(temp_dir_name) catch {};
+    defer temp_dir.close();
+
+    // init server
+    var server = try Server(transport_def).init(allocator, temp_dir_name, port);
+    try server.start();
+    defer server.stop();
+
+    // create the server dir
+    var server_dir = try temp_dir.makeOpenPath("server", .{});
+    defer server_dir.close();
+
+    // init server repo
+    var server_repo = try rp.Repo(.git, .{ .is_test = true }).init(allocator, .{ .cwd = server_dir }, ".");
+    defer server_repo.deinit();
+
+    // copy files from current repo into server dir
+    for (&[_][]const u8{ "src", "docs" }) |dir_name| {
+        var src_repo_dir = try cwd.openDir(dir_name, .{ .iterate = true });
+        defer src_repo_dir.close();
+
+        var dest_repo_dir = try server_dir.makeOpenPath(dir_name, .{});
+        defer dest_repo_dir.close();
+
+        try copyDir(src_repo_dir, dest_repo_dir);
+
+        try server_repo.add(allocator, &.{dir_name});
+    }
+
+    // make a commit
+    const commit1 = try server_repo.commit(allocator, .{ .message = "let there be light" });
+
+    // export server repo
+    {
+        const export_file = try server_repo.core.repo_dir.createFile("git-daemon-export-ok", .{});
+        defer export_file.close();
+    }
+
+    // create the client dir
+    var client_dir = try temp_dir.makeOpenPath("client", .{});
+    defer client_dir.close();
+
+    // init client repo
+    var client_repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = client_dir }, ".");
+    defer client_repo.deinit();
+
+    // add remote
+    {
+        // get repo path
+        var repo_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
+        const repo_path = try server_dir.realpath(".", &repo_path_buffer);
+
+        if (.windows == builtin.os.tag) {
+            std.mem.replaceScalar(u8, repo_path, '\\', '/');
+        }
+        const separator = if (repo_path[0] == '/') "" else "/";
+
+        const remote_url = switch (transport_def) {
+            //.file => try std.fmt.allocPrint(allocator, "file://{s}{s}", .{ separator, repo_path }),
+            .file => try std.fmt.allocPrint(allocator, "../server", .{}), // relative file paths work too
+            .wire => |wire_kind| switch (wire_kind) {
+                .http => try std.fmt.allocPrint(allocator, "http://localhost:{}/server", .{port}),
+                .raw => try std.fmt.allocPrint(allocator, "git://localhost:{}/server", .{port}),
+                .ssh => try std.fmt.allocPrint(allocator, "ssh://localhost:{}{s}{s}", .{ port, separator, repo_path }),
+            },
+        };
+        defer allocator.free(remote_url);
+
+        try client_repo.addRemote(allocator, .{ .name = "origin", .value = remote_url });
+        try client_repo.addConfig(allocator, .{ .name = "branch.master.remote", .value = "origin" });
+    }
+
+    const refspecs = &.{
+        "+refs/heads/master:refs/heads/master",
+    };
+
+    const is_ssh = switch (transport_def) {
+        .file => false,
+        .wire => |wire_kind| .ssh == wire_kind,
+    };
+    const ssh_cmd_maybe: ?[]const u8 = if (is_ssh) blk: {
+        var known_hosts_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
+        const known_hosts_path = try std.fs.cwd().realpath(temp_dir_name ++ "/known_hosts", &known_hosts_path_buffer);
+
+        var priv_key_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
+        const priv_key_path = try std.fs.cwd().realpath(temp_dir_name ++ "/key", &priv_key_path_buffer);
+
+        break :blk try std.fmt.allocPrint(allocator, "ssh -o UserKnownHostsFile=\"{s}\" -o IdentityFile=\"{s}\"", .{ known_hosts_path, priv_key_path });
+    } else null;
+    defer if (ssh_cmd_maybe) |ssh_cmd| allocator.free(ssh_cmd);
+
+    client_repo.fetch(
+        allocator,
+        "origin",
+        .{ .refspecs = refspecs, .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
+    ) catch |err| {
+        if (false) {
+            var stdout = std.ArrayList(u8){};
+            defer stdout.deinit(allocator);
+            var stderr = std.ArrayList(u8){};
+            defer stderr.deinit(allocator);
+            try server.core.process.collectOutput(allocator, &stdout, &stderr, 1024 * 1024);
+            if (stdout.items.len > 0) std.debug.print("server output:\n{s}\n", .{stdout.items});
+            if (stderr.items.len > 0) std.debug.print("server error:\n{s}\n", .{stderr.items});
+        }
+        return err;
+    };
+
+    // update the working dir
+    try client_repo.restore(allocator, ".");
+
+    // make sure fetch was successful
+    {
+        const oid_master = (try client_repo.readRef(.{ .kind = .head, .name = "master" })).?;
+        try std.testing.expectEqualStrings(&commit1, &oid_master);
+    }
+}
+
+fn testPushLarge(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    comptime transport_def: net.TransportDefinition,
+    comptime port: u16,
+    allocator: std.mem.Allocator,
+) !void {
+    const temp_dir_name = "temp-testnet-push-large";
+
+    // create the temp dir
+    const cwd = std.fs.cwd();
+    var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
+    if (temp_dir_or_err) |*temp_dir| {
+        temp_dir.close();
+        try cwd.deleteTree(temp_dir_name);
+    } else |_| {}
+    var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
+    defer cwd.deleteTree(temp_dir_name) catch {};
+    defer temp_dir.close();
+
+    // init server
+    var server = try Server(transport_def).init(allocator, temp_dir_name, port);
+    try server.start();
+    defer server.stop();
+
+    // create the server dir
+    var server_dir = try temp_dir.makeOpenPath("server", .{});
+    defer server_dir.close();
+
+    // init server repo
+    var server_repo = try rp.Repo(.git, .{ .is_test = true }).init(allocator, .{ .cwd = server_dir }, ".");
+    defer server_repo.deinit();
+    switch (transport_def) {
+        .file => try server_repo.addConfig(allocator, .{ .name = "core.bare", .value = "true" }),
+        .wire => {
+            try server_repo.addConfig(allocator, .{ .name = "core.bare", .value = "false" });
+            try server_repo.addConfig(allocator, .{ .name = "receive.denycurrentbranch", .value = "updateinstead" });
+        },
+    }
+    try server_repo.addConfig(allocator, .{ .name = "http.receivepack", .value = "true" });
+
+    // export server repo
+    {
+        const export_file = try server_repo.core.repo_dir.createFile("git-daemon-export-ok", .{});
+        defer export_file.close();
+    }
+
+    // create the client dir
+    var client_dir = try temp_dir.makeOpenPath("client", .{});
+    defer client_dir.close();
+
+    // init client repo
+    var client_repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = client_dir }, ".");
+    defer client_repo.deinit();
+
+    // copy files from current repo into client dir
+    for (&[_][]const u8{ "src", "docs" }) |dir_name| {
+        var src_repo_dir = try cwd.openDir(dir_name, .{ .iterate = true });
+        defer src_repo_dir.close();
+
+        var dest_repo_dir = try client_dir.makeOpenPath(dir_name, .{});
+        defer dest_repo_dir.close();
+
+        try copyDir(src_repo_dir, dest_repo_dir);
+
+        try client_repo.add(allocator, &.{dir_name});
+    }
+
+    // make a commit
+    const commit1 = try client_repo.commit(allocator, .{ .message = "let there be light" });
+
+    // add remote
+    {
+        // get repo path
+        var repo_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
+        const repo_path = try server_dir.realpath(".", &repo_path_buffer);
+
+        if (.windows == builtin.os.tag) {
+            std.mem.replaceScalar(u8, repo_path, '\\', '/');
+        }
+        const separator = if (repo_path[0] == '/') "" else "/";
+
+        const remote_url = switch (transport_def) {
+            //.file => try std.fmt.allocPrint(allocator, "file://{s}{s}", .{ separator, repo_path }),
+            .file => try std.fmt.allocPrint(allocator, "../server", .{}), // relative file paths work too
+            .wire => |wire_kind| switch (wire_kind) {
+                .http => try std.fmt.allocPrint(allocator, "http://localhost:{}/server", .{port}),
+                .raw => try std.fmt.allocPrint(allocator, "git://localhost:{}/server", .{port}),
+                .ssh => try std.fmt.allocPrint(allocator, "ssh://localhost:{}{s}{s}", .{ port, separator, repo_path }),
+            },
+        };
+        defer allocator.free(remote_url);
+
+        try client_repo.addRemote(allocator, .{ .name = "origin", .value = remote_url });
+        try client_repo.addConfig(allocator, .{ .name = "branch.master.remote", .value = "origin" });
+    }
+
+    const is_ssh = switch (transport_def) {
+        .file => false,
+        .wire => |wire_kind| .ssh == wire_kind,
+    };
+    const ssh_cmd_maybe: ?[]const u8 = if (is_ssh) blk: {
+        var known_hosts_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
+        const known_hosts_path = try std.fs.cwd().realpath(temp_dir_name ++ "/known_hosts", &known_hosts_path_buffer);
+
+        var priv_key_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
+        const priv_key_path = try std.fs.cwd().realpath(temp_dir_name ++ "/key", &priv_key_path_buffer);
+
+        break :blk try std.fmt.allocPrint(allocator, "ssh -o UserKnownHostsFile=\"{s}\" -o IdentityFile=\"{s}\"", .{ known_hosts_path, priv_key_path });
+    } else null;
+    defer if (ssh_cmd_maybe) |ssh_cmd| allocator.free(ssh_cmd);
+
+    client_repo.push(
+        allocator,
+        "origin",
+        "master",
+        false,
+        .{ .refspecs = &.{}, .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
+    ) catch |err| {
+        if (false) {
+            var stdout = std.ArrayList(u8){};
+            defer stdout.deinit(allocator);
+            var stderr = std.ArrayList(u8){};
+            defer stderr.deinit(allocator);
+            try server.core.process.collectOutput(allocator, &stdout, &stderr, 1024 * 1024);
+            if (stdout.items.len > 0) std.debug.print("server output:\n{s}\n", .{stdout.items});
+            if (stderr.items.len > 0) std.debug.print("server error:\n{s}\n", .{stderr.items});
+        }
+        return err;
+    };
+
+    // make sure push was successful
+    {
+        const oid_master = (try server_repo.readRef(.{ .kind = .head, .name = "master" })).?;
+        try std.testing.expectEqualStrings(&commit1, &oid_master);
+    }
+}
+
+fn copyDir(src_dir: std.fs.Dir, dest_dir: std.fs.Dir) !void {
+    var iter = src_dir.iterate();
+    while (try iter.next()) |entry| {
+        switch (entry.kind) {
+            .file => try src_dir.copyFile(entry.name, dest_dir, entry.name, .{}),
+            .directory => {
+                try dest_dir.makeDir(entry.name);
+                var dest_entry_dir = try dest_dir.openDir(entry.name, .{ .access_sub_paths = true, .iterate = true, .no_follow = true });
+                defer dest_entry_dir.close();
+                var src_entry_dir = try src_dir.openDir(entry.name, .{ .access_sub_paths = true, .iterate = true, .no_follow = true });
+                defer src_entry_dir.close();
+                try copyDir(src_entry_dir, dest_entry_dir);
+            },
+            else => {},
+        }
+    }
 }
