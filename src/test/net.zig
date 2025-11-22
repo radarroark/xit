@@ -349,7 +349,7 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
                                         defer stdout.deinit(core.allocator);
                                         var stderr = std.ArrayList(u8){};
                                         defer stderr.deinit(core.allocator);
-                                        try process.collectOutput(core.allocator, &stdout, &stderr, 1024 * 1024);
+                                        try process.collectOutput(core.allocator, &stdout, &stderr, 20 * 1024 * 1024);
 
                                         _ = try process.wait();
 
@@ -358,7 +358,10 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
                                             try http_server.out.writeAll("HTTP/1.1 500 Internal Server Error\r\n\r\n");
                                         } else {
                                             try http_server.out.writeAll("HTTP/1.1 200 OK\r\n");
-                                            try http_server.out.writeAll(stdout.items);
+                                            const content_index = std.mem.indexOf(u8, stdout.items, "\r\n\r\n") orelse unreachable;
+                                            try http_server.out.writeAll(stdout.items[0 .. content_index + 2]);
+                                            try http_server.out.print("Content-Length: {}\r\n", .{stdout.items.len - (content_index + 4)});
+                                            try http_server.out.writeAll(stdout.items[content_index + 2 ..]);
                                         }
                                         try http_server.out.flush();
 
