@@ -157,6 +157,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
 
         pub fn init(
             state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+            io: std.Io,
             allocator: std.mem.Allocator,
             wire_kind: WireKind,
             opts: net_transport.Opts(repo_opts.ProgressCtx),
@@ -164,9 +165,9 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             const wire_state = try allocator.create(WireState);
             errdefer allocator.destroy(wire_state);
             wire_state.* = switch (wire_kind) {
-                .http => .{ .http = try net_http.HttpState.init(allocator) },
+                .http => .{ .http = try net_http.HttpState.init(io, allocator) },
                 .raw => .{ .raw = net_raw.RawState.init() },
-                .ssh => .{ .ssh = try net_ssh.SshState.init(repo_kind, repo_opts, state, allocator, opts.wire.ssh) },
+                .ssh => .{ .ssh = try net_ssh.SshState.init(repo_kind, repo_opts, state, io, allocator, opts.wire.ssh) },
             };
             errdefer wire_state.deinit();
 
@@ -378,6 +379,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         pub fn negotiateFetch(
             self: *WireTransport(repo_kind, repo_opts),
             state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+            io: std.Io,
             allocator: std.mem.Allocator,
             fetch_data: *const net_fetch.FetchNegotiation(repo_kind, repo_opts),
         ) !void {
@@ -388,7 +390,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
 
             try net_pkt.bufferWants(repo_kind, repo_opts, allocator, fetch_data, &self.caps, &buffer);
 
-            var obj_iter = try obj.ObjectIterator(repo_kind, repo_opts, .raw).init(allocator, state, .{ .kind = .all });
+            var obj_iter = try obj.ObjectIterator(repo_kind, repo_opts, .raw).init(state, io, allocator, .{ .kind = .all });
             defer obj_iter.deinit();
 
             {
@@ -396,7 +398,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                 defer tags.deinit();
 
                 for (tags.refs.values()) |ref| {
-                    if (try rf.readRecur(repo_kind, repo_opts, state, .{ .ref = ref })) |*oid| {
+                    if (try rf.readRecur(repo_kind, repo_opts, state, io, .{ .ref = ref })) |*oid| {
                         try obj_iter.include(oid);
                     }
                 }
@@ -405,7 +407,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                 defer heads.deinit();
 
                 for (heads.refs.values()) |ref| {
-                    if (try rf.readRecur(repo_kind, repo_opts, state, .{ .ref = ref })) |*oid| {
+                    if (try rf.readRecur(repo_kind, repo_opts, state, io, .{ .ref = ref })) |*oid| {
                         try obj_iter.include(oid);
                     }
                 }
@@ -539,6 +541,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         pub fn downloadPack(
             self: *WireTransport(repo_kind, repo_opts),
             state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+            io: std.Io,
             allocator: std.mem.Allocator,
         ) !void {
             const temp_pack_name = "temp.pack";
@@ -572,9 +575,9 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             // iterate over pack file
             {
                 defer state.core.repo_dir.deleteFile(temp_pack_name) catch {};
-                var pack_iter = try pack.PackObjectIterator(repo_kind, repo_opts).init(allocator, state.core.repo_dir, temp_pack_name);
+                var pack_iter = try pack.PackObjectIterator(repo_kind, repo_opts).init(io, allocator, state.core.repo_dir, temp_pack_name);
                 defer pack_iter.deinit();
-                try obj.copyFromPackObjectIterator(repo_kind, repo_opts, state, allocator, &pack_iter, self.opts.progress_ctx);
+                try obj.copyFromPackObjectIterator(repo_kind, repo_opts, state, io, allocator, &pack_iter, self.opts.progress_ctx);
             }
         }
 

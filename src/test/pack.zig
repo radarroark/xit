@@ -11,6 +11,7 @@ const c = @cImport({
 });
 
 test "pack" {
+    const io = std.testing.io;
     const allocator = std.testing.allocator;
     const temp_dir_name = "temp-test-pack";
     const repo_opts = rp.RepoOpts(.git){ .is_test = true };
@@ -203,22 +204,22 @@ test "pack" {
         var commit_oid_hex = [_]u8{0} ** hash.hexLen(repo_opts.hash);
         try std.testing.expectEqual(0, c.git_oid_fmt(@ptrCast(&commit_oid_hex), commit_oid));
 
-        var r = try rp.Repo(.git, repo_opts).open(allocator, .{ .path = work_path });
+        var r = try rp.Repo(.git, repo_opts).open(io, allocator, .{ .path = work_path });
         defer r.deinit(allocator);
 
-        var commit_object = try obj.Object(.git, repo_opts, .full).init(allocator, .{ .core = &r.core, .extra = .{} }, &commit_oid_hex);
+        var commit_object = try obj.Object(.git, repo_opts, .full).init(.{ .core = &r.core, .extra = .{} }, io, allocator, &commit_oid_hex);
         defer commit_object.deinit();
         try std.testing.expectEqualStrings(expected_message, commit_object.content.commit.metadata.message.?);
     }
 
     // write and read a pack object
     {
-        var r = try rp.Repo(.git, repo_opts).open(allocator, .{ .path = work_path });
+        var r = try rp.Repo(.git, repo_opts).open(io, allocator, .{ .path = work_path });
         defer r.deinit(allocator);
 
-        const head_oid = try rf.readHeadRecur(.git, repo_opts, .{ .core = &r.core, .extra = .{} });
+        const head_oid = try rf.readHeadRecur(.git, repo_opts, .{ .core = &r.core, .extra = .{} }, io);
 
-        var obj_iter = try obj.ObjectIterator(.git, repo_opts, .raw).init(allocator, .{ .core = &r.core, .extra = .{} }, .{ .kind = .all });
+        var obj_iter = try obj.ObjectIterator(.git, repo_opts, .raw).init(.{ .core = &r.core, .extra = .{} }, io, allocator, .{ .kind = .all });
         defer obj_iter.deinit();
         try obj_iter.include(&head_oid);
 
@@ -241,8 +242,8 @@ test "pack" {
             var commit_oid_hex = [_]u8{0} ** hash.hexLen(repo_opts.hash);
             try std.testing.expectEqual(0, c.git_oid_fmt(@ptrCast(&commit_oid_hex), commit_oid));
 
-            var pack_reader = try pack.PackObjectReader(.git, repo_opts).initWithPath(allocator, .{ .core = &r.core, .extra = .{} }, temp_dir, "test.pack", &commit_oid_hex);
-            defer pack_reader.deinit(allocator);
+            var pack_reader = try pack.PackObjectReader(.git, repo_opts).initWithPath(io, allocator, .{ .core = &r.core, .extra = .{} }, temp_dir, "test.pack", &commit_oid_hex);
+            defer pack_reader.deinit();
 
             // make sure the reader's position is at the beginning
             try std.testing.expectEqual(0, pack_reader.relative_position);
@@ -251,7 +252,7 @@ test "pack" {
 
     // read packed refs
     {
-        var r = try rp.Repo(.git, repo_opts).open(allocator, .{ .path = work_path });
+        var r = try rp.Repo(.git, repo_opts).open(io, allocator, .{ .path = work_path });
         defer r.deinit(allocator);
 
         var packed_refs = try repo_dir.createFile("packed-refs", .{});
@@ -264,9 +265,9 @@ test "pack" {
             \\1f6190c71bd33b37cfd885491889a0410f849f5b refs/remotes/sync/zig-0.14.0
         );
 
-        const oid_maybe = try r.readRef(.{ .kind = .{ .remote = "sync" }, .name = "master" });
+        const oid_maybe = try r.readRef(io, .{ .kind = .{ .remote = "sync" }, .name = "master" });
         try std.testing.expectEqualStrings("5246e54744f4e1824ca280e6a2630a87959d7cf4", &oid_maybe.?);
 
-        try std.testing.expect(null == try r.readRef(.{ .kind = .{ .remote = "sync" }, .name = "foo" }));
+        try std.testing.expect(null == try r.readRef(io, .{ .kind = .{ .remote = "sync" }, .name = "foo" }));
     }
 }

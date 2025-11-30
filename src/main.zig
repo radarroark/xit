@@ -74,6 +74,7 @@ const ProgressCtx = struct {
 pub fn run(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
+    io: std.Io,
     allocator: std.mem.Allocator,
     args: []const []const u8,
     cwd_path: []const u8,
@@ -98,16 +99,16 @@ pub fn run(
         .help => |cmd_kind_maybe| try cmd.printHelp(cmd_kind_maybe, writers.out),
         .tui => |cmd_kind_maybe| if (.none == repo_opts.hash) {
             // if no hash was specified, use AnyRepo to detect the hash being used
-            var any_repo = try rp.AnyRepo(repo_kind, repo_opts).open(allocator, .{ .path = cwd_path });
+            var any_repo = try rp.AnyRepo(repo_kind, repo_opts).open(io, allocator, .{ .path = cwd_path });
             defer any_repo.deinit(allocator);
             switch (any_repo) {
                 .none => return error.HashKindNotFound,
-                inline else => |*repo| try ui.start(repo.self_repo_kind, repo.self_repo_opts, repo, allocator, cmd_kind_maybe),
+                inline else => |*repo| try ui.start(repo.self_repo_kind, repo.self_repo_opts, repo, io, allocator, cmd_kind_maybe),
             }
         } else {
-            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = cwd_path });
+            var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = cwd_path });
             defer repo.deinit(allocator);
-            try ui.start(repo_kind, repo_opts, &repo, allocator, cmd_kind_maybe);
+            try ui.start(repo_kind, repo_opts, &repo, io, allocator, cmd_kind_maybe);
         },
         .cli => |cli_cmd| switch (cli_cmd) {
             .init => |init_cmd| {
@@ -118,7 +119,7 @@ pub fn run(
                     repo_opts;
                 const work_path = try std.fs.path.resolve(allocator, &.{ cwd_path, init_cmd.dir });
                 defer allocator.free(work_path);
-                var repo = try rp.Repo(repo_kind, new_repo_opts).init(allocator, .{ .cwd_path = cwd_path, .path = work_path });
+                var repo = try rp.Repo(repo_kind, new_repo_opts).init(io, allocator, .{ .cwd_path = cwd_path, .path = work_path });
                 defer repo.deinit(allocator);
 
                 try writers.out.print(
@@ -136,6 +137,7 @@ pub fn run(
                 var clear_line = false;
                 var progress_node: ?std.Progress.Node = null;
                 var repo = try rp.Repo(repo_kind, repo_opts).clone(
+                    io,
                     allocator,
                     clone_cmd.url,
                     cwd_path,
@@ -154,19 +156,19 @@ pub fn run(
             },
             else => if (.none == repo_opts.hash) {
                 // if no hash was specified, use AnyRepo to detect the hash being used
-                var any_repo = try rp.AnyRepo(repo_kind, repo_opts).open(allocator, .{ .path = cwd_path });
+                var any_repo = try rp.AnyRepo(repo_kind, repo_opts).open(io, allocator, .{ .path = cwd_path });
                 defer any_repo.deinit(allocator);
                 switch (any_repo) {
                     .none => return error.HashKindNotFound,
                     inline else => |*repo| {
                         const cmd_maybe = try cmd.Command(repo.self_repo_kind, repo.self_repo_opts.hash).initMaybe(&cmd_args);
-                        try runCommand(repo.self_repo_kind, repo.self_repo_opts, repo, allocator, cmd_maybe orelse return error.InvalidCommand, writers);
+                        try runCommand(repo.self_repo_kind, repo.self_repo_opts, repo, io, allocator, cmd_maybe orelse return error.InvalidCommand, writers);
                     },
                 }
             } else {
-                var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = cwd_path });
+                var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = cwd_path });
                 defer repo.deinit(allocator);
-                try runCommand(repo_kind, repo_opts, &repo, allocator, cli_cmd, writers);
+                try runCommand(repo_kind, repo_opts, &repo, io, allocator, cli_cmd, writers);
             },
         },
     }
@@ -176,12 +178,13 @@ pub fn run(
 pub fn runPrint(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
+    io: std.Io,
     allocator: std.mem.Allocator,
     args: []const []const u8,
     cwd_path: []const u8,
     writers: Writers,
 ) !void {
-    run(repo_kind, repo_opts, allocator, args, cwd_path, writers) catch |err| switch (err) {
+    run(repo_kind, repo_opts, io, allocator, args, cwd_path, writers) catch |err| switch (err) {
         error.RepoNotFound => {
             try writers.err.print(
                 \\repo not found, dummy.
@@ -290,17 +293,18 @@ fn runCommand(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     repo: *rp.Repo(repo_kind, repo_opts),
+    io: std.Io,
     allocator: std.mem.Allocator,
     command: cmd.Command(repo_kind, repo_opts.hash),
     writers: Writers,
 ) !void {
     switch (command) {
         .init => {},
-        .add => |add_cmd| try repo.add(allocator, add_cmd.paths),
-        .unadd => |unadd_cmd| try repo.unadd(allocator, unadd_cmd.paths, unadd_cmd.opts),
-        .untrack => |untrack_cmd| try repo.untrack(allocator, untrack_cmd.paths, untrack_cmd.opts),
-        .rm => |rm_cmd| try repo.remove(allocator, rm_cmd.paths, rm_cmd.opts),
-        .commit => |commit_cmd| _ = try repo.commit(allocator, commit_cmd),
+        .add => |add_cmd| try repo.add(io, allocator, add_cmd.paths),
+        .unadd => |unadd_cmd| try repo.unadd(io, allocator, unadd_cmd.paths, unadd_cmd.opts),
+        .untrack => |untrack_cmd| try repo.untrack(io, allocator, untrack_cmd.paths, untrack_cmd.opts),
+        .rm => |rm_cmd| try repo.remove(io, allocator, rm_cmd.paths, rm_cmd.opts),
+        .commit => |commit_cmd| _ = try repo.commit(io, allocator, commit_cmd),
         .tag => |tag_cmd| switch (tag_cmd) {
             .list => {
                 var ref_list = try repo.listTags(allocator);
@@ -310,17 +314,17 @@ fn runCommand(
                     try writers.out.print("{s}\n", .{ref.name});
                 }
             },
-            .add => |add_tag| _ = try repo.addTag(allocator, add_tag),
+            .add => |add_tag| _ = try repo.addTag(io, allocator, add_tag),
             .remove => |rm_tag| try repo.removeTag(rm_tag),
         },
         .status => {
             var head_buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
-            switch (try repo.head(&head_buffer)) {
+            switch (try repo.head(io, &head_buffer)) {
                 .ref => |ref| try writers.out.print("on branch {s}\n\n", .{ref.name}),
                 .oid => |oid| try writers.out.print("HEAD detached at {s}\n\n", .{oid}),
             }
 
-            var stat = try repo.status(allocator);
+            var stat = try repo.status(io, allocator);
             defer stat.deinit(allocator);
 
             for (stat.untracked.values()) |entry| {
@@ -394,14 +398,14 @@ fn runCommand(
                 }
             };
             var diff_state: DiffState = switch (diff_cmd) {
-                .work_dir => .{ .work_dir = try repo.status(allocator) },
-                .index => .{ .index = try repo.status(allocator) },
+                .work_dir => .{ .work_dir = try repo.status(io, allocator) },
+                .index => .{ .index = try repo.status(io, allocator) },
                 .tree => |tree| .{
-                    .tree = try repo.treeDiff(allocator, if (tree.old) |old| &old else null, if (tree.new) |new| &new else null),
+                    .tree = try repo.treeDiff(io, allocator, if (tree.old) |old| &old else null, if (tree.new) |new| &new else null),
                 },
             };
             defer diff_state.deinit(allocator);
-            var diff_iter = try repo.filePairs(allocator, switch (diff_cmd) {
+            var diff_iter = try repo.filePairs(io, allocator, switch (diff_cmd) {
                 .work_dir => |work_dir| .{
                     .work_dir = .{
                         .conflict_diff_kind = work_dir.conflict_diff_kind,
@@ -461,7 +465,7 @@ fn runCommand(
             switch (branch_cmd) {
                 .list => {
                     var head_buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
-                    const current_branch_name = switch (try repo.head(&head_buffer)) {
+                    const current_branch_name = switch (try repo.head(io, &head_buffer)) {
                         .ref => |ref| ref.name,
                         .oid => "",
                     };
@@ -474,12 +478,12 @@ fn runCommand(
                         try writers.out.print("{s} {s}\n", .{ prefix, ref.name });
                     }
                 },
-                .add => |add_branch| try repo.addBranch(add_branch),
-                .remove => |rm_branch| try repo.removeBranch(rm_branch),
+                .add => |add_branch| try repo.addBranch(io, add_branch),
+                .remove => |rm_branch| try repo.removeBranch(io, rm_branch),
             }
         },
         .switch_dir, .reset, .reset_dir => |switch_dir_cmd| {
-            var switch_result = try repo.switchDir(allocator, switch_dir_cmd);
+            var switch_result = try repo.switchDir(io, allocator, switch_dir_cmd);
             defer switch_result.deinit();
             switch (switch_result.result) {
                 .success => {},
@@ -505,14 +509,14 @@ fn runCommand(
                 },
             }
         },
-        .reset_add => |reset_add_cmd| try repo.resetAdd(reset_add_cmd),
-        .restore => |restore_cmd| try repo.restore(allocator, restore_cmd.path),
+        .reset_add => |reset_add_cmd| try repo.resetAdd(io, reset_add_cmd),
+        .restore => |restore_cmd| try repo.restore(io, allocator, restore_cmd.path),
         .log => |heads| {
             var start_oids = try std.ArrayList([hash.hexLen(repo_opts.hash)]u8).initCapacity(allocator, heads.len);
             defer start_oids.deinit(allocator);
             for (heads) |ref_or_oid| {
                 const oid_maybe = switch (ref_or_oid) {
-                    .ref => |ref| try repo.readRef(ref),
+                    .ref => |ref| try repo.readRef(io, ref),
                     .oid => |oid| oid.*,
                 };
                 const oid = oid_maybe orelse {
@@ -526,7 +530,7 @@ fn runCommand(
                 start_oids.appendAssumeCapacity(oid);
             }
 
-            var commit_iter = try repo.log(allocator, if (start_oids.items.len > 0) start_oids.items else null);
+            var commit_iter = try repo.log(io, allocator, if (start_oids.items.len > 0) start_oids.items else null);
             defer commit_iter.deinit();
             while (try commit_iter.next()) |commit_object| {
                 defer commit_object.deinit();
@@ -562,6 +566,7 @@ fn runCommand(
             var clear_line = false;
             var progress_node: ?std.Progress.Node = null;
             var result = try repo.merge(
+                io,
                 allocator,
                 merge_cmd,
                 if (repo_opts.ProgressCtx == void) {} else .{ .writers = writers, .clear_line = &clear_line, .node = &progress_node },
@@ -571,7 +576,7 @@ fn runCommand(
         },
         .config => |config_cmd| switch (config_cmd) {
             .list => {
-                var conf = try repo.listConfig(allocator);
+                var conf = try repo.listConfig(io, allocator);
                 defer conf.deinit();
 
                 for (conf.sections.keys(), conf.sections.values()) |section_name, variables| {
@@ -580,12 +585,12 @@ fn runCommand(
                     }
                 }
             },
-            .add => |config_add_cmd| try repo.addConfig(allocator, config_add_cmd),
-            .remove => |config_remove_cmd| try repo.removeConfig(allocator, config_remove_cmd),
+            .add => |config_add_cmd| try repo.addConfig(io, allocator, config_add_cmd),
+            .remove => |config_remove_cmd| try repo.removeConfig(io, allocator, config_remove_cmd),
         },
         .remote => |remote_cmd| switch (remote_cmd) {
             .list => {
-                var rem = try repo.listRemotes(allocator);
+                var rem = try repo.listRemotes(io, allocator);
                 defer rem.deinit();
 
                 for (rem.sections.keys(), rem.sections.values()) |section_name, variables| {
@@ -594,8 +599,8 @@ fn runCommand(
                     }
                 }
             },
-            .add => |remote_add_cmd| try repo.addRemote(allocator, remote_add_cmd),
-            .remove => |remote_remove_cmd| try repo.removeRemote(allocator, remote_remove_cmd),
+            .add => |remote_add_cmd| try repo.addRemote(io, allocator, remote_add_cmd),
+            .remove => |remote_remove_cmd| try repo.removeRemote(io, allocator, remote_remove_cmd),
         },
         .clone => {},
         .fetch => |fetch_cmd| {
@@ -619,6 +624,7 @@ fn runCommand(
             }
 
             try repo.fetch(
+                io,
                 allocator,
                 fetch_cmd.remote_name,
                 .{
@@ -631,6 +637,7 @@ fn runCommand(
             var clear_line = false;
             var progress_node: ?std.Progress.Node = null;
             try repo.push(
+                io,
                 allocator,
                 push_cmd.remote_name,
                 push_cmd.refspec,
@@ -644,12 +651,13 @@ fn runCommand(
                 return error.HandledError;
             },
             .xit => switch (patch_cmd) {
-                .on => try repo.setMergeAlgorithm(allocator, .patch),
-                .off => try repo.setMergeAlgorithm(allocator, .diff3),
+                .on => try repo.setMergeAlgorithm(io, allocator, .patch),
+                .off => try repo.setMergeAlgorithm(io, allocator, .diff3),
                 .all => {
                     var clear_line = false;
                     var progress_node: ?std.Progress.Node = null;
                     try repo.patchAll(
+                        io,
                         allocator,
                         if (repo_opts.ProgressCtx == void) {} else .{ .writers = writers, .clear_line = &clear_line, .node = &progress_node },
                     );
@@ -729,6 +737,10 @@ pub fn main() !u8 {
         _ = debug_allocator.deinit();
     };
 
+    var threaded: std.Io.Threaded = .init(allocator);
+    defer threaded.deinit();
+    const io = threaded.io();
+
     var args = std.ArrayList([]const u8){};
     defer args.deinit(allocator);
 
@@ -746,7 +758,7 @@ pub fn main() !u8 {
     const cwd_path = try std.process.getCwdAlloc(allocator);
     defer allocator.free(cwd_path);
 
-    runPrint(.xit, .{ .ProgressCtx = ProgressCtx }, allocator, args.items, cwd_path, writers) catch |err| switch (err) {
+    runPrint(.xit, .{ .ProgressCtx = ProgressCtx }, io, allocator, args.items, cwd_path, writers) catch |err| switch (err) {
         error.HandledError => return 1,
         else => |e| return e,
     };

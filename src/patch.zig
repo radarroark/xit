@@ -31,11 +31,12 @@ const ChangeKind = enum(u8) {
 pub fn writeAndApplyPatches(
     comptime repo_opts: rp.RepoOpts(.xit),
     state: rp.Repo(.xit, repo_opts).State(.read_write),
+    io: std.Io,
     allocator: std.mem.Allocator,
     commit_oid: *const [hash.hexLen(repo_opts.hash)]u8,
 ) !void {
     const parent_commit_oid_maybe = blk: {
-        var commit_object = try obj.Object(.xit, repo_opts, .full).init(allocator, state.readOnly(), commit_oid);
+        var commit_object = try obj.Object(.xit, repo_opts, .full).init(state.readOnly(), io, allocator, commit_oid);
         defer commit_object.deinit();
 
         if (commit_object.content.commit.metadata.firstParent()) |oid| {
@@ -68,8 +69,19 @@ pub fn writeAndApplyPatches(
     // init file iterator
     var tree_diff = tr.TreeDiff(.xit, repo_opts).init(allocator);
     defer tree_diff.deinit();
-    try tree_diff.compare(state.readOnly(), if (parent_commit_oid_maybe) |parent_commit_oid| &parent_commit_oid else null, commit_oid, null);
-    var file_iter = try df.FileIterator(.xit, repo_opts).init(allocator, state.readOnly(), .{ .tree = .{ .tree_diff = &tree_diff } });
+    try tree_diff.compare(
+        state.readOnly(),
+        io,
+        if (parent_commit_oid_maybe) |parent_commit_oid| &parent_commit_oid else null,
+        commit_oid,
+        null,
+    );
+    var file_iter = try df.FileIterator(.xit, repo_opts).init(
+        state.readOnly(),
+        io,
+        allocator,
+        .{ .tree = .{ .tree_diff = &tree_diff } },
+    );
 
     // iterate over each modified file and create/apply the patch
     while (try file_iter.next()) |*line_iter_pair_ptr| {
@@ -125,7 +137,7 @@ pub fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
         oid_queue: std.AutoArrayHashMapUnmanaged([hash.byteLen(repo_opts.hash)]u8, void),
         commit_count: usize,
 
-        pub fn init(state: rp.Repo(.xit, repo_opts).State(.read_only), allocator: std.mem.Allocator) !PatchWriter(repo_opts) {
+        pub fn init(state: rp.Repo(.xit, repo_opts).State(.read_only), io: std.Io, allocator: std.mem.Allocator) !PatchWriter(repo_opts) {
             const db_file = try state.core.repo_dir.createFile(db_name, .{ .truncate = true, .lock = .exclusive, .read = true });
             errdefer {
                 db_file.close();
@@ -140,7 +152,7 @@ pub fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
 
             const db_ptr = try allocator.create(DB);
             errdefer allocator.destroy(db_ptr);
-            db_ptr.* = try DB.init(.{ .file = db_file, .buffer = buffer_ptr });
+            db_ptr.* = try DB.init(.{ .io = io, .file = db_file, .buffer = buffer_ptr });
 
             const map = try DB.HashMap(.read_write).init(db_ptr.rootCursor());
 
@@ -169,6 +181,7 @@ pub fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
         pub fn add(
             self: *PatchWriter(repo_opts),
             state: rp.Repo(.xit, repo_opts).State(.read_only),
+            io: std.Io,
             allocator: std.mem.Allocator,
             oid: *const [hash.byteLen(repo_opts.hash)]u8,
         ) !void {
@@ -179,7 +192,7 @@ pub fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
             const oid_hex = std.fmt.bytesToHex(oid, .lower);
             const commit_id_int = try hash.hexToInt(repo_opts.hash, &oid_hex);
 
-            var object = try obj.Object(.xit, repo_opts, .full).init(allocator, state, &oid_hex);
+            var object = try obj.Object(.xit, repo_opts, .full).init(state, io, allocator, &oid_hex);
             defer object.deinit();
 
             var is_base_oid = false;
@@ -219,6 +232,7 @@ pub fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
         pub fn write(
             self: *PatchWriter(repo_opts),
             state: rp.Repo(.xit, repo_opts).State(.read_write),
+            io: std.Io,
             allocator: std.mem.Allocator,
             progress_ctx_maybe: ?repo_opts.ProgressCtx,
         ) !void {
@@ -238,7 +252,7 @@ pub fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
                 const oid = self.oid_queue.keys()[0];
                 const oid_hex = std.fmt.bytesToHex(&oid, .lower);
 
-                try writeAndApplyPatches(repo_opts, state, allocator, &oid_hex);
+                try writeAndApplyPatches(repo_opts, state, io, allocator, &oid_hex);
                 self.oid_queue.swapRemoveAt(0);
 
                 if (repo_opts.ProgressCtx != void) {

@@ -58,6 +58,7 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
         pub fn init(
             state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+            io: std.Io,
             allocator: std.mem.Allocator,
             name: []const u8,
             url: []const u8,
@@ -67,18 +68,19 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     var lock = try fs.LockFile.init(state.core.repo_dir, "config");
                     defer lock.deinit();
 
-                    try addConfig(.{ .core = state.core, .extra = .{ .lock_file_maybe = lock.lock_file } }, allocator, name, url);
+                    try addConfig(.{ .core = state.core, .extra = .{ .lock_file_maybe = lock.lock_file } }, io, allocator, name, url);
 
                     lock.success = true;
                 },
-                .xit => try addConfig(state, allocator, name, url),
+                .xit => try addConfig(state, io, allocator, name, url),
             }
 
-            return try open(state.readOnly(), allocator, name);
+            return try open(state.readOnly(), io, allocator, name);
         }
 
         pub fn open(
             state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+            io: std.Io,
             allocator: std.mem.Allocator,
             name: []const u8,
         ) !Remote(repo_kind, repo_opts) {
@@ -86,7 +88,7 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                 return error.InvalidRemoteName;
             }
 
-            var config = try cfg.Config(repo_kind, repo_opts).init(state, allocator);
+            var config = try cfg.Config(repo_kind, repo_opts).init(state, io, allocator);
             defer config.deinit();
 
             var self: Remote(repo_kind, repo_opts) = .{
@@ -182,11 +184,12 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
         pub fn addConfig(
             state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+            io: std.Io,
             allocator: std.mem.Allocator,
             name: []const u8,
             url: []const u8,
         ) !void {
-            var config = try cfg.Config(repo_kind, repo_opts).init(state.readOnly(), allocator);
+            var config = try cfg.Config(repo_kind, repo_opts).init(state.readOnly(), io, allocator);
             defer config.deinit();
 
             {
@@ -209,24 +212,25 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
         pub fn removeConfig(
             state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+            io: std.Io,
             allocator: std.mem.Allocator,
             name: []const u8,
         ) !void {
-            var config = try cfg.Config(repo_kind, repo_opts).init(state.readOnly(), allocator);
+            var config = try cfg.Config(repo_kind, repo_opts).init(state.readOnly(), io, allocator);
             defer config.deinit();
 
             {
                 const config_name = try std.fmt.allocPrint(allocator, "remote.{s}.url", .{name});
                 defer allocator.free(config_name);
 
-                try config.remove(state, .{ .name = config_name });
+                try config.remove(state, io, .{ .name = config_name });
             }
 
             {
                 const config_name = try std.fmt.allocPrint(allocator, "remote.{s}.fetch", .{name});
                 defer allocator.free(config_name);
 
-                try config.remove(state, .{ .name = config_name });
+                try config.remove(state, io, .{ .name = config_name });
             }
         }
 
@@ -283,11 +287,12 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
         pub fn setLocalHeads(
             self: *Remote(repo_kind, repo_opts),
             state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+            io: std.Io,
             allocator: std.mem.Allocator,
         ) !void {
             for (self.heads.values()) |*head| {
                 var obj_exists = true;
-                var object_or_err = obj.Object(repo_kind, repo_opts, .raw).init(allocator, state, &head.oid);
+                var object_or_err = obj.Object(repo_kind, repo_opts, .raw).init(state, io, allocator, &head.oid);
                 if (object_or_err) |*object| {
                     defer object.deinit();
                 } else |err| switch (err) {
@@ -360,6 +365,7 @@ pub fn connect(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+    io: std.Io,
     allocator: std.mem.Allocator,
     remote: *Remote(repo_kind, repo_opts),
     direction: Direction,
@@ -371,11 +377,11 @@ pub fn connect(
     } orelse return error.UrlNotFound;
 
     if (remote.transport) |*transport| {
-        try transport.connect(state, allocator, url, direction);
+        try transport.connect(state, io, allocator, url, direction);
     } else {
-        var t = try net_transport.Transport(repo_kind, repo_opts).init(state, allocator, url, transport_opts);
+        var t = try net_transport.Transport(repo_kind, repo_opts).init(state, io, allocator, url, transport_opts);
         errdefer t.deinit(allocator);
-        try t.connect(state, allocator, url, direction);
+        try t.connect(state, io, allocator, url, direction);
         remote.transport = t;
     }
 }
@@ -384,11 +390,12 @@ fn updateRef(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+    io: std.Io,
     ref_path: []const u8,
     oid_hex: *const [hash.hexLen(repo_opts.hash)]u8,
 ) !void {
     const ref = rf.Ref.initFromPath(ref_path, null) orelse return error.InvalidRefPath;
-    const existing_oid_maybe = try rf.readRecur(repo_kind, repo_opts, state.readOnly(), .{ .ref = ref });
+    const existing_oid_maybe = try rf.readRecur(repo_kind, repo_opts, state.readOnly(), io, .{ .ref = ref });
 
     if (existing_oid_maybe) |*existing_oid| {
         if (std.mem.eql(u8, existing_oid, oid_hex)) {
@@ -400,18 +407,19 @@ fn updateRef(
         // file may have been modified after we read it.
     }
 
-    try rf.write(repo_kind, repo_opts, state, ref_path, .{ .oid = oid_hex });
+    try rf.write(repo_kind, repo_opts, state, io, ref_path, .{ .oid = oid_hex });
 }
 
 pub fn resolveRef(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+    io: std.Io,
     allocator: std.mem.Allocator,
     ref: rf.Ref,
 ) !?[hash.hexLen(repo_opts.hash)]u8 {
-    const oid = try rf.readRecur(repo_kind, repo_opts, state, .{ .ref = ref }) orelse return null;
-    var object = obj.Object(repo_kind, repo_opts, .raw).init(allocator, state, &oid) catch |err| switch (err) {
+    const oid = try rf.readRecur(repo_kind, repo_opts, state, io, .{ .ref = ref }) orelse return null;
+    var object = obj.Object(repo_kind, repo_opts, .raw).init(state, io, allocator, &oid) catch |err| switch (err) {
         error.ObjectNotFound => return null,
         else => |e| return e,
     };
@@ -423,17 +431,19 @@ pub fn resolveRefPath(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+    io: std.Io,
     allocator: std.mem.Allocator,
     ref_path: []const u8,
 ) !?[hash.hexLen(repo_opts.hash)]u8 {
     const ref = rf.Ref.initFromPath(ref_path, null) orelse return error.InvalidRefPath;
-    return try resolveRef(repo_kind, repo_opts, state, allocator, ref);
+    return try resolveRef(repo_kind, repo_opts, state, io, allocator, ref);
 }
 
 fn updateHead(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+    io: std.Io,
     allocator: std.mem.Allocator,
     spec: *net_refspec.RefSpec,
     head: *RemoteHead(repo_kind, repo_opts),
@@ -462,7 +472,7 @@ fn updateHead(
         return;
     }
 
-    const oid_maybe = try resolveRefPath(repo_kind, repo_opts, state.readOnly(), allocator, ref_path.items);
+    const oid_maybe = try resolveRefPath(repo_kind, repo_opts, state.readOnly(), io, allocator, ref_path.items);
 
     if (oid_maybe) |*oid| {
         if (!spec.is_force) {
@@ -471,13 +481,14 @@ fn updateHead(
         }
     }
 
-    try rf.write(repo_kind, repo_opts, state, ref_path.items, .{ .oid = &head.oid });
+    try rf.write(repo_kind, repo_opts, state, io, ref_path.items, .{ .oid = &head.oid });
 }
 
 fn updateRefs(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+    io: std.Io,
     allocator: std.mem.Allocator,
     spec: *net_refspec.RefSpec,
     refs: *std.StringArrayHashMapUnmanaged(RemoteHead(repo_kind, repo_opts)),
@@ -486,12 +497,12 @@ fn updateRefs(
     defer tagspec.deinit(allocator);
 
     for (refs.values()) |*head| {
-        try updateHead(repo_kind, repo_opts, state, allocator, spec, head, &tagspec);
+        try updateHead(repo_kind, repo_opts, state, io, allocator, spec, head, &tagspec);
     }
 
     if (rf.isOid(repo_opts.hash, spec.src)) {
         if (spec.dst.len > 0) {
-            try updateRef(repo_kind, repo_opts, state, spec.dst, spec.src[0..comptime hash.hexLen(repo_opts.hash)]);
+            try updateRef(repo_kind, repo_opts, state, io, spec.dst, spec.src[0..comptime hash.hexLen(repo_opts.hash)]);
         }
     }
 }
@@ -500,6 +511,7 @@ fn updateHeads(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+    io: std.Io,
     allocator: std.mem.Allocator,
     remote: *Remote(repo_kind, repo_opts),
 ) !void {
@@ -509,13 +521,13 @@ fn updateHeads(
     var refs = try getHeads(repo_kind, repo_opts, remote, allocator);
     defer refs.deinit(allocator);
 
-    try updateRefs(repo_kind, repo_opts, state, allocator, &tagspec, &refs);
+    try updateRefs(repo_kind, repo_opts, state, io, allocator, &tagspec, &refs);
 
     for (remote.active_refspecs.items) |*spec| {
         if (.push == spec.direction) {
             continue;
         }
-        try updateRefs(repo_kind, repo_opts, state, allocator, spec, &refs);
+        try updateRefs(repo_kind, repo_opts, state, io, allocator, spec, &refs);
     }
 }
 
@@ -523,12 +535,13 @@ pub fn fetch(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+    io: std.Io,
     allocator: std.mem.Allocator,
     remote: *Remote(repo_kind, repo_opts),
     transport_opts: Opts(repo_opts.ProgressCtx),
 ) !void {
     if (!remote.connected()) {
-        try connect(repo_kind, repo_opts, state.readOnly(), allocator, remote, .fetch, transport_opts);
+        try connect(repo_kind, repo_opts, state.readOnly(), io, allocator, remote, .fetch, transport_opts);
     }
     defer remote.disconnect(allocator);
 
@@ -562,23 +575,24 @@ pub fn fetch(
         try remote.active_refspecs.append(allocator, spec_dupe);
     }
 
-    try net_fetch.negotiate(repo_kind, repo_opts, state.readOnly(), allocator, remote);
+    try net_fetch.negotiate(repo_kind, repo_opts, state.readOnly(), io, allocator, remote);
 
-    try net_fetch.downloadPack(repo_kind, repo_opts, state, allocator, remote);
+    try net_fetch.downloadPack(repo_kind, repo_opts, state, io, allocator, remote);
 
-    try updateHeads(repo_kind, repo_opts, state, allocator, remote);
+    try updateHeads(repo_kind, repo_opts, state, io, allocator, remote);
 }
 
 pub fn push(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+    io: std.Io,
     allocator: std.mem.Allocator,
     remote: *Remote(repo_kind, repo_opts),
     transport_opts: Opts(repo_opts.ProgressCtx),
 ) !void {
     if (!remote.connected()) {
-        try connect(repo_kind, repo_opts, state, allocator, remote, .push, transport_opts);
+        try connect(repo_kind, repo_opts, state, io, allocator, remote, .push, transport_opts);
     }
 
     clearRefSpecs(allocator, &remote.active_refspecs);
@@ -588,13 +602,13 @@ pub fn push(
         try remote.active_refspecs.append(allocator, spec_dupe);
     }
 
-    var remote_push = try net_push.Push(repo_kind, repo_opts).init(state, remote, allocator);
+    var remote_push = try net_push.Push(repo_kind, repo_opts).init(state, remote, io, allocator);
     defer remote_push.deinit(allocator);
 
     var added_refspecs = false;
     if (transport_opts.refspecs) |refspecs| {
         for (refspecs) |refspec| {
-            try remote_push.addRefSpec(state, allocator, refspec);
+            try remote_push.addRefSpec(state, io, allocator, refspec);
             added_refspecs = true;
         }
     }
@@ -603,11 +617,11 @@ pub fn push(
             if (.fetch == spec.direction) {
                 continue;
             }
-            try remote_push.addRefSpec(state, allocator, spec.full);
+            try remote_push.addRefSpec(state, io, allocator, spec.full);
         }
     }
 
-    try remote_push.complete(state, allocator);
+    try remote_push.complete(state, io, allocator);
 
     defer remote.disconnect(allocator);
 }
@@ -615,13 +629,14 @@ pub fn push(
 pub fn clone(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
+    io: std.Io,
     allocator: std.mem.Allocator,
     url: []const u8,
     cwd_path: []const u8,
     work_path: []const u8,
     transport_opts: Opts(repo_opts.ProgressCtx),
 ) !rp.Repo(repo_kind, repo_opts) {
-    var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{
+    var repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{
         .cwd_path = cwd_path,
         .path = work_path,
         .create_default_branch = null,
@@ -637,6 +652,7 @@ pub fn clone(
         .git => {
             var remote = try Remote(repo_kind, repo_opts).init(
                 .{ .core = &repo.core, .extra = .{} },
+                io,
                 allocator,
                 "origin",
                 url,
@@ -648,6 +664,7 @@ pub fn clone(
                     repo_kind,
                     repo_opts,
                     .{ .core = &repo.core, .extra = .{} },
+                    io,
                     allocator,
                     &remote,
                     transport_opts,
@@ -656,6 +673,7 @@ pub fn clone(
                     repo_kind,
                     repo_opts,
                     .{ .core = &repo.core, .extra = .{} },
+                    io,
                     allocator,
                     &remote,
                     transport_opts,
@@ -666,6 +684,7 @@ pub fn clone(
             const Ctx = struct {
                 core: *rp.Repo(repo_kind, repo_opts).Core,
                 transport_def: net_transport.TransportDefinition,
+                io: std.Io,
                 allocator: std.mem.Allocator,
                 url: []const u8,
                 transport_opts: Opts(repo_opts.ProgressCtx),
@@ -674,7 +693,7 @@ pub fn clone(
                     var moment = try rp.Repo(repo_kind, repo_opts).DB.HashMap(.read_write).init(cursor.*);
                     const state = rp.Repo(repo_kind, repo_opts).State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
 
-                    var remote = try Remote(repo_kind, repo_opts).init(state, ctx.allocator, "origin", ctx.url);
+                    var remote = try Remote(repo_kind, repo_opts).init(state, ctx.io, ctx.allocator, "origin", ctx.url);
                     defer remote.deinit(ctx.allocator);
 
                     switch (ctx.transport_def) {
@@ -682,6 +701,7 @@ pub fn clone(
                             repo_kind,
                             repo_opts,
                             state,
+                            ctx.io,
                             ctx.allocator,
                             &remote,
                             ctx.transport_opts,
@@ -690,6 +710,7 @@ pub fn clone(
                             repo_kind,
                             repo_opts,
                             state,
+                            ctx.io,
                             ctx.allocator,
                             &remote,
                             ctx.transport_opts,
@@ -707,6 +728,7 @@ pub fn clone(
                 Ctx{
                     .core = &repo.core,
                     .transport_def = transport_def,
+                    .io = io,
                     .allocator = allocator,
                     .url = url,
                     .transport_opts = transport_opts,

@@ -25,7 +25,11 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
         const Variables = std.StringArrayHashMap([]const u8);
 
-        pub fn init(state: rp.Repo(repo_kind, repo_opts).State(.read_only), allocator: std.mem.Allocator) !Config(repo_kind, repo_opts) {
+        pub fn init(
+            state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+            io: std.Io,
+            allocator: std.mem.Allocator,
+        ) !Config(repo_kind, repo_opts) {
             var arena = try allocator.create(std.heap.ArenaAllocator);
             arena.* = std.heap.ArenaAllocator.init(allocator);
             errdefer {
@@ -126,7 +130,7 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     defer config_file.close();
 
                     var reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
-                    var reader = config_file.reader(&reader_buffer);
+                    var reader = config_file.reader(io, &reader_buffer);
 
                     // for each line...
                     while (reader.interface.peekByte()) |_| {
@@ -347,7 +351,13 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             }
         }
 
-        pub fn remove(self: *Config(repo_kind, repo_opts), state: rp.Repo(repo_kind, repo_opts).State(.read_write), input: RemoveConfigInput) !void {
+        pub fn remove(
+            self: *Config(repo_kind, repo_opts),
+            state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+            io: std.Io,
+            input: RemoveConfigInput,
+        ) !void {
+            _ = io;
             const last_dot_index = std.mem.lastIndexOfScalar(u8, input.name, '.') orelse return error.KeyDoesNotContainASection;
 
             const section_name = try self.arena.allocator().dupe(u8, input.name[0..last_dot_index]);

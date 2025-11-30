@@ -56,8 +56,9 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
         };
 
         pub fn init(
-            allocator: std.mem.Allocator,
             state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+            io: std.Io,
+            allocator: std.mem.Allocator,
         ) !Status(repo_kind, repo_opts) {
             var untracked = std.StringArrayHashMapUnmanaged(Entry){};
             errdefer untracked.deinit(allocator);
@@ -90,19 +91,19 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                 allocator.destroy(arena);
             }
 
-            var index = try idx.Index(repo_kind, repo_opts).init(allocator, state);
+            var index = try idx.Index(repo_kind, repo_opts).init(state, io, allocator);
             errdefer index.deinit();
 
             var index_bools = try allocator.alloc(bool, index.entries.count());
             defer allocator.free(index_bools);
 
-            _ = try addEntries(allocator, arena, &untracked, &work_dir_modified, &index, &index_bools, state.core.work_dir, ".");
+            _ = try addEntries(io, allocator, arena, &untracked, &work_dir_modified, &index, &index_bools, state.core.work_dir, ".");
 
-            var head_tree = try tr.Tree(repo_kind, repo_opts).init(allocator, state, null);
+            var head_tree = try tr.Tree(repo_kind, repo_opts).init(state, io, allocator, null);
             errdefer head_tree.deinit();
 
-            var merge_source_tree_maybe = if (try mrg.readAnyMergeHead(repo_kind, repo_opts, state)) |*merge_source_oid|
-                try tr.Tree(repo_kind, repo_opts).init(allocator, state, merge_source_oid)
+            var merge_source_tree_maybe = if (try mrg.readAnyMergeHead(repo_kind, repo_opts, state, io)) |*merge_source_oid|
+                try tr.Tree(repo_kind, repo_opts).init(state, io, allocator, merge_source_oid)
             else
                 null;
             defer if (merge_source_tree_maybe) |*merge_source_tree| merge_source_tree.deinit();
@@ -182,6 +183,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
         }
 
         fn addEntries(
+            io: std.Io,
             allocator: std.mem.Allocator,
             arena: *std.heap.ArenaAllocator,
             untracked: *std.StringArrayHashMapUnmanaged(Status(repo_kind, repo_opts).Entry),
@@ -198,7 +200,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                         index_bools.*[entry_index] = true;
                         const entries_for_path = index.entries.values()[entry_index];
                         if (entries_for_path[0]) |entry| {
-                            if (try indexDiffersFromWorkDir(repo_kind, repo_opts, &entry, work_dir, path, meta)) {
+                            if (try indexDiffersFromWorkDir(repo_kind, repo_opts, io, &entry, work_dir, path, meta)) {
                                 try modified.put(allocator, path, Status(repo_kind, repo_opts).Entry{ .path = path, .meta = meta });
                             }
                         }
@@ -233,7 +235,7 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                         var grandchild_untracked = std.StringArrayHashMapUnmanaged(Status(repo_kind, repo_opts).Entry){};
                         defer grandchild_untracked.deinit(allocator);
 
-                        const is_file = try addEntries(allocator, arena, &grandchild_untracked, modified, index, index_bools, work_dir, subpath);
+                        const is_file = try addEntries(io, allocator, arena, &grandchild_untracked, modified, index, index_bools, work_dir, subpath);
                         contains_file = contains_file or is_file;
                         if (is_file and is_untracked) break; // no need to continue because child_untracked will be discarded anyway
 
@@ -279,6 +281,7 @@ pub const RemoveOptions = struct {
 pub fn indexDiffersFromWorkDir(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
+    io: std.Io,
     entry: *const idx.Index(repo_kind, repo_opts).Entry,
     parent_dir: std.fs.Dir,
     path: []const u8,
@@ -303,7 +306,7 @@ pub fn indexDiffersFromWorkDir(
                     const header = try std.fmt.bufPrint(&header_buffer, "blob {}\x00", .{meta.size});
 
                     var reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
-                    var reader = file.reader(&reader_buffer);
+                    var reader = file.reader(io, &reader_buffer);
 
                     var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
                     try hash.hashReader(repo_opts.hash, repo_opts.read_size, &reader.interface, header, &oid);
@@ -341,10 +344,11 @@ pub fn addPaths(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+    io: std.Io,
     allocator: std.mem.Allocator,
     paths: []const []const u8,
 ) !void {
-    var index = try idx.Index(repo_kind, repo_opts).init(allocator, state.readOnly());
+    var index = try idx.Index(repo_kind, repo_opts).init(state.readOnly(), io, allocator);
     defer index.deinit();
 
     for (paths) |path| {
@@ -362,11 +366,12 @@ pub fn unaddPaths(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+    io: std.Io,
     allocator: std.mem.Allocator,
     paths: []const []const u8,
     opts: UnaddOptions,
 ) !void {
-    var index = try idx.Index(repo_kind, repo_opts).init(allocator, state.readOnly());
+    var index = try idx.Index(repo_kind, repo_opts).init(state.readOnly(), io, allocator);
     defer index.deinit();
 
     for (paths) |path| {
@@ -380,8 +385,8 @@ pub fn unaddPaths(
         try index.addOrRemovePath(state, path_parts, .rm, null);
 
         // iterate over the HEAD entries and add them to the index
-        if (try tr.headTreeEntry(repo_kind, repo_opts, state.readOnly(), allocator, path_parts)) |*tree_entry| {
-            try index.addTreeEntry(state.readOnly(), allocator, tree_entry, path_parts);
+        if (try tr.headTreeEntry(repo_kind, repo_opts, state.readOnly(), io, allocator, path_parts)) |*tree_entry| {
+            try index.addTreeEntry(state.readOnly(), io, allocator, tree_entry, path_parts);
         }
     }
 
@@ -393,6 +398,7 @@ pub fn removePaths(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+    io: std.Io,
     allocator: std.mem.Allocator,
     paths: []const []const u8,
     opts: RemoveOptions,
@@ -400,7 +406,7 @@ pub fn removePaths(
     var removed_paths = std.StringArrayHashMap(void).init(allocator);
     defer removed_paths.deinit();
 
-    var index = try idx.Index(repo_kind, repo_opts).init(allocator, state.readOnly());
+    var index = try idx.Index(repo_kind, repo_opts).init(state.readOnly(), io, allocator);
     defer index.deinit();
 
     for (paths) |path| {
@@ -416,10 +422,10 @@ pub fn removePaths(
 
     // safety check on the files we're about to remove
     if (!opts.force) {
-        var clean_index = try idx.Index(repo_kind, repo_opts).init(allocator, state.readOnly());
+        var clean_index = try idx.Index(repo_kind, repo_opts).init(state.readOnly(), io, allocator);
         defer clean_index.deinit();
 
-        var head_tree = try tr.Tree(repo_kind, repo_opts).init(allocator, state.readOnly(), null);
+        var head_tree = try tr.Tree(repo_kind, repo_opts).init(state.readOnly(), io, allocator, null);
         defer head_tree.deinit();
 
         for (removed_paths.keys()) |path| {
@@ -441,7 +447,7 @@ pub fn removePaths(
                                 }
                             }
 
-                            if (try indexDiffersFromWorkDir(repo_kind, repo_opts, &index_entry, state.core.work_dir, path, meta)) {
+                            if (try indexDiffersFromWorkDir(repo_kind, repo_opts, io, &index_entry, state.core.work_dir, path, meta)) {
                                 differs_from_work_dir = true;
                             }
                         }
@@ -483,6 +489,7 @@ pub fn objectToFile(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+    io: std.Io,
     allocator: std.mem.Allocator,
     path: []const u8,
     tree_entry: tr.TreeEntry(repo_opts.hash),
@@ -492,7 +499,7 @@ pub fn objectToFile(
     switch (tree_entry.mode.content.object_type) {
         .regular_file => {
             // open the reader
-            var obj_rdr = try obj.ObjectReader(repo_kind, repo_opts).init(allocator, state, &oid_hex);
+            var obj_rdr = try obj.ObjectReader(repo_kind, repo_opts).init(state, io, allocator, &oid_hex);
             defer obj_rdr.deinit();
 
             // create parent dir(s)
@@ -519,21 +526,21 @@ pub fn objectToFile(
         },
         .tree => {
             // load the tree
-            var tree_object = try obj.Object(repo_kind, repo_opts, .full).init(allocator, state, &oid_hex);
+            var tree_object = try obj.Object(repo_kind, repo_opts, .full).init(state, io, allocator, &oid_hex);
             defer tree_object.deinit();
 
             // update each entry recursively
             for (tree_object.content.tree.entries.keys(), tree_object.content.tree.entries.values()) |sub_path, entry| {
                 const new_path = try fs.joinPath(allocator, &.{ path, sub_path });
                 defer allocator.free(new_path);
-                try objectToFile(repo_kind, repo_opts, state, allocator, new_path, entry);
+                try objectToFile(repo_kind, repo_opts, state, io, allocator, new_path, entry);
             }
         },
         .symbolic_link => switch (builtin.os.tag) {
             .windows => {
                 var new_mode = tree_entry.mode;
                 new_mode.content.object_type = .regular_file;
-                try objectToFile(repo_kind, repo_opts, state, allocator, path, .{ .oid = tree_entry.oid, .mode = new_mode });
+                try objectToFile(repo_kind, repo_opts, state, io, allocator, path, .{ .oid = tree_entry.oid, .mode = new_mode });
             },
             else => {
                 // delete file if there is any in this location
@@ -543,7 +550,7 @@ pub fn objectToFile(
                 };
 
                 // open the reader
-                var obj_rdr = try obj.ObjectReader(repo_kind, repo_opts).init(allocator, state, &oid_hex);
+                var obj_rdr = try obj.ObjectReader(repo_kind, repo_opts).init(state, io, allocator, &oid_hex);
                 defer obj_rdr.deinit();
 
                 // get path from blob content
@@ -575,12 +582,13 @@ pub const TreeToWorkDirChange = enum {
 fn compareIndexToWorkDir(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
+    io: std.Io,
     entry_maybe: ?idx.Index(repo_kind, repo_opts).Entry,
     parent_dir: std.fs.Dir,
     path: []const u8,
 ) !TreeToWorkDirChange {
     if (entry_maybe) |entry| {
-        if (try indexDiffersFromWorkDir(repo_kind, repo_opts, &entry, parent_dir, path, try fs.Metadata.init(parent_dir, path))) {
+        if (try indexDiffersFromWorkDir(repo_kind, repo_opts, io, &entry, parent_dir, path, try fs.Metadata.init(parent_dir, path))) {
             return .modified;
         } else {
             return .none;
@@ -677,6 +685,7 @@ pub fn migrate(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+    io: std.Io,
     allocator: std.mem.Allocator,
     tree_diff: tr.TreeDiff(repo_kind, repo_opts),
     index: *idx.Index(repo_kind, repo_opts),
@@ -731,7 +740,7 @@ pub fn migrate(
                 switch (meta.kind) {
                     .file, .sym_link => {
                         // if the path is a file that differs from the index
-                        if (try compareIndexToWorkDir(repo_kind, repo_opts, entry_maybe, state.core.work_dir, path) != .none) {
+                        if (try compareIndexToWorkDir(repo_kind, repo_opts, io, entry_maybe, state.core.work_dir, path) != .none) {
                             switch_result.setConflict();
                             if (entry_maybe) |_| {
                                 try switch_result.result.conflict.stale_files.put(path, {});
@@ -810,7 +819,7 @@ pub fn migrate(
     for (add_files.keys(), add_files.values()) |path, tree_entry| {
         // update work dir
         if (update_work_dir) {
-            try objectToFile(repo_kind, repo_opts, state.readOnly(), allocator, path, tree_entry);
+            try objectToFile(repo_kind, repo_opts, state.readOnly(), io, allocator, path, tree_entry);
         }
         // update index
         try index.addPath(state, path, &tree_entry);
@@ -821,28 +830,29 @@ pub fn restore(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+    io: std.Io,
     allocator: std.mem.Allocator,
     path_parts: []const []const u8,
 ) !void {
     if (path_parts.len == 0) {
         // get the current commit
-        const current_oid = try rf.readHeadRecur(repo_kind, repo_opts, state);
-        var commit_object = try obj.Object(repo_kind, repo_opts, .full).init(allocator, state, &current_oid);
+        const current_oid = try rf.readHeadRecur(repo_kind, repo_opts, state, io);
+        var commit_object = try obj.Object(repo_kind, repo_opts, .full).init(state, io, allocator, &current_oid);
         defer commit_object.deinit();
 
         // get the tree of the current commit
-        var tree_object = try obj.Object(repo_kind, repo_opts, .full).init(allocator, state, &commit_object.content.commit.tree);
+        var tree_object = try obj.Object(repo_kind, repo_opts, .full).init(state, io, allocator, &commit_object.content.commit.tree);
         defer tree_object.deinit();
 
         const entries = &tree_object.content.tree.entries;
         for (entries.keys(), entries.values()) |name, tree_entry| {
-            try objectToFile(repo_kind, repo_opts, state, allocator, name, tree_entry);
+            try objectToFile(repo_kind, repo_opts, state, io, allocator, name, tree_entry);
         }
     } else {
-        const tree_entry = try tr.headTreeEntry(repo_kind, repo_opts, state, allocator, path_parts) orelse return error.ObjectNotFound;
+        const tree_entry = try tr.headTreeEntry(repo_kind, repo_opts, state, io, allocator, path_parts) orelse return error.ObjectNotFound;
         const path = try fs.joinPath(allocator, path_parts);
         defer allocator.free(path);
-        try objectToFile(repo_kind, repo_opts, state, allocator, path, tree_entry);
+        try objectToFile(repo_kind, repo_opts, state, io, allocator, path, tree_entry);
     }
 }
 
@@ -881,18 +891,19 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
         pub fn init(
             state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+            io: std.Io,
             allocator: std.mem.Allocator,
             input: SwitchInput(repo_opts.hash),
         ) !Switch(repo_kind, repo_opts) {
             // get the current oid
             var head_buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
-            const head_maybe = try rf.readHead(repo_kind, repo_opts, state.readOnly(), &head_buffer);
-            const current_oid_maybe = if (head_maybe) |head| try rf.readRecur(repo_kind, repo_opts, state.readOnly(), head) else null;
+            const head_maybe = try rf.readHead(repo_kind, repo_opts, state.readOnly(), io, &head_buffer);
+            const current_oid_maybe = if (head_maybe) |head| try rf.readRecur(repo_kind, repo_opts, state.readOnly(), io, head) else null;
 
             // get the target oid
             const target, const target_oid =
                 if (input.target) |target|
-                    .{ target, try rf.readRecur(repo_kind, repo_opts, state.readOnly(), target) orelse return error.InvalidSwitchTarget }
+                    .{ target, try rf.readRecur(repo_kind, repo_opts, state.readOnly(), io, target) orelse return error.InvalidSwitchTarget }
                 else
                     // if target is null, just set it to the current oid (useful when we just want to reset back to HEAD)
                     .{ head_maybe orelse return error.HeadNotFound, current_oid_maybe orelse return error.HeadNotFound };
@@ -912,7 +923,7 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
             // compare the commits
             var tree_diff = tr.TreeDiff(repo_kind, repo_opts).init(arena.allocator());
-            try tree_diff.compare(state.readOnly(), if (current_oid_maybe) |current_oid| &current_oid else null, &target_oid, null);
+            try tree_diff.compare(state.readOnly(), io, if (current_oid_maybe) |current_oid| &current_oid else null, &target_oid, null);
 
             switch (repo_kind) {
                 .git => {
@@ -921,11 +932,11 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     defer lock.deinit();
 
                     // read index
-                    var index = try idx.Index(repo_kind, repo_opts).init(allocator, state.readOnly());
+                    var index = try idx.Index(repo_kind, repo_opts).init(state.readOnly(), io, allocator);
                     defer index.deinit();
 
                     // update the work dir
-                    try migrate(repo_kind, repo_opts, state, allocator, tree_diff, &index, input.update_work_dir, if (input.force) null else &switch_result);
+                    try migrate(repo_kind, repo_opts, state, io, allocator, tree_diff, &index, input.update_work_dir, if (input.force) null else &switch_result);
 
                     // return early if conflict
                     if (.conflict == switch_result.result) {
@@ -937,8 +948,8 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
                     // update HEAD
                     switch (input.kind) {
-                        .@"switch" => try rf.replaceHead(repo_kind, repo_opts, state, target),
-                        .reset => try rf.updateHead(repo_kind, repo_opts, state, &target_oid),
+                        .@"switch" => try rf.replaceHead(repo_kind, repo_opts, state, io, target),
+                        .reset => try rf.updateHead(repo_kind, repo_opts, state, io, &target_oid),
                     }
 
                     // finish lock
@@ -946,11 +957,11 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                 },
                 .xit => {
                     // read index
-                    var index = try idx.Index(repo_kind, repo_opts).init(allocator, state.readOnly());
+                    var index = try idx.Index(repo_kind, repo_opts).init(state.readOnly(), io, allocator);
                     defer index.deinit();
 
                     // update the work dir
-                    try migrate(repo_kind, repo_opts, state, allocator, tree_diff, &index, input.update_work_dir, if (input.force) null else &switch_result);
+                    try migrate(repo_kind, repo_opts, state, io, allocator, tree_diff, &index, input.update_work_dir, if (input.force) null else &switch_result);
 
                     // return early if conflict
                     if (.conflict == switch_result.result) {
@@ -962,8 +973,8 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
                     // update HEAD
                     switch (input.kind) {
-                        .@"switch" => try rf.replaceHead(repo_kind, repo_opts, state, target),
-                        .reset => try rf.updateHead(repo_kind, repo_opts, state, &target_oid),
+                        .@"switch" => try rf.replaceHead(repo_kind, repo_opts, state, io, target),
+                        .reset => try rf.updateHead(repo_kind, repo_opts, state, io, &target_oid),
                     }
                 },
             }

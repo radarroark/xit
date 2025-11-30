@@ -10,7 +10,7 @@ pub const HttpState = struct {
     arena: *std.heap.ArenaAllocator,
     allocator: std.mem.Allocator,
 
-    pub fn init(allocator: std.mem.Allocator) !HttpState {
+    pub fn init(io: std.Io, allocator: std.mem.Allocator) !HttpState {
         var arena = try allocator.create(std.heap.ArenaAllocator);
         arena.* = .init(allocator);
         errdefer {
@@ -18,7 +18,7 @@ pub const HttpState = struct {
             allocator.destroy(arena);
         }
 
-        var client: std.http.Client = .{ .allocator = arena.allocator() };
+        var client: std.http.Client = .{ .io = io, .allocator = arena.allocator() };
         try client.initDefaultProxies(arena.allocator());
 
         return .{

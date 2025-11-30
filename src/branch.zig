@@ -26,6 +26,7 @@ pub fn add(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+    io: std.Io,
     input: AddBranchInput,
 ) !void {
     const name = input.name;
@@ -33,7 +34,7 @@ pub fn add(
         return error.InvalidBranchName;
     }
 
-    if (try rf.exists(repo_kind, repo_opts, state.readOnly(), .{ .kind = .head, .name = input.name })) {
+    if (try rf.exists(repo_kind, repo_opts, state.readOnly(), io, .{ .kind = .head, .name = input.name })) {
         return error.BranchAlreadyExists;
     }
 
@@ -63,7 +64,7 @@ pub fn add(
             defer lock.deinit();
 
             // get HEAD contents and write to lock file
-            const oid_maybe = rf.readHeadRecurMaybe(repo_kind, repo_opts, state.readOnly()) catch |err| switch (err) {
+            const oid_maybe = rf.readHeadRecurMaybe(repo_kind, repo_opts, state.readOnly(), io) catch |err| switch (err) {
                 error.RefNotFound => null,
                 else => |e| return e,
             };
@@ -90,7 +91,7 @@ pub fn add(
             try heads.putKey(name_hash, .{ .slot = ref_name_cursor.slot() });
 
             // store ref content
-            const oid_maybe = rf.readHeadRecurMaybe(repo_kind, repo_opts, state.readOnly()) catch |err| switch (err) {
+            const oid_maybe = rf.readHeadRecurMaybe(repo_kind, repo_opts, state.readOnly(), io) catch |err| switch (err) {
                 error.RefNotFound => null,
                 else => |e| return e,
             };
@@ -109,11 +110,12 @@ pub fn remove(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+    io: std.Io,
     input: RemoveBranchInput,
 ) !void {
     // don't allow current branch to be deleted
     var current_branch_buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
-    if (try rf.readHead(repo_kind, repo_opts, state.readOnly(), &current_branch_buffer)) |current_branch| {
+    if (try rf.readHead(repo_kind, repo_opts, state.readOnly(), io, &current_branch_buffer)) |current_branch| {
         switch (current_branch) {
             .ref => |ref| if (std.mem.eql(u8, input.name, ref.name)) {
                 return error.CannotDeleteCurrentBranch;
