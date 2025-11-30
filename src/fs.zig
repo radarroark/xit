@@ -124,8 +124,8 @@ pub const Times = struct {
     mtime_nsecs: u32,
 
     pub fn init(stat: std.fs.File.Stat) Times {
-        const ctime = stat.ctime;
-        const mtime = stat.mtime;
+        const ctime = stat.ctime.toNanoseconds();
+        const mtime = stat.mtime.toNanoseconds();
         return .{
             .ctime_secs = @intCast(@divTrunc(ctime, std.time.ns_per_s)),
             .ctime_nsecs = @intCast(@mod(ctime, std.time.ns_per_s)),
@@ -287,7 +287,7 @@ pub fn relativePath(allocator: std.mem.Allocator, work_path: []const u8, cwd_pat
 pub fn splitPath(allocator: std.mem.Allocator, path: []const u8) ![]const []const u8 {
     var path_parts = std.ArrayList([]const u8){};
     errdefer path_parts.deinit(allocator);
-    var path_iter = try std.fs.path.componentIterator(path);
+    var path_iter = std.fs.path.componentIterator(path);
     while (path_iter.next()) |component| {
         try path_parts.append(allocator, component.name);
     }

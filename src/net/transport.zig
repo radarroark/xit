@@ -34,6 +34,7 @@ pub fn Transport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpt
 
         pub fn init(
             state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+            io: std.Io,
             allocator: std.mem.Allocator,
             url: []const u8,
             opts: Opts(repo_opts.ProgressCtx),
@@ -41,7 +42,7 @@ pub fn Transport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpt
             const transport_def_kind = TransportDefinition.init(state.core.cwd, url) orelse return error.UnsupportedUrl;
             return switch (transport_def_kind) {
                 .file => .{ .file = try net_file.FileTransport(repo_kind, repo_opts).init(opts) },
-                .wire => |wire_kind| .{ .wire = try net_wire.WireTransport(repo_kind, repo_opts).init(state, allocator, wire_kind, opts) },
+                .wire => |wire_kind| .{ .wire = try net_wire.WireTransport(repo_kind, repo_opts).init(state, io, allocator, wire_kind, opts) },
             };
         }
 
@@ -55,12 +56,13 @@ pub fn Transport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpt
         pub fn connect(
             self: *Transport(repo_kind, repo_opts),
             state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+            io: std.Io,
             allocator: std.mem.Allocator,
             url: []const u8,
             direction: net.Direction,
         ) !void {
             switch (self.*) {
-                .file => |*file| try file.connect(state, allocator, url, direction),
+                .file => |*file| try file.connect(state, io, allocator, url, direction),
                 .wire => |*wire| try wire.connect(allocator, url, direction),
             }
         }
@@ -82,11 +84,12 @@ pub fn Transport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpt
         pub fn push(
             self: *Transport(repo_kind, repo_opts),
             state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+            io: std.Io,
             allocator: std.mem.Allocator,
             git_push: *net_push.Push(repo_kind, repo_opts),
         ) !void {
             switch (self.*) {
-                .file => |*file| try file.push(state, allocator, git_push),
+                .file => |*file| try file.push(state, io, allocator, git_push),
                 .wire => |*wire| try wire.push(allocator, git_push),
             }
         }
@@ -94,23 +97,25 @@ pub fn Transport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpt
         pub fn negotiateFetch(
             self: *Transport(repo_kind, repo_opts),
             state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+            io: std.Io,
             allocator: std.mem.Allocator,
             fetch_data: *const net_fetch.FetchNegotiation(repo_kind, repo_opts),
         ) !void {
             switch (self.*) {
-                .file => |*file| try file.negotiateFetch(state, allocator),
-                .wire => |*wire| try wire.negotiateFetch(state, allocator, fetch_data),
+                .file => |*file| try file.negotiateFetch(state, io, allocator),
+                .wire => |*wire| try wire.negotiateFetch(state, io, allocator, fetch_data),
             }
         }
 
         pub fn downloadPack(
             self: *Transport(repo_kind, repo_opts),
             state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+            io: std.Io,
             allocator: std.mem.Allocator,
         ) !void {
             switch (self.*) {
-                .file => |*file| try file.downloadPack(state, allocator),
-                .wire => |*wire| try wire.downloadPack(state, allocator),
+                .file => |*file| try file.downloadPack(state, io, allocator),
+                .wire => |*wire| try wire.downloadPack(state, io, allocator),
             }
         }
 
