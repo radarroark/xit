@@ -24,6 +24,7 @@ pub fn add(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+    io: std.Io,
     allocator: std.mem.Allocator,
     input: AddTagInput,
 ) ![hash.hexLen(repo_opts.hash)]u8 {
@@ -34,9 +35,9 @@ pub fn add(
     const ref_path = try std.fmt.allocPrint(allocator, "refs/tags/{s}", .{input.name});
     defer allocator.free(ref_path);
 
-    const target = try rf.readHeadRecur(repo_kind, repo_opts, state.readOnly());
-    const tag_oid = try obj.writeTag(repo_kind, repo_opts, state, allocator, input, &target);
-    try rf.write(repo_kind, repo_opts, state, ref_path, .{ .oid = &tag_oid });
+    const target = try rf.readHeadRecur(repo_kind, repo_opts, state.readOnly(), io);
+    const tag_oid = try obj.writeTag(repo_kind, repo_opts, state, io, allocator, input, &target);
+    try rf.write(repo_kind, repo_opts, state, io, ref_path, .{ .oid = &tag_oid });
 
     return tag_oid;
 }

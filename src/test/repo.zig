@@ -11,14 +11,22 @@ const mrg = xit.merge;
 const df = xit.diff;
 const ui = xit.ui;
 
-fn addFile(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind), repo: *rp.Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, path: []const u8, content: []const u8) !void {
+fn addFile(
+    comptime repo_kind: rp.RepoKind,
+    comptime repo_opts: rp.RepoOpts(repo_kind),
+    repo: *rp.Repo(repo_kind, repo_opts),
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    path: []const u8,
+    content: []const u8,
+) !void {
     if (std.fs.path.dirname(path)) |parent_path| {
         try repo.core.work_dir.makePath(parent_path);
     }
     const file = try repo.core.work_dir.createFile(path, .{ .truncate = true });
     defer file.close();
     try file.writeAll(content);
-    try repo.add(allocator, &.{path});
+    try repo.add(io, allocator, &.{path});
 }
 
 test "simple" {
@@ -27,6 +35,7 @@ test "simple" {
 }
 
 fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) !void {
+    const io = std.testing.io;
     const allocator = std.testing.allocator;
     const temp_dir_name = "temp-test-repo-simple";
 
@@ -48,22 +57,22 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
     defer allocator.free(work_path);
 
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
+        var repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = work_path });
         defer repo.deinit(allocator);
     }
 
-    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = work_path });
     defer repo.deinit(allocator);
 
-    try addFile(repo_kind, repo_opts, &repo, allocator, "README.md", "Hello, world!");
-    const commit_a = try repo.commit(allocator, .{ .message = "a" });
-    try addFile(repo_kind, repo_opts, &repo, allocator, "README.md", "Goodbye, world!");
-    const commit_b = try repo.commit(allocator, .{ .message = "b" });
-    try repo.remove(allocator, &.{"README.md"}, .{});
-    const commit_c = try repo.commit(allocator, .{ .message = "c" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "README.md", "Hello, world!");
+    const commit_a = try repo.commit(io, allocator, .{ .message = "a" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "README.md", "Goodbye, world!");
+    const commit_b = try repo.commit(io, allocator, .{ .message = "b" });
+    try repo.remove(io, allocator, &.{"README.md"}, .{});
+    const commit_c = try repo.commit(io, allocator, .{ .message = "c" });
 
     {
-        var root = try ui.rootWidget(repo_kind, repo_opts, &repo, allocator, .log);
+        var root = try ui.rootWidget(repo_kind, repo_opts, &repo, io, allocator, .log);
         defer root.deinit();
 
         const grid = try root.getGrid().?.toString(allocator);
@@ -94,10 +103,10 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
     }
 
     // can't add path that is outside repo
-    try std.testing.expectError(error.PathIsOutsideRepo, repo.add(allocator, &.{"../README.md"}));
+    try std.testing.expectError(error.PathIsOutsideRepo, repo.add(io, allocator, &.{"../README.md"}));
 
     // commits that haven't changed content are an error
-    try std.testing.expectError(error.EmptyCommit, repo.commit(allocator, .{ .message = "d" }));
+    try std.testing.expectError(error.EmptyCommit, repo.commit(io, allocator, .{ .message = "d" }));
 
     // put oids in a set
     var oid_set = std.StringArrayHashMap(void).init(allocator);
@@ -108,7 +117,7 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
     // assert that all commits have been found in the log
     {
-        var commit_iter = try repo.log(allocator, null);
+        var commit_iter = try repo.log(io, allocator, null);
         defer commit_iter.deinit();
         while (try commit_iter.next()) |commit_object| {
             defer commit_object.deinit();
@@ -118,7 +127,7 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
     }
 
     {
-        var result = try repo.resetDir(allocator, .{ .target = .{ .oid = &commit_b } });
+        var result = try repo.resetDir(io, allocator, .{ .target = .{ .oid = &commit_b } });
         defer result.deinit();
     }
 
@@ -129,7 +138,7 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
     }
 
     {
-        var result = try repo.resetDir(allocator, .{ .target = .{ .oid = &commit_a } });
+        var result = try repo.resetDir(io, allocator, .{ .target = .{ .oid = &commit_a } });
         defer result.deinit();
     }
 
@@ -140,7 +149,7 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
     }
 
     {
-        var result = try repo.resetDir(allocator, .{ .target = .{ .oid = &commit_c } });
+        var result = try repo.resetDir(io, allocator, .{ .target = .{ .oid = &commit_c } });
         defer result.deinit();
     }
 
@@ -152,20 +161,20 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
         else => |e| return e,
     }
 
-    _ = try repo.addTag(allocator, .{ .name = "1.0.0", .message = "hi" });
+    _ = try repo.addTag(io, allocator, .{ .name = "1.0.0", .message = "hi" });
 
     // we can enable patches after adding a tag
     if (repo_kind == .xit) {
-        try repo.patchAll(allocator, null);
+        try repo.patchAll(io, allocator, null);
     }
 
     {
         // we can set the tag to HEAD
-        var result = try repo.resetDir(allocator, .{ .target = .{ .ref = .{ .kind = .tag, .name = "1.0.0" } } });
+        var result = try repo.resetDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .tag, .name = "1.0.0" } } });
         defer result.deinit();
 
         // status works when HEAD points to a tag
-        var status = try repo.status(allocator);
+        var status = try repo.status(io, allocator);
         defer status.deinit(allocator);
     }
 }
@@ -176,6 +185,7 @@ test "merge" {
 }
 
 fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) !void {
+    const io = std.testing.io;
     const allocator = std.testing.allocator;
     const temp_dir_name = "temp-test-repo-merge";
 
@@ -197,11 +207,11 @@ fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
     defer allocator.free(work_path);
 
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
+        var repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = work_path });
         defer repo.deinit(allocator);
     }
 
-    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = work_path });
     defer repo.deinit(allocator);
 
     // A --- B --- C --------- J --- K [master]
@@ -212,81 +222,81 @@ fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
     //            \
     //             G --- H [bar]
 
-    try addFile(repo_kind, repo_opts, &repo, allocator, "master.md", "a");
-    _ = try repo.commit(allocator, .{ .message = "a" });
-    try addFile(repo_kind, repo_opts, &repo, allocator, "master.md", "b");
-    _ = try repo.commit(allocator, .{ .message = "b" });
-    try repo.addBranch(.{ .name = "foo" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "master.md", "a");
+    _ = try repo.commit(io, allocator, .{ .message = "a" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "master.md", "b");
+    _ = try repo.commit(io, allocator, .{ .message = "b" });
+    try repo.addBranch(io, .{ .name = "foo" });
     {
-        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
+        var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
         defer result.deinit();
     }
-    try addFile(repo_kind, repo_opts, &repo, allocator, "foo.md", "d");
-    const commit_d = try repo.commit(allocator, .{ .message = "d" });
-    try repo.addBranch(.{ .name = "bar" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "foo.md", "d");
+    const commit_d = try repo.commit(io, allocator, .{ .message = "d" });
+    try repo.addBranch(io, .{ .name = "bar" });
     {
-        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "bar" } } });
+        var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "bar" } } });
         defer result.deinit();
     }
-    try addFile(repo_kind, repo_opts, &repo, allocator, "bar.md", "g");
-    _ = try repo.commit(allocator, .{ .message = "g" });
-    try addFile(repo_kind, repo_opts, &repo, allocator, "bar.md", "h");
-    const commit_h = try repo.commit(allocator, .{ .message = "h" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "bar.md", "g");
+    _ = try repo.commit(io, allocator, .{ .message = "g" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "bar.md", "h");
+    const commit_h = try repo.commit(io, allocator, .{ .message = "h" });
     {
-        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
+        var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
         defer result.deinit();
     }
-    try addFile(repo_kind, repo_opts, &repo, allocator, "master.md", "c");
-    _ = try repo.commit(allocator, .{ .message = "c" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "master.md", "c");
+    _ = try repo.commit(io, allocator, .{ .message = "c" });
     {
-        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
+        var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
         defer result.deinit();
     }
-    try addFile(repo_kind, repo_opts, &repo, allocator, "foo.md", "e");
-    _ = try repo.commit(allocator, .{ .message = "e" });
-    try addFile(repo_kind, repo_opts, &repo, allocator, "foo.md", "f");
-    _ = try repo.commit(allocator, .{ .message = "f" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "foo.md", "e");
+    _ = try repo.commit(io, allocator, .{ .message = "e" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "foo.md", "f");
+    _ = try repo.commit(io, allocator, .{ .message = "f" });
     {
-        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
+        var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
         defer result.deinit();
     }
     const commit_j = blk: {
-        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
+        var merge = try repo.merge(io, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
         defer merge.deinit();
         try std.testing.expect(.success == merge.result);
         break :blk merge.result.success.oid;
     };
-    try addFile(repo_kind, repo_opts, &repo, allocator, "master.md", "k");
-    const commit_k = try repo.commit(allocator, .{ .message = "k" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "master.md", "k");
+    const commit_k = try repo.commit(io, allocator, .{ .message = "k" });
 
     var moment = try repo.core.latestMoment();
     const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
 
     // there are multiple common ancestors, b and d,
     // but d is the best one because it is a descendent of b
-    const ancestor_k_h = try mrg.commonAncestor(repo_kind, repo_opts, allocator, state, &commit_k, &commit_h);
+    const ancestor_k_h = try mrg.commonAncestor(repo_kind, repo_opts, state, io, allocator, &commit_k, &commit_h);
     try std.testing.expectEqualStrings(&commit_d, &ancestor_k_h);
 
     // if one commit is an ancestor of the other, it is the best common ancestor
-    const ancestor_k_j = try mrg.commonAncestor(repo_kind, repo_opts, allocator, state, &commit_k, &commit_j);
+    const ancestor_k_j = try mrg.commonAncestor(repo_kind, repo_opts, state, io, allocator, &commit_k, &commit_j);
     try std.testing.expectEqualStrings(&commit_j, &ancestor_k_j);
 
     // if we try merging foo again, it does nothing
     {
-        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
+        var merge = try repo.merge(io, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
         defer merge.deinit();
         try std.testing.expect(.nothing == merge.result);
     }
 
     // if we try merging master into foo, it fast forwards
     {
-        var switch_result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
+        var switch_result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
         defer switch_result.deinit();
-        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "master" } }} } } }, null);
+        var merge = try repo.merge(io, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "master" } }} } } }, null);
         defer merge.deinit();
         try std.testing.expect(.fast_forward == merge.result);
 
-        const head_oid = try rf.readHeadRecur(repo_kind, repo_opts, state);
+        const head_oid = try rf.readHeadRecur(repo_kind, repo_opts, state, io);
         try std.testing.expectEqual(commit_k, head_oid);
 
         // make sure file from commit k exists
@@ -303,18 +313,18 @@ fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
     // make sense to you, you're not alone...my future self won't
     // know what it means either probably.
     {
-        var obj_iter = try obj.ObjectIterator(repo_kind, repo_opts, .raw).init(allocator, state, .{ .kind = .all });
+        var obj_iter = try obj.ObjectIterator(repo_kind, repo_opts, .raw).init(state, io, allocator, .{ .kind = .all });
         defer obj_iter.deinit();
         try obj_iter.include(&commit_k);
 
         const dest_work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "dest_repo" });
         defer allocator.free(dest_work_path);
 
-        var dest_repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = dest_work_path });
+        var dest_repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = dest_work_path });
         defer dest_repo.deinit(allocator);
-        try dest_repo.copyObjects(repo_kind, repo_opts, &obj_iter, null);
+        try dest_repo.copyObjects(repo_kind, repo_opts, &obj_iter, io, null);
 
-        var dest_obj_iter = try dest_repo.log(allocator, &.{commit_k});
+        var dest_obj_iter = try dest_repo.log(io, allocator, &.{commit_k});
         defer dest_obj_iter.deinit();
         const dest_commit_k = (try dest_obj_iter.next()) orelse return error.ExpectedObject;
         defer dest_commit_k.deinit();
@@ -327,6 +337,7 @@ test "merge side branch" {
 }
 
 fn testMergeSideBranch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) !void {
+    const io = std.testing.io;
     const allocator = std.testing.allocator;
     const temp_dir_name = "temp-test-repo-merge-side-branch";
 
@@ -348,11 +359,11 @@ fn testMergeSideBranch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.R
     defer allocator.free(work_path);
 
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
+        var repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = work_path });
         defer repo.deinit(allocator);
     }
 
-    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = work_path });
     defer repo.deinit(allocator);
 
     //           C <------ D [side]
@@ -364,64 +375,64 @@ fn testMergeSideBranch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.R
     //                   \
     //                    H <---- I <---- J [topic]
 
-    try addFile(repo_kind, repo_opts, &repo, allocator, "master.md", "a");
-    _ = try repo.commit(allocator, .{ .message = "a" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "master.md", "a");
+    _ = try repo.commit(io, allocator, .{ .message = "a" });
 
-    try addFile(repo_kind, repo_opts, &repo, allocator, "master.md", "b");
-    _ = try repo.commit(allocator, .{ .message = "b" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "master.md", "b");
+    _ = try repo.commit(io, allocator, .{ .message = "b" });
 
-    try repo.addBranch(.{ .name = "side" });
+    try repo.addBranch(io, .{ .name = "side" });
 
     {
-        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "side" } } });
+        var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "side" } } });
         defer result.deinit();
     }
 
-    try addFile(repo_kind, repo_opts, &repo, allocator, "side.md", "c");
-    _ = try repo.commit(allocator, .{ .message = "c" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "side.md", "c");
+    _ = try repo.commit(io, allocator, .{ .message = "c" });
 
-    try addFile(repo_kind, repo_opts, &repo, allocator, "side.md", "d");
-    _ = try repo.commit(allocator, .{ .message = "d" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "side.md", "d");
+    _ = try repo.commit(io, allocator, .{ .message = "d" });
 
     {
-        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
+        var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
         defer result.deinit();
     }
 
-    try addFile(repo_kind, repo_opts, &repo, allocator, "master.md", "e");
-    const commit_e = try repo.commit(allocator, .{ .message = "e" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "master.md", "e");
+    const commit_e = try repo.commit(io, allocator, .{ .message = "e" });
 
-    try repo.addBranch(.{ .name = "topic" });
+    try repo.addBranch(io, .{ .name = "topic" });
 
     // commit f
     _ = blk: {
-        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "side" } }} } } }, null);
+        var merge = try repo.merge(io, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "side" } }} } } }, null);
         defer merge.deinit();
         try std.testing.expect(.success == merge.result);
         break :blk merge.result.success.oid;
     };
 
-    try addFile(repo_kind, repo_opts, &repo, allocator, "master.md", "g");
-    const commit_g = try repo.commit(allocator, .{ .message = "g" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "master.md", "g");
+    const commit_g = try repo.commit(io, allocator, .{ .message = "g" });
 
     {
-        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "topic" } } });
+        var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "topic" } } });
         defer result.deinit();
     }
 
-    try addFile(repo_kind, repo_opts, &repo, allocator, "topic.md", "h");
-    _ = try repo.commit(allocator, .{ .message = "h" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "topic.md", "h");
+    _ = try repo.commit(io, allocator, .{ .message = "h" });
 
-    try addFile(repo_kind, repo_opts, &repo, allocator, "topic.md", "i");
-    _ = try repo.commit(allocator, .{ .message = "i" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "topic.md", "i");
+    _ = try repo.commit(io, allocator, .{ .message = "i" });
 
-    try addFile(repo_kind, repo_opts, &repo, allocator, "topic.md", "j");
-    const commit_j = try repo.commit(allocator, .{ .message = "j" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "topic.md", "j");
+    const commit_j = try repo.commit(io, allocator, .{ .message = "j" });
 
     var moment = try repo.core.latestMoment();
     const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
 
-    const ancestor_g_j = try mrg.commonAncestor(repo_kind, repo_opts, allocator, state, &commit_g, &commit_j);
+    const ancestor_g_j = try mrg.commonAncestor(repo_kind, repo_opts, state, io, allocator, &commit_g, &commit_j);
     try std.testing.expectEqualStrings(&commit_e, &ancestor_g_j);
 }
 
@@ -478,6 +489,7 @@ test "merge conflict" {
 }
 
 fn testMergeConflictSameFile(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) !void {
+    const io = std.testing.io;
     const allocator = std.testing.allocator;
     const temp_dir_name = "temp-test-repo-merge-conflict-same-file";
 
@@ -499,11 +511,11 @@ fn testMergeConflictSameFile(comptime repo_kind: rp.RepoKind, comptime repo_opts
     defer allocator.free(work_path);
 
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
+        var repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = work_path });
         defer repo.deinit(allocator);
     }
 
-    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = work_path });
     defer repo.deinit(allocator);
 
     // A --- B --- D [master]
@@ -511,35 +523,35 @@ fn testMergeConflictSameFile(comptime repo_kind: rp.RepoKind, comptime repo_opts
     //   \       /
     //    `---- C [foo]
 
-    try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt",
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "f.txt",
         \\a
         \\b
         \\c
     );
-    _ = try repo.commit(allocator, .{ .message = "a" });
-    try repo.addBranch(.{ .name = "foo" });
-    try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt",
+    _ = try repo.commit(io, allocator, .{ .message = "a" });
+    try repo.addBranch(io, .{ .name = "foo" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "f.txt",
         \\a
         \\x
         \\c
     );
-    _ = try repo.commit(allocator, .{ .message = "b" });
+    _ = try repo.commit(io, allocator, .{ .message = "b" });
     {
-        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
+        var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
         defer result.deinit();
     }
-    try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt",
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "f.txt",
         \\a
         \\y
         \\c
     );
-    _ = try repo.commit(allocator, .{ .message = "c" });
+    _ = try repo.commit(io, allocator, .{ .message = "c" });
     {
-        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
+        var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
         defer result.deinit();
     }
     {
-        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
+        var merge = try repo.merge(io, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
         defer merge.deinit();
         try std.testing.expect(.conflict == merge.result);
 
@@ -562,7 +574,7 @@ fn testMergeConflictSameFile(comptime repo_kind: rp.RepoKind, comptime repo_opts
     }
 
     {
-        var root = try ui.rootWidget(repo_kind, repo_opts, &repo, allocator, .status);
+        var root = try ui.rootWidget(repo_kind, repo_opts, &repo, io, allocator, .status);
         defer root.deinit();
 
         const grid = try root.getGrid().?.toString(allocator);
@@ -603,9 +615,9 @@ fn testMergeConflictSameFile(comptime repo_kind: rp.RepoKind, comptime repo_opts
     }
 
     // generate diff
-    var status = try repo.status(allocator);
+    var status = try repo.status(io, allocator);
     defer status.deinit(allocator);
-    var file_iter = try repo.filePairs(allocator, .{
+    var file_iter = try repo.filePairs(io, allocator, .{
         .work_dir = .{
             .conflict_diff_kind = .target,
             .status = &status,
@@ -622,7 +634,7 @@ fn testMergeConflictSameFile(comptime repo_kind: rp.RepoKind, comptime repo_opts
     {
         // can't merge again with an unresolved merge
         {
-            var result_or_err = repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
+            var result_or_err = repo.merge(io, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
             if (result_or_err) |*result| {
                 defer result.deinit();
                 return error.ExpectedMergeToNotFinish;
@@ -634,7 +646,7 @@ fn testMergeConflictSameFile(comptime repo_kind: rp.RepoKind, comptime repo_opts
 
         // can't continue merge with unresolved conflicts
         {
-            var result_or_err = repo.merge(allocator, .{ .kind = .full, .action = .cont }, null);
+            var result_or_err = repo.merge(io, allocator, .{ .kind = .full, .action = .cont }, null);
             if (result_or_err) |*result| {
                 defer result.deinit();
                 return error.ExpectedMergeToNotFinish;
@@ -646,14 +658,14 @@ fn testMergeConflictSameFile(comptime repo_kind: rp.RepoKind, comptime repo_opts
     }
 
     // resolve conflict with changes from source branch
-    try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt",
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "f.txt",
         \\a
         \\y
         \\c
     );
 
     {
-        var root = try ui.rootWidget(repo_kind, repo_opts, &repo, allocator, .status);
+        var root = try ui.rootWidget(repo_kind, repo_opts, &repo, io, allocator, .status);
         defer root.deinit();
 
         const grid = try root.getGrid().?.toString(allocator);
@@ -689,14 +701,14 @@ fn testMergeConflictSameFile(comptime repo_kind: rp.RepoKind, comptime repo_opts
     }
 
     // resolve conflict with changes from target branch
-    try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt",
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "f.txt",
         \\a
         \\x
         \\c
     );
 
     {
-        var root = try ui.rootWidget(repo_kind, repo_opts, &repo, allocator, .status);
+        var root = try ui.rootWidget(repo_kind, repo_opts, &repo, io, allocator, .status);
         defer root.deinit();
 
         const grid = try root.getGrid().?.toString(allocator);
@@ -732,20 +744,21 @@ fn testMergeConflictSameFile(comptime repo_kind: rp.RepoKind, comptime repo_opts
     }
 
     {
-        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .cont }, null);
+        var merge = try repo.merge(io, allocator, .{ .kind = .full, .action = .cont }, null);
         defer merge.deinit();
         try std.testing.expect(.success == merge.result);
     }
 
     // if we try merging foo again, it does nothing
     {
-        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
+        var merge = try repo.merge(io, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
         defer merge.deinit();
         try std.testing.expect(.nothing == merge.result);
     }
 }
 
 fn testMergeConflictSameFileEmptyBase(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) !void {
+    const io = std.testing.io;
     const allocator = std.testing.allocator;
     const temp_dir_name = "temp-test-repo-merge-conflict-same-file-empty-base";
 
@@ -767,11 +780,11 @@ fn testMergeConflictSameFileEmptyBase(comptime repo_kind: rp.RepoKind, comptime 
     defer allocator.free(work_path);
 
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
+        var repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = work_path });
         defer repo.deinit(allocator);
     }
 
-    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = work_path });
     defer repo.deinit(allocator);
 
     // A --- B --- D [master]
@@ -780,36 +793,36 @@ fn testMergeConflictSameFileEmptyBase(comptime repo_kind: rp.RepoKind, comptime 
     //    `---- C [foo]
 
     // commit A (base commit) is empty
-    _ = try repo.commit(allocator, .{ .message = "a", .allow_empty = true });
+    _ = try repo.commit(io, allocator, .{ .message = "a", .allow_empty = true });
 
     // newlines are intentionally added to the end of the files this time,
     // to test that the merge code behaves correctly with end lines of zero length
 
-    try repo.addBranch(.{ .name = "foo" });
-    try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt",
+    try repo.addBranch(io, .{ .name = "foo" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "f.txt",
         \\a
         \\x
         \\c
         \\
     );
-    _ = try repo.commit(allocator, .{ .message = "b" });
+    _ = try repo.commit(io, allocator, .{ .message = "b" });
     {
-        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
+        var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
         defer result.deinit();
     }
-    try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt",
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "f.txt",
         \\a
         \\y
         \\c
         \\
     );
-    _ = try repo.commit(allocator, .{ .message = "c" });
+    _ = try repo.commit(io, allocator, .{ .message = "c" });
     {
-        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
+        var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
         defer result.deinit();
     }
     {
-        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
+        var merge = try repo.merge(io, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
         defer merge.deinit();
         try std.testing.expect(.conflict == merge.result);
 
@@ -835,7 +848,7 @@ fn testMergeConflictSameFileEmptyBase(comptime repo_kind: rp.RepoKind, comptime 
     }
 
     {
-        var root = try ui.rootWidget(repo_kind, repo_opts, &repo, allocator, .status);
+        var root = try ui.rootWidget(repo_kind, repo_opts, &repo, io, allocator, .status);
         defer root.deinit();
 
         const grid = try root.getGrid().?.toString(allocator);
@@ -879,9 +892,9 @@ fn testMergeConflictSameFileEmptyBase(comptime repo_kind: rp.RepoKind, comptime 
     }
 
     // generate diff
-    var status = try repo.status(allocator);
+    var status = try repo.status(io, allocator);
     defer status.deinit(allocator);
-    var file_iter = try repo.filePairs(allocator, .{
+    var file_iter = try repo.filePairs(io, allocator, .{
         .work_dir = .{
             .conflict_diff_kind = .target,
             .status = &status,
@@ -898,7 +911,7 @@ fn testMergeConflictSameFileEmptyBase(comptime repo_kind: rp.RepoKind, comptime 
     {
         // can't merge again with an unresolved merge
         {
-            var result_or_err = repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
+            var result_or_err = repo.merge(io, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
             if (result_or_err) |*result| {
                 defer result.deinit();
                 return error.ExpectedMergeToNotFinish;
@@ -910,7 +923,7 @@ fn testMergeConflictSameFileEmptyBase(comptime repo_kind: rp.RepoKind, comptime 
 
         // can't continue merge with unresolved conflicts
         {
-            var result_or_err = repo.merge(allocator, .{ .kind = .full, .action = .cont }, null);
+            var result_or_err = repo.merge(io, allocator, .{ .kind = .full, .action = .cont }, null);
             if (result_or_err) |*result| {
                 defer result.deinit();
                 return error.ExpectedMergeToNotFinish;
@@ -922,7 +935,7 @@ fn testMergeConflictSameFileEmptyBase(comptime repo_kind: rp.RepoKind, comptime 
     }
 
     // resolve conflict with changes from source branch
-    try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt",
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "f.txt",
         \\a
         \\y
         \\c
@@ -930,7 +943,7 @@ fn testMergeConflictSameFileEmptyBase(comptime repo_kind: rp.RepoKind, comptime 
     );
 
     {
-        var root = try ui.rootWidget(repo_kind, repo_opts, &repo, allocator, .status);
+        var root = try ui.rootWidget(repo_kind, repo_opts, &repo, io, allocator, .status);
         defer root.deinit();
 
         const grid = try root.getGrid().?.toString(allocator);
@@ -967,7 +980,7 @@ fn testMergeConflictSameFileEmptyBase(comptime repo_kind: rp.RepoKind, comptime 
     }
 
     // resolve conflict with changes from target branch
-    try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt",
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "f.txt",
         \\a
         \\x
         \\c
@@ -975,7 +988,7 @@ fn testMergeConflictSameFileEmptyBase(comptime repo_kind: rp.RepoKind, comptime 
     );
 
     {
-        var root = try ui.rootWidget(repo_kind, repo_opts, &repo, allocator, .status);
+        var root = try ui.rootWidget(repo_kind, repo_opts, &repo, io, allocator, .status);
         defer root.deinit();
 
         const grid = try root.getGrid().?.toString(allocator);
@@ -1012,20 +1025,21 @@ fn testMergeConflictSameFileEmptyBase(comptime repo_kind: rp.RepoKind, comptime 
     }
 
     {
-        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .cont }, null);
+        var merge = try repo.merge(io, allocator, .{ .kind = .full, .action = .cont }, null);
         defer merge.deinit();
         try std.testing.expect(.success == merge.result);
     }
 
     // if we try merging foo again, it does nothing
     {
-        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
+        var merge = try repo.merge(io, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
         defer merge.deinit();
         try std.testing.expect(.nothing == merge.result);
     }
 }
 
 fn testMergeConflictSameFileAutoresolved(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) !void {
+    const io = std.testing.io;
     const allocator = std.testing.allocator;
     const temp_dir_name = "temp-test-repo-merge-conflict-same-file-autoresolved";
 
@@ -1047,11 +1061,11 @@ fn testMergeConflictSameFileAutoresolved(comptime repo_kind: rp.RepoKind, compti
     defer allocator.free(work_path);
 
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
+        var repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = work_path });
         defer repo.deinit(allocator);
     }
 
-    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = work_path });
     defer repo.deinit(allocator);
 
     // A --- B --- D [master]
@@ -1059,35 +1073,35 @@ fn testMergeConflictSameFileAutoresolved(comptime repo_kind: rp.RepoKind, compti
     //   \       /
     //    `---- C [foo]
 
-    try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt",
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "f.txt",
         \\a
         \\b
         \\c
     );
-    _ = try repo.commit(allocator, .{ .message = "a" });
-    try repo.addBranch(.{ .name = "foo" });
-    try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt",
+    _ = try repo.commit(io, allocator, .{ .message = "a" });
+    try repo.addBranch(io, .{ .name = "foo" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "f.txt",
         \\x
         \\b
         \\c
     );
-    _ = try repo.commit(allocator, .{ .message = "b" });
+    _ = try repo.commit(io, allocator, .{ .message = "b" });
     {
-        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
+        var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
         defer result.deinit();
     }
-    try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt",
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "f.txt",
         \\a
         \\b
         \\y
     );
-    _ = try repo.commit(allocator, .{ .message = "c" });
+    _ = try repo.commit(io, allocator, .{ .message = "c" });
     {
-        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
+        var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
         defer result.deinit();
     }
     {
-        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
+        var merge = try repo.merge(io, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
         defer merge.deinit();
         try std.testing.expect(.success == merge.result);
 
@@ -1104,9 +1118,9 @@ fn testMergeConflictSameFileAutoresolved(comptime repo_kind: rp.RepoKind, compti
     }
 
     // generate diff
-    var status = try repo.status(allocator);
+    var status = try repo.status(io, allocator);
     defer status.deinit(allocator);
-    var file_iter = try repo.filePairs(allocator, .{
+    var file_iter = try repo.filePairs(io, allocator, .{
         .work_dir = .{
             .conflict_diff_kind = .target,
             .status = &status,
@@ -1120,7 +1134,7 @@ fn testMergeConflictSameFileAutoresolved(comptime repo_kind: rp.RepoKind, compti
 
     // if we try merging foo again, it does nothing
     {
-        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
+        var merge = try repo.merge(io, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
         defer merge.deinit();
         try std.testing.expect(.nothing == merge.result);
     }
@@ -1304,6 +1318,7 @@ fn testMergeConflictSameFileAutoresolvedNeighboringLines(comptime repo_kind: rp.
 }
 
 fn testMergeConflictModifyDelete(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) !void {
+    const io = std.testing.io;
     const allocator = std.testing.allocator;
     const temp_dir_name = "temp-test-repo-merge-conflict-modify-delete";
 
@@ -1325,11 +1340,11 @@ fn testMergeConflictModifyDelete(comptime repo_kind: rp.RepoKind, comptime repo_
     defer allocator.free(work_path);
 
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
+        var repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = work_path });
         defer repo.deinit(allocator);
     }
 
-    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = work_path });
     defer repo.deinit(allocator);
 
     // A --- B --- D [master]
@@ -1337,29 +1352,29 @@ fn testMergeConflictModifyDelete(comptime repo_kind: rp.RepoKind, comptime repo_
     //   \       /
     //    `---- C [foo]
 
-    try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt", "1");
-    _ = try repo.commit(allocator, .{ .message = "a" });
-    try repo.addBranch(.{ .name = "foo" });
-    try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt", "2");
-    _ = try repo.commit(allocator, .{ .message = "b" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "f.txt", "1");
+    _ = try repo.commit(io, allocator, .{ .message = "a" });
+    try repo.addBranch(io, .{ .name = "foo" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "f.txt", "2");
+    _ = try repo.commit(io, allocator, .{ .message = "b" });
     {
-        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
+        var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
         defer result.deinit();
     }
-    try repo.remove(allocator, &.{"f.txt"}, .{});
-    _ = try repo.commit(allocator, .{ .message = "c" });
+    try repo.remove(io, allocator, &.{"f.txt"}, .{});
+    _ = try repo.commit(io, allocator, .{ .message = "c" });
     {
-        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
+        var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
         defer result.deinit();
     }
     {
-        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
+        var merge = try repo.merge(io, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
         defer merge.deinit();
         try std.testing.expect(.conflict == merge.result);
     }
 
     {
-        var root = try ui.rootWidget(repo_kind, repo_opts, &repo, allocator, .status);
+        var root = try ui.rootWidget(repo_kind, repo_opts, &repo, io, allocator, .status);
         defer root.deinit();
 
         const grid = try root.getGrid().?.toString(allocator);
@@ -1384,9 +1399,9 @@ fn testMergeConflictModifyDelete(comptime repo_kind: rp.RepoKind, comptime repo_
     }
 
     // generate diff
-    var status = try repo.status(allocator);
+    var status = try repo.status(io, allocator);
     defer status.deinit(allocator);
-    var file_iter = try repo.filePairs(allocator, .{
+    var file_iter = try repo.filePairs(io, allocator, .{
         .work_dir = .{
             .conflict_diff_kind = .target,
             .status = &status,
@@ -1404,7 +1419,7 @@ fn testMergeConflictModifyDelete(comptime repo_kind: rp.RepoKind, comptime repo_
     {
         // can't merge again with an unresolved merge
         {
-            var result_or_err = repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
+            var result_or_err = repo.merge(io, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
             if (result_or_err) |*result| {
                 defer result.deinit();
                 return error.ExpectedMergeToNotFinish;
@@ -1416,7 +1431,7 @@ fn testMergeConflictModifyDelete(comptime repo_kind: rp.RepoKind, comptime repo_
 
         // can't continue merge with unresolved conflicts
         {
-            var result_or_err = repo.merge(allocator, .{ .kind = .full, .action = .cont }, null);
+            var result_or_err = repo.merge(io, allocator, .{ .kind = .full, .action = .cont }, null);
             if (result_or_err) |*result| {
                 defer result.deinit();
                 return error.ExpectedMergeToNotFinish;
@@ -1428,22 +1443,23 @@ fn testMergeConflictModifyDelete(comptime repo_kind: rp.RepoKind, comptime repo_
     }
 
     // resolve conflict
-    try repo.add(allocator, &.{"f.txt"});
+    try repo.add(io, allocator, &.{"f.txt"});
     {
-        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .cont }, null);
+        var merge = try repo.merge(io, allocator, .{ .kind = .full, .action = .cont }, null);
         defer merge.deinit();
         try std.testing.expect(.success == merge.result);
     }
 
     // if we try merging foo again, it does nothing
     {
-        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
+        var merge = try repo.merge(io, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
         defer merge.deinit();
         try std.testing.expect(.nothing == merge.result);
     }
 }
 
 fn testMergeConflictDeleteModify(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) !void {
+    const io = std.testing.io;
     const allocator = std.testing.allocator;
     const temp_dir_name = "temp-test-repo-merge-conflict-delete-modify";
 
@@ -1465,11 +1481,11 @@ fn testMergeConflictDeleteModify(comptime repo_kind: rp.RepoKind, comptime repo_
     defer allocator.free(work_path);
 
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
+        var repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = work_path });
         defer repo.deinit(allocator);
     }
 
-    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = work_path });
     defer repo.deinit(allocator);
 
     // A --- B --- D [master]
@@ -1477,29 +1493,29 @@ fn testMergeConflictDeleteModify(comptime repo_kind: rp.RepoKind, comptime repo_
     //   \       /
     //    `---- C [foo]
 
-    try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt", "1");
-    _ = try repo.commit(allocator, .{ .message = "a" });
-    try repo.addBranch(.{ .name = "foo" });
-    try repo.remove(allocator, &.{"f.txt"}, .{});
-    _ = try repo.commit(allocator, .{ .message = "b" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "f.txt", "1");
+    _ = try repo.commit(io, allocator, .{ .message = "a" });
+    try repo.addBranch(io, .{ .name = "foo" });
+    try repo.remove(io, allocator, &.{"f.txt"}, .{});
+    _ = try repo.commit(io, allocator, .{ .message = "b" });
     {
-        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
+        var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
         defer result.deinit();
     }
-    try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt", "2");
-    _ = try repo.commit(allocator, .{ .message = "c" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "f.txt", "2");
+    _ = try repo.commit(io, allocator, .{ .message = "c" });
     {
-        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
+        var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
         defer result.deinit();
     }
     {
-        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
+        var merge = try repo.merge(io, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
         defer merge.deinit();
         try std.testing.expect(.conflict == merge.result);
     }
 
     {
-        var root = try ui.rootWidget(repo_kind, repo_opts, &repo, allocator, .status);
+        var root = try ui.rootWidget(repo_kind, repo_opts, &repo, io, allocator, .status);
         defer root.deinit();
 
         const grid = try root.getGrid().?.toString(allocator);
@@ -1524,9 +1540,9 @@ fn testMergeConflictDeleteModify(comptime repo_kind: rp.RepoKind, comptime repo_
     }
 
     // generate diff
-    var status = try repo.status(allocator);
+    var status = try repo.status(io, allocator);
     defer status.deinit(allocator);
-    var file_iter = try repo.filePairs(allocator, .{
+    var file_iter = try repo.filePairs(io, allocator, .{
         .work_dir = .{
             .conflict_diff_kind = .target,
             .status = &status,
@@ -1542,7 +1558,7 @@ fn testMergeConflictDeleteModify(comptime repo_kind: rp.RepoKind, comptime repo_
     {
         // can't merge again with an unresolved merge
         {
-            var result_or_err = repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
+            var result_or_err = repo.merge(io, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
             if (result_or_err) |*result| {
                 defer result.deinit();
                 return error.ExpectedMergeToNotFinish;
@@ -1554,7 +1570,7 @@ fn testMergeConflictDeleteModify(comptime repo_kind: rp.RepoKind, comptime repo_
 
         // can't continue merge with unresolved conflicts
         {
-            var result_or_err = repo.merge(allocator, .{ .kind = .full, .action = .cont }, null);
+            var result_or_err = repo.merge(io, allocator, .{ .kind = .full, .action = .cont }, null);
             if (result_or_err) |*result| {
                 defer result.deinit();
                 return error.ExpectedMergeToNotFinish;
@@ -1566,22 +1582,23 @@ fn testMergeConflictDeleteModify(comptime repo_kind: rp.RepoKind, comptime repo_
     }
 
     // resolve conflict
-    try repo.add(allocator, &.{"f.txt"});
+    try repo.add(io, allocator, &.{"f.txt"});
     {
-        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .cont }, null);
+        var merge = try repo.merge(io, allocator, .{ .kind = .full, .action = .cont }, null);
         defer merge.deinit();
         try std.testing.expect(.success == merge.result);
     }
 
     // if we try merging foo again, it does nothing
     {
-        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
+        var merge = try repo.merge(io, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
         defer merge.deinit();
         try std.testing.expect(.nothing == merge.result);
     }
 }
 
 fn testMergeConflictFileDir(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) !void {
+    const io = std.testing.io;
     const allocator = std.testing.allocator;
     const temp_dir_name = "temp-test-repo-merge-conflict-file-dir";
 
@@ -1603,11 +1620,11 @@ fn testMergeConflictFileDir(comptime repo_kind: rp.RepoKind, comptime repo_opts:
     defer allocator.free(work_path);
 
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
+        var repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = work_path });
         defer repo.deinit(allocator);
     }
 
-    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = work_path });
     defer repo.deinit(allocator);
 
     // A --- B --- D [master]
@@ -1615,23 +1632,23 @@ fn testMergeConflictFileDir(comptime repo_kind: rp.RepoKind, comptime repo_opts:
     //   \       /
     //    `---- C [foo]
 
-    try addFile(repo_kind, repo_opts, &repo, allocator, "hi.txt", "hi");
-    _ = try repo.commit(allocator, .{ .message = "a" });
-    try repo.addBranch(.{ .name = "foo" });
-    try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt", "hi");
-    _ = try repo.commit(allocator, .{ .message = "b" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "hi.txt", "hi");
+    _ = try repo.commit(io, allocator, .{ .message = "a" });
+    try repo.addBranch(io, .{ .name = "foo" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "f.txt", "hi");
+    _ = try repo.commit(io, allocator, .{ .message = "b" });
     {
-        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
+        var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
         defer result.deinit();
     }
-    try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt/g.txt", "hi");
-    _ = try repo.commit(allocator, .{ .message = "c" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "f.txt/g.txt", "hi");
+    _ = try repo.commit(io, allocator, .{ .message = "c" });
     {
-        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
+        var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
         defer result.deinit();
     }
     {
-        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
+        var merge = try repo.merge(io, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
         defer merge.deinit();
         try std.testing.expect(.conflict == merge.result);
     }
@@ -1641,7 +1658,7 @@ fn testMergeConflictFileDir(comptime repo_kind: rp.RepoKind, comptime repo_opts:
     defer renamed_file.close();
 
     {
-        var root = try ui.rootWidget(repo_kind, repo_opts, &repo, allocator, .status);
+        var root = try ui.rootWidget(repo_kind, repo_opts, &repo, io, allocator, .status);
         defer root.deinit();
 
         {
@@ -1732,9 +1749,9 @@ fn testMergeConflictFileDir(comptime repo_kind: rp.RepoKind, comptime repo_opts:
     }
 
     // generate diff
-    var status = try repo.status(allocator);
+    var status = try repo.status(io, allocator);
     defer status.deinit(allocator);
-    var file_iter = try repo.filePairs(allocator, .{
+    var file_iter = try repo.filePairs(io, allocator, .{
         .work_dir = .{
             .conflict_diff_kind = .target,
             .status = &status,
@@ -1752,7 +1769,7 @@ fn testMergeConflictFileDir(comptime repo_kind: rp.RepoKind, comptime repo_opts:
     {
         // can't merge again with an unresolved merge
         {
-            var result_or_err = repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
+            var result_or_err = repo.merge(io, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
             if (result_or_err) |*result| {
                 defer result.deinit();
                 return error.ExpectedMergeToNotFinish;
@@ -1764,7 +1781,7 @@ fn testMergeConflictFileDir(comptime repo_kind: rp.RepoKind, comptime repo_opts:
 
         // can't continue merge with unresolved conflicts
         {
-            var result_or_err = repo.merge(allocator, .{ .kind = .full, .action = .cont }, null);
+            var result_or_err = repo.merge(io, allocator, .{ .kind = .full, .action = .cont }, null);
             if (result_or_err) |*result| {
                 defer result.deinit();
                 return error.ExpectedMergeToNotFinish;
@@ -1776,22 +1793,23 @@ fn testMergeConflictFileDir(comptime repo_kind: rp.RepoKind, comptime repo_opts:
     }
 
     // resolve conflict
-    try repo.add(allocator, &.{"f.txt"});
+    try repo.add(io, allocator, &.{"f.txt"});
     {
-        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .cont }, null);
+        var merge = try repo.merge(io, allocator, .{ .kind = .full, .action = .cont }, null);
         defer merge.deinit();
         try std.testing.expect(.success == merge.result);
     }
 
     // if we try merging foo again, it does nothing
     {
-        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
+        var merge = try repo.merge(io, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
         defer merge.deinit();
         try std.testing.expect(.nothing == merge.result);
     }
 }
 
 fn testMergeConflictDirFile(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) !void {
+    const io = std.testing.io;
     const allocator = std.testing.allocator;
     const temp_dir_name = "temp-test-repo-merge-conflict-dir-file";
 
@@ -1813,11 +1831,11 @@ fn testMergeConflictDirFile(comptime repo_kind: rp.RepoKind, comptime repo_opts:
     defer allocator.free(work_path);
 
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
+        var repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = work_path });
         defer repo.deinit(allocator);
     }
 
-    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = work_path });
     defer repo.deinit(allocator);
 
     // A --- B --- D [master]
@@ -1825,23 +1843,23 @@ fn testMergeConflictDirFile(comptime repo_kind: rp.RepoKind, comptime repo_opts:
     //   \       /
     //    `---- C [foo]
 
-    try addFile(repo_kind, repo_opts, &repo, allocator, "hi.txt", "hi");
-    _ = try repo.commit(allocator, .{ .message = "a" });
-    try repo.addBranch(.{ .name = "foo" });
-    try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt/g.txt", "hi");
-    _ = try repo.commit(allocator, .{ .message = "b" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "hi.txt", "hi");
+    _ = try repo.commit(io, allocator, .{ .message = "a" });
+    try repo.addBranch(io, .{ .name = "foo" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "f.txt/g.txt", "hi");
+    _ = try repo.commit(io, allocator, .{ .message = "b" });
     {
-        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
+        var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
         defer result.deinit();
     }
-    try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt", "hi");
-    _ = try repo.commit(allocator, .{ .message = "c" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "f.txt", "hi");
+    _ = try repo.commit(io, allocator, .{ .message = "c" });
     {
-        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
+        var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
         defer result.deinit();
     }
     {
-        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
+        var merge = try repo.merge(io, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
         defer merge.deinit();
         try std.testing.expect(.conflict == merge.result);
     }
@@ -1851,7 +1869,7 @@ fn testMergeConflictDirFile(comptime repo_kind: rp.RepoKind, comptime repo_opts:
     defer renamed_file.close();
 
     {
-        var root = try ui.rootWidget(repo_kind, repo_opts, &repo, allocator, .status);
+        var root = try ui.rootWidget(repo_kind, repo_opts, &repo, io, allocator, .status);
         defer root.deinit();
 
         {
@@ -1909,9 +1927,9 @@ fn testMergeConflictDirFile(comptime repo_kind: rp.RepoKind, comptime repo_opts:
     }
 
     // generate diff
-    var status = try repo.status(allocator);
+    var status = try repo.status(io, allocator);
     defer status.deinit(allocator);
-    var file_iter = try repo.filePairs(allocator, .{
+    var file_iter = try repo.filePairs(io, allocator, .{
         .work_dir = .{
             .conflict_diff_kind = .target,
             .status = &status,
@@ -1927,7 +1945,7 @@ fn testMergeConflictDirFile(comptime repo_kind: rp.RepoKind, comptime repo_opts:
     {
         // can't merge again with an unresolved merge
         {
-            var result_or_err = repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
+            var result_or_err = repo.merge(io, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
             if (result_or_err) |*result| {
                 defer result.deinit();
                 return error.ExpectedMergeToNotFinish;
@@ -1939,7 +1957,7 @@ fn testMergeConflictDirFile(comptime repo_kind: rp.RepoKind, comptime repo_opts:
 
         // can't continue merge with unresolved conflicts
         {
-            var result_or_err = repo.merge(allocator, .{ .kind = .full, .action = .cont }, null);
+            var result_or_err = repo.merge(io, allocator, .{ .kind = .full, .action = .cont }, null);
             if (result_or_err) |*result| {
                 defer result.deinit();
                 return error.ExpectedMergeToNotFinish;
@@ -1951,16 +1969,16 @@ fn testMergeConflictDirFile(comptime repo_kind: rp.RepoKind, comptime repo_opts:
     }
 
     // resolve conflict
-    try repo.add(allocator, &.{"f.txt"});
+    try repo.add(io, allocator, &.{"f.txt"});
     {
-        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .cont }, null);
+        var merge = try repo.merge(io, allocator, .{ .kind = .full, .action = .cont }, null);
         defer merge.deinit();
         try std.testing.expect(.success == merge.result);
     }
 
     // if we try merging foo again, it does nothing
     {
-        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
+        var merge = try repo.merge(io, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
         defer merge.deinit();
         try std.testing.expect(.nothing == merge.result);
     }
@@ -1974,6 +1992,7 @@ test "merge conflict binary" {
 /// creates a merge conflict with binary files, asserting that
 /// it will not attempt to insert conflict markers or auto-resolve.
 pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) !void {
+    const io = std.testing.io;
     const allocator = std.testing.allocator;
     const temp_dir_name = "temp-test-repo-merge-conflict-binary";
 
@@ -1995,11 +2014,11 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind, comptime repo_op
     defer allocator.free(work_path);
 
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
+        var repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = work_path });
         defer repo.deinit(allocator);
     }
 
-    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = work_path });
     defer repo.deinit(allocator);
 
     // A --- B --------- D [master]
@@ -2016,39 +2035,39 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind, comptime repo_op
         }
     }
 
-    try addFile(repo_kind, repo_opts, &repo, allocator, "bin", &bin);
-    _ = try repo.commit(allocator, .{ .message = "a" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "bin", &bin);
+    _ = try repo.commit(io, allocator, .{ .message = "a" });
 
-    try repo.addBranch(.{ .name = "foo" });
+    try repo.addBranch(io, .{ .name = "foo" });
 
     {
-        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
+        var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
         defer result.deinit();
     }
 
     bin[0] = 1;
 
-    try addFile(repo_kind, repo_opts, &repo, allocator, "bin", &bin);
-    _ = try repo.commit(allocator, .{ .message = "c" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "bin", &bin);
+    _ = try repo.commit(io, allocator, .{ .message = "c" });
 
     {
-        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
+        var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
         defer result.deinit();
     }
 
     bin[0] = 2;
 
-    try addFile(repo_kind, repo_opts, &repo, allocator, "bin", &bin);
-    _ = try repo.commit(allocator, .{ .message = "b" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "bin", &bin);
+    _ = try repo.commit(io, allocator, .{ .message = "b" });
 
     {
-        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
+        var merge = try repo.merge(io, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
         defer merge.deinit();
         try std.testing.expect(.conflict == merge.result);
     }
 
     {
-        var root = try ui.rootWidget(repo_kind, repo_opts, &repo, allocator, .status);
+        var root = try ui.rootWidget(repo_kind, repo_opts, &repo, io, allocator, .status);
         defer root.deinit();
 
         const grid = try root.getGrid().?.toString(allocator);
@@ -2087,16 +2106,16 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind, comptime repo_op
     }
 
     // resolve conflict
-    try repo.add(allocator, &.{"bin"});
+    try repo.add(io, allocator, &.{"bin"});
     {
-        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .cont }, null);
+        var merge = try repo.merge(io, allocator, .{ .kind = .full, .action = .cont }, null);
         defer merge.deinit();
         try std.testing.expect(.success == merge.result);
     }
 
     // if we try merging foo again, it does nothing
     {
-        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
+        var merge = try repo.merge(io, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
         defer merge.deinit();
         try std.testing.expect(.nothing == merge.result);
     }
@@ -2110,9 +2129,9 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind, comptime repo_op
             try file.writeAll(&[_]u8{' '} ** 256);
         }
 
-        var status = try repo.status(allocator);
+        var status = try repo.status(io, allocator);
         defer status.deinit(allocator);
-        var file_iter = try repo.filePairs(allocator, .{
+        var file_iter = try repo.filePairs(io, allocator, .{
             .work_dir = .{
                 .conflict_diff_kind = .target,
                 .status = &status,
@@ -2136,6 +2155,7 @@ test "merge conflict shuffle" {
 /// demonstrates an example of git shuffling lines unexpectedly
 /// when auto-resolving a merge conflict
 fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) !void {
+    const io = std.testing.io;
     const allocator = std.testing.allocator;
     const temp_dir_name = "temp-test-repo-merge-conflict-shuffle";
 
@@ -2159,11 +2179,11 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
         defer allocator.free(work_path);
 
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
+            var repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = work_path });
             defer repo.deinit(allocator);
         }
 
-        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = work_path });
         defer repo.deinit(allocator);
 
         // A --- B --- C --- E [master]
@@ -2171,42 +2191,42 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
         //   \             /
         //    `---------- D [foo]
 
-        try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt",
+        try addFile(repo_kind, repo_opts, &repo, io, allocator, "f.txt",
             \\a
             \\b
         );
-        _ = try repo.commit(allocator, .{ .message = "a" });
-        try repo.addBranch(.{ .name = "foo" });
-        try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt",
+        _ = try repo.commit(io, allocator, .{ .message = "a" });
+        try repo.addBranch(io, .{ .name = "foo" });
+        try addFile(repo_kind, repo_opts, &repo, io, allocator, "f.txt",
             \\g
             \\a
             \\b
         );
-        _ = try repo.commit(allocator, .{ .message = "b" });
-        try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt",
+        _ = try repo.commit(io, allocator, .{ .message = "b" });
+        try addFile(repo_kind, repo_opts, &repo, io, allocator, "f.txt",
             \\a
             \\b
             \\g
             \\a
             \\b
         );
-        _ = try repo.commit(allocator, .{ .message = "c" });
+        _ = try repo.commit(io, allocator, .{ .message = "c" });
         {
-            var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
+            var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
             defer result.deinit();
         }
-        try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt",
+        try addFile(repo_kind, repo_opts, &repo, io, allocator, "f.txt",
             \\a
             \\x
             \\b
         );
-        _ = try repo.commit(allocator, .{ .message = "d" });
+        _ = try repo.commit(io, allocator, .{ .message = "d" });
         {
-            var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
+            var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
             defer result.deinit();
         }
         {
-            var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
+            var merge = try repo.merge(io, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
             defer merge.deinit();
             try std.testing.expect(.success == merge.result);
 
@@ -2240,9 +2260,9 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
         }
 
         // generate diff
-        var status = try repo.status(allocator);
+        var status = try repo.status(io, allocator);
         defer status.deinit(allocator);
-        var file_iter = try repo.filePairs(allocator, .{
+        var file_iter = try repo.filePairs(io, allocator, .{
             .work_dir = .{
                 .conflict_diff_kind = .target,
                 .status = &status,
@@ -2256,7 +2276,7 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
 
         // if we try merging foo again, it does nothing
         {
-            var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
+            var merge = try repo.merge(io, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
             defer merge.deinit();
             try std.testing.expect(.nothing == merge.result);
         }
@@ -2268,11 +2288,11 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
         defer allocator.free(work_path);
 
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
+            var repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = work_path });
             defer repo.deinit(allocator);
         }
 
-        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = work_path });
         defer repo.deinit(allocator);
 
         // A --- B --- C --- E [master]
@@ -2280,7 +2300,7 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
         //   \             /
         //    `---------- D [foo]
 
-        try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt",
+        try addFile(repo_kind, repo_opts, &repo, io, allocator, "f.txt",
             \\int square(int x) {
             \\  int y = x;
             \\  /* Update y to equal the result. */
@@ -2289,9 +2309,9 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
             \\  return y;
             \\}
         );
-        _ = try repo.commit(allocator, .{ .message = "a" });
-        try repo.addBranch(.{ .name = "foo" });
-        try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt",
+        _ = try repo.commit(io, allocator, .{ .message = "a" });
+        try repo.addBranch(io, .{ .name = "foo" });
+        try addFile(repo_kind, repo_opts, &repo, io, allocator, "f.txt",
             \\int very_slow_square(int x) {
             \\  int y = 0;
             \\  /* Update y to equal the result. */
@@ -2310,8 +2330,8 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
             \\  return y;
             \\}
         );
-        _ = try repo.commit(allocator, .{ .message = "b" });
-        try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt",
+        _ = try repo.commit(io, allocator, .{ .message = "b" });
+        try addFile(repo_kind, repo_opts, &repo, io, allocator, "f.txt",
             \\int square(int x) {
             \\  int y = x;
             \\  /* Update y to equal the result. */
@@ -2337,12 +2357,12 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
             \\  return y;
             \\}
         );
-        _ = try repo.commit(allocator, .{ .message = "c" });
+        _ = try repo.commit(io, allocator, .{ .message = "c" });
         {
-            var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
+            var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
             defer result.deinit();
         }
-        try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt",
+        try addFile(repo_kind, repo_opts, &repo, io, allocator, "f.txt",
             \\int square(int x) {
             \\  int y = 0;
             \\  /* Update y to equal the result. */
@@ -2351,13 +2371,13 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
             \\  return y;
             \\}
         );
-        _ = try repo.commit(allocator, .{ .message = "d" });
+        _ = try repo.commit(io, allocator, .{ .message = "d" });
         {
-            var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
+            var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
             defer result.deinit();
         }
         {
-            var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
+            var merge = try repo.merge(io, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
             defer merge.deinit();
 
             const f_txt_content = try repo.core.work_dir.readFileAlloc("f.txt", allocator, @enumFromInt(1024));
@@ -2431,6 +2451,7 @@ test "cherry-pick" {
 }
 
 fn testCherryPick(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) !void {
+    const io = std.testing.io;
     const allocator = std.testing.allocator;
     const temp_dir_name = "temp-test-repo-cherry-pick";
 
@@ -2452,11 +2473,11 @@ fn testCherryPick(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOp
     defer allocator.free(work_path);
 
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
+        var repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = work_path });
         defer repo.deinit(allocator);
     }
 
-    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = work_path });
     defer repo.deinit(allocator);
 
     // A --- B ------------ D' [master]
@@ -2464,31 +2485,31 @@ fn testCherryPick(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOp
     //         \
     //          C --- D --- E [foo]
 
-    try addFile(repo_kind, repo_opts, &repo, allocator, "readme.md", "a");
-    _ = try repo.commit(allocator, .{ .message = "a" });
-    try addFile(repo_kind, repo_opts, &repo, allocator, "readme.md", "b");
-    _ = try repo.commit(allocator, .{ .message = "b" });
-    try repo.addBranch(.{ .name = "foo" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "readme.md", "a");
+    _ = try repo.commit(io, allocator, .{ .message = "a" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "readme.md", "b");
+    _ = try repo.commit(io, allocator, .{ .message = "b" });
+    try repo.addBranch(io, .{ .name = "foo" });
     {
-        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
+        var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
         defer result.deinit();
     }
     // commit c will be the parent of the cherry-picked commit,
     // and it is modifying a different file, so it shouldn't
     // cause a conflict.
-    try addFile(repo_kind, repo_opts, &repo, allocator, "stuff.md", "c");
-    _ = try repo.commit(allocator, .{ .message = "c" });
-    try addFile(repo_kind, repo_opts, &repo, allocator, "readme.md", "d");
-    const commit_d = try repo.commit(allocator, .{ .message = "d" });
-    try addFile(repo_kind, repo_opts, &repo, allocator, "readme.md", "e");
-    _ = try repo.commit(allocator, .{ .message = "e" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "stuff.md", "c");
+    _ = try repo.commit(io, allocator, .{ .message = "c" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "readme.md", "d");
+    const commit_d = try repo.commit(io, allocator, .{ .message = "d" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "readme.md", "e");
+    _ = try repo.commit(io, allocator, .{ .message = "e" });
     {
-        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
+        var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
         defer result.deinit();
     }
 
     {
-        var merge = try repo.merge(allocator, .{ .kind = .pick, .action = .{ .new = .{ .source = &.{.{ .oid = &commit_d }} } } }, null);
+        var merge = try repo.merge(io, allocator, .{ .kind = .pick, .action = .{ .new = .{ .source = &.{.{ .oid = &commit_d }} } } }, null);
         defer merge.deinit();
         try std.testing.expect(.success == merge.result);
     }
@@ -2501,7 +2522,7 @@ fn testCherryPick(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOp
 
     // if we try cherry-picking the same commit again, it succeeds again
     {
-        var merge = try repo.merge(allocator, .{
+        var merge = try repo.merge(io, allocator, .{
             .kind = .pick,
             .action = .{ .new = .{ .source = &.{.{ .oid = &commit_d }} } },
             .commit_metadata = .{ .allow_empty = true },
@@ -2517,6 +2538,7 @@ test "cherry-pick conflict" {
 }
 
 fn testCherryPickConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) !void {
+    const io = std.testing.io;
     const allocator = std.testing.allocator;
     const temp_dir_name = "temp-test-repo-cherry-pick-conflict";
 
@@ -2538,11 +2560,11 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
     defer allocator.free(work_path);
 
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
+        var repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = work_path });
         defer repo.deinit(allocator);
     }
 
-    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = work_path });
     defer repo.deinit(allocator);
 
     // A --- B ------------ D' [master]
@@ -2550,27 +2572,27 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
     //         \
     //          D --------- E [foo]
 
-    try addFile(repo_kind, repo_opts, &repo, allocator, "readme.md", "a");
-    _ = try repo.commit(allocator, .{ .message = "a" });
-    try addFile(repo_kind, repo_opts, &repo, allocator, "readme.md", "b");
-    _ = try repo.commit(allocator, .{ .message = "b" });
-    try repo.addBranch(.{ .name = "foo" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "readme.md", "a");
+    _ = try repo.commit(io, allocator, .{ .message = "a" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "readme.md", "b");
+    _ = try repo.commit(io, allocator, .{ .message = "b" });
+    try repo.addBranch(io, .{ .name = "foo" });
     {
-        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
+        var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
         defer result.deinit();
     }
-    try addFile(repo_kind, repo_opts, &repo, allocator, "readme.md", "c");
-    _ = try repo.commit(allocator, .{ .message = "c" });
-    try addFile(repo_kind, repo_opts, &repo, allocator, "readme.md", "d");
-    const commit_d = try repo.commit(allocator, .{ .message = "d" });
-    try addFile(repo_kind, repo_opts, &repo, allocator, "readme.md", "e");
-    _ = try repo.commit(allocator, .{ .message = "e" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "readme.md", "c");
+    _ = try repo.commit(io, allocator, .{ .message = "c" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "readme.md", "d");
+    const commit_d = try repo.commit(io, allocator, .{ .message = "d" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "readme.md", "e");
+    _ = try repo.commit(io, allocator, .{ .message = "e" });
     {
-        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
+        var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
         defer result.deinit();
     }
     {
-        var merge = try repo.merge(allocator, .{ .kind = .pick, .action = .{ .new = .{ .source = &.{.{ .oid = &commit_d }} } } }, null);
+        var merge = try repo.merge(io, allocator, .{ .kind = .pick, .action = .{ .new = .{ .source = &.{.{ .oid = &commit_d }} } } }, null);
         defer merge.deinit();
         try std.testing.expect(.conflict == merge.result);
 
@@ -2591,9 +2613,9 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
     }
 
     // generate diff
-    var status = try repo.status(allocator);
+    var status = try repo.status(io, allocator);
     defer status.deinit(allocator);
-    var file_iter = try repo.filePairs(allocator, .{
+    var file_iter = try repo.filePairs(io, allocator, .{
         .work_dir = .{
             .conflict_diff_kind = .target,
             .status = &status,
@@ -2610,7 +2632,7 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
     {
         // can't cherry-pick again with an unresolved cherry-pick
         {
-            var result_or_err = repo.merge(allocator, .{ .kind = .pick, .action = .{ .new = .{ .source = &.{.{ .oid = &([_]u8{0} ** hash.hexLen(repo_opts.hash)) }} } } }, null);
+            var result_or_err = repo.merge(io, allocator, .{ .kind = .pick, .action = .{ .new = .{ .source = &.{.{ .oid = &([_]u8{0} ** hash.hexLen(repo_opts.hash)) }} } } }, null);
             if (result_or_err) |*result| {
                 defer result.deinit();
                 return error.ExpectedMergeToNotFinish;
@@ -2622,7 +2644,7 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
 
         // can't continue cherry-pick with unresolved conflicts
         {
-            var result_or_err = repo.merge(allocator, .{ .kind = .pick, .action = .cont }, null);
+            var result_or_err = repo.merge(io, allocator, .{ .kind = .pick, .action = .cont }, null);
             if (result_or_err) |*result| {
                 defer result.deinit();
                 return error.ExpectedMergeToNotFinish;
@@ -2634,13 +2656,13 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
     }
 
     // resolve conflict
-    try addFile(repo_kind, repo_opts, &repo, allocator, "readme.md",
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "readme.md",
         \\e
     );
 
     // can't continue with .kind = merge
     {
-        var result_or_err = repo.merge(allocator, .{ .kind = .full, .action = .cont }, null);
+        var result_or_err = repo.merge(io, allocator, .{ .kind = .full, .action = .cont }, null);
         if (result_or_err) |*result| {
             defer result.deinit();
             return error.ExpectedMergeToNotFinish;
@@ -2652,7 +2674,7 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
 
     // continue cherry-pick
     {
-        var merge = try repo.merge(allocator, .{ .kind = .pick, .action = .cont }, null);
+        var merge = try repo.merge(io, allocator, .{ .kind = .pick, .action = .cont }, null);
         defer merge.deinit();
         try std.testing.expect(.success == merge.result);
     }
@@ -2664,6 +2686,7 @@ test "log" {
 }
 
 fn testLog(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) !void {
+    const io = std.testing.io;
     const allocator = std.testing.allocator;
     const temp_dir_name = "temp-test-repo-log";
 
@@ -2685,11 +2708,11 @@ fn testLog(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo
     defer allocator.free(work_path);
 
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
+        var repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = work_path });
         defer repo.deinit(allocator);
     }
 
-    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = work_path });
     defer repo.deinit(allocator);
 
     // A --- B --- C --------- G --- H [master]
@@ -2697,43 +2720,43 @@ fn testLog(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo
     //         \             /
     //          D --- E --- F [foo]
 
-    try addFile(repo_kind, repo_opts, &repo, allocator, "master.md", "a");
-    const commit_a = try repo.commit(allocator, .{ .message = "a" });
-    try addFile(repo_kind, repo_opts, &repo, allocator, "master.md", "b");
-    const commit_b = try repo.commit(allocator, .{ .message = "b" });
-    try repo.addBranch(.{ .name = "foo" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "master.md", "a");
+    const commit_a = try repo.commit(io, allocator, .{ .message = "a" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "master.md", "b");
+    const commit_b = try repo.commit(io, allocator, .{ .message = "b" });
+    try repo.addBranch(io, .{ .name = "foo" });
     {
-        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
+        var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
         defer result.deinit();
     }
-    try addFile(repo_kind, repo_opts, &repo, allocator, "foo.md", "d");
-    const commit_d = try repo.commit(allocator, .{ .message = "d" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "foo.md", "d");
+    const commit_d = try repo.commit(io, allocator, .{ .message = "d" });
     {
-        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
+        var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
         defer result.deinit();
     }
-    try addFile(repo_kind, repo_opts, &repo, allocator, "master.md", "c");
-    const commit_c = try repo.commit(allocator, .{ .message = "c" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "master.md", "c");
+    const commit_c = try repo.commit(io, allocator, .{ .message = "c" });
     {
-        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
+        var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
         defer result.deinit();
     }
-    try addFile(repo_kind, repo_opts, &repo, allocator, "foo.md", "e");
-    const commit_e = try repo.commit(allocator, .{ .message = "e" });
-    try addFile(repo_kind, repo_opts, &repo, allocator, "foo.md", "f");
-    const commit_f = try repo.commit(allocator, .{ .message = "f" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "foo.md", "e");
+    const commit_e = try repo.commit(io, allocator, .{ .message = "e" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "foo.md", "f");
+    const commit_f = try repo.commit(io, allocator, .{ .message = "f" });
     {
-        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
+        var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
         defer result.deinit();
     }
     const commit_g = blk: {
-        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
+        var merge = try repo.merge(io, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
         defer merge.deinit();
         try std.testing.expect(.success == merge.result);
         break :blk merge.result.success.oid;
     };
-    try addFile(repo_kind, repo_opts, &repo, allocator, "master.md", "h");
-    const commit_h = try repo.commit(allocator, .{ .message = "h" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "master.md", "h");
+    const commit_h = try repo.commit(io, allocator, .{ .message = "h" });
 
     // put oids in a set
     var oid_set = std.StringArrayHashMap(void).init(allocator);
@@ -2750,7 +2773,7 @@ fn testLog(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo
     // assert that all commits have been found in the log
     // and they aren't repeated
     {
-        var commit_iter = try repo.log(allocator, null);
+        var commit_iter = try repo.log(io, allocator, null);
         defer commit_iter.deinit();
         while (try commit_iter.next()) |commit_object| {
             defer commit_object.deinit();
@@ -2769,7 +2792,7 @@ fn testLog(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo
     // assert that only some commits have been found in the log
     // and they aren't repeated
     {
-        var commit_iter = try repo.log(allocator, &.{commit_g});
+        var commit_iter = try repo.log(io, allocator, &.{commit_g});
         defer commit_iter.deinit();
         try commit_iter.exclude(&commit_b);
         while (try commit_iter.next()) |commit_object| {
@@ -2785,7 +2808,7 @@ fn testLog(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo
         var count: usize = 0;
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
-        var obj_iter = try obj.ObjectIterator(repo_kind, repo_opts, .full).init(allocator, state, .{ .kind = .all });
+        var obj_iter = try obj.ObjectIterator(repo_kind, repo_opts, .full).init(state, io, allocator, .{ .kind = .all });
         defer obj_iter.deinit();
         try obj_iter.include(&commit_g);
         while (try obj_iter.next()) |object| {

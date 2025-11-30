@@ -15,6 +15,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
         dir_to_paths: std.StringArrayHashMap(std.StringArrayHashMap(void)),
         dir_to_children: std.StringArrayHashMap(std.StringArrayHashMap(void)),
         root_children: std.StringArrayHashMap(void),
+        io: std.Io,
         allocator: std.mem.Allocator,
         arena: *std.heap.ArenaAllocator,
 
@@ -52,7 +53,11 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
             path: []const u8,
         };
 
-        pub fn init(allocator: std.mem.Allocator, state: rp.Repo(repo_kind, repo_opts).State(.read_only)) !Index(repo_kind, repo_opts) {
+        pub fn init(
+            state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+            io: std.Io,
+            allocator: std.mem.Allocator,
+        ) !Index(repo_kind, repo_opts) {
             const arena = try allocator.create(std.heap.ArenaAllocator);
             arena.* = std.heap.ArenaAllocator.init(allocator);
             var self = Index(repo_kind, repo_opts){
@@ -61,6 +66,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                 .dir_to_paths = std.StringArrayHashMap(std.StringArrayHashMap(void)).init(allocator),
                 .dir_to_children = std.StringArrayHashMap(std.StringArrayHashMap(void)).init(allocator),
                 .root_children = std.StringArrayHashMap(void).init(allocator),
+                .io = io,
                 .allocator = allocator,
                 .arena = arena,
             };
@@ -76,7 +82,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     defer index_file.close();
 
                     var reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
-                    var reader = index_file.reader(&reader_buffer);
+                    var reader = index_file.reader(io, &reader_buffer);
 
                     const signature = try reader.interface.takeArray(4);
                     if (!std.mem.eql(u8, "DIRC", signature)) {
@@ -231,11 +237,11 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 
                     // make reader
                     var reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
-                    var reader = file.reader(&reader_buffer);
+                    var reader = file.reader(self.io, &reader_buffer);
 
                     // write object
                     var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-                    try obj.writeObject(repo_kind, repo_opts, state, &reader, .{ .kind = .blob, .size = meta.size }, &oid);
+                    try obj.writeObject(repo_kind, repo_opts, state, self.io, &reader, .{ .kind = .blob, .size = meta.size }, &oid);
 
                     // get the mode
                     // on windows, if a tree entry was supplied to this fn and its hash
@@ -332,7 +338,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 
                     // write object
                     var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-                    try obj.writeObject(repo_kind, repo_opts, state, &stream, .{ .kind = .blob, .size = meta.size }, &oid);
+                    try obj.writeObject(repo_kind, repo_opts, state, self.io, &stream, .{ .kind = .blob, .size = meta.size }, &oid);
 
                     const entry = Entry{
                         .ctime_secs = meta.times.ctime_secs,
@@ -429,12 +435,13 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
         pub fn addTreeEntry(
             self: *Index(repo_kind, repo_opts),
             state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+            io: std.Io,
             allocator: std.mem.Allocator,
             tree_entry: *const tr.TreeEntry(repo_opts.hash),
             path_parts: []const []const u8,
         ) !void {
             const oid_hex = std.fmt.bytesToHex(tree_entry.oid, .lower);
-            var object = try obj.Object(repo_kind, repo_opts, .full).init(allocator, state, &oid_hex);
+            var object = try obj.Object(repo_kind, repo_opts, .full).init(state, io, allocator, &oid_hex);
             defer object.deinit();
 
             switch (object.content) {
@@ -445,7 +452,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                         defer child_path.deinit(allocator);
                         try child_path.appendSlice(allocator, path_parts);
                         try child_path.append(allocator, path_part);
-                        try self.addTreeEntry(state, allocator, child_tree_entry, child_path.items);
+                        try self.addTreeEntry(state, io, allocator, child_tree_entry, child_path.items);
                     }
                 },
                 else => return error.InvalidObjectKind,

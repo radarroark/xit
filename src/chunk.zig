@@ -441,8 +441,9 @@ fn findChunkIndex(
 
 pub fn readChunk(
     comptime repo_opts: rp.RepoOpts(.xit),
-    repo_dir: std.fs.Dir,
     chunk_info_reader: *rp.Repo(.xit, repo_opts).DB.Cursor(.read_only).Reader,
+    io: std.Io,
+    repo_dir: std.fs.Dir,
     object_position: u64,
     buf: []u8,
 ) !usize {
@@ -475,7 +476,7 @@ pub fn readChunk(
 
     // make reader
     var reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
-    var chunk_reader = chunk_file.reader(&reader_buffer);
+    var chunk_reader = chunk_file.reader(io, &reader_buffer);
 
     // read chunk, decompressing if necessary
     const compress_kind = try std.meta.intToEnum(CompressKind, try chunk_reader.interface.takeByte());
@@ -508,6 +509,7 @@ pub fn readChunk(
 
 pub fn ChunkObjectReader(comptime repo_opts: rp.RepoOpts(.xit)) type {
     return struct {
+        io: std.Io,
         repo_dir: std.fs.Dir,
         cursor: *rp.Repo(.xit, repo_opts).DB.Cursor(.read_only),
         chunk_info_reader: rp.Repo(.xit, repo_opts).DB.Cursor(.read_only).Reader,
@@ -515,7 +517,12 @@ pub fn ChunkObjectReader(comptime repo_opts: rp.RepoOpts(.xit)) type {
         position: u64,
         header: obj.ObjectHeader,
 
-        pub fn init(allocator: std.mem.Allocator, state: rp.Repo(.xit, repo_opts).State(.read_only), oid: *const [hash.hexLen(repo_opts.hash)]u8) !ChunkObjectReader(repo_opts) {
+        pub fn init(
+            state: rp.Repo(.xit, repo_opts).State(.read_only),
+            io: std.Io,
+            allocator: std.mem.Allocator,
+            oid: *const [hash.hexLen(repo_opts.hash)]u8,
+        ) !ChunkObjectReader(repo_opts) {
             // chunk info map
             const object_id_to_chunk_info_cursor = (try state.extra.moment.getCursor(hash.hashInt(repo_opts.hash, "object-id->chunk-info"))) orelse return error.ObjectNotFound;
             const object_id_to_chunk_info = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_only).init(object_id_to_chunk_info_cursor);
@@ -547,6 +554,7 @@ pub fn ChunkObjectReader(comptime repo_opts: rp.RepoOpts(.xit)) type {
             chunk_info_ptr.* = chunk_info_kv_pair.value_cursor;
 
             return .{
+                .io = io,
                 .repo_dir = state.core.repo_dir,
                 .cursor = chunk_info_ptr,
                 .chunk_info_reader = try chunk_info_ptr.reader(read_buffer),
@@ -578,7 +586,7 @@ pub fn ChunkObjectReader(comptime repo_opts: rp.RepoOpts(.xit)) type {
         }
 
         fn readStep(self: *ChunkObjectReader(repo_opts), buf: []u8) !usize {
-            return try readChunk(repo_opts, self.repo_dir, &self.chunk_info_reader, self.position, buf);
+            return try readChunk(repo_opts, &self.chunk_info_reader, self.io, self.repo_dir, self.position, buf);
         }
 
         pub fn reset(self: *ChunkObjectReader(repo_opts)) !void {

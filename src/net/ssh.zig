@@ -20,6 +20,7 @@ pub const SshState = struct {
         comptime repo_kind: rp.RepoKind,
         comptime repo_opts: rp.RepoOpts(repo_kind),
         state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+        io: std.Io,
         allocator: std.mem.Allocator,
         opts: Opts,
     ) !SshState {
@@ -39,7 +40,7 @@ pub const SshState = struct {
                 break :blk try arena_ptr.allocator().dupe(u8, env_var);
             }
 
-            var config = try cfg.Config(repo_kind, repo_opts).init(state, allocator);
+            var config = try cfg.Config(repo_kind, repo_opts).init(state, io, allocator);
             defer config.deinit();
             const core_section = config.sections.get("core") orelse break :blk null;
             const ssh_cmd = core_section.get("sshcommand") orelse break :blk null;
