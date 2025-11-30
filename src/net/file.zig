@@ -81,10 +81,10 @@ pub fn FileTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
 
             const path = try parsePath(url);
 
-            var repo_dir = try state.core.init_opts.cwd.openDir(path, .{});
-            defer repo_dir.close();
+            var work_dir = try state.core.init_opts.cwd.openDir(path, .{});
+            defer work_dir.close();
 
-            var remote_repo = try rp.Repo(.git, remote_repo_opts).open(allocator, .{ .cwd = repo_dir });
+            var remote_repo = try rp.Repo(.git, remote_repo_opts).open(allocator, .{ .cwd = work_dir });
             errdefer remote_repo.deinit();
 
             try self.addRefs(.{ .core = &remote_repo.core, .extra = .{} }, allocator);
@@ -113,10 +113,10 @@ pub fn FileTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             const path = try parsePath(git_push.remote.url orelse return error.UrlNotFound);
 
             {
-                var repo_dir = try state.core.init_opts.cwd.openDir(path, .{});
-                defer repo_dir.close();
+                var work_dir = try state.core.init_opts.cwd.openDir(path, .{});
+                defer work_dir.close();
 
-                var any_repo = try rp.AnyRepo(.git, .{ .hash = .none, .ProgressCtx = repo_opts.ProgressCtx }).open(allocator, .{ .cwd = repo_dir });
+                var any_repo = try rp.AnyRepo(.git, .{ .hash = .none, .ProgressCtx = repo_opts.ProgressCtx }).open(allocator, .{ .cwd = work_dir });
                 defer any_repo.deinit();
 
                 const obj_iter: *obj.ObjectIterator(repo_kind, repo_opts, .raw) = &git_push.obj_iter;
@@ -170,10 +170,10 @@ pub fn FileTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         ) !void {
             const path = try parsePath(self.url orelse return error.NotConnected);
 
-            var repo_dir = try state.core.init_opts.cwd.openDir(path, .{});
-            defer repo_dir.close();
+            var work_dir = try state.core.init_opts.cwd.openDir(path, .{});
+            defer work_dir.close();
 
-            var repo = try rp.Repo(.git, remote_repo_opts).open(allocator, .{ .cwd = repo_dir });
+            var repo = try rp.Repo(.git, remote_repo_opts).open(allocator, .{ .cwd = work_dir });
             defer repo.deinit();
 
             var obj_iter = try repo.logRaw(allocator, .{ .kind = .all });
