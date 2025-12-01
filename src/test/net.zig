@@ -8,85 +8,93 @@ const hash = xit.hash;
 const net = xit.net;
 
 test "git fetch" {
+    const io = std.testing.io;
     const allocator = std.testing.allocator;
-    try testFetch(.git, .{ .is_test = true }, .{ .wire = .http }, 3001, allocator);
+    try testFetch(.git, .{ .is_test = true }, .{ .wire = .http }, 3001, io, allocator);
     if (.windows != builtin.os.tag) {
-        try testFetch(.git, .{ .is_test = true }, .{ .wire = .raw }, 3002, allocator);
-        try testFetch(.git, .{ .is_test = true }, .{ .wire = .ssh }, 3003, allocator);
+        try testFetch(.git, .{ .is_test = true }, .{ .wire = .raw }, 3002, io, allocator);
+        try testFetch(.git, .{ .is_test = true }, .{ .wire = .ssh }, 3003, io, allocator);
     }
-    try testFetch(.git, .{ .is_test = true }, .file, 0, allocator);
+    try testFetch(.git, .{ .is_test = true }, .file, 0, io, allocator);
 }
 
 test "xit fetch" {
+    const io = std.testing.io;
     const allocator = std.testing.allocator;
-    try testFetch(.xit, .{ .is_test = true }, .{ .wire = .http }, 3004, allocator);
+    try testFetch(.xit, .{ .is_test = true }, .{ .wire = .http }, 3004, io, allocator);
     if (.windows != builtin.os.tag) {
-        try testFetch(.xit, .{ .is_test = true }, .{ .wire = .raw }, 3005, allocator);
-        try testFetch(.xit, .{ .is_test = true }, .{ .wire = .ssh }, 3006, allocator);
+        try testFetch(.xit, .{ .is_test = true }, .{ .wire = .raw }, 3005, io, allocator);
+        try testFetch(.xit, .{ .is_test = true }, .{ .wire = .ssh }, 3006, io, allocator);
     }
-    try testFetch(.xit, .{ .is_test = true }, .file, 0, allocator);
+    try testFetch(.xit, .{ .is_test = true }, .file, 0, io, allocator);
 }
 
 test "git push" {
+    const io = std.testing.io;
     const allocator = std.testing.allocator;
-    try testPush(.git, .{ .is_test = true }, .{ .wire = .http }, 3007, allocator);
+    try testPush(.git, .{ .is_test = true }, .{ .wire = .http }, 3007, io, allocator);
     if (.windows != builtin.os.tag) {
-        try testPush(.git, .{ .is_test = true }, .{ .wire = .raw }, 3008, allocator);
-        try testPush(.git, .{ .is_test = true }, .{ .wire = .ssh }, 3009, allocator);
+        try testPush(.git, .{ .is_test = true }, .{ .wire = .raw }, 3008, io, allocator);
+        try testPush(.git, .{ .is_test = true }, .{ .wire = .ssh }, 3009, io, allocator);
     }
-    try testPush(.git, .{ .is_test = true }, .file, 0, allocator);
+    try testPush(.git, .{ .is_test = true }, .file, 0, io, allocator);
 }
 
 test "xit push" {
+    const io = std.testing.io;
     const allocator = std.testing.allocator;
-    try testPush(.xit, .{ .is_test = true }, .{ .wire = .http }, 3010, allocator);
+    try testPush(.xit, .{ .is_test = true }, .{ .wire = .http }, 3010, io, allocator);
     if (.windows != builtin.os.tag) {
-        try testPush(.xit, .{ .is_test = true }, .{ .wire = .raw }, 3011, allocator);
-        try testPush(.xit, .{ .is_test = true }, .{ .wire = .ssh }, 3012, allocator);
+        try testPush(.xit, .{ .is_test = true }, .{ .wire = .raw }, 3011, io, allocator);
+        try testPush(.xit, .{ .is_test = true }, .{ .wire = .ssh }, 3012, io, allocator);
     }
-    try testPush(.xit, .{ .is_test = true }, .file, 0, allocator);
+    try testPush(.xit, .{ .is_test = true }, .file, 0, io, allocator);
 }
 
 test "git clone" {
+    const io = std.testing.io;
     const allocator = std.testing.allocator;
-    try testClone(.git, .{ .is_test = true }, .{ .wire = .http }, 3013, allocator);
+    try testClone(.git, .{ .is_test = true }, .{ .wire = .http }, 3013, io, allocator);
     if (.windows != builtin.os.tag) {
-        try testClone(.git, .{ .is_test = true }, .{ .wire = .raw }, 3014, allocator);
-        try testClone(.git, .{ .is_test = true }, .{ .wire = .ssh }, 3015, allocator);
+        try testClone(.git, .{ .is_test = true }, .{ .wire = .raw }, 3014, io, allocator);
+        try testClone(.git, .{ .is_test = true }, .{ .wire = .ssh }, 3015, io, allocator);
     }
-    try testClone(.git, .{ .is_test = true }, .file, 0, allocator);
+    try testClone(.git, .{ .is_test = true }, .file, 0, io, allocator);
 }
 
 test "xit clone" {
+    const io = std.testing.io;
     const allocator = std.testing.allocator;
-    try testClone(.xit, .{ .is_test = true }, .{ .wire = .http }, 3016, allocator);
+    try testClone(.xit, .{ .is_test = true }, .{ .wire = .http }, 3016, io, allocator);
     if (.windows != builtin.os.tag) {
-        try testClone(.xit, .{ .is_test = true }, .{ .wire = .raw }, 3017, allocator);
-        try testClone(.xit, .{ .is_test = true }, .{ .wire = .ssh }, 3018, allocator);
+        try testClone(.xit, .{ .is_test = true }, .{ .wire = .raw }, 3017, io, allocator);
+        try testClone(.xit, .{ .is_test = true }, .{ .wire = .ssh }, 3018, io, allocator);
     }
-    try testClone(.xit, .{ .is_test = true }, .file, 0, allocator);
+    try testClone(.xit, .{ .is_test = true }, .file, 0, io, allocator);
 }
 
 test "git fetch large" {
+    const io = std.testing.io;
     const allocator = std.testing.allocator;
-    try testFetchLarge(.git, .{ .is_test = true }, .{ .wire = .http }, 3019, allocator);
+    try testFetchLarge(.git, .{ .is_test = true }, .{ .wire = .http }, 3019, io, allocator);
     if (true) return; // skip the rest for now because they're slow
     if (.windows != builtin.os.tag) {
-        try testFetchLarge(.git, .{ .is_test = true }, .{ .wire = .raw }, 3020, allocator);
-        try testFetchLarge(.git, .{ .is_test = true }, .{ .wire = .ssh }, 3021, allocator);
+        try testFetchLarge(.git, .{ .is_test = true }, .{ .wire = .raw }, 3020, io, allocator);
+        try testFetchLarge(.git, .{ .is_test = true }, .{ .wire = .ssh }, 3021, io, allocator);
     }
-    try testFetchLarge(.git, .{ .is_test = true }, .file, 0, allocator);
+    try testFetchLarge(.git, .{ .is_test = true }, .file, 0, io, allocator);
 }
 
 test "git push large" {
+    const io = std.testing.io;
     const allocator = std.testing.allocator;
-    try testPushLarge(.git, .{ .is_test = true }, .{ .wire = .http }, 3022, allocator);
+    try testPushLarge(.git, .{ .is_test = true }, .{ .wire = .http }, 3022, io, allocator);
     if (true) return; // skip the rest for now because they're slow
     if (.windows != builtin.os.tag) {
-        try testPushLarge(.git, .{ .is_test = true }, .{ .wire = .raw }, 3023, allocator);
-        try testPushLarge(.git, .{ .is_test = true }, .{ .wire = .ssh }, 3024, allocator);
+        try testPushLarge(.git, .{ .is_test = true }, .{ .wire = .raw }, 3023, io, allocator);
+        try testPushLarge(.git, .{ .is_test = true }, .{ .wire = .ssh }, 3024, io, allocator);
     }
-    try testPushLarge(.git, .{ .is_test = true }, .file, 0, allocator);
+    try testPushLarge(.git, .{ .is_test = true }, .file, 0, io, allocator);
 }
 
 fn Server(comptime transport_def: net.TransportDefinition) type {
@@ -97,31 +105,40 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
             .file => void,
             .wire => |wire_kind| switch (wire_kind) {
                 .http => struct {
+                    io: std.Io,
                     allocator: std.mem.Allocator,
                     temp_dir_name: []const u8,
                     stop_server_endpoint: []const u8,
-                    net_server: std.net.Server,
+                    net_server: std.Io.net.Server,
                     server_thread: std.Thread,
                 },
                 .raw => struct {
+                    io: std.Io,
                     process: std.process.Child,
                 },
                 .ssh => struct {
+                    io: std.Io,
                     process: std.process.Child,
                 },
             },
         };
 
-        fn init(allocator: std.mem.Allocator, comptime temp_dir_name: []const u8, comptime port: u16) !Server(transport_def) {
+        fn init(
+            io: std.Io,
+            allocator: std.mem.Allocator,
+            comptime temp_dir_name: []const u8,
+            comptime port: u16,
+        ) !Server(transport_def) {
             switch (transport_def) {
                 .file => return .{ .core = {} },
                 .wire => |wire_kind| switch (wire_kind) {
                     .http => {
-                        const address = try std.net.Address.parseIp("127.0.0.1", port);
-                        const net_server = try address.listen(.{ .reuse_address = true });
+                        const address = try std.Io.net.IpAddress.parseIp4("127.0.0.1", port);
+                        const net_server = try address.listen(io, .{ .reuse_address = true });
                         errdefer net_server.deinit();
                         return .{
                             .core = .{
+                                .io = io,
                                 .allocator = allocator,
                                 .temp_dir_name = temp_dir_name,
                                 .stop_server_endpoint = std.fmt.comptimePrint("http://127.0.0.1:{}/stop-server", .{port}),
@@ -141,7 +158,7 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
                         process.stdout_behavior = .Pipe;
                         process.stderr_behavior = .Pipe;
                         return .{
-                            .core = .{ .process = process },
+                            .core = .{ .io = io, .process = process },
                         };
                     },
                     .ssh => {
@@ -257,7 +274,7 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
                         process.stdout_behavior = .Pipe;
                         process.stderr_behavior = .Pipe;
                         return .{
-                            .core = .{ .process = process },
+                            .core = .{ .io = io, .process = process },
                         };
                     },
                 },
@@ -275,18 +292,18 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
                                 var recv_buffer = [_]u8{0} ** 1024;
 
                                 accept: while (true) {
-                                    const conn = try core.net_server.accept();
-                                    defer conn.stream.close();
+                                    const stream = try core.net_server.accept(core.io);
+                                    defer stream.close(core.io);
 
-                                    var conn_br = conn.stream.reader(&recv_buffer);
-                                    var conn_bw = conn.stream.writer(&send_buffer);
-                                    var http_server = std.http.Server.init(conn_br.interface(), &conn_bw.interface);
+                                    var conn_br = stream.reader(core.io, &recv_buffer);
+                                    var conn_bw = stream.writer(core.io, &send_buffer);
+                                    var http_server = std.http.Server.init(&conn_br.interface, &conn_bw.interface);
 
                                     while (http_server.reader.state == .ready) {
                                         // give server some time to receive the request.
                                         // without it, POST requests sometimes don't have all the
                                         // expected data in their bodies because they use chunked encoding.
-                                        std.Thread.sleep(std.time.ns_per_s * 0.5);
+                                        try std.Io.sleep(core.io, .fromMilliseconds(500), .real);
 
                                         var request = http_server.receiveHead() catch |err| switch (err) {
                                             error.HttpConnectionClosing => continue :accept,
@@ -407,7 +424,9 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
             }
 
             // give server some time to start
-            std.Thread.sleep(std.time.ns_per_s * 0.5);
+            if (transport_def == .wire) {
+                try std.Io.sleep(self.core.io, .fromMilliseconds(500), .real);
+            }
         }
 
         fn stop(self: *Server(transport_def)) void {
@@ -415,7 +434,7 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
                 .file => {},
                 .wire => |wire_kind| switch (wire_kind) {
                     .http => {
-                        var client = std.http.Client{ .allocator = self.core.allocator };
+                        var client = std.http.Client{ .io = self.core.io, .allocator = self.core.allocator };
                         defer client.deinit();
                         _ = client.fetch(.{ .location = .{ .url = self.core.stop_server_endpoint } }) catch return;
                         self.core.server_thread.join();
@@ -433,6 +452,7 @@ fn testFetch(
     comptime repo_opts: rp.RepoOpts(repo_kind),
     comptime transport_def: net.TransportDefinition,
     comptime port: u16,
+    io: std.Io,
     allocator: std.mem.Allocator,
 ) !void {
     const temp_dir_name = "temp-testnet-fetch";
@@ -449,7 +469,7 @@ fn testFetch(
     defer temp_dir.close();
 
     // init server
-    var server = try Server(transport_def).init(allocator, temp_dir_name, port);
+    var server = try Server(transport_def).init(io, allocator, temp_dir_name, port);
     try server.start();
     defer server.stop();
 
@@ -459,7 +479,7 @@ fn testFetch(
     const server_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "server" });
     defer allocator.free(server_path);
 
-    var server_repo = try rp.Repo(.git, .{ .is_test = true }).init(allocator, .{ .path = server_path });
+    var server_repo = try rp.Repo(.git, .{ .is_test = true }).init(io, allocator, .{ .path = server_path });
     defer server_repo.deinit(allocator);
 
     // make a commit
@@ -467,8 +487,8 @@ fn testFetch(
         const hello_txt = try server_repo.core.work_dir.createFile("hello.txt", .{ .truncate = true });
         defer hello_txt.close();
         try hello_txt.writeAll("hello, world!");
-        try server_repo.add(allocator, &.{"hello.txt"});
-        break :blk try server_repo.commit(allocator, .{ .message = "let there be light" });
+        try server_repo.add(io, allocator, &.{"hello.txt"});
+        break :blk try server_repo.commit(io, allocator, .{ .message = "let there be light" });
     };
 
     // export server repo
@@ -476,16 +496,16 @@ fn testFetch(
         const export_file = try server_repo.core.repo_dir.createFile("git-daemon-export-ok", .{});
         defer export_file.close();
 
-        try server_repo.addConfig(allocator, .{ .name = "uploadpack.allowAnySHA1InWant", .value = "true" });
+        try server_repo.addConfig(io, allocator, .{ .name = "uploadpack.allowAnySHA1InWant", .value = "true" });
     }
 
     // add a tag
-    _ = try server_repo.addTag(allocator, .{ .name = "1.0.0", .message = "hi" });
+    _ = try server_repo.addTag(io, allocator, .{ .name = "1.0.0", .message = "hi" });
 
     const client_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "client" });
     defer allocator.free(client_path);
 
-    var client_repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = client_path });
+    var client_repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = client_path });
     defer client_repo.deinit(allocator);
 
     // add remote
@@ -506,8 +526,8 @@ fn testFetch(
         };
         defer allocator.free(remote_url);
 
-        try client_repo.addRemote(allocator, .{ .name = "origin", .value = remote_url });
-        try client_repo.addConfig(allocator, .{ .name = "branch.master.remote", .value = "origin" });
+        try client_repo.addRemote(io, allocator, .{ .name = "origin", .value = remote_url });
+        try client_repo.addConfig(io, allocator, .{ .name = "branch.master.remote", .value = "origin" });
     }
 
     // create refspec with oid as a test
@@ -535,6 +555,7 @@ fn testFetch(
     defer if (ssh_cmd_maybe) |ssh_cmd| allocator.free(ssh_cmd);
 
     client_repo.fetch(
+        io,
         allocator,
         "origin",
         .{ .refspecs = refspecs, .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
@@ -552,17 +573,17 @@ fn testFetch(
     };
 
     // update the working dir
-    try client_repo.restore(allocator, ".");
+    try client_repo.restore(io, allocator, ".");
 
     // make sure fetch was successful
     {
         const hello_txt = try temp_dir.openFile("client/hello.txt", .{});
         defer hello_txt.close();
 
-        try std.testing.expect(null != try client_repo.readRef(.{ .kind = .tag, .name = "1.0.0" }));
-        try std.testing.expect(null != try client_repo.readRef(.{ .kind = .head, .name = "foo" }));
+        try std.testing.expect(null != try client_repo.readRef(io, .{ .kind = .tag, .name = "1.0.0" }));
+        try std.testing.expect(null != try client_repo.readRef(io, .{ .kind = .head, .name = "foo" }));
 
-        const oid_master = (try client_repo.readRef(.{ .kind = .head, .name = "master" })).?;
+        const oid_master = (try client_repo.readRef(io, .{ .kind = .head, .name = "master" })).?;
         try std.testing.expectEqualStrings(&commit1, &oid_master);
     }
 
@@ -577,11 +598,12 @@ fn testFetch(
         const goodbye_txt = try server_repo.core.work_dir.createFile("goodbye.txt", .{ .truncate = true });
         defer goodbye_txt.close();
         try goodbye_txt.writeAll("goodbye, world!");
-        try server_repo.add(allocator, &.{"goodbye.txt"});
-        break :blk try server_repo.commit(allocator, .{ .message = "goodbye" });
+        try server_repo.add(io, allocator, &.{"goodbye.txt"});
+        break :blk try server_repo.commit(io, allocator, .{ .message = "goodbye" });
     };
 
     client_repo.fetch(
+        io,
         allocator,
         "origin",
         .{ .refspecs = refspecs, .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
@@ -599,14 +621,14 @@ fn testFetch(
     };
 
     // update the working dir
-    try client_repo.restore(allocator, ".");
+    try client_repo.restore(io, allocator, ".");
 
     // make sure fetch was successful
     {
         const goodbye_txt = try temp_dir.openFile("client/goodbye.txt", .{});
         defer goodbye_txt.close();
 
-        const oid_master = (try client_repo.readRef(.{ .kind = .head, .name = "master" })).?;
+        const oid_master = (try client_repo.readRef(io, .{ .kind = .head, .name = "master" })).?;
         try std.testing.expectEqualStrings(&commit2, &oid_master);
     }
 }
@@ -616,6 +638,7 @@ fn testPush(
     comptime repo_opts: rp.RepoOpts(repo_kind),
     comptime transport_def: net.TransportDefinition,
     comptime port: u16,
+    io: std.Io,
     allocator: std.mem.Allocator,
 ) !void {
     const temp_dir_name = "temp-testnet-push";
@@ -632,7 +655,7 @@ fn testPush(
     defer temp_dir.close();
 
     // init server
-    var server = try Server(transport_def).init(allocator, temp_dir_name, port);
+    var server = try Server(transport_def).init(io, allocator, temp_dir_name, port);
     try server.start();
     defer server.stop();
 
@@ -642,18 +665,18 @@ fn testPush(
     const server_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "server" });
     defer allocator.free(server_path);
 
-    var server_repo = try rp.Repo(.git, .{ .is_test = true }).init(allocator, .{ .path = server_path });
+    var server_repo = try rp.Repo(.git, .{ .is_test = true }).init(io, allocator, .{ .path = server_path });
     defer server_repo.deinit(allocator);
 
     // add config
     switch (transport_def) {
-        .file => try server_repo.addConfig(allocator, .{ .name = "core.bare", .value = "true" }),
+        .file => try server_repo.addConfig(io, allocator, .{ .name = "core.bare", .value = "true" }),
         .wire => {
-            try server_repo.addConfig(allocator, .{ .name = "core.bare", .value = "false" });
-            try server_repo.addConfig(allocator, .{ .name = "receive.denycurrentbranch", .value = "updateinstead" });
+            try server_repo.addConfig(io, allocator, .{ .name = "core.bare", .value = "false" });
+            try server_repo.addConfig(io, allocator, .{ .name = "receive.denycurrentbranch", .value = "updateinstead" });
         },
     }
-    try server_repo.addConfig(allocator, .{ .name = "http.receivepack", .value = "true" });
+    try server_repo.addConfig(io, allocator, .{ .name = "http.receivepack", .value = "true" });
 
     // export server repo
     {
@@ -664,7 +687,7 @@ fn testPush(
     const client_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "client" });
     defer allocator.free(client_path);
 
-    var client_repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = client_path });
+    var client_repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = client_path });
     defer client_repo.deinit(allocator);
 
     // make a commit
@@ -672,12 +695,12 @@ fn testPush(
         const hello_txt = try client_repo.core.work_dir.createFile("hello.txt", .{ .truncate = true });
         defer hello_txt.close();
         try hello_txt.writeAll("hello, world!");
-        try client_repo.add(allocator, &.{"hello.txt"});
-        break :blk try client_repo.commit(allocator, .{ .message = "let there be light" });
+        try client_repo.add(io, allocator, &.{"hello.txt"});
+        break :blk try client_repo.commit(io, allocator, .{ .message = "let there be light" });
     };
 
     // add a tag
-    _ = try client_repo.addTag(allocator, .{ .name = "1.0.0", .message = "hi" });
+    _ = try client_repo.addTag(io, allocator, .{ .name = "1.0.0", .message = "hi" });
 
     // add remote
     {
@@ -697,8 +720,8 @@ fn testPush(
         };
         defer allocator.free(remote_url);
 
-        try client_repo.addRemote(allocator, .{ .name = "origin", .value = remote_url });
-        try client_repo.addConfig(allocator, .{ .name = "branch.master.remote", .value = "origin" });
+        try client_repo.addRemote(io, allocator, .{ .name = "origin", .value = remote_url });
+        try client_repo.addConfig(io, allocator, .{ .name = "branch.master.remote", .value = "origin" });
     }
 
     const refspecs = &.{
@@ -721,6 +744,7 @@ fn testPush(
     defer if (ssh_cmd_maybe) |ssh_cmd| allocator.free(ssh_cmd);
 
     client_repo.push(
+        io,
         allocator,
         "origin",
         "master",
@@ -741,9 +765,9 @@ fn testPush(
 
     // make sure push was successful
     {
-        try std.testing.expect(null != try server_repo.readRef(.{ .kind = .tag, .name = "1.0.0" }));
+        try std.testing.expect(null != try server_repo.readRef(io, .{ .kind = .tag, .name = "1.0.0" }));
 
-        const oid_master = (try server_repo.readRef(.{ .kind = .head, .name = "master" })).?;
+        const oid_master = (try server_repo.readRef(io, .{ .kind = .head, .name = "master" })).?;
         try std.testing.expectEqualStrings(&commit1, &oid_master);
     }
 
@@ -758,8 +782,8 @@ fn testPush(
         const hello_txt = try server_repo.core.work_dir.createFile("hello.txt", .{ .truncate = true });
         defer hello_txt.close();
         try hello_txt.writeAll("hello, world from the server!");
-        try server_repo.add(allocator, &.{"hello.txt"});
-        _ = try server_repo.commit(allocator, .{ .message = "new commit from the server" });
+        try server_repo.add(io, allocator, &.{"hello.txt"});
+        _ = try server_repo.commit(io, allocator, .{ .message = "new commit from the server" });
     }
 
     // make another commit
@@ -767,12 +791,13 @@ fn testPush(
         const goodbye_txt = try client_repo.core.work_dir.createFile("goodbye.txt", .{ .truncate = true });
         defer goodbye_txt.close();
         try goodbye_txt.writeAll("goodbye, world!");
-        try client_repo.add(allocator, &.{"goodbye.txt"});
-        break :blk try client_repo.commit(allocator, .{ .message = "goodbye" });
+        try client_repo.add(io, allocator, &.{"goodbye.txt"});
+        break :blk try client_repo.commit(io, allocator, .{ .message = "goodbye" });
     };
 
     // can't push because server has commit not found locally
     try std.testing.expectError(error.RemoteRefContainsCommitsNotFoundLocally, client_repo.push(
+        io,
         allocator,
         "origin",
         "master",
@@ -791,12 +816,13 @@ fn testPush(
         const hello_txt = try server_repo.core.work_dir.createFile("hello.txt", .{ .truncate = true });
         defer hello_txt.close();
         try hello_txt.writeAll("hello, world from the server again!");
-        try server_repo.add(allocator, &.{"hello.txt"});
-        _ = try server_repo.commit(allocator, .{ .message = "new git history on the server", .parent_oids = &.{} });
+        try server_repo.add(io, allocator, &.{"hello.txt"});
+        _ = try server_repo.commit(io, allocator, .{ .message = "new git history on the server", .parent_oids = &.{} });
     }
 
     // can't push because commit doesn't exist locally
     try std.testing.expectError(error.RemoteRefContainsCommitsNotFoundLocally, client_repo.push(
+        io,
         allocator,
         "origin",
         "master",
@@ -812,6 +838,7 @@ fn testPush(
 
     // retrieve the commit object
     try client_repo.fetch(
+        io,
         allocator,
         "origin",
         .{ .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
@@ -825,6 +852,7 @@ fn testPush(
 
     // can't push because server's history is incompatible
     try std.testing.expectError(error.RemoteRefContainsIncompatibleHistory, client_repo.push(
+        io,
         allocator,
         "origin",
         "master",
@@ -840,6 +868,7 @@ fn testPush(
 
     // force push
     try client_repo.push(
+        io,
         allocator,
         "origin",
         "master",
@@ -849,7 +878,7 @@ fn testPush(
 
     // make sure push was successful
     {
-        const oid_master = (try server_repo.readRef(.{ .kind = .head, .name = "master" })).?;
+        const oid_master = (try server_repo.readRef(io, .{ .kind = .head, .name = "master" })).?;
         try std.testing.expectEqualStrings(&commit2, &oid_master);
     }
 
@@ -861,6 +890,7 @@ fn testPush(
 
     // remove the remote tag
     try client_repo.push(
+        io,
         allocator,
         "origin",
         ":refs/tags/1.0.0",
@@ -869,7 +899,7 @@ fn testPush(
     );
 
     // make sure push was successful
-    try std.testing.expect(null == try server_repo.readRef(.{ .kind = .tag, .name = "1.0.0" }));
+    try std.testing.expect(null == try server_repo.readRef(io, .{ .kind = .tag, .name = "1.0.0" }));
 }
 
 fn testClone(
@@ -877,6 +907,7 @@ fn testClone(
     comptime repo_opts: rp.RepoOpts(repo_kind),
     comptime transport_def: net.TransportDefinition,
     comptime port: u16,
+    io: std.Io,
     allocator: std.mem.Allocator,
 ) !void {
     const temp_dir_name = "temp-testnet-clone";
@@ -893,7 +924,7 @@ fn testClone(
     defer temp_dir.close();
 
     // init server
-    var server = try Server(transport_def).init(allocator, temp_dir_name, port);
+    var server = try Server(transport_def).init(io, allocator, temp_dir_name, port);
     try server.start();
     defer server.stop();
 
@@ -907,7 +938,7 @@ fn testClone(
     defer allocator.free(server_path);
 
     // init server repo with default branch name as main
-    var server_repo = try rp.Repo(.git, .{ .is_test = true }).init(allocator, .{ .path = server_path, .create_default_branch = "main" });
+    var server_repo = try rp.Repo(.git, .{ .is_test = true }).init(io, allocator, .{ .path = server_path, .create_default_branch = "main" });
     defer server_repo.deinit(allocator);
 
     // make a commit
@@ -915,8 +946,8 @@ fn testClone(
         const hello_txt = try server_repo.core.work_dir.createFile("hello.txt", .{ .truncate = true });
         defer hello_txt.close();
         try hello_txt.writeAll("hello, world!");
-        try server_repo.add(allocator, &.{"hello.txt"});
-        _ = try server_repo.commit(allocator, .{ .message = "let there be light" });
+        try server_repo.add(io, allocator, &.{"hello.txt"});
+        _ = try server_repo.commit(io, allocator, .{ .message = "let there be light" });
     }
 
     // export server repo
@@ -964,6 +995,7 @@ fn testClone(
 
     // clone repo
     var client_repo = rp.Repo(repo_kind, repo_opts).clone(
+        io,
         allocator,
         remote_url,
         temp_path,
@@ -989,7 +1021,7 @@ fn testClone(
 
     // make sure HEAD points to the right default branch
     var current_branch_buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
-    const head = try client_repo.head(&current_branch_buffer);
+    const head = try client_repo.head(io, &current_branch_buffer);
     try std.testing.expectEqualStrings("main", head.ref.name);
 }
 
@@ -998,6 +1030,7 @@ fn testFetchLarge(
     comptime repo_opts: rp.RepoOpts(repo_kind),
     comptime transport_def: net.TransportDefinition,
     comptime port: u16,
+    io: std.Io,
     allocator: std.mem.Allocator,
 ) !void {
     const temp_dir_name = "temp-testnet-fetch-large";
@@ -1014,7 +1047,7 @@ fn testFetchLarge(
     defer temp_dir.close();
 
     // init server
-    var server = try Server(transport_def).init(allocator, temp_dir_name, port);
+    var server = try Server(transport_def).init(io, allocator, temp_dir_name, port);
     try server.start();
     defer server.stop();
 
@@ -1024,7 +1057,7 @@ fn testFetchLarge(
     const server_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "server" });
     defer allocator.free(server_path);
 
-    var server_repo = try rp.Repo(.git, .{ .is_test = true }).init(allocator, .{ .path = server_path });
+    var server_repo = try rp.Repo(.git, .{ .is_test = true }).init(io, allocator, .{ .path = server_path });
     defer server_repo.deinit(allocator);
 
     var server_dir = try cwd.openDir(server_path, .{});
@@ -1040,11 +1073,11 @@ fn testFetchLarge(
 
         try copyDir(src_repo_dir, dest_repo_dir);
 
-        try server_repo.add(allocator, &.{dir_name});
+        try server_repo.add(io, allocator, &.{dir_name});
     }
 
     // make a commit
-    const commit1 = try server_repo.commit(allocator, .{ .message = "let there be light" });
+    const commit1 = try server_repo.commit(io, allocator, .{ .message = "let there be light" });
 
     // export server repo
     {
@@ -1055,7 +1088,7 @@ fn testFetchLarge(
     const client_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "client" });
     defer allocator.free(client_path);
 
-    var client_repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = client_path });
+    var client_repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = client_path });
     defer client_repo.deinit(allocator);
 
     // add remote
@@ -1076,8 +1109,8 @@ fn testFetchLarge(
         };
         defer allocator.free(remote_url);
 
-        try client_repo.addRemote(allocator, .{ .name = "origin", .value = remote_url });
-        try client_repo.addConfig(allocator, .{ .name = "branch.master.remote", .value = "origin" });
+        try client_repo.addRemote(io, allocator, .{ .name = "origin", .value = remote_url });
+        try client_repo.addConfig(io, allocator, .{ .name = "branch.master.remote", .value = "origin" });
     }
 
     const refspecs = &.{
@@ -1100,6 +1133,7 @@ fn testFetchLarge(
     defer if (ssh_cmd_maybe) |ssh_cmd| allocator.free(ssh_cmd);
 
     client_repo.fetch(
+        io,
         allocator,
         "origin",
         .{ .refspecs = refspecs, .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
@@ -1117,11 +1151,11 @@ fn testFetchLarge(
     };
 
     // update the working dir
-    try client_repo.restore(allocator, ".");
+    try client_repo.restore(io, allocator, ".");
 
     // make sure fetch was successful
     {
-        const oid_master = (try client_repo.readRef(.{ .kind = .head, .name = "master" })).?;
+        const oid_master = (try client_repo.readRef(io, .{ .kind = .head, .name = "master" })).?;
         try std.testing.expectEqualStrings(&commit1, &oid_master);
     }
 }
@@ -1131,6 +1165,7 @@ fn testPushLarge(
     comptime repo_opts: rp.RepoOpts(repo_kind),
     comptime transport_def: net.TransportDefinition,
     comptime port: u16,
+    io: std.Io,
     allocator: std.mem.Allocator,
 ) !void {
     const temp_dir_name = "temp-testnet-push-large";
@@ -1147,7 +1182,7 @@ fn testPushLarge(
     defer temp_dir.close();
 
     // init server
-    var server = try Server(transport_def).init(allocator, temp_dir_name, port);
+    var server = try Server(transport_def).init(io, allocator, temp_dir_name, port);
     try server.start();
     defer server.stop();
 
@@ -1157,18 +1192,18 @@ fn testPushLarge(
     const server_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "server" });
     defer allocator.free(server_path);
 
-    var server_repo = try rp.Repo(.git, .{ .is_test = true }).init(allocator, .{ .path = server_path });
+    var server_repo = try rp.Repo(.git, .{ .is_test = true }).init(io, allocator, .{ .path = server_path });
     defer server_repo.deinit(allocator);
 
     // add config
     switch (transport_def) {
-        .file => try server_repo.addConfig(allocator, .{ .name = "core.bare", .value = "true" }),
+        .file => try server_repo.addConfig(io, allocator, .{ .name = "core.bare", .value = "true" }),
         .wire => {
-            try server_repo.addConfig(allocator, .{ .name = "core.bare", .value = "false" });
-            try server_repo.addConfig(allocator, .{ .name = "receive.denycurrentbranch", .value = "updateinstead" });
+            try server_repo.addConfig(io, allocator, .{ .name = "core.bare", .value = "false" });
+            try server_repo.addConfig(io, allocator, .{ .name = "receive.denycurrentbranch", .value = "updateinstead" });
         },
     }
-    try server_repo.addConfig(allocator, .{ .name = "http.receivepack", .value = "true" });
+    try server_repo.addConfig(io, allocator, .{ .name = "http.receivepack", .value = "true" });
 
     // export server repo
     {
@@ -1179,7 +1214,7 @@ fn testPushLarge(
     const client_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "client" });
     defer allocator.free(client_path);
 
-    var client_repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = client_path });
+    var client_repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = client_path });
     defer client_repo.deinit(allocator);
 
     var client_dir = try cwd.openDir(client_path, .{});
@@ -1195,11 +1230,11 @@ fn testPushLarge(
 
         try copyDir(src_repo_dir, dest_repo_dir);
 
-        try client_repo.add(allocator, &.{dir_name});
+        try client_repo.add(io, allocator, &.{dir_name});
     }
 
     // make a commit
-    const commit1 = try client_repo.commit(allocator, .{ .message = "let there be light" });
+    const commit1 = try client_repo.commit(io, allocator, .{ .message = "let there be light" });
 
     // add remote
     {
@@ -1219,8 +1254,8 @@ fn testPushLarge(
         };
         defer allocator.free(remote_url);
 
-        try client_repo.addRemote(allocator, .{ .name = "origin", .value = remote_url });
-        try client_repo.addConfig(allocator, .{ .name = "branch.master.remote", .value = "origin" });
+        try client_repo.addRemote(io, allocator, .{ .name = "origin", .value = remote_url });
+        try client_repo.addConfig(io, allocator, .{ .name = "branch.master.remote", .value = "origin" });
     }
 
     const is_ssh = switch (transport_def) {
@@ -1239,6 +1274,7 @@ fn testPushLarge(
     defer if (ssh_cmd_maybe) |ssh_cmd| allocator.free(ssh_cmd);
 
     client_repo.push(
+        io,
         allocator,
         "origin",
         "master",
@@ -1259,7 +1295,7 @@ fn testPushLarge(
 
     // make sure push was successful
     {
-        const oid_master = (try server_repo.readRef(.{ .kind = .head, .name = "master" })).?;
+        const oid_master = (try server_repo.readRef(io, .{ .kind = .head, .name = "master" })).?;
         try std.testing.expectEqualStrings(&commit1, &oid_master);
     }
 }
@@ -1271,9 +1307,9 @@ fn copyDir(src_dir: std.fs.Dir, dest_dir: std.fs.Dir) !void {
             .file => try src_dir.copyFile(entry.name, dest_dir, entry.name, .{}),
             .directory => {
                 try dest_dir.makeDir(entry.name);
-                var dest_entry_dir = try dest_dir.openDir(entry.name, .{ .access_sub_paths = true, .iterate = true, .no_follow = true });
+                var dest_entry_dir = try dest_dir.openDir(entry.name, .{ .access_sub_paths = true, .iterate = true, .follow_symlinks = false });
                 defer dest_entry_dir.close();
-                var src_entry_dir = try src_dir.openDir(entry.name, .{ .access_sub_paths = true, .iterate = true, .no_follow = true });
+                var src_entry_dir = try src_dir.openDir(entry.name, .{ .access_sub_paths = true, .iterate = true, .follow_symlinks = false });
                 defer src_entry_dir.close();
                 try copyDir(src_entry_dir, dest_entry_dir);
             },
