@@ -16,9 +16,9 @@ fn copyDir(src_dir: std.fs.Dir, dest_dir: std.fs.Dir) !void {
             .file => try src_dir.copyFile(entry.name, dest_dir, entry.name, .{}),
             .directory => {
                 try dest_dir.makeDir(entry.name);
-                var dest_entry_dir = try dest_dir.openDir(entry.name, .{ .access_sub_paths = true, .iterate = true, .no_follow = true });
+                var dest_entry_dir = try dest_dir.openDir(entry.name, .{ .access_sub_paths = true, .iterate = true, .follow_symlinks = false });
                 defer dest_entry_dir.close();
-                var src_entry_dir = try src_dir.openDir(entry.name, .{ .access_sub_paths = true, .iterate = true, .no_follow = true });
+                var src_entry_dir = try src_dir.openDir(entry.name, .{ .access_sub_paths = true, .iterate = true, .follow_symlinks = false });
                 defer src_entry_dir.close();
                 try copyDir(src_entry_dir, dest_entry_dir);
             },
@@ -31,6 +31,10 @@ pub fn main() !void {
     var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
+
+    var threaded: std.Io.Threaded = .init(allocator);
+    defer threaded.deinit();
+    const io = threaded.io();
 
     const temp_dir_name = "temp-try";
 
@@ -84,17 +88,17 @@ pub fn main() !void {
     const writers = xit.main.Writers{ .out = &stdout_writer.interface, .err = &stderr_writer.interface };
 
     {
-        var git_repo = try rp.Repo(.git, .{}).open(allocator, .{ .path = temp_path });
+        var git_repo = try rp.Repo(.git, .{}).open(io, allocator, .{ .path = temp_path });
         defer git_repo.deinit(allocator);
 
         // restore all files in work dir
         // (they are all missing because we only copied the .git dir)
-        var status = try git_repo.status(allocator);
+        var status = try git_repo.status(io, allocator);
         defer status.deinit(allocator);
         for (status.work_dir_deleted.keys()) |path| {
             if (std.mem.startsWith(u8, path, "deps/")) continue;
             try writers.out.print("Restoring: {s}\n", .{path});
-            git_repo.restore(allocator, path) catch |err| switch (err) {
+            git_repo.restore(io, allocator, path) catch |err| switch (err) {
                 error.FileNotFound, error.ObjectInvalid => try writers.err.print("Failed to restore: {s}\n", .{path}),
                 else => |e| return e,
             };
@@ -108,7 +112,7 @@ pub fn main() !void {
             commits.deinit(allocator);
         }
 
-        var log_iter = try git_repo.log(allocator, null);
+        var log_iter = try git_repo.log(io, allocator, null);
         defer log_iter.deinit();
         var commit_count: usize = 0;
         while (try log_iter.next()) |commit| {
@@ -122,30 +126,30 @@ pub fn main() !void {
             }
         }
 
-        var xit_repo = try rp.Repo(.xit, .{}).init(allocator, .{ .path = temp_path });
+        var xit_repo = try rp.Repo(.xit, .{}).init(io, allocator, .{ .path = temp_path });
         defer xit_repo.deinit(allocator);
 
         for (0..commits.items.len) |i| {
             var commit_object = commits.items[commits.items.len - i - 1];
             try writers.out.print("Creating commit: {s}\n", .{commit_object.content.commit.metadata.message orelse ""});
 
-            var switch_result = try git_repo.switchDir(allocator, .{ .target = .{ .oid = &commit_object.oid }, .force = true });
+            var switch_result = try git_repo.switchDir(io, allocator, .{ .target = .{ .oid = &commit_object.oid }, .force = true });
             defer switch_result.deinit();
             if (.success != switch_result.result) {
                 return error.CheckoutFailed;
             }
 
-            try xit_repo.add(allocator, &.{ "build.zig", "build.zig.zon", "src" });
+            try xit_repo.add(io, allocator, &.{ "build.zig", "build.zig.zon", "src" });
 
             var metadata = commit_object.content.commit.metadata;
             metadata.parent_oids = null;
             metadata.allow_empty = true;
-            _ = try xit_repo.commit(allocator, metadata);
+            _ = try xit_repo.commit(io, allocator, metadata);
         }
 
         if (patch_enabled) {
             try writers.out.print("Generating patches\n", .{});
-            try xit_repo.patchAll(allocator, null);
+            try xit_repo.patchAll(io, allocator, null);
         }
 
         // make changes so we see things in the status UI
@@ -154,15 +158,15 @@ pub fn main() !void {
             defer build_zig.close();
             try build_zig.seekFromEnd(0);
             try build_zig.writeAll("\n// ...just felt like adding a new line!");
-            try xit_repo.add(allocator, &.{"build.zig"});
+            try xit_repo.add(io, allocator, &.{"build.zig"});
             try build_zig.writeAll("\n// ...and here's another one!");
         }
         try temp_dir.deleteFile("build.zig.zon");
 
         // set some config values
-        try xit_repo.addConfig(allocator, .{ .name = "core.editor", .value = "vim" });
-        try xit_repo.addConfig(allocator, .{ .name = "branch.master.remote", .value = "origin" });
+        try xit_repo.addConfig(io, allocator, .{ .name = "core.editor", .value = "vim" });
+        try xit_repo.addConfig(io, allocator, .{ .name = "branch.master.remote", .value = "origin" });
     }
 
-    try xit.main.run(.xit, .{}, allocator, args.items, temp_path, writers);
+    try xit.main.run(.xit, .{}, io, allocator, args.items, temp_path, writers);
 }
