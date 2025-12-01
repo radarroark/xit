@@ -61,6 +61,7 @@ pub const WireStream = union(WireKind) {
     ssh: net_ssh.SshStream,
 
     pub fn initMaybe(
+        io: std.Io,
         allocator: std.mem.Allocator,
         wire_state: *WireState,
         url: []const u8,
@@ -68,7 +69,7 @@ pub const WireStream = union(WireKind) {
     ) !?WireStream {
         return switch (wire_state.*) {
             .http => |*http| .{ .http = try net_http.HttpStream.init(http, url, wire_action) },
-            .raw => |*raw| if (try net_raw.RawStream.initMaybe(allocator, raw, url, wire_action)) |stream| .{ .raw = stream } else null,
+            .raw => |*raw| if (try net_raw.RawStream.initMaybe(io, allocator, raw, url, wire_action)) |stream| .{ .raw = stream } else null,
             .ssh => |*ssh| if (try net_ssh.SshStream.initMaybe(ssh, url, wire_action)) |stream| .{ .ssh = stream } else null,
         };
     }
@@ -196,8 +197,8 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             };
         }
 
-        pub fn deinit(self: *WireTransport(repo_kind, repo_opts), allocator: std.mem.Allocator) void {
-            self.close(allocator);
+        pub fn deinit(self: *WireTransport(repo_kind, repo_opts), io: std.Io, allocator: std.mem.Allocator) void {
+            self.close(io, allocator);
 
             self.wire_state.deinit();
             allocator.destroy(self.wire_state);
@@ -216,6 +217,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
 
         pub fn connect(
             self: *WireTransport(repo_kind, repo_opts),
+            io: std.Io,
             allocator: std.mem.Allocator,
             url: []const u8,
             direction: net.Direction,
@@ -236,7 +238,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                 .push => .list_receive_pack,
             };
 
-            if (try WireStream.initMaybe(allocator, self.wire_state, url_dupe, action)) |stream| {
+            if (try WireStream.initMaybe(io, allocator, self.wire_state, url_dupe, action)) |stream| {
                 self.clearStream(allocator);
                 self.wire_stream = stream;
             }
@@ -298,6 +300,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
 
         pub fn push(
             self: *WireTransport(repo_kind, repo_opts),
+            io: std.Io,
             allocator: std.mem.Allocator,
             git_push: *net_push.Push(repo_kind, repo_opts),
         ) !void {
@@ -318,7 +321,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                 return error.InvalidDirection;
             }
 
-            if (try WireStream.initMaybe(allocator, self.wire_state, self.url orelse return error.NotConnected, .receive_pack)) |stream| {
+            if (try WireStream.initMaybe(io, allocator, self.wire_state, self.url orelse return error.NotConnected, .receive_pack)) |stream| {
                 self.clearStream(allocator);
                 self.wire_stream = stream;
             }
@@ -423,7 +426,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                 if (i % 20 == 0) {
                     try buffer.appendSlice(allocator, "0000");
 
-                    try self.negotiationStep(allocator, buffer.items);
+                    try self.negotiationStep(io, allocator, buffer.items);
 
                     buffer.clearAndFree(allocator);
 
@@ -473,7 +476,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
 
             try buffer.appendSlice(allocator, "0009done\n");
 
-            try self.negotiationStep(allocator, buffer.items);
+            try self.negotiationStep(io, allocator, buffer.items);
 
             if (!self.caps.multi_ack and !self.caps.multi_ack_detailed) {
                 var pkt = try self.recvPkt(allocator);
@@ -516,6 +519,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
 
         fn negotiationStep(
             self: *WireTransport(repo_kind, repo_opts),
+            io: std.Io,
             allocator: std.mem.Allocator,
             buffer: []const u8,
         ) !void {
@@ -528,7 +532,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                 return error.InvalidDirection;
             }
 
-            if (try WireStream.initMaybe(allocator, self.wire_state, self.url orelse return error.NotConnected, .upload_pack)) |stream| {
+            if (try WireStream.initMaybe(io, allocator, self.wire_state, self.url orelse return error.NotConnected, .upload_pack)) |stream| {
                 self.clearStream(allocator);
                 self.wire_stream = stream;
             }
@@ -701,6 +705,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
 
         pub fn close(
             self: *WireTransport(repo_kind, repo_opts),
+            io: std.Io,
             allocator: std.mem.Allocator,
         ) void {
             const action: WireAction = switch (self.direction) {
@@ -711,7 +716,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             const flush = "0000";
             if (self.connected and !self.is_stateless) {
                 if (self.url) |url| {
-                    if (WireStream.initMaybe(allocator, self.wire_state, url, action)) |stream_maybe| {
+                    if (WireStream.initMaybe(io, allocator, self.wire_state, url, action)) |stream_maybe| {
                         if (stream_maybe) |stream| {
                             self.wire_stream = stream;
                         }

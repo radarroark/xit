@@ -1,5 +1,4 @@
 const std = @import("std");
-const net_socket = @import("./socket.zig");
 const net_wire = @import("./wire.zig");
 const net_pkt = @import("./pkt.zig");
 
@@ -15,27 +14,29 @@ pub const RawState = struct {
 
 pub const RawStream = struct {
     wire_state: *RawState,
-    io: net_socket.SocketStream,
+    socket: SocketStream,
     cmd: []const u8,
     url: []u8,
     sent_command: bool,
     allocator: std.mem.Allocator,
 
     pub fn initMaybe(
+        io: std.Io,
         allocator: std.mem.Allocator,
         wire_state: *RawState,
         url: []const u8,
         wire_action: net_wire.WireAction,
     ) !?RawStream {
         return switch (wire_action) {
-            .list_upload_pack => try listUpload(allocator, wire_state, url),
-            .list_receive_pack => try listReceive(allocator, wire_state, url),
+            .list_upload_pack => try listUpload(io, allocator, wire_state, url),
+            .list_receive_pack => try listReceive(io, allocator, wire_state, url),
             .upload_pack => null,
             .receive_pack => null,
         };
     }
 
     fn init(
+        io: std.Io,
         allocator: std.mem.Allocator,
         wire_state: *RawState,
         url: []const u8,
@@ -56,7 +57,7 @@ pub const RawStream = struct {
 
         return .{
             .wire_state = wire_state,
-            .io = try net_socket.SocketStream.init(allocator, host_str, port),
+            .socket = try SocketStream.init(io, allocator, host_str, port),
             .cmd = cmd,
             .url = url_dupe,
             .sent_command = false,
@@ -65,8 +66,7 @@ pub const RawStream = struct {
     }
 
     pub fn deinit(self: *RawStream, allocator: std.mem.Allocator) void {
-        self.io.close() catch {};
-        self.io.deinit(allocator);
+        self.socket.deinit(allocator);
         allocator.free(self.url);
     }
 
@@ -79,7 +79,7 @@ pub const RawStream = struct {
             try sendCommand(self);
         }
 
-        return try self.io.read(buffer, buf_size);
+        return try self.socket.read(buffer, buf_size);
     }
 
     pub fn write(
@@ -91,7 +91,7 @@ pub const RawStream = struct {
             try sendCommand(self);
         }
 
-        try self.io.writeAll(buffer, len);
+        try self.socket.writeAll(buffer, len);
     }
 };
 
@@ -119,33 +119,103 @@ fn sendCommand(stream: *RawStream) !void {
     try net_pkt.commandSize(&command_size_buf, written.len);
     @memcpy(written[0..4], &command_size_buf);
 
-    try stream.io.writeAll(written.ptr, written.len);
+    try stream.socket.writeAll(written.ptr, written.len);
 
     stream.sent_command = true;
 }
 
 fn listUpload(
+    io: std.Io,
     allocator: std.mem.Allocator,
     wire_state: *RawState,
     url: []const u8,
 ) !RawStream {
-    var stream = try RawStream.init(allocator, wire_state, url, "git-upload-pack");
+    var stream = try RawStream.init(io, allocator, wire_state, url, "git-upload-pack");
     errdefer stream.deinit(allocator);
 
-    try stream.io.connect(allocator);
+    try stream.socket.connect();
 
     return stream;
 }
 
 fn listReceive(
+    io: std.Io,
     allocator: std.mem.Allocator,
     wire_state: *RawState,
     url: []const u8,
 ) !RawStream {
-    var stream = try RawStream.init(allocator, wire_state, url, "git-receive-pack");
+    var stream = try RawStream.init(io, allocator, wire_state, url, "git-receive-pack");
     errdefer stream.deinit(allocator);
 
-    try stream.io.connect(allocator);
+    try stream.socket.connect();
 
     return stream;
 }
+
+const CONNECT_TIMEOUT = 5000;
+
+const SocketStream = struct {
+    io: std.Io,
+    host: []const u8,
+    port: u16,
+    stream: ?std.Io.net.Stream,
+
+    fn init(
+        io: std.Io,
+        allocator: std.mem.Allocator,
+        host: []const u8,
+        port: u16,
+    ) !SocketStream {
+        const host_dupe = try allocator.dupe(u8, host);
+        errdefer allocator.free(host_dupe);
+
+        return .{
+            .io = io,
+            .host = host_dupe,
+            .port = port,
+            .stream = null,
+        };
+    }
+
+    fn deinit(self: *SocketStream, allocator: std.mem.Allocator) void {
+        allocator.free(self.host);
+        self.close();
+    }
+
+    fn close(self: *SocketStream) void {
+        if (self.stream) |stream| {
+            stream.close(self.io);
+            self.stream = null;
+        }
+    }
+
+    fn read(
+        self: *SocketStream,
+        data: [*c]u8,
+        len: usize,
+    ) !usize {
+        const stream = self.stream orelse return error.StreamNotConnected;
+        var reader = stream.reader(self.io, &.{});
+        return try reader.interface.readSliceShort(data[0..len]);
+    }
+
+    fn writeAll(
+        self: *SocketStream,
+        data: [*c]const u8,
+        len: usize,
+    ) !void {
+        const stream = self.stream orelse return error.StreamNotConnected;
+        var writer = stream.writer(self.io, &.{});
+        try writer.interface.writeAll(data[0..len]);
+    }
+
+    fn connect(self: *SocketStream) !void {
+        const addr = try std.Io.net.IpAddress.parse(self.host, self.port);
+        self.stream = try addr.connect(self.io, .{
+            .mode = .stream,
+            .protocol = .tcp,
+            .timeout = .none,
+            //.timeout = .{ .duration = .{ .raw = .fromMilliseconds(CONNECT_TIMEOUT), .clock = .real } },
+        });
+    }
+};
