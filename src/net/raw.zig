@@ -210,13 +210,32 @@ const SocketStream = struct {
     }
 
     fn connect(self: *SocketStream) !void {
-        const host = if (std.mem.eql(u8, self.host, "localhost")) "127.0.0.1" else self.host;
-        const addr = try std.Io.net.IpAddress.parse(host, self.port);
-        self.stream = try addr.connect(self.io, .{
-            .mode = .stream,
-            .protocol = .tcp,
-            .timeout = .none,
-            //.timeout = .{ .duration = .{ .raw = .fromMilliseconds(CONNECT_TIMEOUT), .clock = .real } },
+        var canonical_name_buffer: [std.Io.net.HostName.max_len]u8 = undefined;
+        var results_buffer: [32]std.Io.net.HostName.LookupResult = undefined;
+        var results: std.Io.Queue(std.Io.net.HostName.LookupResult) = .init(&results_buffer);
+
+        std.Io.net.HostName.lookup(try .init(self.host), self.io, &results, .{
+            .port = self.port,
+            .canonical_name_buffer = &canonical_name_buffer,
         });
+
+        self.stream = while (results.getOne(self.io)) |result| switch (result) {
+            .address => |address| break try address.connect(self.io, .{
+                .mode = .stream,
+                .protocol = .tcp,
+                .timeout = .none,
+                //.timeout = .{ .duration = .{ .raw = .fromMilliseconds(CONNECT_TIMEOUT), .clock = .real } },
+            }),
+            .canonical_name => |canonical_name| break try canonical_name.connect(self.io, self.port, .{
+                .mode = .stream,
+                .protocol = .tcp,
+                .timeout = .none,
+                //.timeout = .{ .duration = .{ .raw = .fromMilliseconds(CONNECT_TIMEOUT), .clock = .real } },
+            }),
+            .end => |end| {
+                try end;
+                return error.HostNameLookupFailed;
+            },
+        } else |err| return err;
     }
 };
