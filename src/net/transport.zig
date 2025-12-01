@@ -38,7 +38,7 @@ pub fn Transport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpt
             url: []const u8,
             opts: Opts(repo_opts.ProgressCtx),
         ) !Transport(repo_kind, repo_opts) {
-            const transport_def_kind = TransportDefinition.init(state.core.init_opts.cwd, url) orelse return error.UnsupportedUrl;
+            const transport_def_kind = TransportDefinition.init(state.core.cwd, url) orelse return error.UnsupportedUrl;
             return switch (transport_def_kind) {
                 .file => .{ .file = try net_file.FileTransport(repo_kind, repo_opts).init(opts) },
                 .wire => |wire_kind| .{ .wire = try net_wire.WireTransport(repo_kind, repo_opts).init(state, allocator, wire_kind, opts) },

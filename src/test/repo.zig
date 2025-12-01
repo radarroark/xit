@@ -42,15 +42,18 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
+    const cwd_path = try std.process.getCwdAlloc(allocator);
+    defer allocator.free(cwd_path);
+
+    const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "repo" });
+    defer allocator.free(work_path);
+
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "repo");
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
         defer repo.deinit();
     }
 
-    var work_dir = try temp_dir.openDir("repo", .{});
-    defer work_dir.close();
-
-    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
     defer repo.deinit();
 
     try addFile(repo_kind, repo_opts, &repo, allocator, "README.md", "Hello, world!");
@@ -189,15 +192,18 @@ fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
+    const cwd_path = try std.process.getCwdAlloc(allocator);
+    defer allocator.free(cwd_path);
+
+    const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "repo" });
+    defer allocator.free(work_path);
+
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "repo");
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
         defer repo.deinit();
     }
 
-    var work_dir = try temp_dir.openDir("repo", .{});
-    defer work_dir.close();
-
-    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
     defer repo.deinit();
 
     // A --- B --- C --------- J --- K [master]
@@ -303,7 +309,10 @@ fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
         defer obj_iter.deinit();
         try obj_iter.include(&commit_k);
 
-        var dest_repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "dest_repo");
+        const dest_work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "dest_repo" });
+        defer allocator.free(dest_work_path);
+
+        var dest_repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = dest_work_path });
         defer dest_repo.deinit();
         try dest_repo.copyObjects(repo_kind, repo_opts, &obj_iter, null);
 
@@ -335,15 +344,18 @@ fn testMergeSideBranch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.R
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
+    const cwd_path = try std.process.getCwdAlloc(allocator);
+    defer allocator.free(cwd_path);
+
+    const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "repo" });
+    defer allocator.free(work_path);
+
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "repo");
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
         defer repo.deinit();
     }
 
-    var work_dir = try temp_dir.openDir("repo", .{});
-    defer work_dir.close();
-
-    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
     defer repo.deinit();
 
     //           C <------ D [side]
@@ -505,15 +517,18 @@ fn testMergeConflictSameFile(comptime repo_kind: rp.RepoKind, comptime repo_opts
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
+    const cwd_path = try std.process.getCwdAlloc(allocator);
+    defer allocator.free(cwd_path);
+
+    const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "repo" });
+    defer allocator.free(work_path);
+
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "repo");
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
         defer repo.deinit();
     }
 
-    var work_dir = try temp_dir.openDir("repo", .{});
-    defer work_dir.close();
-
-    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
     defer repo.deinit();
 
     // A --- B --- D [master]
@@ -770,15 +785,18 @@ fn testMergeConflictSameFileEmptyBase(comptime repo_kind: rp.RepoKind, comptime 
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
+    const cwd_path = try std.process.getCwdAlloc(allocator);
+    defer allocator.free(cwd_path);
+
+    const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "repo" });
+    defer allocator.free(work_path);
+
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "repo");
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
         defer repo.deinit();
     }
 
-    var work_dir = try temp_dir.openDir("repo", .{});
-    defer work_dir.close();
-
-    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
     defer repo.deinit();
 
     // A --- B --- D [master]
@@ -1047,15 +1065,18 @@ fn testMergeConflictSameFileAutoresolved(comptime repo_kind: rp.RepoKind, compti
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
+    const cwd_path = try std.process.getCwdAlloc(allocator);
+    defer allocator.free(cwd_path);
+
+    const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "repo" });
+    defer allocator.free(work_path);
+
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "repo");
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
         defer repo.deinit();
     }
 
-    var work_dir = try temp_dir.openDir("repo", .{});
-    defer work_dir.close();
-
-    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
     defer repo.deinit();
 
     // A --- B --- D [master]
@@ -1145,15 +1166,18 @@ fn testMergeConflictModifyDelete(comptime repo_kind: rp.RepoKind, comptime repo_
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
+    const cwd_path = try std.process.getCwdAlloc(allocator);
+    defer allocator.free(cwd_path);
+
+    const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "repo" });
+    defer allocator.free(work_path);
+
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "repo");
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
         defer repo.deinit();
     }
 
-    var work_dir = try temp_dir.openDir("repo", .{});
-    defer work_dir.close();
-
-    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
     defer repo.deinit();
 
     // A --- B --- D [master]
@@ -1282,15 +1306,18 @@ fn testMergeConflictDeleteModify(comptime repo_kind: rp.RepoKind, comptime repo_
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
+    const cwd_path = try std.process.getCwdAlloc(allocator);
+    defer allocator.free(cwd_path);
+
+    const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "repo" });
+    defer allocator.free(work_path);
+
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "repo");
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
         defer repo.deinit();
     }
 
-    var work_dir = try temp_dir.openDir("repo", .{});
-    defer work_dir.close();
-
-    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
     defer repo.deinit();
 
     // A --- B --- D [master]
@@ -1417,15 +1444,18 @@ fn testMergeConflictFileDir(comptime repo_kind: rp.RepoKind, comptime repo_opts:
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
+    const cwd_path = try std.process.getCwdAlloc(allocator);
+    defer allocator.free(cwd_path);
+
+    const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "repo" });
+    defer allocator.free(work_path);
+
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "repo");
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
         defer repo.deinit();
     }
 
-    var work_dir = try temp_dir.openDir("repo", .{});
-    defer work_dir.close();
-
-    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
     defer repo.deinit();
 
     // A --- B --- D [master]
@@ -1624,15 +1654,18 @@ fn testMergeConflictDirFile(comptime repo_kind: rp.RepoKind, comptime repo_opts:
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
+    const cwd_path = try std.process.getCwdAlloc(allocator);
+    defer allocator.free(cwd_path);
+
+    const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "repo" });
+    defer allocator.free(work_path);
+
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "repo");
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
         defer repo.deinit();
     }
 
-    var work_dir = try temp_dir.openDir("repo", .{});
-    defer work_dir.close();
-
-    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
     defer repo.deinit();
 
     // A --- B --- D [master]
@@ -1804,15 +1837,18 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind, comptime repo_op
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
+    const cwd_path = try std.process.getCwdAlloc(allocator);
+    defer allocator.free(cwd_path);
+
+    const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "repo" });
+    defer allocator.free(work_path);
+
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "repo");
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
         defer repo.deinit();
     }
 
-    var work_dir = try temp_dir.openDir("repo", .{});
-    defer work_dir.close();
-
-    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
     defer repo.deinit();
 
     // A --- B --------- D [master]
@@ -1963,17 +1999,20 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
+    const cwd_path = try std.process.getCwdAlloc(allocator);
+    defer allocator.free(cwd_path);
+
     // from https://pijul.org/manual/why_pijul.html
     {
+        const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "simple" });
+        defer allocator.free(work_path);
+
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "simple");
+            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
             defer repo.deinit();
         }
 
-        var work_dir = try temp_dir.openDir("simple", .{});
-        defer work_dir.close();
-
-        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
         defer repo.deinit();
 
         // A --- B --- C --- E [master]
@@ -2074,15 +2113,15 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
 
     // from https://tahoe-lafs.org/~zooko/badmerge/concrete-good-semantics.html
     {
+        const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "concrete" });
+        defer allocator.free(work_path);
+
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "concrete");
+            var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
             defer repo.deinit();
         }
 
-        var work_dir = try temp_dir.openDir("concrete", .{});
-        defer work_dir.close();
-
-        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
         defer repo.deinit();
 
         // A --- B --- C --- E [master]
@@ -2256,15 +2295,18 @@ fn testCherryPick(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOp
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
+    const cwd_path = try std.process.getCwdAlloc(allocator);
+    defer allocator.free(cwd_path);
+
+    const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "repo" });
+    defer allocator.free(work_path);
+
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "repo");
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
         defer repo.deinit();
     }
 
-    var work_dir = try temp_dir.openDir("repo", .{});
-    defer work_dir.close();
-
-    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
     defer repo.deinit();
 
     // A --- B ------------ D' [master]
@@ -2340,15 +2382,18 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
+    const cwd_path = try std.process.getCwdAlloc(allocator);
+    defer allocator.free(cwd_path);
+
+    const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "repo" });
+    defer allocator.free(work_path);
+
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "repo");
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
         defer repo.deinit();
     }
 
-    var work_dir = try temp_dir.openDir("repo", .{});
-    defer work_dir.close();
-
-    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
     defer repo.deinit();
 
     // A --- B ------------ D' [master]
@@ -2485,15 +2530,18 @@ fn testLog(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
+    const cwd_path = try std.process.getCwdAlloc(allocator);
+    defer allocator.free(cwd_path);
+
+    const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "repo" });
+    defer allocator.free(work_path);
+
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, "repo");
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
         defer repo.deinit();
     }
 
-    var work_dir = try temp_dir.openDir("repo", .{});
-    defer work_dir.close();
-
-    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
     defer repo.deinit();
 
     // A --- B --- C --------- G --- H [master]

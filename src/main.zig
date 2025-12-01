@@ -73,7 +73,7 @@ pub fn run(
     comptime repo_opts: rp.RepoOpts(repo_kind),
     allocator: std.mem.Allocator,
     args: []const []const u8,
-    cwd: std.fs.Dir,
+    cwd_path: []const u8,
     writers: Writers,
 ) !void {
     var cmd_args = try cmd.CommandArgs.init(allocator, args);
@@ -95,14 +95,14 @@ pub fn run(
         .help => |cmd_kind_maybe| try cmd.printHelp(cmd_kind_maybe, writers.out),
         .tui => |cmd_kind_maybe| if (.none == repo_opts.hash) {
             // if no hash was specified, use AnyRepo to detect the hash being used
-            var any_repo = try rp.AnyRepo(repo_kind, repo_opts).open(allocator, .{ .cwd = cwd });
+            var any_repo = try rp.AnyRepo(repo_kind, repo_opts).open(allocator, .{ .path = cwd_path });
             defer any_repo.deinit();
             switch (any_repo) {
                 .none => return error.HashKindNotFound,
                 inline else => |*repo| try ui.start(repo.self_repo_kind, repo.self_repo_opts, repo, allocator, cmd_kind_maybe),
             }
         } else {
-            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = cwd });
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = cwd_path });
             defer repo.deinit();
             try ui.start(repo_kind, repo_opts, &repo, allocator, cmd_kind_maybe);
         },
@@ -113,7 +113,9 @@ pub fn run(
                     repo_opts.withHash((rp.RepoOpts(repo_kind){}).hash)
                 else
                     repo_opts;
-                var repo = try rp.Repo(repo_kind, new_repo_opts).init(allocator, .{ .cwd = cwd }, init_cmd.dir);
+                const work_path = try std.fs.path.resolve(allocator, &.{ cwd_path, init_cmd.dir });
+                defer allocator.free(work_path);
+                var repo = try rp.Repo(repo_kind, new_repo_opts).init(allocator, .{ .cwd_path = cwd_path, .path = work_path });
                 defer repo.deinit();
 
                 try writers.out.print(
@@ -127,13 +129,15 @@ pub fn run(
             },
             .clone => |clone_cmd| {
                 const repo_opts_with_ctx = repo_opts.withProgressCtx(ProgressCtx);
+                const work_path = try std.fs.path.resolve(allocator, &.{ cwd_path, clone_cmd.local_path });
+                defer allocator.free(work_path);
                 var clear_line = false;
                 var progress_node: ?std.Progress.Node = null;
                 var repo = try rp.Repo(repo_kind, repo_opts_with_ctx).clone(
                     allocator,
                     clone_cmd.url,
-                    cwd,
-                    clone_cmd.local_path,
+                    cwd_path,
+                    work_path,
                     .{ .progress_ctx = .{ .writers = writers, .clear_line = &clear_line, .node = &progress_node } },
                 );
                 defer repo.deinit();
@@ -153,7 +157,7 @@ pub fn run(
             else => if (.none == repo_opts.hash) {
                 // if no hash was specified, use AnyRepo to detect the hash being used
                 const repo_opts_with_ctx = repo_opts.withProgressCtx(ProgressCtx);
-                var any_repo = try rp.AnyRepo(repo_kind, repo_opts_with_ctx).open(allocator, .{ .cwd = cwd });
+                var any_repo = try rp.AnyRepo(repo_kind, repo_opts_with_ctx).open(allocator, .{ .path = cwd_path });
                 defer any_repo.deinit();
                 switch (any_repo) {
                     .none => return error.HashKindNotFound,
@@ -164,7 +168,7 @@ pub fn run(
                 }
             } else {
                 const repo_opts_with_ctx = repo_opts.withProgressCtx(ProgressCtx);
-                var repo = try rp.Repo(repo_kind, repo_opts_with_ctx).open(allocator, .{ .cwd = cwd });
+                var repo = try rp.Repo(repo_kind, repo_opts_with_ctx).open(allocator, .{ .path = cwd_path });
                 defer repo.deinit();
                 try runCommand(repo_kind, repo_opts_with_ctx, &repo, allocator, cli_cmd, writers);
             },
@@ -178,10 +182,10 @@ pub fn runPrint(
     comptime repo_opts: rp.RepoOpts(repo_kind),
     allocator: std.mem.Allocator,
     args: []const []const u8,
-    cwd: std.fs.Dir,
+    cwd_path: []const u8,
     writers: Writers,
 ) !void {
-    run(repo_kind, repo_opts, allocator, args, cwd, writers) catch |err| switch (err) {
+    run(repo_kind, repo_opts, allocator, args, cwd_path, writers) catch |err| switch (err) {
         error.RepoNotFound => {
             try writers.err.print(
                 \\repo not found, dummy.
@@ -737,7 +741,10 @@ pub fn main() !u8 {
     var stderr_writer = std.fs.File.stderr().writer(&.{});
     const writers = Writers{ .out = &stdout_writer.interface, .err = &stderr_writer.interface };
 
-    runPrint(.xit, .{}, allocator, args.items, std.fs.cwd(), writers) catch |err| switch (err) {
+    const cwd_path = try std.process.getCwdAlloc(allocator);
+    defer allocator.free(cwd_path);
+
+    runPrint(.xit, .{}, allocator, args.items, cwd_path, writers) catch |err| switch (err) {
         error.HandledError => return 1,
         else => |e| return e,
     };

@@ -45,6 +45,12 @@ pub fn main() !void {
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
+    const cwd_path = try std.process.getCwdAlloc(allocator);
+    defer allocator.free(cwd_path);
+
+    const temp_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name });
+    defer allocator.free(temp_path);
+
     {
         var src_repo_dir = try cwd.openDir(".git", .{ .iterate = true });
         defer src_repo_dir.close();
@@ -78,7 +84,7 @@ pub fn main() !void {
     const writers = xit.main.Writers{ .out = &stdout_writer.interface, .err = &stderr_writer.interface };
 
     {
-        var git_repo = try rp.Repo(.git, .{}).open(allocator, .{ .cwd = temp_dir });
+        var git_repo = try rp.Repo(.git, .{}).open(allocator, .{ .path = temp_path });
         defer git_repo.deinit();
 
         // restore all files in work dir
@@ -116,7 +122,7 @@ pub fn main() !void {
             }
         }
 
-        var xit_repo = try rp.Repo(.xit, .{}).init(allocator, .{ .cwd = temp_dir }, ".");
+        var xit_repo = try rp.Repo(.xit, .{}).init(allocator, .{ .path = temp_path });
         defer xit_repo.deinit();
 
         for (0..commits.items.len) |i| {
@@ -158,5 +164,5 @@ pub fn main() !void {
         try xit_repo.addConfig(allocator, .{ .name = "branch.master.remote", .value = "origin" });
     }
 
-    try xit.main.run(.xit, .{}, allocator, args.items, temp_dir, writers);
+    try xit.main.run(.xit, .{}, allocator, args.items, temp_path, writers);
 }

@@ -227,8 +227,8 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
                         }
 
                         // create sshd.sh contents
-                        var cwd_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-                        const cwd_path = try std.process.getCwd(&cwd_path_buffer);
+                        const cwd_path = try std.process.getCwdAlloc(allocator);
+                        defer allocator.free(cwd_path);
                         const host_key_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "host_key" });
                         defer allocator.free(host_key_path);
                         const auth_keys_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "authorized_keys" });
@@ -303,8 +303,8 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
                                         else
                                             return error.SlashNotFound;
 
-                                        var cwd_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-                                        const cwd_path = try std.process.getCwd(&cwd_path_buffer);
+                                        const cwd_path = try std.process.getCwdAlloc(core.allocator);
+                                        defer core.allocator.free(cwd_path);
                                         const temp_dir_path = try std.fs.path.join(core.allocator, &.{ cwd_path, core.temp_dir_name });
                                         defer core.allocator.free(temp_dir_path);
                                         const path_translated = try std.fmt.allocPrint(core.allocator, "{s}{s}", .{
@@ -453,20 +453,13 @@ fn testFetch(
     try server.start();
     defer server.stop();
 
-    // get the cwd path
-    var cwd_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-    const cwd_path = try std.process.getCwd(&cwd_path_buffer);
+    const cwd_path = try std.process.getCwdAlloc(allocator);
+    defer allocator.free(cwd_path);
 
-    // get server dir path
     const server_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "server" });
     defer allocator.free(server_path);
 
-    // create the server dir
-    var server_dir = try cwd.makeOpenPath(server_path, .{});
-    defer server_dir.close();
-
-    // init server repo
-    var server_repo = try rp.Repo(.git, .{ .is_test = true }).init(allocator, .{ .cwd = server_dir }, ".");
+    var server_repo = try rp.Repo(.git, .{ .is_test = true }).init(allocator, .{ .path = server_path });
     defer server_repo.deinit();
 
     // make a commit
@@ -489,12 +482,10 @@ fn testFetch(
     // add a tag
     _ = try server_repo.addTag(allocator, .{ .name = "1.0.0", .message = "hi" });
 
-    // create the client dir
-    var client_dir = try temp_dir.makeOpenPath("client", .{});
-    defer client_dir.close();
+    const client_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "client" });
+    defer allocator.free(client_path);
 
-    // init client repo
-    var client_repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = client_dir }, ".");
+    var client_repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = client_path });
     defer client_repo.deinit();
 
     // add remote
@@ -645,21 +636,16 @@ fn testPush(
     try server.start();
     defer server.stop();
 
-    // get the cwd path
-    var cwd_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-    const cwd_path = try std.process.getCwd(&cwd_path_buffer);
+    const cwd_path = try std.process.getCwdAlloc(allocator);
+    defer allocator.free(cwd_path);
 
-    // get server dir path
     const server_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "server" });
     defer allocator.free(server_path);
 
-    // create the server dir
-    var server_dir = try cwd.makeOpenPath(server_path, .{});
-    defer server_dir.close();
-
-    // init server repo
-    var server_repo = try rp.Repo(.git, .{ .is_test = true }).init(allocator, .{ .cwd = server_dir }, ".");
+    var server_repo = try rp.Repo(.git, .{ .is_test = true }).init(allocator, .{ .path = server_path });
     defer server_repo.deinit();
+
+    // add config
     switch (transport_def) {
         .file => try server_repo.addConfig(allocator, .{ .name = "core.bare", .value = "true" }),
         .wire => {
@@ -675,12 +661,10 @@ fn testPush(
         defer export_file.close();
     }
 
-    // create the client dir
-    var client_dir = try temp_dir.makeOpenPath("client", .{});
-    defer client_dir.close();
+    const client_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "client" });
+    defer allocator.free(client_path);
 
-    // init client repo
-    var client_repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = client_dir }, ".");
+    var client_repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = client_path });
     defer client_repo.deinit();
 
     // make a commit
@@ -913,20 +897,17 @@ fn testClone(
     try server.start();
     defer server.stop();
 
-    // get the cwd path
-    var cwd_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-    const cwd_path = try std.process.getCwd(&cwd_path_buffer);
+    const cwd_path = try std.process.getCwdAlloc(allocator);
+    defer allocator.free(cwd_path);
 
-    // get server dir path
+    const temp_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name });
+    defer allocator.free(temp_path);
+
     const server_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "server" });
     defer allocator.free(server_path);
 
-    // create the server dir
-    var server_dir = try cwd.makeOpenPath(server_path, .{});
-    defer server_dir.close();
-
     // init server repo with default branch name as main
-    var server_repo = try rp.Repo(.git, .{ .is_test = true }).init(allocator, .{ .cwd = server_dir, .create_default_branch = "main" }, ".");
+    var server_repo = try rp.Repo(.git, .{ .is_test = true }).init(allocator, .{ .path = server_path, .create_default_branch = "main" });
     defer server_repo.deinit();
 
     // make a commit
@@ -944,13 +925,8 @@ fn testClone(
         defer export_file.close();
     }
 
-    // get client dir path
     const client_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "client" });
     defer allocator.free(client_path);
-
-    // create the client dir
-    var client_dir = try cwd.makeOpenPath(client_path, .{});
-    defer client_dir.close();
 
     // get remote url
     const remote_url = blk: {
@@ -990,7 +966,7 @@ fn testClone(
     var client_repo = rp.Repo(repo_kind, repo_opts).clone(
         allocator,
         remote_url,
-        temp_dir,
+        temp_path,
         client_path,
         .{ .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
     ) catch |err| {
@@ -1042,21 +1018,17 @@ fn testFetchLarge(
     try server.start();
     defer server.stop();
 
-    // get the cwd path
-    var cwd_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-    const cwd_path = try std.process.getCwd(&cwd_path_buffer);
+    const cwd_path = try std.process.getCwdAlloc(allocator);
+    defer allocator.free(cwd_path);
 
-    // get server dir path
     const server_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "server" });
     defer allocator.free(server_path);
 
-    // create the server dir
-    var server_dir = try cwd.makeOpenPath(server_path, .{});
-    defer server_dir.close();
-
-    // init server repo
-    var server_repo = try rp.Repo(.git, .{ .is_test = true }).init(allocator, .{ .cwd = server_dir }, ".");
+    var server_repo = try rp.Repo(.git, .{ .is_test = true }).init(allocator, .{ .path = server_path });
     defer server_repo.deinit();
+
+    var server_dir = try cwd.openDir(server_path, .{});
+    defer server_dir.close();
 
     // copy files from current repo into server dir
     for (&[_][]const u8{ "src", "docs" }) |dir_name| {
@@ -1080,12 +1052,10 @@ fn testFetchLarge(
         defer export_file.close();
     }
 
-    // create the client dir
-    var client_dir = try temp_dir.makeOpenPath("client", .{});
-    defer client_dir.close();
+    const client_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "client" });
+    defer allocator.free(client_path);
 
-    // init client repo
-    var client_repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = client_dir }, ".");
+    var client_repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = client_path });
     defer client_repo.deinit();
 
     // add remote
@@ -1181,21 +1151,16 @@ fn testPushLarge(
     try server.start();
     defer server.stop();
 
-    // get the cwd path
-    var cwd_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-    const cwd_path = try std.process.getCwd(&cwd_path_buffer);
+    const cwd_path = try std.process.getCwdAlloc(allocator);
+    defer allocator.free(cwd_path);
 
-    // get server dir path
     const server_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "server" });
     defer allocator.free(server_path);
 
-    // create the server dir
-    var server_dir = try cwd.makeOpenPath(server_path, .{});
-    defer server_dir.close();
-
-    // init server repo
-    var server_repo = try rp.Repo(.git, .{ .is_test = true }).init(allocator, .{ .cwd = server_dir }, ".");
+    var server_repo = try rp.Repo(.git, .{ .is_test = true }).init(allocator, .{ .path = server_path });
     defer server_repo.deinit();
+
+    // add config
     switch (transport_def) {
         .file => try server_repo.addConfig(allocator, .{ .name = "core.bare", .value = "true" }),
         .wire => {
@@ -1211,13 +1176,14 @@ fn testPushLarge(
         defer export_file.close();
     }
 
-    // create the client dir
-    var client_dir = try temp_dir.makeOpenPath("client", .{});
-    defer client_dir.close();
+    const client_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "client" });
+    defer allocator.free(client_path);
 
-    // init client repo
-    var client_repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = client_dir }, ".");
+    var client_repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = client_path });
     defer client_repo.deinit();
+
+    var client_dir = try cwd.openDir(client_path, .{});
+    defer client_dir.close();
 
     // copy files from current repo into client dir
     for (&[_][]const u8{ "src", "docs" }) |dir_name| {

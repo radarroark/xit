@@ -617,12 +617,19 @@ pub fn clone(
     comptime repo_opts: rp.RepoOpts(repo_kind),
     allocator: std.mem.Allocator,
     url: []const u8,
-    cwd: std.fs.Dir,
-    local_path: []const u8,
+    cwd_path: []const u8,
+    work_path: []const u8,
     transport_opts: Opts(repo_opts.ProgressCtx),
 ) !rp.Repo(repo_kind, repo_opts) {
-    var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = cwd, .create_default_branch = null }, local_path);
+    var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{
+        .cwd_path = cwd_path,
+        .path = work_path,
+        .create_default_branch = null,
+    });
     errdefer repo.deinit();
+
+    var cwd = try std.fs.openDirAbsolute(cwd_path, .{});
+    defer cwd.close();
 
     const transport_def = net_transport.TransportDefinition.init(cwd, url) orelse return error.UnsupportedUrl;
 

@@ -85,7 +85,8 @@ pub fn RepoOpts(comptime repo_kind: RepoKind) type {
 }
 
 pub const InitOpts = struct {
-    cwd: std.fs.Dir,
+    cwd_path: ?[]const u8 = null,
+    path: []const u8,
     create_default_branch: ?[]const u8 = "master",
 };
 
@@ -98,14 +99,18 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
         pub const Core = switch (repo_kind) {
             .git => struct {
-                init_opts: InitOpts,
+                cwd_path: []const u8,
+                cwd: std.fs.Dir,
+                work_path: []const u8,
                 work_dir: std.fs.Dir,
                 repo_dir: std.fs.Dir,
 
                 pub fn latestMoment(_: *@This()) !void {}
             },
             .xit => struct {
-                init_opts: InitOpts,
+                cwd_path: []const u8,
+                cwd: std.fs.Dir,
+                work_path: []const u8,
                 work_dir: std.fs.Dir,
                 repo_dir: std.fs.Dir,
                 db_file: std.fs.File,
@@ -175,12 +180,15 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             };
         }
 
-        pub fn init(allocator: std.mem.Allocator, opts: InitOpts, sub_path: []const u8) !Repo(repo_kind, repo_opts) {
-            // get the root dir. if no path was given to the init command, this
-            // should just be the current working directory (cwd). if a path was
-            // given, it should either append it to the cwd or, if it is absolute,
-            // it should just use that path alone. IT'S MAGIC!
-            var work_dir = try opts.cwd.makeOpenPath(sub_path, .{});
+        pub fn init(allocator: std.mem.Allocator, opts: InitOpts) !Repo(repo_kind, repo_opts) {
+            const cwd_path = opts.cwd_path orelse opts.path;
+            if (!std.fs.path.isAbsolute(cwd_path)) return error.PathMustBeAbsolute;
+
+            var cwd = try std.fs.cwd().makeOpenPath(cwd_path, .{});
+            errdefer cwd.close();
+
+            if (!std.fs.path.isAbsolute(opts.path)) return error.PathMustBeAbsolute;
+            var work_dir = try std.fs.cwd().makeOpenPath(opts.path, .{});
             errdefer work_dir.close();
 
             const repo_dir_name = switch (repo_kind) {
@@ -211,7 +219,9 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
                     var self = Repo(repo_kind, repo_opts){
                         .core = .{
-                            .init_opts = opts,
+                            .cwd_path = cwd_path,
+                            .cwd = cwd,
+                            .work_path = opts.path,
                             .work_dir = work_dir,
                             .repo_dir = repo_dir,
                         },
@@ -232,7 +242,9 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     // make the db
                     var self = Repo(repo_kind, repo_opts){
                         .core = .{
-                            .init_opts = opts,
+                            .cwd_path = cwd_path,
+                            .cwd = cwd,
+                            .work_path = opts.path,
                             .work_dir = work_dir,
                             .repo_dir = repo_dir,
                             .db_file = db_file,
@@ -255,8 +267,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
         }
 
         pub fn open(allocator: std.mem.Allocator, opts: InitOpts) !Repo(repo_kind, repo_opts) {
-            const cwd_path = try opts.cwd.realpathAlloc(allocator, ".");
-            defer allocator.free(cwd_path);
+            if (!std.fs.path.isAbsolute(opts.path)) return error.PathMustBeAbsolute;
 
             const repo_dir_name = switch (repo_kind) {
                 .git => ".git",
@@ -264,7 +275,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             };
 
             // search all parent dirs for one containing the repo dir
-            var dir_path_maybe: ?[]const u8 = cwd_path;
+            var dir_path_maybe: ?[]const u8 = opts.path;
             while (dir_path_maybe) |dir_path| {
                 var work_dir = try std.fs.openDirAbsolute(dir_path, .{});
                 defer work_dir.close();
@@ -281,8 +292,14 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                 break;
             }
 
-            const dir_path = dir_path_maybe orelse return error.RepoNotFound;
-            var work_dir = try std.fs.openDirAbsolute(dir_path, .{});
+            const cwd_path = opts.cwd_path orelse opts.path;
+            if (!std.fs.path.isAbsolute(cwd_path)) return error.PathMustBeAbsolute;
+
+            var cwd = try std.fs.cwd().makeOpenPath(cwd_path, .{});
+            errdefer cwd.close();
+
+            const work_path = dir_path_maybe orelse return error.RepoNotFound;
+            var work_dir = try std.fs.openDirAbsolute(work_path, .{});
             errdefer work_dir.close();
 
             var repo_dir = try work_dir.openDir(repo_dir_name, .{});
@@ -292,7 +309,9 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                 .git => {
                     return .{
                         .core = .{
-                            .init_opts = opts,
+                            .cwd_path = cwd_path,
+                            .cwd = cwd,
+                            .work_path = work_path,
                             .work_dir = work_dir,
                             .repo_dir = repo_dir,
                         },
@@ -307,7 +326,9 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
                     var self = Repo(repo_kind, repo_opts){
                         .core = .{
-                            .init_opts = opts,
+                            .cwd_path = cwd_path,
+                            .cwd = cwd,
+                            .work_path = work_path,
                             .work_dir = work_dir,
                             .repo_dir = repo_dir,
                             .db_file = db_file,
@@ -335,10 +356,12 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
         pub fn deinit(self: *Repo(repo_kind, repo_opts)) void {
             switch (repo_kind) {
                 .git => {
+                    self.core.cwd.close();
                     self.core.work_dir.close();
                     self.core.repo_dir.close();
                 },
                 .xit => {
+                    self.core.cwd.close();
                     self.core.work_dir.close();
                     self.core.repo_dir.close();
                     self.core.db_file.close();
@@ -465,7 +488,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
             var normalized_paths = std.ArrayList([]const u8){};
             for (paths) |path| {
-                const rel_path = try fs.relativePath(allocator, self.core.work_dir, self.core.init_opts.cwd, path);
+                const rel_path = try fs.relativePath(allocator, self.core.work_path, self.core.cwd_path, path);
                 defer allocator.free(rel_path);
                 const path_parts = try fs.splitPath(allocator, rel_path);
                 defer allocator.free(path_parts);
@@ -517,7 +540,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
             var normalized_paths = std.ArrayList([]const u8){};
             for (paths) |path| {
-                const rel_path = try fs.relativePath(allocator, self.core.work_dir, self.core.init_opts.cwd, path);
+                const rel_path = try fs.relativePath(allocator, self.core.work_path, self.core.cwd_path, path);
                 defer allocator.free(rel_path);
                 const path_parts = try fs.splitPath(allocator, rel_path);
                 defer allocator.free(path_parts);
@@ -583,7 +606,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
             var normalized_paths = std.ArrayList([]const u8){};
             for (paths) |path| {
-                const rel_path = try fs.relativePath(allocator, self.core.work_dir, self.core.init_opts.cwd, path);
+                const rel_path = try fs.relativePath(allocator, self.core.work_path, self.core.cwd_path, path);
                 defer allocator.free(rel_path);
                 const path_parts = try fs.splitPath(allocator, rel_path);
                 defer allocator.free(path_parts);
@@ -814,7 +837,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
         pub fn restore(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, path: []const u8) !void {
             var moment = try self.core.latestMoment();
             const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
-            const rel_path = try fs.relativePath(allocator, self.core.work_dir, self.core.init_opts.cwd, path);
+            const rel_path = try fs.relativePath(allocator, self.core.work_path, self.core.cwd_path, path);
             defer allocator.free(rel_path);
             const path_parts = try fs.splitPath(allocator, rel_path);
             defer allocator.free(path_parts);
@@ -1103,7 +1126,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
         }
 
         pub fn addRemote(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator, input: cfg.AddConfigInput) !void {
-            if (!net.validateUrl(self.core.init_opts.cwd, input.value)) {
+            if (!net.validateUrl(self.core.cwd, input.value)) {
                 return error.InvalidRemoteUrl;
             }
 
@@ -1234,12 +1257,12 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
         pub fn clone(
             allocator: std.mem.Allocator,
             url: []const u8,
-            cwd: std.fs.Dir,
-            local_path: []const u8,
+            cwd_path: []const u8,
+            work_path: []const u8,
             opts: net.Opts(repo_opts.ProgressCtx),
         ) !Repo(repo_kind, repo_opts) {
             if (repo_opts.hash == .none) return error.UnsupportedHashKind;
-            return net.clone(repo_kind, repo_opts, allocator, url, cwd, local_path, opts);
+            return net.clone(repo_kind, repo_opts, allocator, url, cwd_path, work_path, opts);
         }
 
         pub fn fetch(

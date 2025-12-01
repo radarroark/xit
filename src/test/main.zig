@@ -52,15 +52,17 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
-    // init repo
-    try main.run(repo_kind, repo_opts, allocator, &.{ "init", "repo" }, temp_dir, writers);
+    const cwd_path = try std.process.getCwdAlloc(allocator);
+    defer allocator.free(cwd_path);
 
-    // get the cwd path
-    var cwd_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-    const cwd_path = try std.process.getCwd(&cwd_path_buffer);
+    const temp_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name });
+    defer allocator.free(temp_path);
+
+    // init repo
+    try main.run(repo_kind, repo_opts, allocator, &.{ "init", "repo" }, temp_path, writers);
 
     // get work dir path (null-terminated because it's used by libgit)
-    const work_path = try std.fs.path.joinZ(allocator, &.{ cwd_path, temp_dir_name, "repo" });
+    const work_path = try std.fs.path.joinZ(allocator, &.{ temp_path, "repo" });
     defer allocator.free(work_path);
 
     // get the work dir
@@ -99,7 +101,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // make sure we can get status before first commit
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
         defer repo.deinit();
         var status = try repo.status(allocator);
         defer status.deinit(allocator);
@@ -162,21 +164,23 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         try design_md.writeAll("design stuff");
 
         // add the files
-        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "." }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "." }, work_path, writers);
 
         // make a commit
         // we're calling this one differently to test a few things:
         // 1. setting the hash to `.none` causes it to autodetect the repo's hash.
-        // 2. the cwd is docs_dir, to make sure we can run commands in any sub dir.
+        // 2. the cwd is docs_path, to make sure we can run commands in any sub dir.
         // 3. we're using runPrint instead of run, which prints user-friendly errors
         //    (no difference in the tests but I just want to make sure it works)
-        try main.runPrint(repo_kind, repo_opts.withHash(.none), allocator, &.{ "commit", "-m", "first commit" }, docs_dir, writers);
+        const docs_path = try std.fs.path.join(allocator, &.{ work_path, "docs" });
+        defer allocator.free(docs_path);
+        try main.runPrint(repo_kind, repo_opts.withHash(.none), allocator, &.{ "commit", "-m", "first commit" }, docs_path, writers);
 
         switch (repo_kind) {
             .git => {
                 // check that the commit object was created
                 {
-                    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+                    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
                     defer repo.deinit();
                     const head_file_buffer = try rf.readHeadRecur(repo_kind, repo_opts, .{ .core = &repo.core, .extra = .{} });
                     var objects_dir = try test_state.repo_dir.openDir("objects", .{});
@@ -228,7 +232,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             },
             .xit => {
                 // check that the commit object was created
-                var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+                var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
                 defer repo.deinit();
                 var moment = try repo.core.latestMoment();
                 const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
@@ -244,7 +248,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // get HEAD contents
     const commit1 = blk: {
-        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
@@ -325,7 +329,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
         // work dir diff
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
             defer repo.deinit();
             var status = try repo.status(allocator);
             defer status.deinit(allocator);
@@ -404,18 +408,18 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
         // delete a file
         try work_dir.deleteFile("LICENSE");
-        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "LICENSE" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "LICENSE" }, work_path, writers);
 
         // delete a file and dir
         try work_dir.deleteTree("docs");
-        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "docs/design.md" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "docs/design.md" }, work_path, writers);
 
         // add new and modified files
-        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "hello.txt", "run.sh", "src/zig/main.zig" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "hello.txt", "run.sh", "src/zig/main.zig" }, work_path, writers);
 
         // index diff
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
             defer repo.deinit();
             var status = try repo.status(allocator);
             defer status.deinit(allocator);
@@ -456,16 +460,16 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         }
 
         // add the remaining files
-        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "." }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "." }, work_path, writers);
 
         // make another commit
-        try main.run(repo_kind, repo_opts, allocator, &.{ "commit", "-m", "second commit" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "commit", "-m", "second commit" }, work_path, writers);
 
         switch (repo_kind) {
             .git => {
                 // check that the commit object was created
                 {
-                    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+                    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
                     defer repo.deinit();
                     const head_file_buffer = try rf.readHeadRecur(repo_kind, repo_opts, .{ .core = &repo.core, .extra = .{} });
                     var objects_dir = try test_state.repo_dir.openDir("objects", .{});
@@ -494,7 +498,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             },
             .xit => {
                 // check that the commit object was created
-                var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+                var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
                 defer repo.deinit();
                 var moment = try repo.core.latestMoment();
                 const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
@@ -510,7 +514,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // get HEAD contents
     const commit2 = blk: {
-        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
@@ -519,7 +523,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // tree diff
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
         defer repo.deinit();
         var tree_diff = try repo.treeDiff(allocator, &commit1, &commit2);
         defer tree_diff.deinit();
@@ -583,12 +587,12 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                 var license = try work_dir.createFile("LICENSE", .{});
                 defer license.close();
                 try license.writeAll("different license");
-                try main.run(repo_kind, repo_opts, allocator, &.{ "add", "LICENSE" }, work_dir, writers);
+                try main.run(repo_kind, repo_opts, allocator, &.{ "add", "LICENSE" }, work_path, writers);
             }
 
             // check out commit1 and make sure the conflict is found
             {
-                var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+                var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
                 defer repo.deinit();
                 var switch_result = try repo.switchDir(allocator, .{ .target = .{ .oid = &commit1 } });
                 defer switch_result.deinit();
@@ -599,7 +603,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             // delete the file
             {
                 try work_dir.deleteFile("LICENSE");
-                try main.run(repo_kind, repo_opts, allocator, &.{ "add", "LICENSE" }, work_dir, writers);
+                try main.run(repo_kind, repo_opts, allocator, &.{ "add", "LICENSE" }, work_path, writers);
             }
         }
 
@@ -613,7 +617,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
             // check out commit1 and make sure the conflict is found
             {
-                var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+                var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
                 defer repo.deinit();
                 var switch_result = try repo.switchDir(allocator, .{ .target = .{ .oid = &commit1 } });
                 defer switch_result.deinit();
@@ -636,7 +640,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
             // check out commit1 and make sure the conflict is found
             {
-                var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+                var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
                 defer repo.deinit();
                 var switch_result = try repo.switchDir(allocator, .{ .target = .{ .oid = &commit1 } });
                 defer switch_result.deinit();
@@ -665,7 +669,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
             // check out commit1 and make sure the conflict is found
             {
-                var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+                var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
                 defer repo.deinit();
                 var switch_result = try repo.switchDir(allocator, .{ .target = .{ .oid = &commit1 } });
                 defer switch_result.deinit();
@@ -679,7 +683,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     }
 
     // switch to first commit
-    try main.run(repo_kind, repo_opts, allocator, &.{ "switch", &commit1 }, work_dir, writers);
+    try main.run(repo_kind, repo_opts, allocator, &.{ "switch", &commit1 }, work_path, writers);
 
     // the work dir was updated
     {
@@ -704,7 +708,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     }
 
     // switch to master
-    try main.run(repo_kind, repo_opts, allocator, &.{ "switch", "master" }, work_dir, writers);
+    try main.run(repo_kind, repo_opts, allocator, &.{ "switch", "master" }, work_path, writers);
 
     // the work dir was updated
     {
@@ -730,11 +734,11 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         }
 
         // add the new dir
-        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "hello.txt" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "hello.txt" }, work_path, writers);
 
         // read index
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
             defer repo.deinit();
             var moment = try repo.core.latestMoment();
             const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
@@ -764,7 +768,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             },
             .xit => {
                 // read the index in xitdb
-                var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+                var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
                 defer repo.deinit();
                 var count: u32 = 0;
                 var moment = try repo.core.latestMoment();
@@ -790,11 +794,11 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         defer hello_txt2.close();
 
         // add the new file
-        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "hello.txt" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "hello.txt" }, work_path, writers);
 
         // read index
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
             defer repo.deinit();
             var moment = try repo.core.latestMoment();
             const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
@@ -823,7 +827,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             },
             .xit => {
                 // read the index in xitdb
-                var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+                var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
                 defer repo.deinit();
                 var count: u32 = 0;
                 var moment = try repo.core.latestMoment();
@@ -847,10 +851,10 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     // changing the index
     {
         // can't add a non-existent file
-        try std.testing.expectEqual(error.AddIndexPathNotFound, main.run(repo_kind, repo_opts, allocator, &.{ "add", "no-such-file" }, work_dir, writers));
+        try std.testing.expectEqual(error.AddIndexPathNotFound, main.run(repo_kind, repo_opts, allocator, &.{ "add", "no-such-file" }, work_path, writers));
 
         // can't remove non-existent file
-        try std.testing.expectEqual(error.RemoveIndexPathNotFound, main.run(repo_kind, repo_opts, allocator, &.{ "rm", "no-such-file" }, work_dir, writers));
+        try std.testing.expectEqual(error.RemoveIndexPathNotFound, main.run(repo_kind, repo_opts, allocator, &.{ "rm", "no-such-file" }, work_path, writers));
 
         // modify a file
         {
@@ -862,10 +866,10 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         }
 
         // can't remove a file with unstaged changes
-        try std.testing.expectEqual(error.CannotRemoveFileWithUnstagedChanges, main.run(repo_kind, repo_opts, allocator, &.{ "rm", "one/two/three.txt" }, work_dir, writers));
+        try std.testing.expectEqual(error.CannotRemoveFileWithUnstagedChanges, main.run(repo_kind, repo_opts, allocator, &.{ "rm", "one/two/three.txt" }, work_path, writers));
 
         // stage the changes
-        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "one/two/three.txt" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "one/two/three.txt" }, work_path, writers);
 
         // modify it again
         {
@@ -877,23 +881,23 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         }
 
         // can't untrack a file with staged and unstaged changes
-        try std.testing.expectEqual(error.CannotRemoveFileWithStagedAndUnstagedChanges, main.run(repo_kind, repo_opts, allocator, &.{ "untrack", "one/two/three.txt" }, work_dir, writers));
+        try std.testing.expectEqual(error.CannotRemoveFileWithStagedAndUnstagedChanges, main.run(repo_kind, repo_opts, allocator, &.{ "untrack", "one/two/three.txt" }, work_path, writers));
 
         // add dir
-        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "one" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "one" }, work_path, writers);
 
         // can't untrack a dir without -r
-        try std.testing.expectEqual(error.RecursiveOptionRequired, main.run(repo_kind, repo_opts, allocator, &.{ "untrack", "one" }, work_dir, writers));
+        try std.testing.expectEqual(error.RecursiveOptionRequired, main.run(repo_kind, repo_opts, allocator, &.{ "untrack", "one" }, work_path, writers));
 
         // can't unadd a dir without -r
-        try std.testing.expectEqual(error.RecursiveOptionRequired, main.run(repo_kind, repo_opts, allocator, &.{ "unadd", "one" }, work_dir, writers));
+        try std.testing.expectEqual(error.RecursiveOptionRequired, main.run(repo_kind, repo_opts, allocator, &.{ "unadd", "one" }, work_path, writers));
 
         // unadd dir
-        try main.run(repo_kind, repo_opts, allocator, &.{ "unadd", "-r", "one" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "unadd", "-r", "one" }, work_path, writers);
 
         // still tracked because unadd just resets it back to the state from HEAD
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
             defer repo.deinit();
             var moment = try repo.core.latestMoment();
             const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
@@ -904,11 +908,11 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             try std.testing.expectEqual("one, two, three!".len, index.entries.get("one/two/three.txt").?[0].?.file_size);
         }
 
-        try main.run(repo_kind, repo_opts, allocator, &.{ "untrack", "one/two/three.txt" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "untrack", "one/two/three.txt" }, work_path, writers);
 
         // not tracked anymore
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
             defer repo.deinit();
             var moment = try repo.core.latestMoment();
             const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
@@ -919,13 +923,13 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         }
 
         // stage the changes to the file
-        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "one/two/three.txt" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "one/two/three.txt" }, work_path, writers);
 
         // can't remove a file with staged changes
-        try std.testing.expectEqual(error.CannotRemoveFileWithStagedChanges, main.run(repo_kind, repo_opts, allocator, &.{ "rm", "one/two/three.txt" }, work_dir, writers));
+        try std.testing.expectEqual(error.CannotRemoveFileWithStagedChanges, main.run(repo_kind, repo_opts, allocator, &.{ "rm", "one/two/three.txt" }, work_path, writers));
 
         // remove file by force
-        try main.run(repo_kind, repo_opts, allocator, &.{ "rm", "one/two/three.txt", "-f" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "rm", "one/two/three.txt", "-f" }, work_path, writers);
 
         // restore file's original content
         {
@@ -938,12 +942,12 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             try three_txt.writeAll("one, two, three!");
             try three_txt.setEndPos(try three_txt.getPos());
 
-            try main.run(repo_kind, repo_opts, allocator, &.{ "add", "one/two/three.txt" }, work_dir, writers);
+            try main.run(repo_kind, repo_opts, allocator, &.{ "add", "one/two/three.txt" }, work_path, writers);
         }
 
         // remove a file
         {
-            try main.run(repo_kind, repo_opts, allocator, &.{ "rm", "one/two/three.txt" }, work_dir, writers);
+            try main.run(repo_kind, repo_opts, allocator, &.{ "rm", "one/two/three.txt" }, work_path, writers);
 
             var file_or_err = work_dir.openFile("one/two/three.txt", .{ .mode = .read_only });
             if (file_or_err) |*file| {
@@ -993,7 +997,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         // work dir changes
         {
             // get status
-            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
             defer repo.deinit();
             var status = try repo.status(allocator);
             defer status.deinit(allocator);
@@ -1037,13 +1041,13 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             // add file to index
             var d_txt = try c_dir.createFile("d.txt", .{});
             defer d_txt.close();
-            try main.run(repo_kind, repo_opts, allocator, &.{ "add", "c/d.txt" }, work_dir, writers);
+            try main.run(repo_kind, repo_opts, allocator, &.{ "add", "c/d.txt" }, work_path, writers);
 
             // remove file from index
-            try main.run(repo_kind, repo_opts, allocator, &.{ "add", "src/zig/main.zig" }, work_dir, writers);
+            try main.run(repo_kind, repo_opts, allocator, &.{ "add", "src/zig/main.zig" }, work_path, writers);
 
             // get status
-            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
             defer repo.deinit();
             var status = try repo.status(allocator);
             defer status.deinit(allocator);
@@ -1067,7 +1071,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     {
         // there are two modified and two deleted files remaining
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
             defer repo.deinit();
             var status = try repo.status(allocator);
             defer status.deinit(allocator);
@@ -1076,22 +1080,22 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             try std.testing.expectEqual(2, status.index_deleted.count());
         }
 
-        try main.run(repo_kind, repo_opts, allocator, &.{ "restore", "README" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "restore", "README" }, work_path, writers);
 
-        try main.run(repo_kind, repo_opts, allocator, &.{ "restore", "hello.txt" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "restore", "hello.txt" }, work_path, writers);
 
         // directories can be restored
-        try main.run(repo_kind, repo_opts, allocator, &.{ "restore", "src" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "restore", "src" }, work_path, writers);
 
         // nested paths can be restored
-        try main.run(repo_kind, repo_opts, allocator, &.{ "restore", "one/two/three.txt" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "restore", "one/two/three.txt" }, work_path, writers);
 
         // remove changes to index
-        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "hello.txt", "src", "one" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "hello.txt", "src", "one" }, work_path, writers);
 
         // there are no modified or deleted files remaining
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
             defer repo.deinit();
             var status = try repo.status(allocator);
             defer status.deinit(allocator);
@@ -1103,7 +1107,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // parse objects
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
@@ -1136,22 +1140,22 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         }
 
         // can't remove unindexed file
-        try std.testing.expectEqual(error.RemoveIndexPathNotFound, main.run(repo_kind, repo_opts, allocator, &.{ "rm", "foo/bar/hi.txt" }, work_dir, writers));
+        try std.testing.expectEqual(error.RemoveIndexPathNotFound, main.run(repo_kind, repo_opts, allocator, &.{ "rm", "foo/bar/hi.txt" }, work_path, writers));
 
         // add dir
-        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "foo" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "foo" }, work_path, writers);
 
         // make a commit
-        try main.run(repo_kind, repo_opts, allocator, &.{ "commit", "-m", "third commit" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "commit", "-m", "third commit" }, work_path, writers);
 
         // untrack hi.txt
-        try main.run(repo_kind, repo_opts, allocator, &.{ "untrack", "foo/bar/hi.txt" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "untrack", "foo/bar/hi.txt" }, work_path, writers);
 
         // can't remove subdir without -r
-        try std.testing.expectEqual(error.RecursiveOptionRequired, main.run(repo_kind, repo_opts, allocator, &.{ "rm", "foo" }, work_dir, writers));
+        try std.testing.expectEqual(error.RecursiveOptionRequired, main.run(repo_kind, repo_opts, allocator, &.{ "rm", "foo" }, work_path, writers));
 
         // remove subdir with -r
-        try main.run(repo_kind, repo_opts, allocator, &.{ "rm", "-r", "foo" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "rm", "-r", "foo" }, work_path, writers);
 
         // make sure it was deleted
         var dir_or_err = work_dir.openDir("foo/bar/baz", .{});
@@ -1165,12 +1169,12 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         defer hi_txt.close();
 
         // add hi.txt back to the index
-        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "foo/bar/hi.txt" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "foo/bar/hi.txt" }, work_path, writers);
     }
 
     // get HEAD contents
     const commit3 = blk: {
-        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
@@ -1178,14 +1182,14 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     };
 
     // create a branch
-    try main.run(repo_kind, repo_opts, allocator, &.{ "branch", "add", "stuff" }, work_dir, writers);
+    try main.run(repo_kind, repo_opts, allocator, &.{ "branch", "add", "stuff" }, work_path, writers);
 
     // switch to the branch
-    try main.run(repo_kind, repo_opts, allocator, &.{ "switch", "stuff" }, work_dir, writers);
+    try main.run(repo_kind, repo_opts, allocator, &.{ "switch", "stuff" }, work_path, writers);
 
     // check the refs
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
@@ -1195,7 +1199,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // list all branches
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
         defer repo.deinit();
         var ref_list = try repo.listBranches(allocator);
         defer ref_list.deinit();
@@ -1204,7 +1208,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // get the current branch
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
         defer repo.deinit();
         var current_branch_buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
         const head = try repo.head(&current_branch_buffer);
@@ -1225,7 +1229,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // can't delete current branch
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
         defer repo.deinit();
         try std.testing.expectEqual(error.CannotDeleteCurrentBranch, repo.removeBranch(.{ .name = "stuff" }));
     }
@@ -1240,25 +1244,25 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         try hello_txt.setEndPos(try hello_txt.getPos());
 
         // add the files
-        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "hello.txt" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "hello.txt" }, work_path, writers);
 
         // make a commit
-        try main.run(repo_kind, repo_opts, allocator, &.{ "commit", "-m", "third commit" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "commit", "-m", "third commit" }, work_path, writers);
 
         var stuff_txt = try work_dir.createFile("stuff.txt", .{});
         defer stuff_txt.close();
         try stuff_txt.writeAll("this was made on the stuff branch, commit 4!");
 
         // add the files
-        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "stuff.txt" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "stuff.txt" }, work_path, writers);
 
         // make a commit
-        try main.run(repo_kind, repo_opts, allocator, &.{ "commit", "-m", "fourth commit" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "commit", "-m", "fourth commit" }, work_path, writers);
     }
 
     // get HEAD contents
     const commit4_stuff = blk: {
-        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
@@ -1266,7 +1270,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     };
 
     // create a branch with slashes
-    try main.run(repo_kind, repo_opts, allocator, &.{ "branch", "add", "a/b/c" }, work_dir, writers);
+    try main.run(repo_kind, repo_opts, allocator, &.{ "branch", "add", "a/b/c" }, work_path, writers);
 
     // make sure the ref is created with subdirs
     if (repo_kind == .git) {
@@ -1276,7 +1280,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // list all branches
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
         defer repo.deinit();
         var ref_list = try repo.listBranches(allocator);
         defer ref_list.deinit();
@@ -1287,7 +1291,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     }
 
     // remove the branch
-    try main.run(repo_kind, repo_opts, allocator, &.{ "branch", "rm", "a/b/c" }, work_dir, writers);
+    try main.run(repo_kind, repo_opts, allocator, &.{ "branch", "rm", "a/b/c" }, work_path, writers);
 
     // make sure the subdirs are deleted
     if (repo_kind == .git) {
@@ -1297,7 +1301,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     }
 
     // switch to master
-    try main.run(repo_kind, repo_opts, allocator, &.{ "switch", "master" }, work_dir, writers);
+    try main.run(repo_kind, repo_opts, allocator, &.{ "switch", "master" }, work_path, writers);
 
     // modify files and commit
     {
@@ -1316,15 +1320,15 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         try goodbye_txt.setEndPos(try goodbye_txt.getPos());
 
         // add the files
-        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "hello.txt", "goodbye.txt" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "add", "hello.txt", "goodbye.txt" }, work_path, writers);
 
         // make a commit
-        try main.run(repo_kind, repo_opts, allocator, &.{ "commit", "-m", "fourth commit" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "commit", "-m", "fourth commit" }, work_path, writers);
     }
 
     // get HEAD contents
     const commit4 = blk: {
-        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
@@ -1333,7 +1337,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // make sure the most recent branch name points to the most recent commit
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
@@ -1342,7 +1346,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // log
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
         defer repo.deinit();
         var iter = try repo.log(allocator, null);
         defer iter.deinit();
@@ -1396,7 +1400,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // common ancestor
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
@@ -1407,11 +1411,11 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     // merge
     {
         // both branches modified hello.txt, so there is a conflict
-        try std.testing.expectError(error.HandledError, main.run(repo_kind, repo_opts, allocator, &.{ "merge", "stuff" }, work_dir, writers));
+        try std.testing.expectError(error.HandledError, main.run(repo_kind, repo_opts, allocator, &.{ "merge", "stuff" }, work_path, writers));
 
         // there are conflicts in the index
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
             defer repo.deinit();
             var status = try repo.status(allocator);
             defer status.deinit(allocator);
@@ -1419,11 +1423,11 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         }
 
         // abort the merge
-        try main.run(repo_kind, repo_opts, allocator, &.{ "merge", "--abort" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "merge", "--abort" }, work_path, writers);
 
         // there are no conflicts in the index
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
             defer repo.deinit();
             var status = try repo.status(allocator);
             defer status.deinit(allocator);
@@ -1431,7 +1435,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         }
 
         // merge again
-        try std.testing.expectError(error.HandledError, main.run(repo_kind, repo_opts, allocator, &.{ "merge", "stuff" }, work_dir, writers));
+        try std.testing.expectError(error.HandledError, main.run(repo_kind, repo_opts, allocator, &.{ "merge", "stuff" }, work_path, writers));
 
         // solve the conflict
         {
@@ -1442,9 +1446,9 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             try hello_txt.writeAll("hello, world once again!");
             try hello_txt.setEndPos(try hello_txt.getPos());
 
-            try main.run(repo_kind, repo_opts, allocator, &.{ "add", "hello.txt" }, work_dir, writers);
+            try main.run(repo_kind, repo_opts, allocator, &.{ "add", "hello.txt" }, work_path, writers);
 
-            try main.run(repo_kind, repo_opts, allocator, &.{ "merge", "--continue" }, work_dir, writers);
+            try main.run(repo_kind, repo_opts, allocator, &.{ "merge", "--continue" }, work_path, writers);
         }
 
         // change from stuff exists
@@ -1464,7 +1468,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // get HEAD contents
     const commit5 = blk: {
-        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+        var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
         defer repo.deinit();
         var moment = try repo.core.latestMoment();
         const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
@@ -1473,10 +1477,10 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
 
     // config
     {
-        try main.run(repo_kind, repo_opts, allocator, &.{ "config", "add", "core.editor", "vim" }, work_dir, writers);
-        try main.run(repo_kind, repo_opts, allocator, &.{ "config", "add", "branch.master.remote", "origin" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "config", "add", "core.editor", "vim" }, work_path, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "config", "add", "branch.master.remote", "origin" }, work_path, writers);
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
             defer repo.deinit();
 
             var config = try repo.listConfig(allocator);
@@ -1490,9 +1494,9 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             try std.testing.expectEqualStrings("origin", branch_master_section.get("remote").?);
         }
 
-        try main.run(repo_kind, repo_opts, allocator, &.{ "config", "rm", "branch.master.remote" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "config", "rm", "branch.master.remote" }, work_path, writers);
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
             defer repo.deinit();
 
             var config = try repo.listConfig(allocator);
@@ -1502,12 +1506,12 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         }
 
         // don't allow invalid names
-        try std.testing.expectEqual(error.InvalidConfigName, main.run(repo_kind, repo_opts, allocator, &.{ "config", "add", "core.editor#hi", "vim" }, work_dir, writers));
+        try std.testing.expectEqual(error.InvalidConfigName, main.run(repo_kind, repo_opts, allocator, &.{ "config", "add", "core.editor#hi", "vim" }, work_path, writers));
 
         // do allow values with spaces
-        try main.run(repo_kind, repo_opts, allocator, &.{ "config", "add", "user.name", "radar roark" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "config", "add", "user.name", "radar roark" }, work_path, writers);
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
             defer repo.deinit();
 
             var config = try repo.listConfig(allocator);
@@ -1518,9 +1522,9 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         }
 
         // do allow additional characters in subsection names
-        try main.run(repo_kind, repo_opts, allocator, &.{ "config", "add", "branch.\"hello.world\".remote", "radar roark" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "config", "add", "branch.\"hello.world\".remote", "radar roark" }, work_path, writers);
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
             defer repo.deinit();
 
             var config = try repo.listConfig(allocator);
@@ -1531,9 +1535,9 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         }
 
         // section and var names are forcibly lower-cased, but not the subsection name
-        try main.run(repo_kind, repo_opts, allocator, &.{ "config", "add", "BRANCH.MASTER.REMOTE", "origin" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "config", "add", "BRANCH.MASTER.REMOTE", "origin" }, work_path, writers);
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
             defer repo.deinit();
 
             var config = try repo.listConfig(allocator);
@@ -1544,14 +1548,14 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             try std.testing.expectEqualStrings("origin", branch_master_section.get("remote").?);
         }
 
-        try main.run(repo_kind, repo_opts, allocator, &.{ "config", "list" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "config", "list" }, work_path, writers);
     }
 
     // remote
     {
-        try main.run(repo_kind, repo_opts, allocator, &.{ "remote", "add", "origin", "http://localhost:3000" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "remote", "add", "origin", "http://localhost:3000" }, work_path, writers);
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
             defer repo.deinit();
 
             var remote = try repo.listRemotes(allocator);
@@ -1560,9 +1564,9 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             try std.testing.expect(null != remote.sections.get("origin"));
         }
 
-        try main.run(repo_kind, repo_opts, allocator, &.{ "remote", "rm", "origin" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "remote", "rm", "origin" }, work_path, writers);
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
             defer repo.deinit();
 
             var remote = try repo.listRemotes(allocator);
@@ -1571,15 +1575,15 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             try std.testing.expectEqual(null, remote.sections.get("origin"));
         }
 
-        try main.run(repo_kind, repo_opts, allocator, &.{ "remote", "list" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "remote", "list" }, work_path, writers);
     }
 
     // tag
     {
-        try main.run(repo_kind, repo_opts, allocator, &.{ "tag", "add", "ann", "-m", "this is an annotated tag" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "tag", "add", "ann", "-m", "this is an annotated tag" }, work_path, writers);
 
         {
-            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .cwd = work_dir });
+            var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
             defer repo.deinit();
             var moment = try repo.core.latestMoment();
             const state = rp.Repo(repo_kind, repo_opts).State(.read_only){ .core = &repo.core, .extra = .{ .moment = &moment } };
@@ -1598,9 +1602,9 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             try std.testing.expectEqualStrings(&commit4_stuff, &ancestor_commit);
         }
 
-        try main.run(repo_kind, repo_opts, allocator, &.{ "tag", "list" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "tag", "list" }, work_path, writers);
 
-        try main.run(repo_kind, repo_opts, allocator, &.{ "tag", "rm", "ann" }, work_dir, writers);
+        try main.run(repo_kind, repo_opts, allocator, &.{ "tag", "rm", "ann" }, work_path, writers);
     }
 
     return commit5;

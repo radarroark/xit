@@ -262,17 +262,24 @@ fn sign(
 ) ![]const []const u8 {
     const content = try std.mem.join(arena.allocator(), "\n", lines);
 
-    // write the commit content to a file
+    // get the content file path
+    const repo_dir_name = switch (repo_kind) {
+        .git => ".git",
+        .xit => ".xit",
+    };
     const content_file_name = "xit_signing_buffer";
-    const content_file = try state.core.repo_dir.createFile(content_file_name, .{ .truncate = true, .lock = .exclusive });
+    const content_file_path = try std.fs.path.join(allocator, &.{ state.core.work_path, repo_dir_name, content_file_name });
+    defer allocator.free(content_file_path);
+
+    // write the commit content to a file
+    const content_file = try std.fs.createFileAbsolute(content_file_path, .{ .truncate = true, .lock = .exclusive });
     defer {
         content_file.close();
-        state.core.repo_dir.deleteFile(content_file_name) catch {};
+        std.fs.deleteFileAbsolute(content_file_path) catch {};
     }
     try content_file.writeAll(content);
 
     // sign the file
-    const content_file_path = try state.core.repo_dir.realpathAlloc(arena.allocator(), content_file_name);
     var process = std.process.Child.init(
         &.{ "ssh-keygen", "-Y", "sign", "-n", "git", "-f", signing_key, content_file_path },
         allocator,

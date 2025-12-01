@@ -28,9 +28,14 @@ fn testSign(
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
-    // get the cwd path
     var cwd_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
     const cwd_path = try std.process.getCwd(&cwd_path_buffer);
+
+    const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name });
+    defer allocator.free(work_path);
+
+    var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
+    defer repo.deinit();
 
     // create priv key
     const priv_key_file = try temp_dir.createFile("key", .{});
@@ -61,10 +66,6 @@ fn testSign(
     if (.windows != builtin.os.tag) {
         try pub_key_file.setPermissions(.{ .inner = .{ .mode = 0o600 } });
     }
-
-    // init repo
-    var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = temp_dir }, ".");
-    defer repo.deinit();
 
     // add key to config
     try repo.addConfig(allocator, .{ .name = "user.signingkey", .value = pub_key_path });
