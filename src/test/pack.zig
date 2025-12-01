@@ -30,17 +30,21 @@ test "pack" {
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
-    // create the repo dir
+    // create the work dir
     var work_dir = try temp_dir.makeOpenPath("repo", .{});
     defer work_dir.close();
 
-    // get repo path for libgit
-    var repo_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-    const repo_path: [*c]const u8 = @ptrCast(try work_dir.realpath(".", &repo_path_buffer));
+    // get the cwd path
+    var cwd_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
+    const cwd_path = try std.process.getCwd(&cwd_path_buffer);
+
+    // get work dir path for libgit
+    const work_path = try std.fs.path.joinZ(allocator, &.{ cwd_path, temp_dir_name, "repo" });
+    defer allocator.free(work_path);
 
     // init repo
     var repo: ?*c.git_repository = null;
-    try std.testing.expectEqual(0, c.git_repository_init(&repo, repo_path, 0));
+    try std.testing.expectEqual(0, c.git_repository_init(&repo, work_path, 0));
     defer c.git_repository_free(repo);
 
     // make sure the git dir was created
@@ -233,7 +237,7 @@ test "pack" {
             }
         }
 
-        const pack_file_path = try temp_dir.realpathAlloc(allocator, "test.pack");
+        const pack_file_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "test.pack" });
         defer allocator.free(pack_file_path);
 
         for (&[_]*c.git_oid{ &commit_oid1, &commit_oid2 }) |commit_oid| {

@@ -55,9 +55,17 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     // init repo
     try main.run(repo_kind, repo_opts, allocator, &.{ "init", "repo" }, temp_dir, writers);
 
-    // get the main dir
+    // get the work dir
     var work_dir = try temp_dir.openDir("repo", .{});
     defer work_dir.close();
+
+    // get the cwd path
+    var cwd_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
+    const cwd_path = try std.process.getCwd(&cwd_path_buffer);
+
+    // get work dir path for libgit
+    const work_path = try std.fs.path.joinZ(allocator, &.{ cwd_path, temp_dir_name, "repo" });
+    defer allocator.free(work_path);
 
     // init repo-specific state
     const TestState = switch (repo_kind) {
@@ -88,10 +96,6 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             test_state.repo_dir.close();
         },
     };
-
-    // get repo path for libgit
-    var repo_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-    const repo_path: [*c]const u8 = @ptrCast(try work_dir.realpath(".", &repo_path_buffer));
 
     // make sure we can get status before first commit
     {
@@ -186,7 +190,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                 // read the commit with libgit
                 {
                     var repo: ?*c.git_repository = null;
-                    try std.testing.expectEqual(0, c.git_repository_open(&repo, repo_path));
+                    try std.testing.expectEqual(0, c.git_repository_open(&repo, work_path));
                     defer c.git_repository_free(repo);
                     var head: ?*c.git_reference = null;
                     try std.testing.expectEqual(0, c.git_repository_head(&head, repo));
@@ -475,7 +479,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
                 // read the commit with libgit
                 {
                     var repo: ?*c.git_repository = null;
-                    try std.testing.expectEqual(0, c.git_repository_open(&repo, repo_path));
+                    try std.testing.expectEqual(0, c.git_repository_open(&repo, work_path));
                     defer c.git_repository_free(repo);
                     var head: ?*c.git_reference = null;
                     try std.testing.expectEqual(0, c.git_repository_head(&head, repo));
@@ -751,7 +755,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             .git => {
                 // read index with libgit
                 var repo: ?*c.git_repository = null;
-                try std.testing.expectEqual(0, c.git_repository_open(&repo, repo_path));
+                try std.testing.expectEqual(0, c.git_repository_open(&repo, work_path));
                 defer c.git_repository_free(repo);
                 var index: ?*c.git_index = null;
                 try std.testing.expectEqual(0, c.git_repository_index(&index, repo));
@@ -810,7 +814,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
             .git => {
                 // read index with libgit
                 var repo: ?*c.git_repository = null;
-                try std.testing.expectEqual(0, c.git_repository_open(&repo, repo_path));
+                try std.testing.expectEqual(0, c.git_repository_open(&repo, work_path));
                 defer c.git_repository_free(repo);
                 var index: ?*c.git_index = null;
                 try std.testing.expectEqual(0, c.git_repository_index(&index, repo));
@@ -1012,7 +1016,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
         // get status with libgit
         if (repo_kind == .git) {
             var repo: ?*c.git_repository = null;
-            try std.testing.expectEqual(0, c.git_repository_open(&repo, repo_path));
+            try std.testing.expectEqual(0, c.git_repository_open(&repo, work_path));
             defer c.git_repository_free(repo);
             var status_list: ?*c.git_status_list = null;
             var status_options: c.git_status_options = undefined;
@@ -1210,7 +1214,7 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     // get the current branch with libgit
     if (repo_kind == .git) {
         var repo: ?*c.git_repository = null;
-        try std.testing.expectEqual(0, c.git_repository_open(&repo, repo_path));
+        try std.testing.expectEqual(0, c.git_repository_open(&repo, work_path));
         defer c.git_repository_free(repo);
         var head: ?*c.git_reference = null;
         try std.testing.expectEqual(0, c.git_repository_head(&head, repo));

@@ -227,9 +227,11 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
                         }
 
                         // create sshd.sh contents
-                        const host_key_path = try std.fs.cwd().realpathAlloc(allocator, temp_dir_name ++ "/host_key");
+                        var cwd_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
+                        const cwd_path = try std.process.getCwd(&cwd_path_buffer);
+                        const host_key_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "host_key" });
                         defer allocator.free(host_key_path);
-                        const auth_keys_path = try std.fs.cwd().realpathAlloc(allocator, temp_dir_name ++ "/authorized_keys");
+                        const auth_keys_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "authorized_keys" });
                         defer allocator.free(auth_keys_path);
                         const sshd_contents = try std.fmt.allocPrint(
                             allocator,
@@ -301,7 +303,9 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
                                         else
                                             return error.SlashNotFound;
 
-                                        const temp_dir_path = try std.fs.cwd().realpathAlloc(core.allocator, core.temp_dir_name);
+                                        var cwd_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
+                                        const cwd_path = try std.process.getCwd(&cwd_path_buffer);
+                                        const temp_dir_path = try std.fs.path.join(core.allocator, &.{ cwd_path, core.temp_dir_name });
                                         defer core.allocator.free(temp_dir_path);
                                         const path_translated = try std.fmt.allocPrint(core.allocator, "{s}{s}", .{
                                             temp_dir_path,
@@ -485,24 +489,28 @@ fn testFetch(
     var client_repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = client_dir }, ".");
     defer client_repo.deinit();
 
+    // get the cwd path
+    var cwd_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
+    const cwd_path = try std.process.getCwd(&cwd_path_buffer);
+
     // add remote
     {
-        // get repo path
-        var repo_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-        const repo_path = try server_dir.realpath(".", &repo_path_buffer);
+        // get server dir path
+        const server_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "server" });
+        defer allocator.free(server_path);
 
         if (.windows == builtin.os.tag) {
-            std.mem.replaceScalar(u8, repo_path, '\\', '/');
+            std.mem.replaceScalar(u8, server_path, '\\', '/');
         }
-        const separator = if (repo_path[0] == '/') "" else "/";
+        const separator = if (server_path[0] == '/') "" else "/";
 
         const remote_url = switch (transport_def) {
-            //.file => try std.fmt.allocPrint(allocator, "file://{s}{s}", .{ separator, repo_path }),
+            //.file => try std.fmt.allocPrint(allocator, "file://{s}{s}", .{ separator, server_path }),
             .file => try std.fmt.allocPrint(allocator, "../server", .{}), // relative file paths work too
             .wire => |wire_kind| switch (wire_kind) {
                 .http => try std.fmt.allocPrint(allocator, "http://localhost:{}/server", .{port}),
                 .raw => try std.fmt.allocPrint(allocator, "git://localhost:{}/server", .{port}),
-                .ssh => try std.fmt.allocPrint(allocator, "ssh://localhost:{}{s}{s}", .{ port, separator, repo_path }),
+                .ssh => try std.fmt.allocPrint(allocator, "ssh://localhost:{}{s}{s}", .{ port, separator, server_path }),
             },
         };
         defer allocator.free(remote_url);
@@ -525,11 +533,11 @@ fn testFetch(
         .wire => |wire_kind| .ssh == wire_kind,
     };
     const ssh_cmd_maybe: ?[]const u8 = if (is_ssh) blk: {
-        var known_hosts_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-        const known_hosts_path = try std.fs.cwd().realpath(temp_dir_name ++ "/known_hosts", &known_hosts_path_buffer);
+        const known_hosts_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "known_hosts" });
+        defer allocator.free(known_hosts_path);
 
-        var priv_key_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-        const priv_key_path = try std.fs.cwd().realpath(temp_dir_name ++ "/key", &priv_key_path_buffer);
+        const priv_key_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "key" });
+        defer allocator.free(priv_key_path);
 
         break :blk try std.fmt.allocPrint(allocator, "ssh -o UserKnownHostsFile=\"{s}\" -o IdentityFile=\"{s}\"", .{ known_hosts_path, priv_key_path });
     } else null;
@@ -679,24 +687,28 @@ fn testPush(
     // add a tag
     _ = try client_repo.addTag(allocator, .{ .name = "1.0.0", .message = "hi" });
 
+    // get the cwd path
+    var cwd_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
+    const cwd_path = try std.process.getCwd(&cwd_path_buffer);
+
     // add remote
     {
-        // get repo path
-        var repo_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-        const repo_path = try server_dir.realpath(".", &repo_path_buffer);
+        // get server dir path
+        const server_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "server" });
+        defer allocator.free(server_path);
 
         if (.windows == builtin.os.tag) {
-            std.mem.replaceScalar(u8, repo_path, '\\', '/');
+            std.mem.replaceScalar(u8, server_path, '\\', '/');
         }
-        const separator = if (repo_path[0] == '/') "" else "/";
+        const separator = if (server_path[0] == '/') "" else "/";
 
         const remote_url = switch (transport_def) {
-            //.file => try std.fmt.allocPrint(allocator, "file://{s}{s}", .{ separator, repo_path }),
+            //.file => try std.fmt.allocPrint(allocator, "file://{s}{s}", .{ separator, server_path }),
             .file => try std.fmt.allocPrint(allocator, "../server", .{}), // relative file paths work too
             .wire => |wire_kind| switch (wire_kind) {
                 .http => try std.fmt.allocPrint(allocator, "http://localhost:{}/server", .{port}),
                 .raw => try std.fmt.allocPrint(allocator, "git://localhost:{}/server", .{port}),
-                .ssh => try std.fmt.allocPrint(allocator, "ssh://localhost:{}{s}{s}", .{ port, separator, repo_path }),
+                .ssh => try std.fmt.allocPrint(allocator, "ssh://localhost:{}{s}{s}", .{ port, separator, server_path }),
             },
         };
         defer allocator.free(remote_url);
@@ -714,11 +726,11 @@ fn testPush(
         .wire => |wire_kind| .ssh == wire_kind,
     };
     const ssh_cmd_maybe: ?[]const u8 = if (is_ssh) blk: {
-        var known_hosts_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-        const known_hosts_path = try std.fs.cwd().realpath(temp_dir_name ++ "/known_hosts", &known_hosts_path_buffer);
+        const known_hosts_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "known_hosts" });
+        defer allocator.free(known_hosts_path);
 
-        var priv_key_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-        const priv_key_path = try std.fs.cwd().realpath(temp_dir_name ++ "/key", &priv_key_path_buffer);
+        const priv_key_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "key" });
+        defer allocator.free(priv_key_path);
 
         break :blk try std.fmt.allocPrint(allocator, "ssh -o UserKnownHostsFile=\"{s}\" -o IdentityFile=\"{s}\"", .{ known_hosts_path, priv_key_path });
     } else null;
@@ -928,42 +940,46 @@ fn testClone(
     var client_dir = try temp_dir.makeOpenPath("client", .{});
     defer client_dir.close();
 
+    // get the cwd path
+    var cwd_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
+    const cwd_path = try std.process.getCwd(&cwd_path_buffer);
+
     // get remote url
     const remote_url = blk: {
-        // get repo path
-        var repo_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-        const repo_path = try server_dir.realpath(".", &repo_path_buffer);
+        // get server dir path
+        const server_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "server" });
+        defer allocator.free(server_path);
 
         if (.windows == builtin.os.tag) {
-            std.mem.replaceScalar(u8, repo_path, '\\', '/');
+            std.mem.replaceScalar(u8, server_path, '\\', '/');
         }
-        const separator = if (repo_path[0] == '/') "" else "/";
+        const separator = if (server_path[0] == '/') "" else "/";
 
         break :blk switch (transport_def) {
-            //.file => try std.fmt.allocPrint(allocator, "file://{s}{s}", .{ separator, repo_path }),
+            //.file => try std.fmt.allocPrint(allocator, "file://{s}{s}", .{ separator, server_path }),
             .file => try std.fmt.allocPrint(allocator, "server", .{}), // relative file paths work too
             .wire => |wire_kind| switch (wire_kind) {
                 .http => try std.fmt.allocPrint(allocator, "http://localhost:{}/server", .{port}),
                 .raw => try std.fmt.allocPrint(allocator, "git://localhost:{}/server", .{port}),
-                .ssh => try std.fmt.allocPrint(allocator, "ssh://localhost:{}{s}{s}", .{ port, separator, repo_path }),
+                .ssh => try std.fmt.allocPrint(allocator, "ssh://localhost:{}{s}{s}", .{ port, separator, server_path }),
             },
         };
     };
     defer allocator.free(remote_url);
 
-    var repo_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-    const repo_path = try client_dir.realpath(".", &repo_path_buffer);
+    const client_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "client" });
+    defer allocator.free(client_path);
 
     const is_ssh = switch (transport_def) {
         .file => false,
         .wire => |wire_kind| .ssh == wire_kind,
     };
     const ssh_cmd_maybe: ?[]const u8 = if (is_ssh) blk: {
-        var known_hosts_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-        const known_hosts_path = try std.fs.cwd().realpath(temp_dir_name ++ "/known_hosts", &known_hosts_path_buffer);
+        const known_hosts_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "known_hosts" });
+        defer allocator.free(known_hosts_path);
 
-        var priv_key_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-        const priv_key_path = try std.fs.cwd().realpath(temp_dir_name ++ "/key", &priv_key_path_buffer);
+        const priv_key_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "key" });
+        defer allocator.free(priv_key_path);
 
         break :blk try std.fmt.allocPrint(allocator, "ssh -o UserKnownHostsFile=\"{s}\" -o IdentityFile=\"{s}\"", .{ known_hosts_path, priv_key_path });
     } else null;
@@ -974,7 +990,7 @@ fn testClone(
         allocator,
         remote_url,
         temp_dir,
-        repo_path,
+        client_path,
         .{ .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
     ) catch |err| {
         if (false) {
@@ -1063,24 +1079,28 @@ fn testFetchLarge(
     var client_repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = client_dir }, ".");
     defer client_repo.deinit();
 
+    // get the cwd path
+    var cwd_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
+    const cwd_path = try std.process.getCwd(&cwd_path_buffer);
+
     // add remote
     {
-        // get repo path
-        var repo_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-        const repo_path = try server_dir.realpath(".", &repo_path_buffer);
+        // get server dir path
+        const server_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "server" });
+        defer allocator.free(server_path);
 
         if (.windows == builtin.os.tag) {
-            std.mem.replaceScalar(u8, repo_path, '\\', '/');
+            std.mem.replaceScalar(u8, server_path, '\\', '/');
         }
-        const separator = if (repo_path[0] == '/') "" else "/";
+        const separator = if (server_path[0] == '/') "" else "/";
 
         const remote_url = switch (transport_def) {
-            //.file => try std.fmt.allocPrint(allocator, "file://{s}{s}", .{ separator, repo_path }),
+            //.file => try std.fmt.allocPrint(allocator, "file://{s}{s}", .{ separator, server_path }),
             .file => try std.fmt.allocPrint(allocator, "../server", .{}), // relative file paths work too
             .wire => |wire_kind| switch (wire_kind) {
                 .http => try std.fmt.allocPrint(allocator, "http://localhost:{}/server", .{port}),
                 .raw => try std.fmt.allocPrint(allocator, "git://localhost:{}/server", .{port}),
-                .ssh => try std.fmt.allocPrint(allocator, "ssh://localhost:{}{s}{s}", .{ port, separator, repo_path }),
+                .ssh => try std.fmt.allocPrint(allocator, "ssh://localhost:{}{s}{s}", .{ port, separator, server_path }),
             },
         };
         defer allocator.free(remote_url);
@@ -1098,11 +1118,11 @@ fn testFetchLarge(
         .wire => |wire_kind| .ssh == wire_kind,
     };
     const ssh_cmd_maybe: ?[]const u8 = if (is_ssh) blk: {
-        var known_hosts_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-        const known_hosts_path = try std.fs.cwd().realpath(temp_dir_name ++ "/known_hosts", &known_hosts_path_buffer);
+        const known_hosts_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "known_hosts" });
+        defer allocator.free(known_hosts_path);
 
-        var priv_key_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-        const priv_key_path = try std.fs.cwd().realpath(temp_dir_name ++ "/key", &priv_key_path_buffer);
+        const priv_key_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "key" });
+        defer allocator.free(priv_key_path);
 
         break :blk try std.fmt.allocPrint(allocator, "ssh -o UserKnownHostsFile=\"{s}\" -o IdentityFile=\"{s}\"", .{ known_hosts_path, priv_key_path });
     } else null;
@@ -1206,24 +1226,28 @@ fn testPushLarge(
     // make a commit
     const commit1 = try client_repo.commit(allocator, .{ .message = "let there be light" });
 
+    // get the cwd path
+    var cwd_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
+    const cwd_path = try std.process.getCwd(&cwd_path_buffer);
+
     // add remote
     {
-        // get repo path
-        var repo_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-        const repo_path = try server_dir.realpath(".", &repo_path_buffer);
+        // get server dir path
+        const server_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "server" });
+        defer allocator.free(server_path);
 
         if (.windows == builtin.os.tag) {
-            std.mem.replaceScalar(u8, repo_path, '\\', '/');
+            std.mem.replaceScalar(u8, server_path, '\\', '/');
         }
-        const separator = if (repo_path[0] == '/') "" else "/";
+        const separator = if (server_path[0] == '/') "" else "/";
 
         const remote_url = switch (transport_def) {
-            //.file => try std.fmt.allocPrint(allocator, "file://{s}{s}", .{ separator, repo_path }),
+            //.file => try std.fmt.allocPrint(allocator, "file://{s}{s}", .{ separator, server_path }),
             .file => try std.fmt.allocPrint(allocator, "../server", .{}), // relative file paths work too
             .wire => |wire_kind| switch (wire_kind) {
                 .http => try std.fmt.allocPrint(allocator, "http://localhost:{}/server", .{port}),
                 .raw => try std.fmt.allocPrint(allocator, "git://localhost:{}/server", .{port}),
-                .ssh => try std.fmt.allocPrint(allocator, "ssh://localhost:{}{s}{s}", .{ port, separator, repo_path }),
+                .ssh => try std.fmt.allocPrint(allocator, "ssh://localhost:{}{s}{s}", .{ port, separator, server_path }),
             },
         };
         defer allocator.free(remote_url);
@@ -1237,11 +1261,11 @@ fn testPushLarge(
         .wire => |wire_kind| .ssh == wire_kind,
     };
     const ssh_cmd_maybe: ?[]const u8 = if (is_ssh) blk: {
-        var known_hosts_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-        const known_hosts_path = try std.fs.cwd().realpath(temp_dir_name ++ "/known_hosts", &known_hosts_path_buffer);
+        const known_hosts_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "known_hosts" });
+        defer allocator.free(known_hosts_path);
 
-        var priv_key_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-        const priv_key_path = try std.fs.cwd().realpath(temp_dir_name ++ "/key", &priv_key_path_buffer);
+        const priv_key_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "key" });
+        defer allocator.free(priv_key_path);
 
         break :blk try std.fmt.allocPrint(allocator, "ssh -o UserKnownHostsFile=\"{s}\" -o IdentityFile=\"{s}\"", .{ known_hosts_path, priv_key_path });
     } else null;

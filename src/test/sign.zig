@@ -61,7 +61,9 @@ fn testSign(
     defer repo.deinit();
 
     // add key to config
-    const pub_key_path = try temp_dir.realpathAlloc(allocator, "key.pub");
+    var cwd_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
+    const cwd_path = try std.process.getCwd(&cwd_path_buffer);
+    const pub_key_path = try std.fs.path.joinZ(allocator, &.{ cwd_path, temp_dir_name, "key.pub" });
     defer allocator.free(pub_key_path);
     try repo.addConfig(allocator, .{ .name = "user.signingkey", .value = pub_key_path });
 
