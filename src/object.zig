@@ -282,9 +282,10 @@ fn sign(
         &.{ "ssh-keygen", "-Y", "sign", "-n", "git", "-f", signing_key, content_file_path },
         allocator,
     );
-    process.stdin_behavior = .Inherit;
-    process.stdout_behavior = .Inherit;
-    process.stderr_behavior = .Inherit;
+    const behavior: std.process.Child.StdIo = if (repo_opts.is_test) .Ignore else .Inherit;
+    process.stdin_behavior = behavior;
+    process.stdout_behavior = behavior;
+    process.stderr_behavior = behavior;
     const term = try process.spawnAndWait();
     if (0 != term.Exited) {
         return error.ObjectSigningFailed;
