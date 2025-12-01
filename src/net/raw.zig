@@ -210,7 +210,8 @@ const SocketStream = struct {
     }
 
     fn connect(self: *SocketStream) !void {
-        const addr = try std.Io.net.IpAddress.parse(self.host, self.port);
+        const host = if (std.mem.eql(u8, self.host, "localhost")) "127.0.0.1" else self.host;
+        const addr = try std.Io.net.IpAddress.parse(host, self.port);
         self.stream = try addr.connect(self.io, .{
             .mode = .stream,
             .protocol = .tcp,
