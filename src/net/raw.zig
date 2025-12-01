@@ -1,4 +1,5 @@
 const std = @import("std");
+const net_socket = @import("./socket.zig");
 const net_wire = @import("./wire.zig");
 const net_pkt = @import("./pkt.zig");
 
@@ -14,7 +15,7 @@ pub const RawState = struct {
 
 pub const RawStream = struct {
     wire_state: *RawState,
-    socket: SocketStream,
+    socket: net_socket.SocketStream,
     cmd: []const u8,
     url: []u8,
     sent_command: bool,
@@ -57,7 +58,7 @@ pub const RawStream = struct {
 
         return .{
             .wire_state = wire_state,
-            .socket = try SocketStream.init(io, allocator, host_str, port),
+            .socket = try net_socket.SocketStream.init(io, allocator, host_str, port),
             .cmd = cmd,
             .url = url_dupe,
             .sent_command = false,
@@ -151,91 +152,3 @@ fn listReceive(
 
     return stream;
 }
-
-const CONNECT_TIMEOUT = 5000;
-
-const SocketStream = struct {
-    io: std.Io,
-    host: []const u8,
-    port: u16,
-    stream: ?std.Io.net.Stream,
-
-    fn init(
-        io: std.Io,
-        allocator: std.mem.Allocator,
-        host: []const u8,
-        port: u16,
-    ) !SocketStream {
-        const host_dupe = try allocator.dupe(u8, host);
-        errdefer allocator.free(host_dupe);
-
-        return .{
-            .io = io,
-            .host = host_dupe,
-            .port = port,
-            .stream = null,
-        };
-    }
-
-    fn deinit(self: *SocketStream, allocator: std.mem.Allocator) void {
-        allocator.free(self.host);
-        self.close();
-    }
-
-    fn close(self: *SocketStream) void {
-        if (self.stream) |stream| {
-            stream.close(self.io);
-            self.stream = null;
-        }
-    }
-
-    fn read(
-        self: *SocketStream,
-        data: [*c]u8,
-        len: usize,
-    ) !usize {
-        const stream = self.stream orelse return error.StreamNotConnected;
-        var reader = stream.reader(self.io, &.{});
-        return try reader.interface.readSliceShort(data[0..len]);
-    }
-
-    fn writeAll(
-        self: *SocketStream,
-        data: [*c]const u8,
-        len: usize,
-    ) !void {
-        const stream = self.stream orelse return error.StreamNotConnected;
-        var writer = stream.writer(self.io, &.{});
-        try writer.interface.writeAll(data[0..len]);
-    }
-
-    fn connect(self: *SocketStream) !void {
-        var canonical_name_buffer: [std.Io.net.HostName.max_len]u8 = undefined;
-        var results_buffer: [32]std.Io.net.HostName.LookupResult = undefined;
-        var results: std.Io.Queue(std.Io.net.HostName.LookupResult) = .init(&results_buffer);
-
-        std.Io.net.HostName.lookup(try .init(self.host), self.io, &results, .{
-            .port = self.port,
-            .canonical_name_buffer = &canonical_name_buffer,
-        });
-
-        self.stream = while (results.getOne(self.io)) |result| switch (result) {
-            .address => |address| break try address.connect(self.io, .{
-                .mode = .stream,
-                .protocol = .tcp,
-                .timeout = .none,
-                //.timeout = .{ .duration = .{ .raw = .fromMilliseconds(CONNECT_TIMEOUT), .clock = .real } },
-            }),
-            .canonical_name => |canonical_name| break try canonical_name.connect(self.io, self.port, .{
-                .mode = .stream,
-                .protocol = .tcp,
-                .timeout = .none,
-                //.timeout = .{ .duration = .{ .raw = .fromMilliseconds(CONNECT_TIMEOUT), .clock = .real } },
-            }),
-            .end => |end| {
-                try end;
-                return error.HostNameLookupFailed;
-            },
-        } else |err| return err;
-    }
-};

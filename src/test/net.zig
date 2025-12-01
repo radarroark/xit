@@ -154,9 +154,9 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
                             allocator,
                         );
                         process.cwd = temp_dir_name;
-                        process.stdin_behavior = .Pipe;
-                        process.stdout_behavior = .Pipe;
-                        process.stderr_behavior = .Pipe;
+                        process.stdin_behavior = .Ignore;
+                        process.stdout_behavior = .Ignore;
+                        process.stderr_behavior = .Ignore;
                         return .{
                             .core = .{ .io = io, .process = process },
                         };
