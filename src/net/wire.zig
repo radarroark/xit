@@ -582,9 +582,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             // iterate over pack file
             {
                 defer state.core.repo_dir.deleteFile(temp_pack_name) catch {};
-                const pack_file_path = try state.core.repo_dir.realpathAlloc(allocator, temp_pack_name);
-                defer allocator.free(pack_file_path);
-                var pack_iter = try pack.PackObjectIterator(repo_kind, repo_opts).init(allocator, pack_file_path);
+                var pack_iter = try pack.PackObjectIterator(repo_kind, repo_opts).init(allocator, state.core.repo_dir, temp_pack_name);
                 defer pack_iter.deinit();
                 try obj.copyFromPackObjectIterator(repo_kind, repo_opts, state, allocator, &pack_iter, self.opts.progress_ctx);
             }

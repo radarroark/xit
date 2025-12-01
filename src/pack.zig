@@ -8,15 +8,16 @@ const flate = @import("./std/flate.zig");
 pub fn PackObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return struct {
         allocator: std.mem.Allocator,
-        pack_file_path: []const u8,
+        pack_dir: std.fs.Dir,
+        pack_file_name: []const u8,
         pack_file: std.fs.File,
         start_position: u64,
         object_count: u32,
         object_index: u32,
         pack_reader: PackObjectReader(repo_kind, repo_opts),
 
-        pub fn init(allocator: std.mem.Allocator, pack_file_path: []const u8) !PackObjectIterator(repo_kind, repo_opts) {
-            var pack_file = try std.fs.openFileAbsolute(pack_file_path, .{ .mode = .read_only });
+        pub fn init(allocator: std.mem.Allocator, pack_dir: std.fs.Dir, pack_file_name: []const u8) !PackObjectIterator(repo_kind, repo_opts) {
+            var pack_file = try pack_dir.openFile(pack_file_name, .{ .mode = .read_only });
             errdefer pack_file.close();
 
             var reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
@@ -35,7 +36,8 @@ pub fn PackObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
 
             return .{
                 .allocator = allocator,
-                .pack_file_path = pack_file_path,
+                .pack_dir = pack_dir,
+                .pack_file_name = pack_file_name,
                 .pack_file = pack_file,
                 .start_position = reader.logicalPos(),
                 .object_count = obj_count,
@@ -51,7 +53,7 @@ pub fn PackObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
 
             const start_position = self.start_position;
 
-            var pack_reader = try PackObjectReader(repo_kind, repo_opts).initAtPosition(self.allocator, self.pack_file_path, start_position);
+            var pack_reader = try PackObjectReader(repo_kind, repo_opts).initAtPosition(self.allocator, self.pack_dir, self.pack_file_name, start_position);
             errdefer pack_reader.deinit(self.allocator);
 
             switch (pack_reader.internal) {
@@ -286,7 +288,8 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             delta: struct {
                 init: union(enum) {
                     ofs: struct {
-                        pack_file_path: []const u8,
+                        pack_dir: std.fs.Dir,
+                        pack_file_name: []const u8,
                         position: u64,
                     },
                     ref: struct {
@@ -338,10 +341,11 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
         pub fn initWithPath(
             allocator: std.mem.Allocator,
             state: rp.Repo(repo_kind, repo_opts).State(.read_only),
-            pack_file_path: []const u8,
+            pack_dir: std.fs.Dir,
+            pack_file_name: []const u8,
             oid_hex: *const [hash.hexLen(repo_opts.hash)]u8,
         ) !PackObjectReader(repo_kind, repo_opts) {
-            var iter = try PackObjectIterator(repo_kind, repo_opts).init(allocator, pack_file_path);
+            var iter = try PackObjectIterator(repo_kind, repo_opts).init(allocator, pack_dir, pack_file_name);
             defer iter.deinit();
 
             while (try iter.next(state)) |pack_reader| {
@@ -405,10 +409,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             var file_name_buf = [_]u8{0} ** pack_file_name_len;
             const file_name = try std.fmt.bufPrint(&file_name_buf, "{s}{s}{s}", .{ pack_prefix, pack_offset.pack_id, pack_suffix });
 
-            const pack_file_path = try pack_dir.realpathAlloc(allocator, file_name);
-            defer allocator.free(pack_file_path);
-
-            var pack_file = try std.fs.openFileAbsolute(pack_file_path, .{ .mode = .read_only });
+            var pack_file = try pack_dir.openFile(file_name, .{ .mode = .read_only });
             defer pack_file.close();
 
             var reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
@@ -425,11 +426,11 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             }
             _ = try reader.interface.takeInt(u32, .big); // number of objects
 
-            return try PackObjectReader(repo_kind, repo_opts).initAtPosition(allocator, pack_file_path, pack_offset.value);
+            return try PackObjectReader(repo_kind, repo_opts).initAtPosition(allocator, pack_dir, file_name, pack_offset.value);
         }
 
-        fn initAtPosition(allocator: std.mem.Allocator, pack_file_path: []const u8, position: u64) !PackObjectReader(repo_kind, repo_opts) {
-            var pack_file = try std.fs.openFileAbsolute(pack_file_path, .{ .mode = .read_only });
+        fn initAtPosition(allocator: std.mem.Allocator, pack_dir: std.fs.Dir, pack_file_name: []const u8, position: u64) !PackObjectReader(repo_kind, repo_opts) {
+            var pack_file = try pack_dir.openFile(pack_file_name, .{ .mode = .read_only });
             errdefer pack_file.close();
             try pack_file.seekTo(position);
             const reader = pack_file.deprecatedReader();
@@ -505,8 +506,11 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                         }
                     }
 
-                    const pack_file_path_copy = try allocator.dupe(u8, pack_file_path);
-                    errdefer allocator.free(pack_file_path_copy);
+                    var pack_dir_copy = try pack_dir.openDir(".", .{});
+                    errdefer pack_dir_copy.close();
+
+                    const pack_file_name_copy = try allocator.dupe(u8, pack_file_name);
+                    errdefer allocator.free(pack_file_name_copy);
 
                     const start_position = try pack_file.getPos();
 
@@ -522,7 +526,8 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                             .delta = .{
                                 .init = .{
                                     .ofs = .{
-                                        .pack_file_path = pack_file_path_copy,
+                                        .pack_dir = pack_dir_copy,
+                                        .pack_file_name = pack_file_name_copy,
                                         .position = position - offset,
                                     },
                                 },
@@ -606,7 +611,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             errdefer allocator.destroy(base_reader);
 
             base_reader.* = switch (self.internal.delta.init) {
-                .ofs => |ofs| .{ .pack = try PackObjectReader(repo_kind, repo_opts).initAtPosition(allocator, ofs.pack_file_path, ofs.position) },
+                .ofs => |ofs| .{ .pack = try PackObjectReader(repo_kind, repo_opts).initAtPosition(allocator, ofs.pack_dir, ofs.pack_file_name, ofs.position) },
                 .ref => |ref| switch (repo_kind) {
                     .git => .{ .pack = try PackObjectReader(repo_kind, repo_opts).initWithIndex(allocator, state.core, &ref.oid_hex) },
                     .xit => .{ .chunk = try PackOrChunkObjectReader(repo_kind, repo_opts).ChunkObjectReader.init(allocator, state, &ref.oid_hex) },
@@ -826,7 +831,10 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                 .basic => {},
                 .delta => |*delta| {
                     switch (delta.init) {
-                        .ofs => |ofs| allocator.free(ofs.pack_file_path),
+                        .ofs => |*ofs| {
+                            ofs.pack_dir.close();
+                            allocator.free(ofs.pack_file_name);
+                        },
                         .ref => {},
                     }
                     if (delta.state) |*state| {

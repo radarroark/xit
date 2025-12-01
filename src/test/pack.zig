@@ -237,14 +237,11 @@ test "pack" {
             }
         }
 
-        const pack_file_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "test.pack" });
-        defer allocator.free(pack_file_path);
-
         for (&[_]*c.git_oid{ &commit_oid1, &commit_oid2 }) |commit_oid| {
             var commit_oid_hex = [_]u8{0} ** hash.hexLen(repo_opts.hash);
             try std.testing.expectEqual(0, c.git_oid_fmt(@ptrCast(&commit_oid_hex), commit_oid));
 
-            var pack_reader = try pack.PackObjectReader(.git, repo_opts).initWithPath(allocator, .{ .core = &r.core, .extra = .{} }, pack_file_path, &commit_oid_hex);
+            var pack_reader = try pack.PackObjectReader(.git, repo_opts).initWithPath(allocator, .{ .core = &r.core, .extra = .{} }, temp_dir, "test.pack", &commit_oid_hex);
             defer pack_reader.deinit(allocator);
 
             // make sure the reader's position is at the beginning
