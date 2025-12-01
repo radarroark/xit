@@ -453,8 +453,16 @@ fn testFetch(
     try server.start();
     defer server.stop();
 
+    // get the cwd path
+    var cwd_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
+    const cwd_path = try std.process.getCwd(&cwd_path_buffer);
+
+    // get server dir path
+    const server_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "server" });
+    defer allocator.free(server_path);
+
     // create the server dir
-    var server_dir = try temp_dir.makeOpenPath("server", .{});
+    var server_dir = try cwd.makeOpenPath(server_path, .{});
     defer server_dir.close();
 
     // init server repo
@@ -489,16 +497,8 @@ fn testFetch(
     var client_repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = client_dir }, ".");
     defer client_repo.deinit();
 
-    // get the cwd path
-    var cwd_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-    const cwd_path = try std.process.getCwd(&cwd_path_buffer);
-
     // add remote
     {
-        // get server dir path
-        const server_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "server" });
-        defer allocator.free(server_path);
-
         if (.windows == builtin.os.tag) {
             std.mem.replaceScalar(u8, server_path, '\\', '/');
         }
@@ -645,8 +645,16 @@ fn testPush(
     try server.start();
     defer server.stop();
 
+    // get the cwd path
+    var cwd_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
+    const cwd_path = try std.process.getCwd(&cwd_path_buffer);
+
+    // get server dir path
+    const server_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "server" });
+    defer allocator.free(server_path);
+
     // create the server dir
-    var server_dir = try temp_dir.makeOpenPath("server", .{});
+    var server_dir = try cwd.makeOpenPath(server_path, .{});
     defer server_dir.close();
 
     // init server repo
@@ -687,16 +695,8 @@ fn testPush(
     // add a tag
     _ = try client_repo.addTag(allocator, .{ .name = "1.0.0", .message = "hi" });
 
-    // get the cwd path
-    var cwd_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-    const cwd_path = try std.process.getCwd(&cwd_path_buffer);
-
     // add remote
     {
-        // get server dir path
-        const server_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "server" });
-        defer allocator.free(server_path);
-
         if (.windows == builtin.os.tag) {
             std.mem.replaceScalar(u8, server_path, '\\', '/');
         }
@@ -913,8 +913,16 @@ fn testClone(
     try server.start();
     defer server.stop();
 
+    // get the cwd path
+    var cwd_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
+    const cwd_path = try std.process.getCwd(&cwd_path_buffer);
+
+    // get server dir path
+    const server_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "server" });
+    defer allocator.free(server_path);
+
     // create the server dir
-    var server_dir = try temp_dir.makeOpenPath("server", .{});
+    var server_dir = try cwd.makeOpenPath(server_path, .{});
     defer server_dir.close();
 
     // init server repo with default branch name as main
@@ -936,20 +944,16 @@ fn testClone(
         defer export_file.close();
     }
 
-    // create the client dir
-    var client_dir = try temp_dir.makeOpenPath("client", .{});
-    defer client_dir.close();
+    // get client dir path
+    const client_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "client" });
+    defer allocator.free(client_path);
 
-    // get the cwd path
-    var cwd_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-    const cwd_path = try std.process.getCwd(&cwd_path_buffer);
+    // create the client dir
+    var client_dir = try cwd.makeOpenPath(client_path, .{});
+    defer client_dir.close();
 
     // get remote url
     const remote_url = blk: {
-        // get server dir path
-        const server_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "server" });
-        defer allocator.free(server_path);
-
         if (.windows == builtin.os.tag) {
             std.mem.replaceScalar(u8, server_path, '\\', '/');
         }
@@ -966,9 +970,6 @@ fn testClone(
         };
     };
     defer allocator.free(remote_url);
-
-    const client_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "client" });
-    defer allocator.free(client_path);
 
     const is_ssh = switch (transport_def) {
         .file => false,
@@ -1041,8 +1042,16 @@ fn testFetchLarge(
     try server.start();
     defer server.stop();
 
+    // get the cwd path
+    var cwd_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
+    const cwd_path = try std.process.getCwd(&cwd_path_buffer);
+
+    // get server dir path
+    const server_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "server" });
+    defer allocator.free(server_path);
+
     // create the server dir
-    var server_dir = try temp_dir.makeOpenPath("server", .{});
+    var server_dir = try cwd.makeOpenPath(server_path, .{});
     defer server_dir.close();
 
     // init server repo
@@ -1079,16 +1088,8 @@ fn testFetchLarge(
     var client_repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .cwd = client_dir }, ".");
     defer client_repo.deinit();
 
-    // get the cwd path
-    var cwd_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-    const cwd_path = try std.process.getCwd(&cwd_path_buffer);
-
     // add remote
     {
-        // get server dir path
-        const server_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "server" });
-        defer allocator.free(server_path);
-
         if (.windows == builtin.os.tag) {
             std.mem.replaceScalar(u8, server_path, '\\', '/');
         }
@@ -1180,8 +1181,16 @@ fn testPushLarge(
     try server.start();
     defer server.stop();
 
+    // get the cwd path
+    var cwd_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
+    const cwd_path = try std.process.getCwd(&cwd_path_buffer);
+
+    // get server dir path
+    const server_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "server" });
+    defer allocator.free(server_path);
+
     // create the server dir
-    var server_dir = try temp_dir.makeOpenPath("server", .{});
+    var server_dir = try cwd.makeOpenPath(server_path, .{});
     defer server_dir.close();
 
     // init server repo
@@ -1226,16 +1235,8 @@ fn testPushLarge(
     // make a commit
     const commit1 = try client_repo.commit(allocator, .{ .message = "let there be light" });
 
-    // get the cwd path
-    var cwd_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-    const cwd_path = try std.process.getCwd(&cwd_path_buffer);
-
     // add remote
     {
-        // get server dir path
-        const server_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "server" });
-        defer allocator.free(server_path);
-
         if (.windows == builtin.os.tag) {
             std.mem.replaceScalar(u8, server_path, '\\', '/');
         }

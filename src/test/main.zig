@@ -55,17 +55,17 @@ fn testMain(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(rep
     // init repo
     try main.run(repo_kind, repo_opts, allocator, &.{ "init", "repo" }, temp_dir, writers);
 
-    // get the work dir
-    var work_dir = try temp_dir.openDir("repo", .{});
-    defer work_dir.close();
-
     // get the cwd path
     var cwd_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
     const cwd_path = try std.process.getCwd(&cwd_path_buffer);
 
-    // get work dir path for libgit
+    // get work dir path (null-terminated because it's used by libgit)
     const work_path = try std.fs.path.joinZ(allocator, &.{ cwd_path, temp_dir_name, "repo" });
     defer allocator.free(work_path);
+
+    // get the work dir
+    var work_dir = try cwd.openDir(work_path, .{});
+    defer work_dir.close();
 
     // init repo-specific state
     const TestState = switch (repo_kind) {

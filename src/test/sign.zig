@@ -28,7 +28,11 @@ fn testSign(
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
-    // create priv client key
+    // get the cwd path
+    var cwd_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
+    const cwd_path = try std.process.getCwd(&cwd_path_buffer);
+
+    // create priv key
     const priv_key_file = try temp_dir.createFile("key", .{});
     defer priv_key_file.close();
     try priv_key_file.writeAll(
@@ -46,7 +50,9 @@ fn testSign(
     }
 
     // create pub key
-    const pub_key_file = try temp_dir.createFile("key.pub", .{});
+    const pub_key_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "key.pub" });
+    defer allocator.free(pub_key_path);
+    const pub_key_file = try cwd.createFile(pub_key_path, .{});
     defer pub_key_file.close();
     try pub_key_file.writeAll(
         \\ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKeIs8mJqigBZ5y84J4COgnAJJ5bHPKy+lM2SliMXbYm radar@roark
@@ -61,10 +67,6 @@ fn testSign(
     defer repo.deinit();
 
     // add key to config
-    var cwd_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-    const cwd_path = try std.process.getCwd(&cwd_path_buffer);
-    const pub_key_path = try std.fs.path.joinZ(allocator, &.{ cwd_path, temp_dir_name, "key.pub" });
-    defer allocator.free(pub_key_path);
     try repo.addConfig(allocator, .{ .name = "user.signingkey", .value = pub_key_path });
 
     // make a commit
