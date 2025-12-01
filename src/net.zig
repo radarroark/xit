@@ -160,7 +160,7 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             return self;
         }
 
-        pub fn deinit(self: *Remote(repo_kind, repo_opts), allocator: std.mem.Allocator) void {
+        pub fn deinit(self: *Remote(repo_kind, repo_opts), io: std.Io, allocator: std.mem.Allocator) void {
             if (self.name) |name| allocator.free(name);
             if (self.url) |url| allocator.free(url);
             if (self.push_url) |push_url| allocator.free(push_url);
@@ -174,9 +174,9 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             self.active_refspecs.deinit(allocator);
 
             if (self.transport) |*transport| {
-                self.disconnect(allocator);
+                self.disconnect(io, allocator);
 
-                transport.deinit(allocator);
+                transport.deinit(io, allocator);
 
                 self.transport = null;
             }
@@ -276,10 +276,10 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             }
         }
 
-        pub fn disconnect(self: *Remote(repo_kind, repo_opts), allocator: std.mem.Allocator) void {
+        pub fn disconnect(self: *Remote(repo_kind, repo_opts), io: std.Io, allocator: std.mem.Allocator) void {
             if (self.connected()) {
                 if (self.transport) |*transport| {
-                    transport.close(allocator);
+                    transport.close(io, allocator);
                 }
             }
         }
@@ -380,7 +380,7 @@ pub fn connect(
         try transport.connect(state, io, allocator, url, direction);
     } else {
         var t = try net_transport.Transport(repo_kind, repo_opts).init(state, io, allocator, url, transport_opts);
-        errdefer t.deinit(allocator);
+        errdefer t.deinit(io, allocator);
         try t.connect(state, io, allocator, url, direction);
         remote.transport = t;
     }
@@ -543,7 +543,7 @@ pub fn fetch(
     if (!remote.connected()) {
         try connect(repo_kind, repo_opts, state.readOnly(), io, allocator, remote, .fetch, transport_opts);
     }
-    defer remote.disconnect(allocator);
+    defer remote.disconnect(io, allocator);
 
     var refs = try getHeads(repo_kind, repo_opts, remote, allocator);
     defer refs.deinit(allocator);
@@ -623,7 +623,7 @@ pub fn push(
 
     try remote_push.complete(state, io, allocator);
 
-    defer remote.disconnect(allocator);
+    defer remote.disconnect(io, allocator);
 }
 
 pub fn clone(
@@ -657,7 +657,7 @@ pub fn clone(
                 "origin",
                 url,
             );
-            defer remote.deinit(allocator);
+            defer remote.deinit(io, allocator);
 
             switch (transport_def) {
                 .file => try net_clone.cloneFile(
@@ -694,7 +694,7 @@ pub fn clone(
                     const state = rp.Repo(repo_kind, repo_opts).State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
 
                     var remote = try Remote(repo_kind, repo_opts).init(state, ctx.io, ctx.allocator, "origin", ctx.url);
-                    defer remote.deinit(ctx.allocator);
+                    defer remote.deinit(ctx.io, ctx.allocator);
 
                     switch (ctx.transport_def) {
                         .file => try net_clone.cloneFile(
