@@ -89,14 +89,31 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             var config = try cfg.Config(repo_kind, repo_opts).init(state, allocator);
             defer config.deinit();
 
-            var remote = std.mem.zeroInit(Remote(repo_kind, repo_opts), .{});
-            errdefer remote.deinit(allocator);
+            var self: Remote(repo_kind, repo_opts) = .{
+                .name = null,
+                .url = null,
+                .push_url = null,
+                .heads = undefined,
+                .refspecs = std.ArrayList(net_refspec.RefSpec){},
+                .active_refspecs = std.ArrayList(net_refspec.RefSpec){},
+                .transport = null,
+                .requires_fetch = false,
+                .nego = undefined,
+            };
+            errdefer {
+                clearRefSpecs(allocator, &self.refspecs);
+                self.refspecs.deinit(allocator);
 
-            remote.name = try allocator.dupe(u8, name);
+                clearRefSpecs(allocator, &self.active_refspecs);
+                self.active_refspecs.deinit(allocator);
+            }
 
-            remote.heads = try std.StringArrayHashMapUnmanaged(RemoteHead(repo_kind, repo_opts)).init(allocator, &.{}, &.{});
-            remote.refspecs = std.ArrayList(net_refspec.RefSpec){};
-            remote.active_refspecs = std.ArrayList(net_refspec.RefSpec){};
+            const name_copy = try allocator.dupe(u8, name);
+            errdefer allocator.free(name_copy);
+            self.name = name_copy;
+
+            self.heads = try std.StringArrayHashMapUnmanaged(RemoteHead(repo_kind, repo_opts)).init(allocator, &.{}, &.{});
+            errdefer self.heads.deinit(allocator);
 
             const remote_section_name = try std.fmt.allocPrint(allocator, "remote.{s}", .{name});
             defer allocator.free(remote_section_name);
@@ -106,13 +123,15 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
             if (remote_vars.get("url")) |remote_url| {
                 found_remote = true;
-                remote.url = try allocator.dupe(u8, remote_url);
+                self.url = try allocator.dupe(u8, remote_url);
             }
+            errdefer if (self.url) |remote_url| allocator.free(remote_url);
 
             if (remote_vars.get("pushurl")) |remote_push_url| {
                 found_remote = true;
-                remote.push_url = try allocator.dupe(u8, remote_push_url);
+                self.push_url = try allocator.dupe(u8, remote_push_url);
             }
+            errdefer if (self.push_url) |remote_push_url| allocator.free(remote_push_url);
 
             if (!found_remote) {
                 return error.RemoteNotFound;
@@ -121,22 +140,44 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             if (remote_vars.get("fetch")) |spec_str| {
                 var spec = try net_refspec.RefSpec.init(allocator, spec_str, .fetch);
                 errdefer spec.deinit(allocator);
-                try remote.refspecs.append(allocator, spec);
+                try self.refspecs.append(allocator, spec);
             }
 
             if (remote_vars.get("push")) |spec_str| {
                 var spec = try net_refspec.RefSpec.init(allocator, spec_str, .push);
                 errdefer spec.deinit(allocator);
-                try remote.refspecs.append(allocator, spec);
+                try self.refspecs.append(allocator, spec);
             }
 
-            for (remote.refspecs.items) |*spec| {
+            for (self.refspecs.items) |*spec| {
                 var spec_dupe = try spec.dupe(allocator);
                 errdefer spec_dupe.deinit(allocator);
-                try remote.active_refspecs.append(allocator, spec_dupe);
+                try self.active_refspecs.append(allocator, spec_dupe);
             }
 
-            return remote;
+            return self;
+        }
+
+        pub fn deinit(self: *Remote(repo_kind, repo_opts), allocator: std.mem.Allocator) void {
+            if (self.name) |name| allocator.free(name);
+            if (self.url) |url| allocator.free(url);
+            if (self.push_url) |push_url| allocator.free(push_url);
+
+            self.heads.deinit(allocator);
+
+            clearRefSpecs(allocator, &self.refspecs);
+            self.refspecs.deinit(allocator);
+
+            clearRefSpecs(allocator, &self.active_refspecs);
+            self.active_refspecs.deinit(allocator);
+
+            if (self.transport) |*transport| {
+                self.disconnect(allocator);
+
+                transport.deinit(allocator);
+
+                self.transport = null;
+            }
         }
 
         pub fn addConfig(
@@ -187,28 +228,6 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
                 try config.remove(state, .{ .name = config_name });
             }
-        }
-
-        pub fn deinit(self: *Remote(repo_kind, repo_opts), allocator: std.mem.Allocator) void {
-            if (self.name) |name| allocator.free(name);
-            if (self.url) |url| allocator.free(url);
-            if (self.push_url) |push_url| allocator.free(push_url);
-
-            if (self.transport) |*transport| {
-                self.disconnect(allocator);
-
-                transport.deinit(allocator);
-
-                self.transport = null;
-            }
-
-            self.heads.deinit(allocator);
-
-            clearRefSpecs(allocator, &self.refspecs);
-            self.refspecs.deinit(allocator);
-
-            clearRefSpecs(allocator, &self.active_refspecs);
-            self.active_refspecs.deinit(allocator);
         }
 
         pub fn dupe(self: *const Remote(repo_kind, repo_opts), allocator: std.mem.Allocator) !Remote(repo_kind, repo_opts) {
