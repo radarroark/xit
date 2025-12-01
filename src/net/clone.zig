@@ -118,7 +118,7 @@ pub fn cloneWire(
     }
 
     var remote_copy = try remote.dupe(allocator);
-    defer remote_copy.deinit(allocator);
+    defer remote_copy.deinit(io, allocator);
 
     try net.connect(repo_kind, repo_opts, state.readOnly(), io, allocator, &remote_copy, .fetch, transport_opts);
 

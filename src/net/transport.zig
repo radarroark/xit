@@ -46,10 +46,10 @@ pub fn Transport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpt
             };
         }
 
-        pub fn deinit(self: *Transport(repo_kind, repo_opts), allocator: std.mem.Allocator) void {
+        pub fn deinit(self: *Transport(repo_kind, repo_opts), io: std.Io, allocator: std.mem.Allocator) void {
             switch (self.*) {
                 .file => |*file| file.deinit(allocator),
-                .wire => |*wire| wire.deinit(allocator),
+                .wire => |*wire| wire.deinit(io, allocator),
             }
         }
 
@@ -63,7 +63,7 @@ pub fn Transport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpt
         ) !void {
             switch (self.*) {
                 .file => |*file| try file.connect(state, io, allocator, url, direction),
-                .wire => |*wire| try wire.connect(allocator, url, direction),
+                .wire => |*wire| try wire.connect(io, allocator, url, direction),
             }
         }
 
@@ -90,7 +90,7 @@ pub fn Transport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpt
         ) !void {
             switch (self.*) {
                 .file => |*file| try file.push(state, io, allocator, git_push),
-                .wire => |*wire| try wire.push(allocator, git_push),
+                .wire => |*wire| try wire.push(io, allocator, git_push),
             }
         }
 
@@ -126,10 +126,10 @@ pub fn Transport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpt
             }
         }
 
-        pub fn close(self: *Transport(repo_kind, repo_opts), allocator: std.mem.Allocator) void {
+        pub fn close(self: *Transport(repo_kind, repo_opts), io: std.Io, allocator: std.mem.Allocator) void {
             switch (self.*) {
                 .file => |*file| file.close(allocator),
-                .wire => |*wire| wire.close(allocator),
+                .wire => |*wire| wire.close(io, allocator),
             }
         }
     };
