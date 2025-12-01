@@ -4,15 +4,17 @@ const xit = @import("xit");
 const rp = xit.repo;
 
 test "sign commit and tag" {
+    const io = std.testing.io;
     const allocator = std.testing.allocator;
     if (.windows != builtin.os.tag) {
-        try testSign(.git, .{ .is_test = true }, allocator);
+        try testSign(.git, .{ .is_test = true }, io, allocator);
     }
 }
 
 fn testSign(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
+    io: std.Io,
     allocator: std.mem.Allocator,
 ) !void {
     const temp_dir_name = "temp-testnet-sign";
@@ -34,7 +36,7 @@ fn testSign(
     const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name });
     defer allocator.free(work_path);
 
-    var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
+    var repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = work_path });
     defer repo.deinit(allocator);
 
     // create priv key
@@ -68,17 +70,17 @@ fn testSign(
     }
 
     // add key to config
-    try repo.addConfig(allocator, .{ .name = "user.signingkey", .value = pub_key_path });
+    try repo.addConfig(io, allocator, .{ .name = "user.signingkey", .value = pub_key_path });
 
     // make a commit
     const hello_txt = try repo.core.work_dir.createFile("hello.txt", .{ .truncate = true });
     defer hello_txt.close();
     try hello_txt.writeAll("hello, world!");
-    try repo.add(allocator, &.{"hello.txt"});
-    const commit_oid = try repo.commit(allocator, .{ .message = "let there be light" });
+    try repo.add(io, allocator, &.{"hello.txt"});
+    const commit_oid = try repo.commit(io, allocator, .{ .message = "let there be light" });
 
     // add a tag
-    const tag_oid = try repo.addTag(allocator, .{ .name = "1.0.0", .message = "hi" });
+    const tag_oid = try repo.addTag(io, allocator, .{ .name = "1.0.0", .message = "hi" });
 
     // TODO: verify the objects contain signatures
     _ = commit_oid;

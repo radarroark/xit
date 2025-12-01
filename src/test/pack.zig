@@ -243,7 +243,7 @@ test "pack" {
             try std.testing.expectEqual(0, c.git_oid_fmt(@ptrCast(&commit_oid_hex), commit_oid));
 
             var pack_reader = try pack.PackObjectReader(.git, repo_opts).initWithPath(io, allocator, .{ .core = &r.core, .extra = .{} }, temp_dir, "test.pack", &commit_oid_hex);
-            defer pack_reader.deinit();
+            defer pack_reader.deinit(allocator);
 
             // make sure the reader's position is at the beginning
             try std.testing.expectEqual(0, pack_reader.relative_position);
