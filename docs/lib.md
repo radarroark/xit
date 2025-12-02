@@ -38,7 +38,7 @@ pub fn main() !void {
     defer allocator.free(work_path);
 
     var repo = try rp.Repo(.xit, .{}).init(allocator, .{ .path = work_path });
-    defer repo.deinit();
+    defer repo.deinit(allocator);
 
     try repo.addConfig(allocator, .{ .name = "user.name", .value = "mr magoo" });
     try repo.addConfig(allocator, .{ .name = "user.email", .value = "mister@magoo" });

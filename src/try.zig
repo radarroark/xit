@@ -85,7 +85,7 @@ pub fn main() !void {
 
     {
         var git_repo = try rp.Repo(.git, .{}).open(allocator, .{ .path = temp_path });
-        defer git_repo.deinit();
+        defer git_repo.deinit(allocator);
 
         // restore all files in work dir
         // (they are all missing because we only copied the .git dir)
@@ -123,7 +123,7 @@ pub fn main() !void {
         }
 
         var xit_repo = try rp.Repo(.xit, .{}).init(allocator, .{ .path = temp_path });
-        defer xit_repo.deinit();
+        defer xit_repo.deinit(allocator);
 
         for (0..commits.items.len) |i| {
             var commit_object = commits.items[commits.items.len - i - 1];

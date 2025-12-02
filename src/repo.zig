@@ -184,11 +184,19 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             const cwd_path = opts.cwd_path orelse opts.path;
             if (!std.fs.path.isAbsolute(cwd_path)) return error.PathMustBeAbsolute;
 
-            var cwd = try std.fs.cwd().makeOpenPath(cwd_path, .{});
+            // resolve cwd path to ensure it is well-formed
+            const cwd_path_resolved = try std.fs.path.resolve(allocator, &.{ cwd_path, "." });
+            errdefer allocator.free(cwd_path_resolved);
+
+            var cwd = try std.fs.cwd().makeOpenPath(cwd_path_resolved, .{});
             errdefer cwd.close();
 
+            // resolve work path to ensure it is well-formed
             if (!std.fs.path.isAbsolute(opts.path)) return error.PathMustBeAbsolute;
-            var work_dir = try std.fs.cwd().makeOpenPath(opts.path, .{});
+            const work_path_resolved = try std.fs.path.resolve(allocator, &.{ opts.path, "." });
+            errdefer allocator.free(work_path_resolved);
+
+            var work_dir = try cwd.makeOpenPath(work_path_resolved, .{});
             errdefer work_dir.close();
 
             const repo_dir_name = switch (repo_kind) {
@@ -205,7 +213,6 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                 } else |_| {}
             }
 
-            // make the repo dir
             var repo_dir = try work_dir.makeOpenPath(repo_dir_name, .{});
             errdefer repo_dir.close();
 
@@ -219,9 +226,9 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
                     var self = Repo(repo_kind, repo_opts){
                         .core = .{
-                            .cwd_path = cwd_path,
+                            .cwd_path = cwd_path_resolved,
                             .cwd = cwd,
-                            .work_path = opts.path,
+                            .work_path = work_path_resolved,
                             .work_dir = work_dir,
                             .repo_dir = repo_dir,
                         },
@@ -242,9 +249,9 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     // make the db
                     var self = Repo(repo_kind, repo_opts){
                         .core = .{
-                            .cwd_path = cwd_path,
+                            .cwd_path = cwd_path_resolved,
                             .cwd = cwd,
-                            .work_path = opts.path,
+                            .work_path = work_path_resolved,
                             .work_dir = work_dir,
                             .repo_dir = repo_dir,
                             .db_file = db_file,
@@ -267,7 +274,15 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
         }
 
         pub fn open(allocator: std.mem.Allocator, opts: InitOpts) !Repo(repo_kind, repo_opts) {
-            if (!std.fs.path.isAbsolute(opts.path)) return error.PathMustBeAbsolute;
+            const cwd_path = opts.cwd_path orelse opts.path;
+            if (!std.fs.path.isAbsolute(cwd_path)) return error.PathMustBeAbsolute;
+
+            // resolve cwd path to ensure it is well-formed
+            const cwd_path_resolved = try std.fs.path.resolve(allocator, &.{ cwd_path, "." });
+            errdefer allocator.free(cwd_path_resolved);
+
+            var cwd = try std.fs.cwd().makeOpenPath(cwd_path_resolved, .{});
+            errdefer cwd.close();
 
             const repo_dir_name = switch (repo_kind) {
                 .git => ".git",
@@ -292,14 +307,14 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                 break;
             }
 
-            const cwd_path = opts.cwd_path orelse opts.path;
-            if (!std.fs.path.isAbsolute(cwd_path)) return error.PathMustBeAbsolute;
-
-            var cwd = try std.fs.cwd().makeOpenPath(cwd_path, .{});
-            errdefer cwd.close();
-
             const work_path = dir_path_maybe orelse return error.RepoNotFound;
-            var work_dir = try std.fs.openDirAbsolute(work_path, .{});
+            if (!std.fs.path.isAbsolute(work_path)) return error.PathMustBeAbsolute;
+
+            // resolve work path to ensure it is well-formed
+            const work_path_resolved = try std.fs.path.resolve(allocator, &.{ work_path, "." });
+            errdefer allocator.free(work_path_resolved);
+
+            var work_dir = try std.fs.openDirAbsolute(work_path_resolved, .{});
             errdefer work_dir.close();
 
             var repo_dir = try work_dir.openDir(repo_dir_name, .{});
@@ -309,9 +324,9 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                 .git => {
                     return .{
                         .core = .{
-                            .cwd_path = cwd_path,
+                            .cwd_path = cwd_path_resolved,
                             .cwd = cwd,
-                            .work_path = work_path,
+                            .work_path = work_path_resolved,
                             .work_dir = work_dir,
                             .repo_dir = repo_dir,
                         },
@@ -326,9 +341,9 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
                     var self = Repo(repo_kind, repo_opts){
                         .core = .{
-                            .cwd_path = cwd_path,
+                            .cwd_path = cwd_path_resolved,
                             .cwd = cwd,
-                            .work_path = work_path,
+                            .work_path = work_path_resolved,
                             .work_dir = work_dir,
                             .repo_dir = repo_dir,
                             .db_file = db_file,
@@ -353,15 +368,19 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
-        pub fn deinit(self: *Repo(repo_kind, repo_opts)) void {
+        pub fn deinit(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator) void {
             switch (repo_kind) {
                 .git => {
+                    allocator.free(self.core.cwd_path);
                     self.core.cwd.close();
+                    allocator.free(self.core.work_path);
                     self.core.work_dir.close();
                     self.core.repo_dir.close();
                 },
                 .xit => {
+                    allocator.free(self.core.cwd_path);
                     self.core.cwd.close();
+                    allocator.free(self.core.work_path);
                     self.core.work_dir.close();
                     self.core.repo_dir.close();
                     self.core.db_file.close();
@@ -1355,7 +1374,7 @@ pub fn AnyRepo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_k
                 .none => {
                     const hash_kind = blk: {
                         var repo = try Repo(repo_kind, repo_opts).open(allocator, init_opts);
-                        defer repo.deinit();
+                        defer repo.deinit(allocator);
                         break :blk try repo.hashKind();
                     };
                     return switch (hash_kind) {
@@ -1369,10 +1388,10 @@ pub fn AnyRepo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_k
             }
         }
 
-        pub fn deinit(self: *AnyRepo(repo_kind, repo_opts)) void {
+        pub fn deinit(self: *AnyRepo(repo_kind, repo_opts), allocator: std.mem.Allocator) void {
             switch (self.*) {
                 .none => {},
-                inline else => |*case| case.deinit(),
+                inline else => |*case| case.deinit(allocator),
             }
         }
     };

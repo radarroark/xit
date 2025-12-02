@@ -626,7 +626,7 @@ pub fn clone(
         .path = work_path,
         .create_default_branch = null,
     });
-    errdefer repo.deinit();
+    errdefer repo.deinit(allocator);
 
     var cwd = try std.fs.openDirAbsolute(cwd_path, .{});
     defer cwd.close();

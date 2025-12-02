@@ -96,14 +96,14 @@ pub fn run(
         .tui => |cmd_kind_maybe| if (.none == repo_opts.hash) {
             // if no hash was specified, use AnyRepo to detect the hash being used
             var any_repo = try rp.AnyRepo(repo_kind, repo_opts).open(allocator, .{ .path = cwd_path });
-            defer any_repo.deinit();
+            defer any_repo.deinit(allocator);
             switch (any_repo) {
                 .none => return error.HashKindNotFound,
                 inline else => |*repo| try ui.start(repo.self_repo_kind, repo.self_repo_opts, repo, allocator, cmd_kind_maybe),
             }
         } else {
             var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = cwd_path });
-            defer repo.deinit();
+            defer repo.deinit(allocator);
             try ui.start(repo_kind, repo_opts, &repo, allocator, cmd_kind_maybe);
         },
         .cli => |cli_cmd| switch (cli_cmd) {
@@ -116,7 +116,7 @@ pub fn run(
                 const work_path = try std.fs.path.resolve(allocator, &.{ cwd_path, init_cmd.dir });
                 defer allocator.free(work_path);
                 var repo = try rp.Repo(repo_kind, new_repo_opts).init(allocator, .{ .cwd_path = cwd_path, .path = work_path });
-                defer repo.deinit();
+                defer repo.deinit(allocator);
 
                 try writers.out.print(
                     \\congrats, you just created a new repo! aren't you special.
@@ -140,7 +140,7 @@ pub fn run(
                     work_path,
                     .{ .progress_ctx = .{ .writers = writers, .clear_line = &clear_line, .node = &progress_node } },
                 );
-                defer repo.deinit();
+                defer repo.deinit(allocator);
 
                 if (repo_kind == .xit) {
                     try writers.out.print(
@@ -158,7 +158,7 @@ pub fn run(
                 // if no hash was specified, use AnyRepo to detect the hash being used
                 const repo_opts_with_ctx = repo_opts.withProgressCtx(ProgressCtx);
                 var any_repo = try rp.AnyRepo(repo_kind, repo_opts_with_ctx).open(allocator, .{ .path = cwd_path });
-                defer any_repo.deinit();
+                defer any_repo.deinit(allocator);
                 switch (any_repo) {
                     .none => return error.HashKindNotFound,
                     inline else => |*repo| {
@@ -169,7 +169,7 @@ pub fn run(
             } else {
                 const repo_opts_with_ctx = repo_opts.withProgressCtx(ProgressCtx);
                 var repo = try rp.Repo(repo_kind, repo_opts_with_ctx).open(allocator, .{ .path = cwd_path });
-                defer repo.deinit();
+                defer repo.deinit(allocator);
                 try runCommand(repo_kind, repo_opts_with_ctx, &repo, allocator, cli_cmd, writers);
             },
         },

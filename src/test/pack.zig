@@ -204,7 +204,7 @@ test "pack" {
         try std.testing.expectEqual(0, c.git_oid_fmt(@ptrCast(&commit_oid_hex), commit_oid));
 
         var r = try rp.Repo(.git, repo_opts).open(allocator, .{ .path = work_path });
-        defer r.deinit();
+        defer r.deinit(allocator);
 
         var commit_object = try obj.Object(.git, repo_opts, .full).init(allocator, .{ .core = &r.core, .extra = .{} }, &commit_oid_hex);
         defer commit_object.deinit();
@@ -214,7 +214,7 @@ test "pack" {
     // write and read a pack object
     {
         var r = try rp.Repo(.git, repo_opts).open(allocator, .{ .path = work_path });
-        defer r.deinit();
+        defer r.deinit(allocator);
 
         const head_oid = try rf.readHeadRecur(.git, repo_opts, .{ .core = &r.core, .extra = .{} });
 
@@ -252,7 +252,7 @@ test "pack" {
     // read packed refs
     {
         var r = try rp.Repo(.git, repo_opts).open(allocator, .{ .path = work_path });
-        defer r.deinit();
+        defer r.deinit(allocator);
 
         var packed_refs = try repo_dir.createFile("packed-refs", .{});
         defer packed_refs.close();

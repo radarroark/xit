@@ -267,6 +267,7 @@ pub fn joinPath(allocator: std.mem.Allocator, paths: []const []const u8) ![]u8 {
 }
 
 pub fn relativePath(allocator: std.mem.Allocator, work_path: []const u8, cwd_path: []const u8, path: []const u8) ![]const u8 {
+    // path must go through `resolve` to ensure it has the correct path separators
     const input_path =
         if (std.fs.path.isAbsolute(path))
             try std.fs.path.resolve(allocator, &.{ path, "." })
@@ -274,18 +275,13 @@ pub fn relativePath(allocator: std.mem.Allocator, work_path: []const u8, cwd_pat
             try std.fs.path.resolve(allocator, &.{ cwd_path, path });
     defer allocator.free(input_path);
 
-    const work_path_dupe = try std.fs.path.resolve(allocator, &.{ work_path, "." });
-    defer allocator.free(work_path_dupe);
-
-    // make sure the input path is in the repo.
-    // both paths were passed through `resolve`, which ensures they have the
-    // correct path separators so this comparison actually works.
-    if (!std.mem.startsWith(u8, input_path, work_path_dupe)) {
+    // make sure the input path is in the repo
+    if (!std.mem.startsWith(u8, input_path, work_path)) {
         return error.PathIsOutsideRepo;
     }
 
     // compute the path relative to the repo path
-    return try std.fs.path.relative(allocator, work_path_dupe, input_path);
+    return try std.fs.path.relative(allocator, work_path, input_path);
 }
 
 pub fn splitPath(allocator: std.mem.Allocator, path: []const u8) ![]const []const u8 {

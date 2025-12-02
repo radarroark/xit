@@ -50,11 +50,11 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
     {
         var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
-        defer repo.deinit();
+        defer repo.deinit(allocator);
     }
 
     var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
-    defer repo.deinit();
+    defer repo.deinit(allocator);
 
     try addFile(repo_kind, repo_opts, &repo, allocator, "README.md", "Hello, world!");
     const commit_a = try repo.commit(allocator, .{ .message = "a" });
@@ -200,11 +200,11 @@ fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 
     {
         var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
-        defer repo.deinit();
+        defer repo.deinit(allocator);
     }
 
     var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
-    defer repo.deinit();
+    defer repo.deinit(allocator);
 
     // A --- B --- C --------- J --- K [master]
     //        \               /
@@ -313,7 +313,7 @@ fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
         defer allocator.free(dest_work_path);
 
         var dest_repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = dest_work_path });
-        defer dest_repo.deinit();
+        defer dest_repo.deinit(allocator);
         try dest_repo.copyObjects(repo_kind, repo_opts, &obj_iter, null);
 
         var dest_obj_iter = try dest_repo.log(allocator, &.{commit_k});
@@ -352,11 +352,11 @@ fn testMergeSideBranch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.R
 
     {
         var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
-        defer repo.deinit();
+        defer repo.deinit(allocator);
     }
 
     var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
-    defer repo.deinit();
+    defer repo.deinit(allocator);
 
     //           C <------ D [side]
     //          /           \
@@ -525,11 +525,11 @@ fn testMergeConflictSameFile(comptime repo_kind: rp.RepoKind, comptime repo_opts
 
     {
         var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
-        defer repo.deinit();
+        defer repo.deinit(allocator);
     }
 
     var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
-    defer repo.deinit();
+    defer repo.deinit(allocator);
 
     // A --- B --- D [master]
     //  \         /
@@ -793,11 +793,11 @@ fn testMergeConflictSameFileEmptyBase(comptime repo_kind: rp.RepoKind, comptime 
 
     {
         var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
-        defer repo.deinit();
+        defer repo.deinit(allocator);
     }
 
     var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
-    defer repo.deinit();
+    defer repo.deinit(allocator);
 
     // A --- B --- D [master]
     //  \         /
@@ -1073,11 +1073,11 @@ fn testMergeConflictSameFileAutoresolved(comptime repo_kind: rp.RepoKind, compti
 
     {
         var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
-        defer repo.deinit();
+        defer repo.deinit(allocator);
     }
 
     var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
-    defer repo.deinit();
+    defer repo.deinit(allocator);
 
     // A --- B --- D [master]
     //  \         /
@@ -1174,11 +1174,11 @@ fn testMergeConflictModifyDelete(comptime repo_kind: rp.RepoKind, comptime repo_
 
     {
         var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
-        defer repo.deinit();
+        defer repo.deinit(allocator);
     }
 
     var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
-    defer repo.deinit();
+    defer repo.deinit(allocator);
 
     // A --- B --- D [master]
     //  \         /
@@ -1314,11 +1314,11 @@ fn testMergeConflictDeleteModify(comptime repo_kind: rp.RepoKind, comptime repo_
 
     {
         var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
-        defer repo.deinit();
+        defer repo.deinit(allocator);
     }
 
     var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
-    defer repo.deinit();
+    defer repo.deinit(allocator);
 
     // A --- B --- D [master]
     //  \         /
@@ -1452,11 +1452,11 @@ fn testMergeConflictFileDir(comptime repo_kind: rp.RepoKind, comptime repo_opts:
 
     {
         var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
-        defer repo.deinit();
+        defer repo.deinit(allocator);
     }
 
     var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
-    defer repo.deinit();
+    defer repo.deinit(allocator);
 
     // A --- B --- D [master]
     //  \         /
@@ -1662,11 +1662,11 @@ fn testMergeConflictDirFile(comptime repo_kind: rp.RepoKind, comptime repo_opts:
 
     {
         var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
-        defer repo.deinit();
+        defer repo.deinit(allocator);
     }
 
     var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
-    defer repo.deinit();
+    defer repo.deinit(allocator);
 
     // A --- B --- D [master]
     //  \         /
@@ -1845,11 +1845,11 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind, comptime repo_op
 
     {
         var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
-        defer repo.deinit();
+        defer repo.deinit(allocator);
     }
 
     var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
-    defer repo.deinit();
+    defer repo.deinit(allocator);
 
     // A --- B --------- D [master]
     //  \               /
@@ -2009,11 +2009,11 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
 
         {
             var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
-            defer repo.deinit();
+            defer repo.deinit(allocator);
         }
 
         var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
-        defer repo.deinit();
+        defer repo.deinit(allocator);
 
         // A --- B --- C --- E [master]
         //  \               /
@@ -2118,11 +2118,11 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
 
         {
             var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
-            defer repo.deinit();
+            defer repo.deinit(allocator);
         }
 
         var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
-        defer repo.deinit();
+        defer repo.deinit(allocator);
 
         // A --- B --- C --- E [master]
         //  \               /
@@ -2303,11 +2303,11 @@ fn testCherryPick(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOp
 
     {
         var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
-        defer repo.deinit();
+        defer repo.deinit(allocator);
     }
 
     var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
-    defer repo.deinit();
+    defer repo.deinit(allocator);
 
     // A --- B ------------ D' [master]
     //        \
@@ -2390,11 +2390,11 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
 
     {
         var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
-        defer repo.deinit();
+        defer repo.deinit(allocator);
     }
 
     var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
-    defer repo.deinit();
+    defer repo.deinit(allocator);
 
     // A --- B ------------ D' [master]
     //        \
@@ -2538,11 +2538,11 @@ fn testLog(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo
 
     {
         var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
-        defer repo.deinit();
+        defer repo.deinit(allocator);
     }
 
     var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
-    defer repo.deinit();
+    defer repo.deinit(allocator);
 
     // A --- B --- C --------- G --- H [master]
     //        \               /

@@ -15,7 +15,6 @@ pub fn FileTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
         direction: net.Direction,
         heads: std.ArrayList(net.RemoteHead(repo_kind, repo_opts)),
         connected: bool,
-        remote_repo_path: ?[]const u8,
         remote_repo: ?rp.Repo(.git, remote_repo_opts),
         opts: net_transport.Opts(repo_opts.ProgressCtx),
 
@@ -27,7 +26,6 @@ pub fn FileTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                 .direction = .fetch,
                 .heads = std.ArrayList(net.RemoteHead(repo_kind, repo_opts)){},
                 .connected = false,
-                .remote_repo_path = null,
                 .remote_repo = null,
                 .opts = opts,
             };
@@ -39,12 +37,8 @@ pub fn FileTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             }
             self.heads.deinit(allocator);
             self.close(allocator);
-            if (self.remote_repo_path) |remote_repo_path| {
-                allocator.free(remote_repo_path);
-                self.remote_repo_path = null;
-            }
             if (self.remote_repo) |*remote_repo| {
-                remote_repo.deinit();
+                remote_repo.deinit(allocator);
                 self.remote_repo = null;
             }
         }
@@ -88,15 +82,14 @@ pub fn FileTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             const path = try parsePath(url);
 
             const work_path = try std.fs.path.resolve(allocator, &.{ state.core.cwd_path, path });
-            errdefer allocator.free(work_path);
+            defer allocator.free(work_path);
 
             var remote_repo = try rp.Repo(.git, remote_repo_opts).open(allocator, .{ .path = work_path });
-            errdefer remote_repo.deinit();
+            errdefer remote_repo.deinit(allocator);
 
             try self.addRefs(.{ .core = &remote_repo.core, .extra = .{} }, allocator);
 
             self.connected = true;
-            self.remote_repo_path = work_path;
             self.remote_repo = remote_repo;
         }
 
@@ -124,7 +117,7 @@ pub fn FileTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                 defer allocator.free(work_path);
 
                 var any_repo = try rp.AnyRepo(.git, .{ .hash = .none, .ProgressCtx = repo_opts.ProgressCtx }).open(allocator, .{ .path = work_path });
-                defer any_repo.deinit();
+                defer any_repo.deinit(allocator);
 
                 const obj_iter: *obj.ObjectIterator(repo_kind, repo_opts, .raw) = &git_push.obj_iter;
 
@@ -181,7 +174,7 @@ pub fn FileTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             defer allocator.free(work_path);
 
             var repo = try rp.Repo(.git, remote_repo_opts).open(allocator, .{ .path = work_path });
-            defer repo.deinit();
+            defer repo.deinit(allocator);
 
             var obj_iter = try repo.logRaw(allocator, .{ .kind = .all });
             defer obj_iter.deinit();
@@ -213,9 +206,9 @@ pub fn FileTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                 self.url = null;
             }
 
-            if (self.remote_repo_path) |remote_repo_path| {
-                allocator.free(remote_repo_path);
-                self.remote_repo_path = null;
+            if (self.remote_repo) |*remote_repo| {
+                remote_repo.deinit(allocator);
+                self.remote_repo = null;
             }
         }
 

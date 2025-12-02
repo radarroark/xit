@@ -460,7 +460,7 @@ fn testFetch(
     defer allocator.free(server_path);
 
     var server_repo = try rp.Repo(.git, .{ .is_test = true }).init(allocator, .{ .path = server_path });
-    defer server_repo.deinit();
+    defer server_repo.deinit(allocator);
 
     // make a commit
     const commit1 = blk: {
@@ -486,7 +486,7 @@ fn testFetch(
     defer allocator.free(client_path);
 
     var client_repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = client_path });
-    defer client_repo.deinit();
+    defer client_repo.deinit(allocator);
 
     // add remote
     {
@@ -643,7 +643,7 @@ fn testPush(
     defer allocator.free(server_path);
 
     var server_repo = try rp.Repo(.git, .{ .is_test = true }).init(allocator, .{ .path = server_path });
-    defer server_repo.deinit();
+    defer server_repo.deinit(allocator);
 
     // add config
     switch (transport_def) {
@@ -665,7 +665,7 @@ fn testPush(
     defer allocator.free(client_path);
 
     var client_repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = client_path });
-    defer client_repo.deinit();
+    defer client_repo.deinit(allocator);
 
     // make a commit
     const commit1 = blk: {
@@ -908,7 +908,7 @@ fn testClone(
 
     // init server repo with default branch name as main
     var server_repo = try rp.Repo(.git, .{ .is_test = true }).init(allocator, .{ .path = server_path, .create_default_branch = "main" });
-    defer server_repo.deinit();
+    defer server_repo.deinit(allocator);
 
     // make a commit
     {
@@ -981,7 +981,7 @@ fn testClone(
         }
         return err;
     };
-    defer client_repo.deinit();
+    defer client_repo.deinit(allocator);
 
     // make sure clone was successful
     const hello_txt = try temp_dir.openFile("client/hello.txt", .{});
@@ -1025,7 +1025,7 @@ fn testFetchLarge(
     defer allocator.free(server_path);
 
     var server_repo = try rp.Repo(.git, .{ .is_test = true }).init(allocator, .{ .path = server_path });
-    defer server_repo.deinit();
+    defer server_repo.deinit(allocator);
 
     var server_dir = try cwd.openDir(server_path, .{});
     defer server_dir.close();
@@ -1056,7 +1056,7 @@ fn testFetchLarge(
     defer allocator.free(client_path);
 
     var client_repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = client_path });
-    defer client_repo.deinit();
+    defer client_repo.deinit(allocator);
 
     // add remote
     {
@@ -1158,7 +1158,7 @@ fn testPushLarge(
     defer allocator.free(server_path);
 
     var server_repo = try rp.Repo(.git, .{ .is_test = true }).init(allocator, .{ .path = server_path });
-    defer server_repo.deinit();
+    defer server_repo.deinit(allocator);
 
     // add config
     switch (transport_def) {
@@ -1180,7 +1180,7 @@ fn testPushLarge(
     defer allocator.free(client_path);
 
     var client_repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = client_path });
-    defer client_repo.deinit();
+    defer client_repo.deinit(allocator);
 
     var client_dir = try cwd.openDir(client_path, .{});
     defer client_dir.close();

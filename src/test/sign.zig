@@ -35,7 +35,7 @@ fn testSign(
     defer allocator.free(work_path);
 
     var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
-    defer repo.deinit();
+    defer repo.deinit(allocator);
 
     // create priv key
     const priv_key_file = try temp_dir.createFile("key", .{});
