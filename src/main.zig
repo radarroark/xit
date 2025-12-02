@@ -543,7 +543,7 @@ fn runCommand(
                 while (commit_object.object_reader.interface.peekByte()) |_| {
                     var line_writer = std.Io.Writer.Allocating.init(allocator);
                     defer line_writer.deinit();
-                    _ = try commit_object.object_reader.interface.streamDelimiterLimit(&line_writer.writer, '\n', @enumFromInt(repo_opts.max_line_size));
+                    _ = try commit_object.object_reader.interface.streamDelimiterLimit(&line_writer.writer, '\n', .limited(repo_opts.max_line_size));
 
                     // skip delimiter
                     if (commit_object.object_reader.interface.bufferedLen() > 0) {

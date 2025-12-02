@@ -714,7 +714,7 @@ fn writeBlobWithPatches(
             if (obj_rdr.interface.peekByte()) |_| {
                 var line_writer = std.Io.Writer.Allocating.init(inner_allocator);
                 errdefer line_writer.deinit();
-                _ = try obj_rdr.interface.streamDelimiterLimit(&line_writer.writer, '\n', @enumFromInt(repo_opts.max_line_size));
+                _ = try obj_rdr.interface.streamDelimiterLimit(&line_writer.writer, '\n', .limited(repo_opts.max_line_size));
 
                 // skip delimiter
                 if (obj_rdr.interface.bufferedLen() > 0) {

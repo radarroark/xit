@@ -110,7 +110,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                             .extended_flags = null, // TODO: read this if necessary
                             .path = blk: {
                                 var writer = std.Io.Writer.Allocating.init(self.arena.allocator());
-                                _ = try reader.interface.streamDelimiterLimit(&writer.writer, 0, @enumFromInt(std.fs.max_path_bytes));
+                                _ = try reader.interface.streamDelimiterLimit(&writer.writer, 0, .limited(repo_opts.max_read_size));
                                 if (0 != try reader.interface.takeByte()) {
                                     return error.InvalidNullPadding;
                                 }

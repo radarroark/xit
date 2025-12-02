@@ -273,7 +273,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
             // for each line...
             while (reader.peekByte()) |_| {
                 var line_writer = std.Io.Writer.Allocating.init(arena.allocator());
-                _ = try reader.streamDelimiterLimit(&line_writer.writer, '\n', @enumFromInt(repo_opts.max_line_size));
+                _ = try reader.streamDelimiterLimit(&line_writer.writer, '\n', .limited(repo_opts.max_line_size));
 
                 // skip delimiter
                 if (reader.bufferedLen() > 0) {
@@ -382,7 +382,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                     var reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
                     var reader = work_dir.file.reader(&reader_buffer);
                     try reader.seekTo(try work_dir.file.getPos());
-                    _ = try reader.interface.streamDelimiterLimit(&line_writer.writer, '\n', @enumFromInt(repo_opts.max_line_size));
+                    _ = try reader.interface.streamDelimiterLimit(&line_writer.writer, '\n', .limited(repo_opts.max_line_size));
 
                     // skip delimiter
                     if (reader.interface.bufferedLen() > 0) {

@@ -308,7 +308,7 @@ fn sign(
         // for each line...
         while (sig_file_reader.interface.peekByte()) |_| {
             var line_writer = std.Io.Writer.Allocating.init(arena.allocator());
-            _ = try sig_file_reader.interface.streamDelimiterLimit(&line_writer.writer, '\n', @enumFromInt(repo_opts.max_read_size));
+            _ = try sig_file_reader.interface.streamDelimiterLimit(&line_writer.writer, '\n', .limited(repo_opts.max_read_size));
 
             // skip delimiter
             if (sig_file_reader.interface.bufferedLen() > 0) {
@@ -819,7 +819,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                             const entry_mode: fs.Mode = @bitCast(try std.fmt.parseInt(u32, entry_mode_str, 8));
 
                             var entry_name_writer = std.Io.Writer.Allocating.init(arena.allocator());
-                            _ = try obj_rdr.interface.streamDelimiterLimit(&entry_name_writer.writer, 0, @enumFromInt(repo_opts.max_read_size));
+                            _ = try obj_rdr.interface.streamDelimiterLimit(&entry_name_writer.writer, 0, .limited(repo_opts.max_read_size));
                             obj_rdr.interface.toss(1); // skip delimiter
 
                             const entry_name = entry_name_writer.written();
@@ -856,7 +856,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                         // read the content kind
                         var content_kind_writer = std.Io.Writer.Allocating.init(allocator);
                         defer content_kind_writer.deinit();
-                        _ = try obj_rdr.interface.streamDelimiterLimit(&content_kind_writer.writer, ' ', @enumFromInt(repo_opts.max_read_size));
+                        _ = try obj_rdr.interface.streamDelimiterLimit(&content_kind_writer.writer, ' ', .limited(repo_opts.max_read_size));
                         obj_rdr.interface.toss(1); // skip delimiter
                         const content_kind = content_kind_writer.written();
                         if (!std.mem.eql(u8, "tree", content_kind)) {
@@ -880,7 +880,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                         // read the metadata
                         while (true) {
                             var line_writer = std.Io.Writer.Allocating.init(arena.allocator());
-                            _ = try obj_rdr.interface.streamDelimiterLimit(&line_writer.writer, '\n', @enumFromInt(repo_opts.max_read_size));
+                            _ = try obj_rdr.interface.streamDelimiterLimit(&line_writer.writer, '\n', .limited(repo_opts.max_read_size));
                             obj_rdr.interface.toss(1); // skip delimiter
 
                             const line = line_writer.written();
@@ -918,7 +918,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                         // read only the first line
                         {
                             var line_writer = std.Io.Writer.Allocating.init(arena.allocator());
-                            const line_size_maybe = obj_rdr.interface.streamDelimiterLimit(&line_writer.writer, '\n', @enumFromInt(repo_opts.max_line_size)) catch |err| switch (err) {
+                            const line_size_maybe = obj_rdr.interface.streamDelimiterLimit(&line_writer.writer, '\n', .limited(repo_opts.max_line_size)) catch |err| switch (err) {
                                 error.StreamTooLong => null,
                                 else => |e| return e,
                             };
@@ -964,7 +964,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                         defer fields.deinit();
                         while (true) {
                             var line_writer = std.Io.Writer.Allocating.init(arena.allocator());
-                            _ = try obj_rdr.interface.streamDelimiterLimit(&line_writer.writer, '\n', @enumFromInt(repo_opts.max_read_size));
+                            _ = try obj_rdr.interface.streamDelimiterLimit(&line_writer.writer, '\n', .limited(repo_opts.max_read_size));
                             obj_rdr.interface.toss(1); // skip delimiter
 
                             const line = line_writer.written();
@@ -1001,7 +1001,7 @@ pub fn Object(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                         // read only the first line
                         {
                             var line_writer = std.Io.Writer.Allocating.init(arena.allocator());
-                            const line_size_maybe = obj_rdr.interface.streamDelimiterLimit(&line_writer.writer, '\n', @enumFromInt(repo_opts.max_line_size)) catch |err| switch (err) {
+                            const line_size_maybe = obj_rdr.interface.streamDelimiterLimit(&line_writer.writer, '\n', .limited(repo_opts.max_line_size)) catch |err| switch (err) {
                                 error.StreamTooLong => null,
                                 else => |e| return e,
                             };
