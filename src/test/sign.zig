@@ -28,8 +28,8 @@ fn testSign(
     defer cwd.deleteTree(temp_dir_name) catch {};
     defer temp_dir.close();
 
-    var cwd_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-    const cwd_path = try std.process.getCwd(&cwd_path_buffer);
+    const cwd_path = try std.process.getCwdAlloc(allocator);
+    defer allocator.free(cwd_path);
 
     const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name });
     defer allocator.free(work_path);
