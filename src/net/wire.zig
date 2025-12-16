@@ -256,6 +256,10 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
 
             self.caps = try Capabilities.init(allocator, if (first_ref.capabilities) |caps| caps else null, &symrefs);
 
+            if (!self.caps.side_band and !self.caps.side_band_64k) {
+                return error.SideBandProtocolNotSupported;
+            }
+
             if (1 == self.refs.items.len and
                 !std.mem.eql(u8, first_ref.head.name, "capabilities^{}") and
                 std.mem.allEqual(u8, &first_ref.head.oid, '0'))
@@ -544,35 +548,21 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                 var temp_pack = try fs.LockFile.init(state.core.repo_dir, temp_pack_name);
                 defer temp_pack.deinit();
 
-                if (!self.caps.side_band and !self.caps.side_band_64k) {
-                    while (true) {
-                        try temp_pack.lock_file.writeAll(self.buffer.data[0..self.buffer.len]);
+                while (true) {
+                    var pkt = try self.recvPkt(allocator);
+                    defer pkt.deinit(allocator);
 
-                        self.buffer.len = 0;
-                        self.buffer.data[0] = 0;
-
-                        const recvd = try self.recv(allocator);
-                        if (recvd == 0) {
-                            break;
-                        }
-                    }
-                } else {
-                    while (true) {
-                        var pkt = try self.recvPkt(allocator);
-                        defer pkt.deinit(allocator);
-
-                        switch (pkt) {
-                            .progress => |progress| if (repo_opts.ProgressCtx != void) {
-                                if (self.opts.progress_ctx) |progress_ctx| {
-                                    try progress_ctx.run(.{ .text = progress });
-                                }
-                            },
-                            .data => |data| if (data.len > 0) {
-                                try temp_pack.lock_file.writeAll(data);
-                            },
-                            .flush => break,
-                            else => {},
-                        }
+                    switch (pkt) {
+                        .progress => |progress| if (repo_opts.ProgressCtx != void) {
+                            if (self.opts.progress_ctx) |progress_ctx| {
+                                try progress_ctx.run(.{ .text = progress });
+                            }
+                        },
+                        .data => |data| if (data.len > 0) {
+                            try temp_pack.lock_file.writeAll(data);
+                        },
+                        .flush => break,
+                        else => {},
                     }
                 }
 
