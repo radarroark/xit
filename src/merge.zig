@@ -1537,7 +1537,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                                 }
                             }
 
-                            break :blk .diff3;
+                            break :blk .patch;
                         },
                     };
 

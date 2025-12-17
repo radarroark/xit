@@ -34,6 +34,7 @@ pub const ProgressEvent = union(enum) {
         kind: ProgressKind,
         count: usize,
     },
+    child_text: []const u8,
     end: ProgressKind,
     text: []const u8,
 };
@@ -66,7 +67,6 @@ pub fn RepoOpts(comptime repo_kind: RepoKind) type {
                     .max_size = 8192,
                     .normalization = .level1,
                 },
-                enable_patches: bool = false,
             },
         };
 
@@ -258,10 +258,6 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         try self.resetAdd(.{ .ref = .{ .kind = .head, .name = default_branch_name } });
                     }
 
-                    if (repo_opts.extra.enable_patches) {
-                        try self.setMergeAlgorithm(allocator, .patch);
-                    }
-
                     return self;
                 },
             }
@@ -333,7 +329,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     };
                     errdefer db_file.close();
 
-                    var self = Repo(repo_kind, repo_opts){
+                    return .{
                         .core = .{
                             .cwd_path = cwd_path_resolved,
                             .cwd = cwd,
@@ -352,12 +348,6 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             },
                         },
                     };
-
-                    if (repo_opts.extra.enable_patches) {
-                        try self.setMergeAlgorithm(allocator, .patch);
-                    }
-
-                    return self;
                 },
             }
         }

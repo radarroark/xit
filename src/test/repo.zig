@@ -24,7 +24,6 @@ fn addFile(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo
 test "simple" {
     try testSimple(.git, .{ .is_test = true });
     try testSimple(.xit, .{ .is_test = true });
-    try testSimple(.xit, .{ .is_test = true, .extra = .{ .enable_patches = true } });
 }
 
 fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) !void {
@@ -174,7 +173,6 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 test "merge" {
     try testMerge(.git, .{ .is_test = true });
     try testMerge(.xit, .{ .is_test = true });
-    try testMerge(.xit, .{ .is_test = true, .extra = .{ .enable_patches = true } });
 }
 
 fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) !void {
@@ -326,7 +324,6 @@ fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 test "merge side branch" {
     try testMergeSideBranch(.git, .{ .is_test = true });
     try testMergeSideBranch(.xit, .{ .is_test = true });
-    try testMergeSideBranch(.xit, .{ .is_test = true, .extra = .{ .enable_patches = true } });
 }
 
 fn testMergeSideBranch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) !void {
@@ -436,19 +433,11 @@ test "merge conflict" {
     try testMergeConflictSameFile(.xit, .{ .read_size = 1, .is_test = true, .extra = .{
         .chunk_opts = .{ .min_size = 1, .avg_size = 2, .max_size = 4, .normalization = .level1 },
     } });
-    try testMergeConflictSameFile(.xit, .{ .is_test = true, .extra = .{
-        .chunk_opts = .{ .min_size = 1, .avg_size = 2, .max_size = 4, .normalization = .level1 },
-        .enable_patches = true,
-    } });
 
     // same file conflict with an empty base
     try testMergeConflictSameFileEmptyBase(.git, .{ .read_size = 1, .is_test = true });
     try testMergeConflictSameFileEmptyBase(.xit, .{ .read_size = 1, .is_test = true, .extra = .{
         .chunk_opts = .{ .min_size = 1, .avg_size = 2, .max_size = 4, .normalization = .level1 },
-    } });
-    try testMergeConflictSameFileEmptyBase(.xit, .{ .is_test = true, .extra = .{
-        .chunk_opts = .{ .min_size = 1, .avg_size = 2, .max_size = 4, .normalization = .level1 },
-        .enable_patches = true,
     } });
 
     // same file conflict that is autoresolved
@@ -456,19 +445,11 @@ test "merge conflict" {
     try testMergeConflictSameFileAutoresolved(.xit, .{ .read_size = 1, .is_test = true, .extra = .{
         .chunk_opts = .{ .min_size = 1, .avg_size = 2, .max_size = 4, .normalization = .level1 },
     } });
-    try testMergeConflictSameFileAutoresolved(.xit, .{ .is_test = true, .extra = .{
-        .chunk_opts = .{ .min_size = 1, .avg_size = 2, .max_size = 4, .normalization = .level1 },
-        .enable_patches = true,
-    } });
 
     // same file conflict on neighboring lines that is autoresolved only with patch-based merging
     try testMergeConflictSameFileAutoresolvedNeighboringLines(.git, .{ .read_size = 1, .is_test = true });
     try testMergeConflictSameFileAutoresolvedNeighboringLines(.xit, .{ .read_size = 1, .is_test = true, .extra = .{
         .chunk_opts = .{ .min_size = 1, .avg_size = 2, .max_size = 4, .normalization = .level1 },
-    } });
-    try testMergeConflictSameFileAutoresolvedNeighboringLines(.xit, .{ .is_test = true, .extra = .{
-        .chunk_opts = .{ .min_size = 1, .avg_size = 2, .max_size = 4, .normalization = .level1 },
-        .enable_patches = true,
     } });
 
     // delete/modify conflict (target deletes, source modifies)
@@ -476,19 +457,11 @@ test "merge conflict" {
     try testMergeConflictModifyDelete(.xit, .{ .read_size = 1, .is_test = true, .extra = .{
         .chunk_opts = .{ .min_size = 1, .avg_size = 2, .max_size = 4, .normalization = .level1 },
     } });
-    try testMergeConflictModifyDelete(.xit, .{ .is_test = true, .extra = .{
-        .chunk_opts = .{ .min_size = 1, .avg_size = 2, .max_size = 4, .normalization = .level1 },
-        .enable_patches = true,
-    } });
 
     // delete/modify conflict (target deletes, source modifies)
     try testMergeConflictDeleteModify(.git, .{ .read_size = 1, .is_test = true });
     try testMergeConflictDeleteModify(.xit, .{ .read_size = 1, .is_test = true, .extra = .{
         .chunk_opts = .{ .min_size = 1, .avg_size = 2, .max_size = 4, .normalization = .level1 },
-    } });
-    try testMergeConflictDeleteModify(.xit, .{ .is_test = true, .extra = .{
-        .chunk_opts = .{ .min_size = 1, .avg_size = 2, .max_size = 4, .normalization = .level1 },
-        .enable_patches = true,
     } });
 
     // file/dir conflict (target has file, source has dir)
@@ -496,19 +469,11 @@ test "merge conflict" {
     try testMergeConflictFileDir(.xit, .{ .read_size = 1, .is_test = true, .extra = .{
         .chunk_opts = .{ .min_size = 1, .avg_size = 2, .max_size = 4, .normalization = .level1 },
     } });
-    try testMergeConflictFileDir(.xit, .{ .is_test = true, .extra = .{
-        .chunk_opts = .{ .min_size = 1, .avg_size = 2, .max_size = 4, .normalization = .level1 },
-        .enable_patches = true,
-    } });
 
     // dir/file conflict (target has dir, source has file)
     try testMergeConflictDirFile(.git, .{ .read_size = 1, .is_test = true });
     try testMergeConflictDirFile(.xit, .{ .read_size = 1, .is_test = true, .extra = .{
         .chunk_opts = .{ .min_size = 1, .avg_size = 2, .max_size = 4, .normalization = .level1 },
-    } });
-    try testMergeConflictDirFile(.xit, .{ .is_test = true, .extra = .{
-        .chunk_opts = .{ .min_size = 1, .avg_size = 2, .max_size = 4, .normalization = .level1 },
-        .enable_patches = true,
     } });
 }
 
@@ -1231,52 +1196,55 @@ fn testMergeConflictSameFileAutoresolvedNeighboringLines(comptime repo_kind: rp.
         defer merge.deinit();
 
         // the conflict is only autoresolved when patch-based merging is enabled
-        if (.xit == repo_kind and repo_opts.extra.enable_patches) {
-            try std.testing.expect(.success == merge.result);
+        switch (repo_kind) {
+            .xit => {
+                try std.testing.expect(.success == merge.result);
 
-            // verify f.txt has been autoresolved
-            const f_txt_content = try repo.core.work_dir.readFileAlloc(allocator, "f.txt", 1024);
-            defer allocator.free(f_txt_content);
-            try std.testing.expectEqualStrings(
-                \\a
-                \\f
-                \\e
-                \\d
-            ,
-                f_txt_content,
-            );
+                // verify f.txt has been autoresolved
+                const f_txt_content = try repo.core.work_dir.readFileAlloc(allocator, "f.txt", 1024);
+                defer allocator.free(f_txt_content);
+                try std.testing.expectEqualStrings(
+                    \\a
+                    \\f
+                    \\e
+                    \\d
+                ,
+                    f_txt_content,
+                );
 
-            // generate diff
-            var status = try repo.status(allocator);
-            defer status.deinit(allocator);
-            var file_iter = try repo.filePairs(allocator, .{
-                .work_dir = .{
-                    .conflict_diff_kind = .target,
-                    .status = &status,
-                },
-            });
-            if (try file_iter.next()) |*line_iter_pair_ptr| {
-                var line_iter_pair = line_iter_pair_ptr.*;
-                defer line_iter_pair.deinit();
-                return error.DiffResultNotExpected;
-            }
+                // generate diff
+                var status = try repo.status(allocator);
+                defer status.deinit(allocator);
+                var file_iter = try repo.filePairs(allocator, .{
+                    .work_dir = .{
+                        .conflict_diff_kind = .target,
+                        .status = &status,
+                    },
+                });
+                if (try file_iter.next()) |*line_iter_pair_ptr| {
+                    var line_iter_pair = line_iter_pair_ptr.*;
+                    defer line_iter_pair.deinit();
+                    return error.DiffResultNotExpected;
+                }
 
-            // if we try merging foo again, it does nothing
-            {
-                var merge_again = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
-                defer merge_again.deinit();
-                try std.testing.expect(.nothing == merge_again.result);
-            }
+                // if we try merging foo again, it does nothing
+                {
+                    var merge_again = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
+                    defer merge_again.deinit();
+                    try std.testing.expect(.nothing == merge_again.result);
+                }
 
-            // undo merge
-            var result = try repo.resetDir(allocator, .{ .target = .{ .oid = &commit_b }, .force = true });
-            defer result.deinit();
-        } else {
-            try std.testing.expect(.conflict == merge.result);
+                // undo merge
+                var result = try repo.resetDir(allocator, .{ .target = .{ .oid = &commit_b }, .force = true });
+                defer result.deinit();
+            },
+            .git => {
+                try std.testing.expect(.conflict == merge.result);
 
-            // abort merge
-            var result = try repo.resetDir(allocator, .{ .target = null, .force = true });
-            defer result.deinit();
+                // abort merge
+                var result = try repo.resetDir(allocator, .{ .target = null, .force = true });
+                defer result.deinit();
+            },
         }
     }
 
@@ -1292,44 +1260,45 @@ fn testMergeConflictSameFileAutoresolvedNeighboringLines(comptime repo_kind: rp.
         defer merge.deinit();
 
         // the conflict is only autoresolved when patch-based merging is enabled
-        if (.xit == repo_kind and repo_opts.extra.enable_patches) {
-            try std.testing.expect(.success == merge.result);
+        switch (repo_kind) {
+            .xit => {
+                try std.testing.expect(.success == merge.result);
 
-            // verify f.txt has been autoresolved
-            const f_txt_content = try repo.core.work_dir.readFileAlloc(allocator, "f.txt", 1024);
-            defer allocator.free(f_txt_content);
-            try std.testing.expectEqualStrings(
-                \\a
-                \\f
-                \\e
-                \\d
-            ,
-                f_txt_content,
-            );
+                // verify f.txt has been autoresolved
+                const f_txt_content = try repo.core.work_dir.readFileAlloc(allocator, "f.txt", 1024);
+                defer allocator.free(f_txt_content);
+                try std.testing.expectEqualStrings(
+                    \\a
+                    \\f
+                    \\e
+                    \\d
+                ,
+                    f_txt_content,
+                );
 
-            // generate diff
-            var status = try repo.status(allocator);
-            defer status.deinit(allocator);
-            var file_iter = try repo.filePairs(allocator, .{
-                .work_dir = .{
-                    .conflict_diff_kind = .target,
-                    .status = &status,
-                },
-            });
-            if (try file_iter.next()) |*line_iter_pair_ptr| {
-                var line_iter_pair = line_iter_pair_ptr.*;
-                defer line_iter_pair.deinit();
-                return error.DiffResultNotExpected;
-            }
+                // generate diff
+                var status = try repo.status(allocator);
+                defer status.deinit(allocator);
+                var file_iter = try repo.filePairs(allocator, .{
+                    .work_dir = .{
+                        .conflict_diff_kind = .target,
+                        .status = &status,
+                    },
+                });
+                if (try file_iter.next()) |*line_iter_pair_ptr| {
+                    var line_iter_pair = line_iter_pair_ptr.*;
+                    defer line_iter_pair.deinit();
+                    return error.DiffResultNotExpected;
+                }
 
-            // if we try merging foo again, it does nothing
-            {
-                var merge_again = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "master" } }} } } }, null);
-                defer merge_again.deinit();
-                try std.testing.expect(.nothing == merge_again.result);
-            }
-        } else {
-            try std.testing.expect(.conflict == merge.result);
+                // if we try merging foo again, it does nothing
+                {
+                    var merge_again = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "master" } }} } } }, null);
+                    defer merge_again.deinit();
+                    try std.testing.expect(.nothing == merge_again.result);
+                }
+            },
+            .git => try std.testing.expect(.conflict == merge.result),
         }
     }
 }
@@ -2000,7 +1969,6 @@ fn testMergeConflictDirFile(comptime repo_kind: rp.RepoKind, comptime repo_opts:
 test "merge conflict binary" {
     try testMergeConflictBinary(.git, .{ .is_test = true });
     try testMergeConflictBinary(.xit, .{ .is_test = true });
-    try testMergeConflictBinary(.xit, .{ .is_test = true, .extra = .{ .enable_patches = true } });
 }
 
 /// creates a merge conflict with binary files, asserting that
@@ -2162,7 +2130,7 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind, comptime repo_op
 
 test "merge conflict shuffle" {
     try testMergeConflictShuffle(.git, .{ .is_test = true });
-    try testMergeConflictShuffle(.xit, .{ .is_test = true, .extra = .{ .enable_patches = true } });
+    try testMergeConflictShuffle(.xit, .{ .is_test = true });
 }
 
 /// demonstrates an example of git shuffling lines unexpectedly
@@ -2460,7 +2428,6 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
 test "cherry-pick" {
     try testCherryPick(.git, .{ .is_test = true });
     try testCherryPick(.xit, .{ .is_test = true });
-    try testCherryPick(.xit, .{ .is_test = true, .extra = .{ .enable_patches = true } });
 }
 
 fn testCherryPick(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) !void {
@@ -2547,7 +2514,6 @@ fn testCherryPick(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOp
 test "cherry-pick conflict" {
     try testCherryPickConflict(.git, .{ .is_test = true });
     try testCherryPickConflict(.xit, .{ .is_test = true });
-    try testCherryPickConflict(.xit, .{ .is_test = true, .extra = .{ .enable_patches = true } });
 }
 
 fn testCherryPickConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) !void {
@@ -2695,7 +2661,6 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
 test "log" {
     try testLog(.git, .{ .is_test = true });
     try testLog(.xit, .{ .is_test = true });
-    try testLog(.xit, .{ .is_test = true, .extra = .{ .enable_patches = true } });
 }
 
 fn testLog(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) !void {

@@ -7,7 +7,7 @@ You're looking at xit, a new version control system. It's pronounced like "zit" 
 * combine snapshot-based and patch-based version control
   * merging and cherry-picking uses patches like Darcs and Pijul
   * restoring files and anything sent over the network uses snapshots like git
-  * status: complete (patch-based merging can be enabled with `xit patch on`)
+  * status: complete
   * [read more](docs/patch.md) about snapshots vs patches
 * built-in TUI
   * all functionality will be exposed via the TUI

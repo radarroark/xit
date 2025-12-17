@@ -223,6 +223,9 @@ pub fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
                 }
             }
 
+            var showed_perf_warning = false;
+            const start_time = std.time.timestamp();
+
             while (self.oid_queue.count() > 0) {
                 const oid = self.oid_queue.keys()[0];
                 const oid_hex = std.fmt.bytesToHex(&oid, .lower);
@@ -245,6 +248,16 @@ pub fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
                         const kv_pair = try next_cursor.readKeyValuePair();
                         const child_oid = hash.intToBytes(hash.HashInt(repo_opts.hash), kv_pair.hash);
                         try self.oid_queue.put(allocator, child_oid, {});
+                    }
+                }
+
+                if (repo_opts.ProgressCtx != void) {
+                    if (progress_ctx_maybe) |progress_ctx| {
+                        if (!showed_perf_warning and std.time.timestamp() - start_time >= 5) {
+                            showed_perf_warning = true;
+                            try progress_ctx.run(.{ .child_text = "making patches can take a while." });
+                            try progress_ctx.run(.{ .child_text = "run `xit patch off` to disable it." });
+                        }
                     }
                 }
             }

@@ -49,6 +49,9 @@ const ProgressCtx = struct {
             },
             .complete_one => if (self.node.*) |node| node.completeOne(),
             .complete_total => |complete_total| if (self.node.*) |node| node.setCompletedItems(complete_total.count),
+            .child_text => |text| if (self.node.*) |node| {
+                _ = node.start(text, 0);
+            },
             .end => if (self.node.*) |node| {
                 node.end();
                 self.node.* = null;
@@ -146,10 +149,6 @@ pub fn run(
                         \\
                         \\clone complete!
                         \\
-                        \\to enable patch-based merging:
-                        \\    xit patch on
-                        \\to enable patch-based merging and generate all patches in advance:
-                        \\    xit patch all
                     , .{});
                 }
             },
@@ -236,6 +235,7 @@ pub fn runPrint(
                 \\
                 \\    xit config add user.name foo
                 \\    xit config add user.email foo@bar
+                \\
             , .{});
             return error.HandledError;
         },
@@ -268,6 +268,7 @@ pub fn runPrint(
                 \\a ref you are pushing to contains commits you don't have locally.
                 \\you either need to retrieve them with `xit fetch` and then `xit merge`,
                 \\or if you want to obliterate them like a badass, run this command with `-f`.
+                \\
             , .{});
             return error.HandledError;
         },
@@ -275,6 +276,7 @@ pub fn runPrint(
             try writers.err.print(
                 \\a ref you are pushing to has commits with an incompatible history.
                 \\if you want to obliterate them like a badass, run this command with `-f`.
+                \\
             , .{});
             return error.HandledError;
         },
