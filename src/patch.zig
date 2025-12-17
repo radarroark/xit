@@ -246,7 +246,7 @@ pub fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
             }
 
             var showed_perf_warning = false;
-            const start_time = std.time.timestamp();
+            const start_time = (try std.Io.Clock.Timestamp.now(io, .real)).raw.toSeconds();
 
             while (self.oid_queue.count() > 0) {
                 const oid = self.oid_queue.keys()[0];
@@ -275,10 +275,13 @@ pub fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
 
                 if (repo_opts.ProgressCtx != void) {
                     if (progress_ctx_maybe) |progress_ctx| {
-                        if (!showed_perf_warning and std.time.timestamp() - start_time >= 5) {
-                            showed_perf_warning = true;
-                            try progress_ctx.run(.{ .child_text = "making patches can take a while." });
-                            try progress_ctx.run(.{ .child_text = "run `xit patch off` to disable it." });
+                        if (!showed_perf_warning) {
+                            const current_time = (try std.Io.Clock.Timestamp.now(io, .real)).raw.toSeconds();
+                            if (current_time - start_time >= 5) {
+                                showed_perf_warning = true;
+                                try progress_ctx.run(.{ .child_text = "making patches can take a while." });
+                                try progress_ctx.run(.{ .child_text = "run `xit patch off` to disable it." });
+                            }
                         }
                     }
                 }
