@@ -75,12 +75,6 @@ pub fn RepoOpts(comptime repo_kind: RepoKind) type {
             new_self.hash = hash_kind;
             return new_self;
         }
-
-        pub fn withProgressCtx(self: RepoOpts(repo_kind), ProgressCtx: type) RepoOpts(repo_kind) {
-            var new_self = self;
-            new_self.ProgressCtx = ProgressCtx;
-            return new_self;
-        }
     };
 }
 

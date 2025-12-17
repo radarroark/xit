@@ -128,17 +128,16 @@ pub fn run(
                 , .{});
             },
             .clone => |clone_cmd| {
-                const repo_opts_with_ctx = repo_opts.withProgressCtx(ProgressCtx);
                 const work_path = try std.fs.path.resolve(allocator, &.{ cwd_path, clone_cmd.local_path });
                 defer allocator.free(work_path);
                 var clear_line = false;
                 var progress_node: ?std.Progress.Node = null;
-                var repo = try rp.Repo(repo_kind, repo_opts_with_ctx).clone(
+                var repo = try rp.Repo(repo_kind, repo_opts).clone(
                     allocator,
                     clone_cmd.url,
                     cwd_path,
                     work_path,
-                    .{ .progress_ctx = .{ .writers = writers, .clear_line = &clear_line, .node = &progress_node } },
+                    .{ .progress_ctx = if (repo_opts.ProgressCtx == void) {} else .{ .writers = writers, .clear_line = &clear_line, .node = &progress_node } },
                 );
                 defer repo.deinit(allocator);
 
@@ -156,8 +155,7 @@ pub fn run(
             },
             else => if (.none == repo_opts.hash) {
                 // if no hash was specified, use AnyRepo to detect the hash being used
-                const repo_opts_with_ctx = repo_opts.withProgressCtx(ProgressCtx);
-                var any_repo = try rp.AnyRepo(repo_kind, repo_opts_with_ctx).open(allocator, .{ .path = cwd_path });
+                var any_repo = try rp.AnyRepo(repo_kind, repo_opts).open(allocator, .{ .path = cwd_path });
                 defer any_repo.deinit(allocator);
                 switch (any_repo) {
                     .none => return error.HashKindNotFound,
@@ -167,10 +165,9 @@ pub fn run(
                     },
                 }
             } else {
-                const repo_opts_with_ctx = repo_opts.withProgressCtx(ProgressCtx);
-                var repo = try rp.Repo(repo_kind, repo_opts_with_ctx).open(allocator, .{ .path = cwd_path });
+                var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = cwd_path });
                 defer repo.deinit(allocator);
-                try runCommand(repo_kind, repo_opts_with_ctx, &repo, allocator, cli_cmd, writers);
+                try runCommand(repo_kind, repo_opts, &repo, allocator, cli_cmd, writers);
             },
         },
     }
@@ -565,7 +562,7 @@ fn runCommand(
             var result = try repo.merge(
                 allocator,
                 merge_cmd,
-                .{ .writers = writers, .clear_line = &clear_line, .node = &progress_node },
+                if (repo_opts.ProgressCtx == void) {} else .{ .writers = writers, .clear_line = &clear_line, .node = &progress_node },
             );
             defer result.deinit();
             try printMergeResult(repo_kind, repo_opts, &result, writers);
@@ -623,7 +620,7 @@ fn runCommand(
                 allocator,
                 fetch_cmd.remote_name,
                 .{
-                    .progress_ctx = .{ .writers = writers, .clear_line = &clear_line, .node = &progress_node },
+                    .progress_ctx = if (repo_opts.ProgressCtx == void) {} else .{ .writers = writers, .clear_line = &clear_line, .node = &progress_node },
                     .refspecs = if (refspecs.items.len > 0) refspecs.items else null,
                 },
             );
@@ -636,7 +633,7 @@ fn runCommand(
                 push_cmd.remote_name,
                 push_cmd.refspec,
                 push_cmd.force,
-                .{ .progress_ctx = .{ .writers = writers, .clear_line = &clear_line, .node = &progress_node } },
+                .{ .progress_ctx = if (repo_opts.ProgressCtx == void) {} else .{ .writers = writers, .clear_line = &clear_line, .node = &progress_node } },
             );
         },
         .patch => |patch_cmd| switch (repo_kind) {
@@ -650,7 +647,10 @@ fn runCommand(
                 .all => {
                     var clear_line = false;
                     var progress_node: ?std.Progress.Node = null;
-                    try repo.patchAll(allocator, .{ .writers = writers, .clear_line = &clear_line, .node = &progress_node });
+                    try repo.patchAll(
+                        allocator,
+                        if (repo_opts.ProgressCtx == void) {} else .{ .writers = writers, .clear_line = &clear_line, .node = &progress_node },
+                    );
                 },
             },
         },
@@ -744,7 +744,7 @@ pub fn main() !u8 {
     const cwd_path = try std.process.getCwdAlloc(allocator);
     defer allocator.free(cwd_path);
 
-    runPrint(.xit, .{}, allocator, args.items, cwd_path, writers) catch |err| switch (err) {
+    runPrint(.xit, .{ .ProgressCtx = ProgressCtx }, allocator, args.items, cwd_path, writers) catch |err| switch (err) {
         error.HandledError => return 1,
         else => |e| return e,
     };
