@@ -1141,6 +1141,7 @@ fn testMergeConflictSameFileAutoresolved(comptime repo_kind: rp.RepoKind, compti
 }
 
 fn testMergeConflictSameFileAutoresolvedNeighboringLines(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) !void {
+    const io = std.testing.io;
     const allocator = std.testing.allocator;
     const temp_dir_name = "temp-test-repo-merge-conflict-same-file-autoresolved-neighboring-lines";
 
@@ -1162,11 +1163,11 @@ fn testMergeConflictSameFileAutoresolvedNeighboringLines(comptime repo_kind: rp.
     defer allocator.free(work_path);
 
     {
-        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
+        var repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = work_path });
         defer repo.deinit(allocator);
     }
 
-    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
+    var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = work_path });
     defer repo.deinit(allocator);
 
     // A --- B --- D [master]
@@ -1174,39 +1175,39 @@ fn testMergeConflictSameFileAutoresolvedNeighboringLines(comptime repo_kind: rp.
     //   \       /
     //    `---- C [foo]
 
-    try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt",
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "f.txt",
         \\a
         \\b
         \\c
         \\d
     );
-    _ = try repo.commit(allocator, .{ .message = "a" });
-    try repo.addBranch(.{ .name = "foo" });
-    try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt",
+    _ = try repo.commit(io, allocator, .{ .message = "a" });
+    try repo.addBranch(io, .{ .name = "foo" });
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "f.txt",
         \\a
         \\b
         \\e
         \\d
     );
-    const commit_b = try repo.commit(allocator, .{ .message = "b" });
+    const commit_b = try repo.commit(io, allocator, .{ .message = "b" });
     {
-        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
+        var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
         defer result.deinit();
     }
-    try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt",
+    try addFile(repo_kind, repo_opts, &repo, io, allocator, "f.txt",
         \\a
         \\f
         \\c
         \\d
     );
-    _ = try repo.commit(allocator, .{ .message = "c" });
+    _ = try repo.commit(io, allocator, .{ .message = "c" });
     {
-        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
+        var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
         defer result.deinit();
     }
 
     {
-        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
+        var merge = try repo.merge(io, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
         defer merge.deinit();
 
         // the conflict is only autoresolved when patch-based merging is enabled
@@ -1215,7 +1216,7 @@ fn testMergeConflictSameFileAutoresolvedNeighboringLines(comptime repo_kind: rp.
                 try std.testing.expect(.success == merge.result);
 
                 // verify f.txt has been autoresolved
-                const f_txt_content = try repo.core.work_dir.readFileAlloc(allocator, "f.txt", 1024);
+                const f_txt_content = try repo.core.work_dir.readFileAlloc("f.txt", allocator, .limited(1024));
                 defer allocator.free(f_txt_content);
                 try std.testing.expectEqualStrings(
                     \\a
@@ -1227,9 +1228,9 @@ fn testMergeConflictSameFileAutoresolvedNeighboringLines(comptime repo_kind: rp.
                 );
 
                 // generate diff
-                var status = try repo.status(allocator);
+                var status = try repo.status(io, allocator);
                 defer status.deinit(allocator);
-                var file_iter = try repo.filePairs(allocator, .{
+                var file_iter = try repo.filePairs(io, allocator, .{
                     .work_dir = .{
                         .conflict_diff_kind = .target,
                         .status = &status,
@@ -1243,20 +1244,20 @@ fn testMergeConflictSameFileAutoresolvedNeighboringLines(comptime repo_kind: rp.
 
                 // if we try merging foo again, it does nothing
                 {
-                    var merge_again = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
+                    var merge_again = try repo.merge(io, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
                     defer merge_again.deinit();
                     try std.testing.expect(.nothing == merge_again.result);
                 }
 
                 // undo merge
-                var result = try repo.resetDir(allocator, .{ .target = .{ .oid = &commit_b }, .force = true });
+                var result = try repo.resetDir(io, allocator, .{ .target = .{ .oid = &commit_b }, .force = true });
                 defer result.deinit();
             },
             .git => {
                 try std.testing.expect(.conflict == merge.result);
 
                 // abort merge
-                var result = try repo.resetDir(allocator, .{ .target = null, .force = true });
+                var result = try repo.resetDir(io, allocator, .{ .target = null, .force = true });
                 defer result.deinit();
             },
         }
@@ -1265,12 +1266,12 @@ fn testMergeConflictSameFileAutoresolvedNeighboringLines(comptime repo_kind: rp.
     // now try merging from the other direction
 
     {
-        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
+        var result = try repo.switchDir(io, allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
         defer result.deinit();
     }
 
     {
-        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "master" } }} } } }, null);
+        var merge = try repo.merge(io, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "master" } }} } } }, null);
         defer merge.deinit();
 
         // the conflict is only autoresolved when patch-based merging is enabled
@@ -1279,7 +1280,7 @@ fn testMergeConflictSameFileAutoresolvedNeighboringLines(comptime repo_kind: rp.
                 try std.testing.expect(.success == merge.result);
 
                 // verify f.txt has been autoresolved
-                const f_txt_content = try repo.core.work_dir.readFileAlloc(allocator, "f.txt", 1024);
+                const f_txt_content = try repo.core.work_dir.readFileAlloc("f.txt", allocator, .limited(1024));
                 defer allocator.free(f_txt_content);
                 try std.testing.expectEqualStrings(
                     \\a
@@ -1291,9 +1292,9 @@ fn testMergeConflictSameFileAutoresolvedNeighboringLines(comptime repo_kind: rp.
                 );
 
                 // generate diff
-                var status = try repo.status(allocator);
+                var status = try repo.status(io, allocator);
                 defer status.deinit(allocator);
-                var file_iter = try repo.filePairs(allocator, .{
+                var file_iter = try repo.filePairs(io, allocator, .{
                     .work_dir = .{
                         .conflict_diff_kind = .target,
                         .status = &status,
@@ -1307,7 +1308,7 @@ fn testMergeConflictSameFileAutoresolvedNeighboringLines(comptime repo_kind: rp.
 
                 // if we try merging foo again, it does nothing
                 {
-                    var merge_again = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "master" } }} } } }, null);
+                    var merge_again = try repo.merge(io, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "master" } }} } } }, null);
                     defer merge_again.deinit();
                     try std.testing.expect(.nothing == merge_again.result);
                 }
