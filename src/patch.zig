@@ -337,11 +337,25 @@ pub fn applyPatch(
 
         switch (try std.meta.intToEnum(ChangeKind, change_kind)) {
             .new_edge => {
-                const line_id_int = try change_list_reader.interface.takeInt(LineId(repo_opts.hash).Int, .big);
-                const parent_line_id_int = try change_list_reader.interface.takeInt(LineId(repo_opts.hash).Int, .big);
+                var line_id_int = try change_list_reader.interface.takeInt(LineId(repo_opts.hash).Int, .big);
+                var parent_line_id_int = try change_list_reader.interface.takeInt(LineId(repo_opts.hash).Int, .big);
 
-                const line_id_bytes = hash.intToBytes(LineId(repo_opts.hash).Int, line_id_int);
-                const line_id_hash = hash.hashInt(repo_opts.hash, &line_id_bytes);
+                var line_id_bytes = hash.intToBytes(LineId(repo_opts.hash).Int, line_id_int);
+                var line_id_hash = hash.hashInt(repo_opts.hash, &line_id_bytes);
+
+                // if child is a ghost line, keep going up the chain until we find a live parent
+                while (!std.mem.eql(u8, &LineId(repo_opts.hash).first_bytes, &line_id_bytes) and null == try live_parent_to_children.getCursor(line_id_hash)) {
+                    if (try child_to_parent.getCursor(line_id_hash)) |next_parent_cursor| {
+                        var next_parent_line_id_bytes = [_]u8{0} ** LineId(repo_opts.hash).byte_size;
+                        const next_parent_line_id_slice = try next_parent_cursor.readBytes(&next_parent_line_id_bytes);
+                        @memcpy(&line_id_bytes, next_parent_line_id_slice);
+
+                        line_id_int = std.mem.readInt(LineId(repo_opts.hash).Int, &line_id_bytes, .big);
+                        line_id_hash = hash.hashInt(repo_opts.hash, &line_id_bytes);
+                    } else {
+                        break;
+                    }
+                }
 
                 // if child has an existing parent, remove it
                 if (try child_to_parent.getCursor(line_id_hash)) |*existing_parent_cursor| {
@@ -371,7 +385,9 @@ pub fn applyPatch(
                         var next_parent_line_id_bytes = [_]u8{0} ** LineId(repo_opts.hash).byte_size;
                         const next_parent_line_id_slice = try next_parent_cursor.readBytes(&next_parent_line_id_bytes);
                         @memcpy(&parent_line_id_bytes, next_parent_line_id_slice);
-                        parent_line_id_hash = hash.hashInt(repo_opts.hash, next_parent_line_id_slice);
+
+                        parent_line_id_int = std.mem.readInt(LineId(repo_opts.hash).Int, &next_parent_line_id_bytes, .big);
+                        parent_line_id_hash = hash.hashInt(repo_opts.hash, &next_parent_line_id_bytes);
                     }
 
                     try parent_to_added_child.put(parent_line_id_hash, line_id_bytes);

@@ -461,6 +461,16 @@ test "merge conflict" {
         .enable_patches = true,
     } });
 
+    // same file conflict on neighboring lines that is autoresolved only with patch-based merging
+    try testMergeConflictSameFileAutoresolvedNeighboringLines(.git, .{ .read_size = 1, .is_test = true });
+    try testMergeConflictSameFileAutoresolvedNeighboringLines(.xit, .{ .read_size = 1, .is_test = true, .extra = .{
+        .chunk_opts = .{ .min_size = 1, .avg_size = 2, .max_size = 4, .normalization = .level1 },
+    } });
+    try testMergeConflictSameFileAutoresolvedNeighboringLines(.xit, .{ .is_test = true, .extra = .{
+        .chunk_opts = .{ .min_size = 1, .avg_size = 2, .max_size = 4, .normalization = .level1 },
+        .enable_patches = true,
+    } });
+
     // delete/modify conflict (target deletes, source modifies)
     try testMergeConflictModifyDelete(.git, .{ .read_size = 1, .is_test = true });
     try testMergeConflictModifyDelete(.xit, .{ .read_size = 1, .is_test = true, .extra = .{
@@ -1148,6 +1158,179 @@ fn testMergeConflictSameFileAutoresolved(comptime repo_kind: rp.RepoKind, compti
         var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
         defer merge.deinit();
         try std.testing.expect(.nothing == merge.result);
+    }
+}
+
+fn testMergeConflictSameFileAutoresolvedNeighboringLines(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) !void {
+    const allocator = std.testing.allocator;
+    const temp_dir_name = "temp-test-repo-merge-conflict-same-file-autoresolved-neighboring-lines";
+
+    // create the temp dir
+    const cwd = std.fs.cwd();
+    var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
+    if (temp_dir_or_err) |*temp_dir| {
+        temp_dir.close();
+        try cwd.deleteTree(temp_dir_name);
+    } else |_| {}
+    var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
+    defer cwd.deleteTree(temp_dir_name) catch {};
+    defer temp_dir.close();
+
+    const cwd_path = try std.process.getCwdAlloc(allocator);
+    defer allocator.free(cwd_path);
+
+    const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "repo" });
+    defer allocator.free(work_path);
+
+    {
+        var repo = try rp.Repo(repo_kind, repo_opts).init(allocator, .{ .path = work_path });
+        defer repo.deinit(allocator);
+    }
+
+    var repo = try rp.Repo(repo_kind, repo_opts).open(allocator, .{ .path = work_path });
+    defer repo.deinit(allocator);
+
+    // A --- B --- D [master]
+    //  \         /
+    //   \       /
+    //    `---- C [foo]
+
+    try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt",
+        \\a
+        \\b
+        \\c
+        \\d
+    );
+    _ = try repo.commit(allocator, .{ .message = "a" });
+    try repo.addBranch(.{ .name = "foo" });
+    try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt",
+        \\a
+        \\b
+        \\e
+        \\d
+    );
+    const commit_b = try repo.commit(allocator, .{ .message = "b" });
+    {
+        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
+        defer result.deinit();
+    }
+    try addFile(repo_kind, repo_opts, &repo, allocator, "f.txt",
+        \\a
+        \\f
+        \\c
+        \\d
+    );
+    _ = try repo.commit(allocator, .{ .message = "c" });
+    {
+        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "master" } } });
+        defer result.deinit();
+    }
+
+    {
+        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
+        defer merge.deinit();
+
+        // the conflict is only autoresolved when patch-based merging is enabled
+        if (.xit == repo_kind and repo_opts.extra.enable_patches) {
+            try std.testing.expect(.success == merge.result);
+
+            // verify f.txt has been autoresolved
+            const f_txt_content = try repo.core.work_dir.readFileAlloc(allocator, "f.txt", 1024);
+            defer allocator.free(f_txt_content);
+            try std.testing.expectEqualStrings(
+                \\a
+                \\f
+                \\e
+                \\d
+            ,
+                f_txt_content,
+            );
+
+            // generate diff
+            var status = try repo.status(allocator);
+            defer status.deinit(allocator);
+            var file_iter = try repo.filePairs(allocator, .{
+                .work_dir = .{
+                    .conflict_diff_kind = .target,
+                    .status = &status,
+                },
+            });
+            if (try file_iter.next()) |*line_iter_pair_ptr| {
+                var line_iter_pair = line_iter_pair_ptr.*;
+                defer line_iter_pair.deinit();
+                return error.DiffResultNotExpected;
+            }
+
+            // if we try merging foo again, it does nothing
+            {
+                var merge_again = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
+                defer merge_again.deinit();
+                try std.testing.expect(.nothing == merge_again.result);
+            }
+
+            // undo merge
+            var result = try repo.resetDir(allocator, .{ .target = .{ .oid = &commit_b }, .force = true });
+            defer result.deinit();
+        } else {
+            try std.testing.expect(.conflict == merge.result);
+
+            // abort merge
+            var result = try repo.resetDir(allocator, .{ .target = null, .force = true });
+            defer result.deinit();
+        }
+    }
+
+    // now try merging from the other direction
+
+    {
+        var result = try repo.switchDir(allocator, .{ .target = .{ .ref = .{ .kind = .head, .name = "foo" } } });
+        defer result.deinit();
+    }
+
+    {
+        var merge = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "master" } }} } } }, null);
+        defer merge.deinit();
+
+        // the conflict is only autoresolved when patch-based merging is enabled
+        if (.xit == repo_kind and repo_opts.extra.enable_patches) {
+            try std.testing.expect(.success == merge.result);
+
+            // verify f.txt has been autoresolved
+            const f_txt_content = try repo.core.work_dir.readFileAlloc(allocator, "f.txt", 1024);
+            defer allocator.free(f_txt_content);
+            try std.testing.expectEqualStrings(
+                \\a
+                \\f
+                \\e
+                \\d
+            ,
+                f_txt_content,
+            );
+
+            // generate diff
+            var status = try repo.status(allocator);
+            defer status.deinit(allocator);
+            var file_iter = try repo.filePairs(allocator, .{
+                .work_dir = .{
+                    .conflict_diff_kind = .target,
+                    .status = &status,
+                },
+            });
+            if (try file_iter.next()) |*line_iter_pair_ptr| {
+                var line_iter_pair = line_iter_pair_ptr.*;
+                defer line_iter_pair.deinit();
+                return error.DiffResultNotExpected;
+            }
+
+            // if we try merging foo again, it does nothing
+            {
+                var merge_again = try repo.merge(allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "master" } }} } } }, null);
+                defer merge_again.deinit();
+                try std.testing.expect(.nothing == merge_again.result);
+            }
+        } else {
+            try std.testing.expect(.conflict == merge.result);
+        }
     }
 }
 
