@@ -149,9 +149,8 @@ pub const HttpStream = struct {
         try req.sendBodiless();
 
         var response = try req.receiveHead(&.{});
-        const head = response.head;
+        try self.handleResponse(response.head, true);
         const out_len = try readAny(response.reader(&.{}), buffer) orelse return error.UnexpectedEndOfStream;
-        try self.handleResponse(head, true);
 
         self.wire_state.read_request = req;
 
@@ -202,9 +201,8 @@ pub const HttpStream = struct {
             try body_writer.end();
 
             var response = try req.receiveHead(&.{});
-            const head = response.head;
+            try self.handleResponse(response.head, false);
             reader = response.reader(&.{});
-            try self.handleResponse(head, false);
 
             self.wire_state.sent_write_request = true;
         }
