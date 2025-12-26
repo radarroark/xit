@@ -314,7 +314,8 @@ pub fn writeChunks(
 
     // get a writer to the value slot
     var chunk_info_cursor = try blob_id_to_chunk_info.putCursor(object_hash);
-    var writer = try chunk_info_cursor.writer();
+    var write_buffer: [repo_opts.buffer_size]u8 = undefined;
+    var writer = try chunk_info_cursor.writer(&write_buffer);
 
     // make the .xit/chunks dir
     var chunks_dir = try state.core.repo_dir.makeOpenPath("chunks", .{});
@@ -529,7 +530,7 @@ pub fn ChunkObjectReader(comptime repo_opts: rp.RepoOpts(.xit)) type {
 
             // object size
             const object_size = blk: {
-                var read_buffer: [repo_opts.extra.read_buffer_size]u8 = undefined;
+                var read_buffer: [repo_opts.buffer_size]u8 = undefined;
                 var reader = try chunk_info_kv_pair.value_cursor.reader(&read_buffer);
                 if (reader.size == 0) {
                     break :blk 0;
@@ -540,7 +541,7 @@ pub fn ChunkObjectReader(comptime repo_opts: rp.RepoOpts(.xit)) type {
                 }
             };
 
-            const read_buffer = try allocator.alloc(u8, repo_opts.extra.read_buffer_size);
+            const read_buffer = try allocator.alloc(u8, repo_opts.buffer_size);
             errdefer allocator.free(read_buffer);
 
             // put cursor on the heap so the pointer is stable (the reader uses it internally)

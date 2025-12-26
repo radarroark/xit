@@ -67,8 +67,6 @@ pub fn RepoOpts(comptime repo_kind: RepoKind) type {
                     .max_size = 8192,
                     .normalization = .level1,
                 },
-                read_buffer_size: usize = 2048,
-                write_buffer_size: usize = 2048,
             },
         };
 
@@ -112,7 +110,6 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                 db_file: std.fs.File,
                 db: DB,
                 read_buffer: []u8,
-                write_buffer: []u8,
 
                 /// used by read-only fns to get a moment without starting a transaction
                 pub fn latestMoment(self: *@This()) !DB.HashMap(.read_only) {
@@ -244,11 +241,8 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     const db_file = try repo_dir.createFile("db", .{ .exclusive = true, .lock = .exclusive, .read = true });
                     errdefer db_file.close();
 
-                    const read_buffer = try allocator.alloc(u8, repo_opts.extra.read_buffer_size);
+                    const read_buffer = try allocator.alloc(u8, repo_opts.buffer_size);
                     errdefer allocator.free(read_buffer);
-
-                    const write_buffer = try allocator.alloc(u8, repo_opts.extra.write_buffer_size);
-                    errdefer allocator.free(write_buffer);
 
                     // make the db
                     var self = Repo(repo_kind, repo_opts){
@@ -262,11 +256,9 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             .db = try DB.init(.{
                                 .file = db_file,
                                 .read_buffer = read_buffer,
-                                .write_buffer = write_buffer,
                                 .hash_id = .{ .id = hash.hashId(repo_opts.hash) },
                             }),
                             .read_buffer = read_buffer,
-                            .write_buffer = write_buffer,
                         },
                     };
 
@@ -346,11 +338,8 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     };
                     errdefer db_file.close();
 
-                    const read_buffer = try allocator.alloc(u8, repo_opts.extra.read_buffer_size);
+                    const read_buffer = try allocator.alloc(u8, repo_opts.buffer_size);
                     errdefer allocator.free(read_buffer);
-
-                    const write_buffer = try allocator.alloc(u8, repo_opts.extra.write_buffer_size);
-                    errdefer allocator.free(write_buffer);
 
                     return .{
                         .core = .{
@@ -367,7 +356,6 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                                     const db = try DB.init(.{
                                         .file = db_file,
                                         .read_buffer = read_buffer,
-                                        .write_buffer = write_buffer,
                                         .hash_id = .{ .id = hash_id },
                                     });
                                     if (db.header.hash_id.id != hash_id) return error.UnexpectedHashKind;
@@ -375,7 +363,6 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                                 },
                             },
                             .read_buffer = read_buffer,
-                            .write_buffer = write_buffer,
                         },
                     };
                 },
@@ -399,7 +386,6 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     self.core.repo_dir.close();
                     self.core.db_file.close();
                     allocator.free(self.core.read_buffer);
-                    allocator.free(self.core.write_buffer);
                 },
             }
         }
