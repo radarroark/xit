@@ -511,6 +511,7 @@ pub fn ChunkObjectReader(comptime repo_opts: rp.RepoOpts(.xit)) type {
         repo_dir: std.fs.Dir,
         cursor: *rp.Repo(.xit, repo_opts).DB.Cursor(.read_only),
         chunk_info_reader: rp.Repo(.xit, repo_opts).DB.Cursor(.read_only).Reader,
+        read_buffer: []u8,
         position: u64,
         header: obj.ObjectHeader,
 
@@ -528,17 +529,19 @@ pub fn ChunkObjectReader(comptime repo_opts: rp.RepoOpts(.xit)) type {
 
             // object size
             const object_size = blk: {
-                var reader = try chunk_info_kv_pair.value_cursor.reader();
+                var read_buffer: [repo_opts.extra.read_buffer_size]u8 = undefined;
+                var reader = try chunk_info_kv_pair.value_cursor.reader(&read_buffer);
                 if (reader.size == 0) {
                     break :blk 0;
                 } else {
                     // the last 8 bytes in the chunk info contain the object size
                     try reader.seekTo(reader.size - @sizeOf(u64));
-                    const size = try reader.interface.takeInt(u64, .big);
-                    try reader.seekTo(0);
-                    break :blk size;
+                    break :blk try reader.interface.takeInt(u64, .big);
                 }
             };
+
+            const read_buffer = try allocator.alloc(u8, repo_opts.extra.read_buffer_size);
+            errdefer allocator.free(read_buffer);
 
             // put cursor on the heap so the pointer is stable (the reader uses it internally)
             const chunk_info_ptr = try allocator.create(rp.Repo(.xit, repo_opts).DB.Cursor(.read_only));
@@ -548,7 +551,8 @@ pub fn ChunkObjectReader(comptime repo_opts: rp.RepoOpts(.xit)) type {
             return .{
                 .repo_dir = state.core.repo_dir,
                 .cursor = chunk_info_ptr,
-                .chunk_info_reader = try chunk_info_ptr.reader(),
+                .chunk_info_reader = try chunk_info_ptr.reader(read_buffer),
+                .read_buffer = read_buffer,
                 .position = 0,
                 .header = .{
                     .kind = try obj.ObjectKind.init(object_kind_name),
@@ -559,6 +563,7 @@ pub fn ChunkObjectReader(comptime repo_opts: rp.RepoOpts(.xit)) type {
 
         pub fn deinit(self: *ChunkObjectReader(repo_opts), allocator: std.mem.Allocator) void {
             allocator.destroy(self.cursor);
+            allocator.free(self.read_buffer);
         }
 
         pub fn read(self: *ChunkObjectReader(repo_opts), buf: []u8) !usize {
