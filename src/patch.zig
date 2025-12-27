@@ -121,7 +121,6 @@ pub fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
         repo_dir: std.fs.Dir,
         db_file: std.fs.File,
         db: *DB,
-        read_buffer: []u8,
         parent_to_children: DB.HashMap(.read_write),
         oid_queue: std.AutoArrayHashMapUnmanaged([hash.byteLen(repo_opts.hash)]u8, void),
         commit_count: usize,
@@ -133,12 +132,9 @@ pub fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
                 state.core.repo_dir.deleteFile(db_name) catch {};
             }
 
-            const read_buffer = try allocator.alloc(u8, repo_opts.buffer_size);
-            errdefer allocator.free(read_buffer);
-
             const db_ptr = try allocator.create(DB);
             errdefer allocator.destroy(db_ptr);
-            db_ptr.* = try DB.init(.{ .file = db_file, .read_buffer = read_buffer });
+            db_ptr.* = try DB.init(.{ .file = db_file });
 
             const map = try DB.HashMap(.read_write).init(db_ptr.rootCursor());
 
@@ -149,7 +145,6 @@ pub fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
                 .repo_dir = state.core.repo_dir,
                 .db_file = db_file,
                 .db = db_ptr,
-                .read_buffer = read_buffer,
                 .parent_to_children = parent_to_children,
                 .oid_queue = std.AutoArrayHashMapUnmanaged([hash.byteLen(repo_opts.hash)]u8, void){},
                 .commit_count = 0,
@@ -161,7 +156,6 @@ pub fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
             self.repo_dir.deleteFile(db_name) catch {};
             allocator.destroy(self.db);
             self.oid_queue.deinit(allocator);
-            allocator.free(self.read_buffer);
         }
 
         pub fn add(

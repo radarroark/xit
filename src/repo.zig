@@ -109,7 +109,6 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                 repo_dir: std.fs.Dir,
                 db_file: std.fs.File,
                 db: DB,
-                read_buffer: []u8,
 
                 /// used by read-only fns to get a moment without starting a transaction
                 pub fn latestMoment(self: *@This()) !DB.HashMap(.read_only) {
@@ -241,9 +240,6 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     const db_file = try repo_dir.createFile("db", .{ .exclusive = true, .lock = .exclusive, .read = true });
                     errdefer db_file.close();
 
-                    const read_buffer = try allocator.alloc(u8, repo_opts.buffer_size);
-                    errdefer allocator.free(read_buffer);
-
                     // make the db
                     var self = Repo(repo_kind, repo_opts){
                         .core = .{
@@ -255,10 +251,8 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             .db_file = db_file,
                             .db = try DB.init(.{
                                 .file = db_file,
-                                .read_buffer = read_buffer,
                                 .hash_id = .{ .id = hash.hashId(repo_opts.hash) },
                             }),
-                            .read_buffer = read_buffer,
                         },
                     };
 
@@ -338,9 +332,6 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     };
                     errdefer db_file.close();
 
-                    const read_buffer = try allocator.alloc(u8, repo_opts.buffer_size);
-                    errdefer allocator.free(read_buffer);
-
                     return .{
                         .core = .{
                             .cwd_path = cwd_path_resolved,
@@ -355,14 +346,12 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                                     const hash_id = hash.hashId(repo_opts.hash);
                                     const db = try DB.init(.{
                                         .file = db_file,
-                                        .read_buffer = read_buffer,
                                         .hash_id = .{ .id = hash_id },
                                     });
                                     if (db.header.hash_id.id != hash_id) return error.UnexpectedHashKind;
                                     break :blk db;
                                 },
                             },
-                            .read_buffer = read_buffer,
                         },
                     };
                 },
@@ -385,7 +374,6 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     self.core.work_dir.close();
                     self.core.repo_dir.close();
                     self.core.db_file.close();
-                    allocator.free(self.core.read_buffer);
                 },
             }
         }
