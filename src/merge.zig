@@ -697,7 +697,8 @@ fn writeBlobWithPatches(
             offset_list_cursor: *rp.Repo(.xit, repo_opts).DB.Cursor(.read_only),
             line_id: patch.LineId(repo_opts.hash),
         ) ![]const u8 {
-            var offset_list_reader = try offset_list_cursor.reader();
+            var read_buffer: [repo_opts.buffer_size]u8 = undefined;
+            var offset_list_reader = try offset_list_cursor.reader(&read_buffer);
 
             const hash_size = comptime hash.byteLen(repo_opts.hash);
             const offset_size = @bitSizeOf(u64) / 8;

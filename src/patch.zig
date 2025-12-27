@@ -132,9 +132,19 @@ pub fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
                 state.core.repo_dir.deleteFile(db_name) catch {};
             }
 
+            const buffer_ptr = try allocator.create(std.ArrayList(u8));
+            errdefer allocator.destroy(buffer_ptr);
+
+            buffer_ptr.* = std.ArrayList(u8){};
+            errdefer buffer_ptr.deinit(allocator);
+
             const db_ptr = try allocator.create(DB);
             errdefer allocator.destroy(db_ptr);
-            db_ptr.* = try DB.init(.{ .file = db_file });
+            db_ptr.* = try DB.init(.{
+                .buffer = buffer_ptr,
+                .allocator = allocator,
+                .file = db_file,
+            });
 
             const map = try DB.HashMap(.read_write).init(db_ptr.rootCursor());
 
@@ -153,6 +163,8 @@ pub fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
 
         pub fn deinit(self: *PatchWriter(repo_opts), allocator: std.mem.Allocator) void {
             self.db_file.close();
+            self.db.core.memory.buffer.deinit(allocator);
+            allocator.destroy(self.db.core.memory.buffer);
             self.repo_dir.deleteFile(db_name) catch {};
             allocator.destroy(self.db);
             self.oid_queue.deinit(allocator);
@@ -341,7 +353,8 @@ pub fn applyPatch(
     var parent_to_added_child = std.AutoArrayHashMap(hash.HashInt(repo_opts.hash), [LineId(repo_opts.hash).byte_size]u8).init(allocator);
     defer parent_to_added_child.deinit();
 
-    var change_list_reader = try change_list_cursor.reader();
+    var read_buffer: [repo_opts.buffer_size]u8 = undefined;
+    var change_list_reader = try change_list_cursor.reader(&read_buffer);
     while (true) {
         const change_kind = change_list_reader.interface.takeInt(u8, .big) catch |err| switch (err) {
             error.EndOfStream => break,
@@ -455,7 +468,8 @@ pub fn applyPatch(
     const path_to_line_id_list = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(path_to_line_id_list_cursor);
     try path_to_line_id_list.putKey(path_hash, .{ .slot = path_slot });
     var line_id_list_cursor = try path_to_line_id_list.putCursor(path_hash);
-    var line_id_list_writer = try line_id_list_cursor.writer();
+    var line_id_list_write_buffer: [repo_opts.buffer_size]u8 = undefined;
+    var line_id_list_writer = try line_id_list_cursor.writer(&line_id_list_write_buffer);
 
     var current_line_id_int = LineId(repo_opts.hash).first_int;
 
@@ -477,7 +491,8 @@ pub fn applyPatch(
                 // append child to the line list
                 else {
                     var kv_pair_cursor = try child_cursor.readKeyValuePair();
-                    var key_reader = try kv_pair_cursor.key_cursor.reader();
+                    var key_read_buffer: [repo_opts.buffer_size]u8 = undefined;
+                    var key_reader = try kv_pair_cursor.key_cursor.reader(&key_read_buffer);
                     const child_bytes = try key_reader.interface.takeArray(LineId(repo_opts.hash).byte_size);
 
                     const line_id_position = kv_pair_cursor.key_cursor.slot().value;
@@ -544,13 +559,15 @@ fn writePatch(
 
     try createPatchEntries(repo_opts, moment, snapshot, allocator, &arena, &myers_diff_iter, path_hash, patch_hash, &patch_entries, &patch_offsets);
 
-    var change_list_writer = try change_list_cursor.writer();
+    var change_list_write_buffer: [repo_opts.buffer_size]u8 = undefined;
+    var change_list_writer = try change_list_cursor.writer(&change_list_write_buffer);
     for (patch_entries.items) |patch_entry| {
         try change_list_writer.interface.writeAll(patch_entry);
     }
     try change_list_writer.finish();
 
-    var offset_list_writer = try offset_list_cursor.writer();
+    var offset_list_write_buffer: [repo_opts.buffer_size]u8 = undefined;
+    var offset_list_writer = try offset_list_cursor.writer(&offset_list_write_buffer);
     try offset_list_writer.interface.writeAll(new_oid);
     for (patch_offsets.items) |patch_offset| {
         try offset_list_writer.interface.writeInt(u64, patch_offset, .big);
@@ -632,7 +649,8 @@ fn createPatchEntries(
         switch (edit) {
             .eql => |eql| {
                 var line_id_list_cursor = line_id_list_cursor_maybe orelse return error.LineListNotFound;
-                var line_id_list_reader = try line_id_list_cursor.reader();
+                var line_id_list_read_buffer: [repo_opts.buffer_size]u8 = undefined;
+                var line_id_list_reader = try line_id_list_cursor.reader(&line_id_list_read_buffer);
                 try line_id_list_reader.seekTo(eql.old_line.num * @sizeOf(u64));
 
                 const line_id_position = try line_id_list_reader.interface.takeInt(u64, .big);
@@ -644,7 +662,8 @@ fn createPatchEntries(
                     .db = moment.cursor.db,
                 };
 
-                var line_id_reader = try line_id_cursor.reader();
+                var line_id_read_buffer: [repo_opts.buffer_size]u8 = undefined;
+                var line_id_reader = try line_id_cursor.reader(&line_id_read_buffer);
                 const line_id_bytes = try line_id_reader.interface.takeArray(LineId(repo_opts.hash).byte_size);
 
                 if (last_line.origin == .new) {
@@ -683,7 +702,8 @@ fn createPatchEntries(
                 try buffer.writer.writeInt(u8, @intFromEnum(ChangeKind.delete_line), .big);
 
                 var line_id_list_cursor = line_id_list_cursor_maybe orelse return error.LineListNotFound;
-                var line_id_list_reader = try line_id_list_cursor.reader();
+                var line_id_list_read_buffer: [repo_opts.buffer_size]u8 = undefined;
+                var line_id_list_reader = try line_id_list_cursor.reader(&line_id_list_read_buffer);
                 try line_id_list_reader.seekTo(del.old_line.num * @sizeOf(u64));
 
                 const line_id_position = try line_id_list_reader.interface.takeInt(u64, .big);
@@ -695,7 +715,8 @@ fn createPatchEntries(
                     .db = moment.cursor.db,
                 };
 
-                var line_id_reader = try line_id_cursor.reader();
+                var line_id_read_buffer: [repo_opts.buffer_size]u8 = undefined;
+                var line_id_reader = try line_id_cursor.reader(&line_id_read_buffer);
                 const line_id_bytes = try line_id_reader.interface.takeArray(LineId(repo_opts.hash).byte_size);
 
                 try buffer.writer.writeAll(line_id_bytes);

@@ -127,7 +127,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             .git => void,
             .xit => switch (repo_opts.hash) {
                 .none => void,
-                else => @import("xitdb").Database(.file, hash.HashInt(repo_opts.hash)),
+                else => @import("xitdb").Database(.buffered_file, hash.HashInt(repo_opts.hash)),
             },
         };
 
@@ -240,6 +240,12 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     const db_file = try repo_dir.createFile("db", .{ .exclusive = true, .lock = .exclusive, .read = true });
                     errdefer db_file.close();
 
+                    const buffer_ptr = try allocator.create(std.ArrayList(u8));
+                    errdefer allocator.destroy(buffer_ptr);
+
+                    buffer_ptr.* = std.ArrayList(u8){};
+                    errdefer buffer_ptr.deinit(allocator);
+
                     // make the db
                     var self = Repo(repo_kind, repo_opts){
                         .core = .{
@@ -249,7 +255,12 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             .work_dir = work_dir,
                             .repo_dir = repo_dir,
                             .db_file = db_file,
-                            .db = try DB.init(.{ .file = db_file, .hash_id = .{ .id = hash.hashId(repo_opts.hash) } }),
+                            .db = try DB.init(.{
+                                .buffer = buffer_ptr,
+                                .allocator = allocator,
+                                .file = db_file,
+                                .hash_id = .{ .id = hash.hashId(repo_opts.hash) },
+                            }),
                         },
                     };
 
@@ -340,8 +351,19 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             .db = switch (repo_opts.hash) {
                                 .none => {},
                                 else => blk: {
+                                    const buffer_ptr = try allocator.create(std.ArrayList(u8));
+                                    errdefer allocator.destroy(buffer_ptr);
+
+                                    buffer_ptr.* = std.ArrayList(u8){};
+                                    errdefer buffer_ptr.deinit(allocator);
+
                                     const hash_id = hash.hashId(repo_opts.hash);
-                                    const db = try DB.init(.{ .file = db_file, .hash_id = .{ .id = hash_id } });
+                                    const db = try DB.init(.{
+                                        .buffer = buffer_ptr,
+                                        .allocator = allocator,
+                                        .file = db_file,
+                                        .hash_id = .{ .id = hash_id },
+                                    });
                                     if (db.header.hash_id.id != hash_id) return error.UnexpectedHashKind;
                                     break :blk db;
                                 },
@@ -368,6 +390,10 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     self.core.work_dir.close();
                     self.core.repo_dir.close();
                     self.core.db_file.close();
+                    if (DB != void) {
+                        self.core.db.core.memory.buffer.deinit(allocator);
+                        allocator.destroy(self.core.db.core.memory.buffer);
+                    }
                 },
             }
         }
