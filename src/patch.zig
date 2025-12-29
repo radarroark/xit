@@ -132,19 +132,15 @@ pub fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
                 state.core.repo_dir.deleteFile(db_name) catch {};
             }
 
-            const buffer_ptr = try allocator.create(std.ArrayList(u8));
+            const buffer_ptr = try allocator.create(std.Io.Writer.Allocating);
             errdefer allocator.destroy(buffer_ptr);
 
-            buffer_ptr.* = std.ArrayList(u8){};
-            errdefer buffer_ptr.deinit(allocator);
+            buffer_ptr.* = std.Io.Writer.Allocating.init(allocator);
+            errdefer buffer_ptr.deinit();
 
             const db_ptr = try allocator.create(DB);
             errdefer allocator.destroy(db_ptr);
-            db_ptr.* = try DB.init(.{
-                .buffer = buffer_ptr,
-                .allocator = allocator,
-                .file = db_file,
-            });
+            db_ptr.* = try DB.init(.{ .file = db_file, .buffer = buffer_ptr });
 
             const map = try DB.HashMap(.read_write).init(db_ptr.rootCursor());
 
@@ -163,7 +159,7 @@ pub fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
 
         pub fn deinit(self: *PatchWriter(repo_opts), allocator: std.mem.Allocator) void {
             self.db_file.close();
-            self.db.core.memory.buffer.deinit(allocator);
+            self.db.core.memory.buffer.deinit();
             allocator.destroy(self.db.core.memory.buffer);
             self.repo_dir.deleteFile(db_name) catch {};
             allocator.destroy(self.db);

@@ -240,11 +240,11 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     const db_file = try repo_dir.createFile("db", .{ .exclusive = true, .lock = .exclusive, .read = true });
                     errdefer db_file.close();
 
-                    const buffer_ptr = try allocator.create(std.ArrayList(u8));
+                    const buffer_ptr = try allocator.create(std.Io.Writer.Allocating);
                     errdefer allocator.destroy(buffer_ptr);
 
-                    buffer_ptr.* = std.ArrayList(u8){};
-                    errdefer buffer_ptr.deinit(allocator);
+                    buffer_ptr.* = std.Io.Writer.Allocating.init(allocator);
+                    errdefer buffer_ptr.deinit();
 
                     // make the db
                     var self = Repo(repo_kind, repo_opts){
@@ -256,9 +256,8 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             .repo_dir = repo_dir,
                             .db_file = db_file,
                             .db = try DB.init(.{
-                                .buffer = buffer_ptr,
-                                .allocator = allocator,
                                 .file = db_file,
+                                .buffer = buffer_ptr,
                                 .hash_id = .{ .id = hash.hashId(repo_opts.hash) },
                             }),
                         },
@@ -351,17 +350,16 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             .db = switch (repo_opts.hash) {
                                 .none => {},
                                 else => blk: {
-                                    const buffer_ptr = try allocator.create(std.ArrayList(u8));
+                                    const buffer_ptr = try allocator.create(std.Io.Writer.Allocating);
                                     errdefer allocator.destroy(buffer_ptr);
 
-                                    buffer_ptr.* = std.ArrayList(u8){};
-                                    errdefer buffer_ptr.deinit(allocator);
+                                    buffer_ptr.* = std.Io.Writer.Allocating.init(allocator);
+                                    errdefer buffer_ptr.deinit();
 
                                     const hash_id = hash.hashId(repo_opts.hash);
                                     const db = try DB.init(.{
-                                        .buffer = buffer_ptr,
-                                        .allocator = allocator,
                                         .file = db_file,
+                                        .buffer = buffer_ptr,
                                         .hash_id = .{ .id = hash_id },
                                     });
                                     if (db.header.hash_id.id != hash_id) return error.UnexpectedHashKind;
@@ -391,7 +389,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     self.core.repo_dir.close();
                     self.core.db_file.close();
                     if (DB != void) {
-                        self.core.db.core.memory.buffer.deinit(allocator);
+                        self.core.db.core.memory.buffer.deinit();
                         allocator.destroy(self.core.db.core.memory.buffer);
                     }
                 },
