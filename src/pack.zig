@@ -200,6 +200,12 @@ const PackObjectStream = union(enum) {
         pack_file: std.fs.File,
         start_position: u64,
     ) !PackObjectStream {
+        // set the OS file position
+        {
+            var file_reader_streaming = pack_file.readerStreaming(io, &.{});
+            try file_reader_streaming.seekTo(start_position);
+        }
+
         const reader_buffer = try allocator.alloc(u8, buffer_size);
         errdefer allocator.free(reader_buffer);
 
@@ -507,9 +513,6 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                 inline .commit, .tree, .blob, .tag => |pack_obj_kind| {
                     const start_position = file_reader.logicalPos();
 
-                    // make the underlying file's seek pos the same as the reader's
-                    try pack_file.seekTo(start_position);
-
                     var stream = try PackObjectStream.initFile(repo_opts.buffer_size, io, allocator, pack_file, start_position);
                     errdefer stream.deinit();
                     if (size <= max_buffer_size) {
@@ -561,9 +564,6 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
 
                     const start_position = file_reader.logicalPos();
 
-                    // make the underlying file's seek pos the same as the reader's
-                    try pack_file.seekTo(start_position);
-
                     var stream = try PackObjectStream.initFile(repo_opts.buffer_size, io, allocator, pack_file, start_position);
                     errdefer stream.deinit();
 
@@ -589,9 +589,6 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     const base_oid = try reader.takeArray(hash.byteLen(repo_opts.hash));
 
                     const start_position = file_reader.logicalPos();
-
-                    // make the underlying file's seek pos the same as the reader's
-                    try pack_file.seekTo(start_position);
 
                     var stream = try PackObjectStream.initFile(repo_opts.buffer_size, io, allocator, pack_file, start_position);
                     errdefer stream.deinit();
@@ -675,12 +672,9 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             var bytes_read: u64 = 0;
 
             var file_reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
-            var file_reader = self.stream.file.pack_file.reader(io, &file_reader_buffer);
+            var file_reader = self.stream.file.pack_file.readerStreaming(io, &file_reader_buffer);
             var zlib_stream_buffer = [_]u8{0} ** std.compress.flate.max_window_len;
             var zlib_stream: std.compress.flate.Decompress = .init(&file_reader.interface, .zlib, &zlib_stream_buffer);
-
-            // make the reader's seek pos the same as the underlying file's
-            try file_reader.seekTo(try self.stream.file.pack_file.getPos());
 
             // get size of base object (little endian variable length format)
             var base_size: u64 = 0;
@@ -780,9 +774,6 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     },
                 }
             }
-
-            // make the underlying file's seek pos the same as the reader's
-            try self.stream.file.pack_file.seekTo(file_reader.logicalPos());
 
             const SortCtx = struct {
                 keys: []Location,
