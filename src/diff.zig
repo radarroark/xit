@@ -111,9 +111,6 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                         else => |e| return e,
                     };
 
-                    var file_writer_streaming = file.writerStreaming(&.{});
-                    try file_writer_streaming.seekTo(0);
-
                     var iter = LineIterator(repo_kind, repo_opts){
                         .io = io,
                         .allocator = allocator,
