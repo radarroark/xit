@@ -10,6 +10,7 @@ pub const Opts = struct {
 };
 
 pub const SshState = struct {
+    io: std.Io,
     opts: Opts,
     process: ?std.process.Child,
     allocator: std.mem.Allocator,
@@ -52,6 +53,7 @@ pub const SshState = struct {
         };
 
         return .{
+            .io = io,
             .opts = opts,
             .process = null,
             .allocator = allocator,
@@ -65,9 +67,9 @@ pub const SshState = struct {
         self.allocator.destroy(self.arena);
     }
 
-    pub fn close(self: *SshState) !void {
+    pub fn close(self: *SshState, io: std.Io) !void {
         if (self.process) |*process| {
-            _ = try process.kill();
+            _ = try process.kill(io);
             self.process = null;
         }
     }
@@ -99,7 +101,7 @@ pub const SshStream = struct {
     ) !usize {
         const process = &(self.wire_state.process orelse return error.ProcessNotFound);
         const stdout = process.stdout orelse return error.StdoutNotFound;
-        return try stdout.read(buffer[0..buf_size]);
+        return try stdout.readStreaming(self.wire_state.io, &.{buffer[0..buf_size]});
     }
 
     pub fn write(
@@ -109,7 +111,7 @@ pub const SshStream = struct {
     ) !void {
         const process = &(self.wire_state.process orelse return error.ProcessNotFound);
         const stdin = process.stdin orelse return error.StdinNotFound;
-        try stdin.writeAll(buffer[0..len]);
+        try stdin.writeStreamingAll(self.wire_state.io, buffer[0..len]);
     }
 };
 
@@ -200,7 +202,7 @@ fn spawnSsh(
     process.stdout_behavior = .Pipe;
     process.stderr_behavior = .Ignore;
 
-    try process.spawn();
+    try process.spawn(wire_state.io);
 
     wire_state.process = process;
 }

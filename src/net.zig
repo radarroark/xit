@@ -65,8 +65,8 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
         ) !Remote(repo_kind, repo_opts) {
             switch (repo_kind) {
                 .git => {
-                    var lock = try fs.LockFile.init(state.core.repo_dir, "config");
-                    defer lock.deinit();
+                    var lock = try fs.LockFile.init(io, state.core.repo_dir, "config");
+                    defer lock.deinit(io);
 
                     try addConfig(.{ .core = state.core, .extra = .{ .lock_file_maybe = lock.lock_file } }, io, allocator, name, url);
 
@@ -196,7 +196,7 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                 const config_name = try std.fmt.allocPrint(allocator, "remote.{s}.url", .{name});
                 defer allocator.free(config_name);
 
-                try config.add(state, .{ .name = config_name, .value = url });
+                try config.add(state, io, .{ .name = config_name, .value = url });
             }
 
             {
@@ -206,7 +206,7 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                 const config_value = try std.fmt.allocPrint(allocator, "+refs/heads/*:refs/remotes/{s}/*", .{name});
                 defer allocator.free(config_value);
 
-                try config.add(state, .{ .name = config_name, .value = config_value });
+                try config.add(state, io, .{ .name = config_name, .value = config_value });
             }
         }
 
@@ -310,8 +310,8 @@ pub fn Remote(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
     };
 }
 
-pub fn validateUrl(cwd: std.fs.Dir, url: []const u8) bool {
-    return net_transport.TransportDefinition.init(cwd, url) != null;
+pub fn validateUrl(io: std.Io, cwd: std.Io.Dir, url: []const u8) bool {
+    return net_transport.TransportDefinition.init(io, cwd, url) != null;
 }
 
 pub fn matchingRefSpec(
@@ -641,12 +641,12 @@ pub fn clone(
         .path = work_path,
         .create_default_branch = null,
     });
-    errdefer repo.deinit(allocator);
+    errdefer repo.deinit(io, allocator);
 
-    var cwd = try std.fs.openDirAbsolute(cwd_path, .{});
-    defer cwd.close();
+    var cwd = try std.Io.Dir.openDirAbsolute(io, cwd_path, .{});
+    defer cwd.close(io);
 
-    const transport_def = net_transport.TransportDefinition.init(cwd, url) orelse return error.UnsupportedUrl;
+    const transport_def = net_transport.TransportDefinition.init(io, cwd, url) orelse return error.UnsupportedUrl;
 
     switch (repo_kind) {
         .git => {

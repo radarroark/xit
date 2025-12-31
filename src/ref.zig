@@ -172,6 +172,7 @@ pub const RefList = struct {
         comptime repo_kind: rp.RepoKind,
         comptime repo_opts: rp.RepoOpts(repo_kind),
         state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+        io: std.Io,
         allocator: std.mem.Allocator,
         ref_kind: RefKind,
     ) !RefList {
@@ -194,17 +195,17 @@ pub const RefList = struct {
 
         switch (repo_kind) {
             .git => {
-                var refs_dir = try state.core.repo_dir.openDir("refs", .{});
-                defer refs_dir.close();
-                var ref_kind_dir = refs_dir.openDir(dir_name, .{ .iterate = true }) catch |err| switch (err) {
+                var refs_dir = try state.core.repo_dir.openDir(io, "refs", .{});
+                defer refs_dir.close(io);
+                var ref_kind_dir = refs_dir.openDir(io, dir_name, .{ .iterate = true }) catch |err| switch (err) {
                     error.FileNotFound => return ref_list,
                     else => |e| return e,
                 };
-                defer ref_kind_dir.close();
+                defer ref_kind_dir.close(io);
 
                 var path = std.ArrayList([]const u8){};
                 defer path.deinit(allocator);
-                try ref_list.addRefs(repo_opts, state, ref_kind, ref_kind_dir, allocator, &path);
+                try ref_list.addRefs(repo_opts, state, io, allocator, ref_kind, ref_kind_dir, &path);
             },
             .xit => {
                 if (try state.extra.moment.cursor.readPath(void, &.{
@@ -234,13 +235,14 @@ pub const RefList = struct {
         self: *RefList,
         comptime repo_opts: rp.RepoOpts(.git),
         state: rp.Repo(.git, repo_opts).State(.read_only),
-        ref_kind: RefKind,
-        dir: std.fs.Dir,
+        io: std.Io,
         allocator: std.mem.Allocator,
+        ref_kind: RefKind,
+        dir: std.Io.Dir,
         path: *std.ArrayList([]const u8),
     ) !void {
         var iter = dir.iterate();
-        while (try iter.next()) |entry| {
+        while (try iter.next(io)) |entry| {
             var next_path = try path.clone(allocator);
             defer next_path.deinit(allocator);
             try next_path.append(allocator, entry.name);
@@ -250,9 +252,9 @@ pub const RefList = struct {
                     try self.refs.put(name, .{ .kind = ref_kind, .name = name });
                 },
                 .directory => {
-                    var next_dir = try dir.openDir(entry.name, .{ .iterate = true });
-                    defer next_dir.close();
-                    try self.addRefs(repo_opts, state, ref_kind, next_dir, allocator, &next_path);
+                    var next_dir = try dir.openDir(io, entry.name, .{ .iterate = true });
+                    defer next_dir.close(io);
+                    try self.addRefs(repo_opts, state, io, allocator, ref_kind, next_dir, &next_path);
                 },
                 else => {},
             }
@@ -299,8 +301,8 @@ pub fn read(
     switch (repo_kind) {
         .git => {
             // look for loose ref
-            if (state.core.repo_dir.openFile(ref_path, .{ .mode = .read_only })) |ref_file| {
-                defer ref_file.close();
+            if (state.core.repo_dir.openFile(io, ref_path, .{ .mode = .read_only })) |ref_file| {
+                defer ref_file.close(io);
                 var reader = ref_file.reader(io, &.{});
                 var writer = std.Io.Writer.fixed(buffer);
                 const size = try reader.interface.streamRemaining(&writer);
@@ -312,8 +314,8 @@ pub fn read(
             }
 
             // look for packed ref
-            if (state.core.repo_dir.openFile("packed-refs", .{ .mode = .read_only })) |packed_refs_file| {
-                defer packed_refs_file.close();
+            if (state.core.repo_dir.openFile(io, "packed-refs", .{ .mode = .read_only })) |packed_refs_file| {
+                defer packed_refs_file.close(io);
 
                 var reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
                 var reader = packed_refs_file.reader(io, &reader_buffer);
@@ -438,7 +440,6 @@ pub fn write(
     ref_path: []const u8,
     ref_or_oid: RefOrOid(repo_opts.hash),
 ) !void {
-    _ = io;
     var buffer = [_]u8{0} ** MAX_REF_CONTENT_SIZE;
     const content = switch (ref_or_oid) {
         .oid => |oid| oid,
@@ -452,12 +453,12 @@ pub fn write(
     switch (repo_kind) {
         .git => {
             if (std.fs.path.dirname(ref_path)) |ref_parent_path| {
-                try state.core.repo_dir.makePath(ref_parent_path);
+                try state.core.repo_dir.createDirPath(io, ref_parent_path);
             }
-            var lock = try fs.LockFile.init(state.core.repo_dir, ref_path);
-            defer lock.deinit();
-            try lock.lock_file.writeAll(content);
-            try lock.lock_file.writeAll("\n");
+            var lock = try fs.LockFile.init(io, state.core.repo_dir, ref_path);
+            defer lock.deinit(io);
+            try lock.lock_file.writeStreamingAll(io, content);
+            try lock.lock_file.writeStreamingAll(io, "\n");
             lock.success = true;
         },
         .xit => {
@@ -535,11 +536,12 @@ pub fn remove(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+    io: std.Io,
     ref_path: []const u8,
 ) !void {
     switch (repo_kind) {
         .git => {
-            state.core.repo_dir.deleteFile(ref_path) catch |err| switch (err) {
+            state.core.repo_dir.deleteFile(io, ref_path) catch |err| switch (err) {
                 error.FileNotFound => return error.RefNotFound,
                 else => |e| return e,
             };

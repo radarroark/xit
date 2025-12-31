@@ -297,6 +297,7 @@ test "trimTruncatedCodepoints" {
 pub fn writeChunks(
     comptime repo_opts: rp.RepoOpts(.xit),
     state: rp.Repo(.xit, repo_opts).State(.read_write),
+    io: std.Io,
     reader: *std.Io.Reader,
     object_hash: hash.HashInt(repo_opts.hash),
     object_len: usize,
@@ -316,8 +317,8 @@ pub fn writeChunks(
     var writer = try chunk_info_cursor.writer(&write_buffer);
 
     // make the .xit/chunks dir
-    var chunks_dir = try state.core.repo_dir.makeOpenPath("chunks", .{});
-    defer chunks_dir.close();
+    var chunks_dir = try state.core.repo_dir.createDirPathOpen(io, "chunks", .{});
+    defer chunks_dir.close(io);
 
     var chunk_buffer = [_]u8{0} ** repo_opts.extra.chunk_opts.max_size;
     var iter = FastCdc(repo_opts.extra.chunk_opts).init(object_len);
@@ -329,12 +330,12 @@ pub fn writeChunks(
 
         // write chunk unless it already exists
         const chunk_hash_hex = std.fmt.bytesToHex(chunk_hash_bytes, .lower);
-        if (chunks_dir.openFile(&chunk_hash_hex, .{})) |chunk_file| {
-            chunk_file.close();
+        if (chunks_dir.openFile(io, &chunk_hash_hex, .{})) |chunk_file| {
+            chunk_file.close(io);
         } else |err| switch (err) {
             error.FileNotFound => {
-                var lock = try fs.LockFile.init(chunks_dir, &chunk_hash_hex);
-                defer lock.deinit();
+                var lock = try fs.LockFile.init(io, chunks_dir, &chunk_hash_hex);
+                defer lock.deinit(io);
 
                 // if it's utf8 text, try compressing it
                 // since the beginning and end could have truncated unicode codepoints,
@@ -342,7 +343,7 @@ pub fn writeChunks(
                 // sometimes fail to validate as utf8 and thus won't get compressed.
                 if (repo_opts.extra.compress_chunks and std.unicode.utf8ValidateSlice(trimTruncatedCodepoints(chunk))) {
                     var wbuf = [_]u8{0} ** repo_opts.buffer_size;
-                    var file_writer = lock.lock_file.writer(&wbuf);
+                    var file_writer = lock.lock_file.writer(io, &wbuf);
                     try file_writer.interface.writeByte(@intFromEnum(CompressKind.zlib));
                     var dbuf = [_]u8{0} ** std.compress.flate.max_window_len;
                     var zlib_stream = try std.compress.flate.Compress.init(&file_writer.interface, &dbuf, .zlib, .default);
@@ -353,10 +354,10 @@ pub fn writeChunks(
                     // abort compression if it didn't make it smaller
                     const compress_kind_size = @sizeOf(CompressKind);
                     const checksum_size = @sizeOf(u32);
-                    if (try lock.lock_file.getPos() >= compress_kind_size + checksum_size + chunk.len) {
-                        var file_writer_streaming = lock.lock_file.writerStreaming(&.{});
+                    if (try lock.lock_file.length(io) >= compress_kind_size + checksum_size + chunk.len) {
+                        var file_writer_streaming = lock.lock_file.writerStreaming(io, &.{});
                         try file_writer_streaming.seekTo(0);
-                        try lock.lock_file.setEndPos(0);
+                        try lock.lock_file.setLength(io, 0);
                     } else {
                         lock.success = true;
                     }
@@ -364,7 +365,7 @@ pub fn writeChunks(
 
                 // write the chunk uncompressed
                 if (!lock.success) {
-                    var file_writer = lock.lock_file.writer(&.{});
+                    var file_writer = lock.lock_file.writer(io, &.{});
                     try file_writer.interface.writeByte(@intFromEnum(CompressKind.none));
                     try file_writer.interface.writeInt(u32, std.hash.Adler32.hash(chunk), .big);
                     try file_writer.interface.writeAll(chunk);
@@ -444,7 +445,7 @@ pub fn readChunk(
     comptime repo_opts: rp.RepoOpts(.xit),
     chunk_info_reader: *rp.Repo(.xit, repo_opts).DB.Cursor(.read_only).Reader,
     io: std.Io,
-    repo_dir: std.fs.Dir,
+    repo_dir: std.Io.Dir,
     object_position: u64,
     buf: []u8,
 ) !usize {
@@ -470,17 +471,17 @@ pub fn readChunk(
     const chunk_hash_hex = std.fmt.bytesToHex(chunk_hash_bytes, .lower);
 
     // open the chunk file
-    var chunks_dir = try repo_dir.openDir("chunks", .{});
-    defer chunks_dir.close();
-    const chunk_file = try chunks_dir.openFile(&chunk_hash_hex, .{});
-    defer chunk_file.close();
+    var chunks_dir = try repo_dir.openDir(io, "chunks", .{});
+    defer chunks_dir.close(io);
+    const chunk_file = try chunks_dir.openFile(io, &chunk_hash_hex, .{});
+    defer chunk_file.close(io);
 
     // make reader
     var reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
     var chunk_reader = chunk_file.reader(io, &reader_buffer);
 
     // read chunk, decompressing if necessary
-    const compress_kind = try std.meta.intToEnum(CompressKind, try chunk_reader.interface.takeByte());
+    const compress_kind = std.enums.fromInt(CompressKind, try chunk_reader.interface.takeByte()) orelse return error.InvalidEnumTag;
     switch (compress_kind) {
         .none => {
             const expected_checksum = try chunk_reader.interface.takeInt(u32, .big);
@@ -511,7 +512,7 @@ pub fn readChunk(
 pub fn ChunkObjectReader(comptime repo_opts: rp.RepoOpts(.xit)) type {
     return struct {
         io: std.Io,
-        repo_dir: std.fs.Dir,
+        repo_dir: std.Io.Dir,
         cursor: *rp.Repo(.xit, repo_opts).DB.Cursor(.read_only),
         chunk_info_reader: rp.Repo(.xit, repo_opts).DB.Cursor(.read_only).Reader,
         read_buffer: []u8,
@@ -568,7 +569,7 @@ pub fn ChunkObjectReader(comptime repo_opts: rp.RepoOpts(.xit)) type {
             };
         }
 
-        pub fn deinit(self: *ChunkObjectReader(repo_opts), allocator: std.mem.Allocator) void {
+        pub fn deinit(self: *ChunkObjectReader(repo_opts), _: std.Io, allocator: std.mem.Allocator) void {
             allocator.destroy(self.cursor);
             allocator.free(self.read_buffer);
         }

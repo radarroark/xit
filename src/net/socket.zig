@@ -75,23 +75,25 @@ pub const SocketStream = struct {
         var results_buffer: [32]std.Io.net.HostName.LookupResult = undefined;
         var results: std.Io.Queue(std.Io.net.HostName.LookupResult) = .init(&results_buffer);
 
-        std.Io.net.HostName.lookup(try .init(self.host), self.io, &results, .{
+        try std.Io.net.HostName.lookup(try .init(self.host), self.io, &results, .{
             .port = self.port,
             .canonical_name_buffer = &canonical_name_buffer,
         });
 
-        const address = while (results.getOne(self.io)) |result| switch (result) {
-            .address => |address| break address,
-            .canonical_name => continue,
-            .end => |end| {
-                try end;
-                continue;
+        var addr_v4: ?std.Io.net.IpAddress = null;
+        var addr_v6: ?std.Io.net.IpAddress = null;
+        while (results.getOne(self.io)) |result| switch (result) {
+            .address => |address| switch (address) {
+                .ip4 => addr_v4 = address,
+                .ip6 => addr_v6 = address,
             },
-        } else |err| return err;
+            .canonical_name => continue,
+        } else |_| {}
 
+        const address = addr_v4 orelse addr_v6 orelse return error.AddressNotFound;
         const family: u32 = switch (address) {
-            .ip4 => std.os.linux.AF.INET,
-            .ip6 => std.os.linux.AF.INET6,
+            .ip4 => std.c.AF.INET,
+            .ip6 => std.c.AF.INET6,
         };
 
         const s = try std.posix.socket(family, std.posix.SOCK.STREAM, std.posix.IPPROTO.TCP);

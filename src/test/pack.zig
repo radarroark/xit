@@ -21,15 +21,15 @@ test "pack" {
     defer _ = c.git_libgit2_shutdown();
 
     // create the temp dir
-    const cwd = std.fs.cwd();
-    var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
+    const cwd = std.Io.Dir.cwd();
+    var temp_dir_or_err = cwd.openDir(io, temp_dir_name, .{});
     if (temp_dir_or_err) |*temp_dir| {
-        temp_dir.close();
-        try cwd.deleteTree(temp_dir_name);
+        temp_dir.close(io);
+        try cwd.deleteTree(io, temp_dir_name);
     } else |_| {}
-    var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
-    defer cwd.deleteTree(temp_dir_name) catch {};
-    defer temp_dir.close();
+    var temp_dir = try cwd.createDirPathOpen(io, temp_dir_name, .{});
+    defer cwd.deleteTree(io, temp_dir_name) catch {};
+    defer temp_dir.close(io);
 
     // get the cwd path
     const cwd_path = try std.process.getCwdAlloc(allocator);
@@ -40,8 +40,8 @@ test "pack" {
     defer allocator.free(work_path);
 
     // create the work dir
-    var work_dir = try cwd.makeOpenPath(work_path, .{});
-    defer work_dir.close();
+    var work_dir = try cwd.createDirPathOpen(io, work_path, .{});
+    defer work_dir.close(io);
 
     // init repo
     var repo: ?*c.git_repository = null;
@@ -49,21 +49,21 @@ test "pack" {
     defer c.git_repository_free(repo);
 
     // make sure the git dir was created
-    var repo_dir = try work_dir.openDir(".git", .{});
-    defer repo_dir.close();
+    var repo_dir = try work_dir.openDir(io, ".git", .{});
+    defer repo_dir.close(io);
 
     // add and commit
     var commit_oid1: c.git_oid = undefined;
     {
         // make file
-        var hello_txt = try work_dir.createFile("hello.txt", .{});
-        defer hello_txt.close();
-        try hello_txt.writeAll("hello, world!");
+        var hello_txt = try work_dir.createFile(io, "hello.txt", .{});
+        defer hello_txt.close(io);
+        try hello_txt.writeStreamingAll(io, "hello, world!");
 
         // make file
-        var readme = try work_dir.createFile("README", .{});
-        defer readme.close();
-        try readme.writeAll("My cool project");
+        var readme = try work_dir.createFile(io, "README", .{});
+        defer readme.close(io);
+        try readme.writeStreamingAll(io, "My cool project");
 
         // add the files
         var index: ?*c.git_index = null;
@@ -100,18 +100,18 @@ test "pack" {
     var commit_oid2: c.git_oid = undefined;
     {
         // make files
-        var license = try work_dir.createFile("LICENSE", .{});
-        defer license.close();
-        try license.writeAll("do whatever you want");
-        var change_log = try work_dir.createFile("CHANGELOG", .{});
-        defer change_log.close();
-        try change_log.writeAll("cha-cha-cha-changes");
+        var license = try work_dir.createFile(io, "LICENSE", .{});
+        defer license.close(io);
+        try license.writeStreamingAll(io, "do whatever you want");
+        var change_log = try work_dir.createFile(io, "CHANGELOG", .{});
+        defer change_log.close(io);
+        try change_log.writeStreamingAll(io, "cha-cha-cha-changes");
 
         // change file
-        const hello_txt = try work_dir.openFile("hello.txt", .{ .mode = .read_write });
-        defer hello_txt.close();
-        try hello_txt.writeAll("goodbye, world!");
-        try hello_txt.setEndPos(try hello_txt.getPos());
+        const hello_txt = try work_dir.openFile(io, "hello.txt", .{ .mode = .read_write });
+        defer hello_txt.close(io);
+        try hello_txt.setLength(io, 0);
+        try hello_txt.writeStreamingAll(io, "goodbye, world!");
 
         // add the files
         var index: ?*c.git_index = null;
@@ -168,12 +168,12 @@ test "pack" {
 
     // check that pack file exists
     {
-        var pack_dir = try work_dir.openDir(".git/objects/pack", .{ .iterate = true });
-        defer pack_dir.close();
+        var pack_dir = try work_dir.openDir(io, ".git/objects/pack", .{ .iterate = true });
+        defer pack_dir.close(io);
         var entries = std.ArrayList([]const u8){};
         defer entries.deinit(allocator);
         var iter = pack_dir.iterate();
-        while (try iter.next()) |entry| {
+        while (try iter.next(io)) |entry| {
             switch (entry.kind) {
                 .file => try entries.append(allocator, entry.name),
                 else => {},
@@ -190,10 +190,10 @@ test "pack" {
         var path_buf = [_]u8{0} ** (hash.hexLen(repo_opts.hash) + 1);
         const path = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ commit_oid_hex[0..2], commit_oid_hex[2..] });
 
-        var objects_dir = try work_dir.openDir(".git/objects", .{});
-        defer objects_dir.close();
+        var objects_dir = try work_dir.openDir(io, ".git/objects", .{});
+        defer objects_dir.close(io);
 
-        try objects_dir.deleteFile(path);
+        try objects_dir.deleteFile(io, path);
     }
 
     // read the pack objects
@@ -205,7 +205,7 @@ test "pack" {
         try std.testing.expectEqual(0, c.git_oid_fmt(@ptrCast(&commit_oid_hex), commit_oid));
 
         var r = try rp.Repo(.git, repo_opts).open(io, allocator, .{ .path = work_path });
-        defer r.deinit(allocator);
+        defer r.deinit(io, allocator);
 
         var commit_object = try obj.Object(.git, repo_opts, .full).init(.{ .core = &r.core, .extra = .{} }, io, allocator, &commit_oid_hex);
         defer commit_object.deinit();
@@ -215,7 +215,7 @@ test "pack" {
     // write and read a pack object
     {
         var r = try rp.Repo(.git, repo_opts).open(io, allocator, .{ .path = work_path });
-        defer r.deinit(allocator);
+        defer r.deinit(io, allocator);
 
         const head_oid = try rf.readHeadRecur(.git, repo_opts, .{ .core = &r.core, .extra = .{} }, io);
 
@@ -226,13 +226,13 @@ test "pack" {
         var pack_writer = try pack.PackObjectWriter(.git, repo_opts).init(allocator, &obj_iter) orelse return error.PackWriterIsEmpty;
         defer pack_writer.deinit();
 
-        var pack_file = try temp_dir.createFile("test.pack", .{});
-        defer pack_file.close();
+        var pack_file = try temp_dir.createFile(io, "test.pack", .{});
+        defer pack_file.close(io);
 
         var buffer = [_]u8{0} ** 1;
         while (true) {
             const size = try pack_writer.read(&buffer);
-            try pack_file.writeAll(buffer[0..size]);
+            try pack_file.writeStreamingAll(io, buffer[0..size]);
             if (size < buffer.len) {
                 break;
             }
@@ -243,7 +243,7 @@ test "pack" {
             try std.testing.expectEqual(0, c.git_oid_fmt(@ptrCast(&commit_oid_hex), commit_oid));
 
             var pack_reader = try pack.PackObjectReader(.git, repo_opts).initWithPath(io, allocator, .{ .core = &r.core, .extra = .{} }, temp_dir, "test.pack", &commit_oid_hex);
-            defer pack_reader.deinit(allocator);
+            defer pack_reader.deinit(io, allocator);
 
             // make sure the reader's position is at the beginning
             try std.testing.expectEqual(0, pack_reader.relative_position);
@@ -253,11 +253,11 @@ test "pack" {
     // read packed refs
     {
         var r = try rp.Repo(.git, repo_opts).open(io, allocator, .{ .path = work_path });
-        defer r.deinit(allocator);
+        defer r.deinit(io, allocator);
 
-        var packed_refs = try repo_dir.createFile("packed-refs", .{});
-        defer packed_refs.close();
-        try packed_refs.writeAll(
+        var packed_refs = try repo_dir.createFile(io, "packed-refs", .{});
+        defer packed_refs.close(io);
+        try packed_refs.writeStreamingAll(io,
             \\# pack-refs with: peeled fully-peeled sorted
             \\5246e54744f4e1824ca280e6a2630a87959d7cf4 refs/remotes/origin/master
             \\1ea47a890400815b24a0073f110a41530322a44f refs/remotes/sync/chunk

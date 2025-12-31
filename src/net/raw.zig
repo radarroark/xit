@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const net_socket = @import("./socket.zig");
 const net_wire = @import("./wire.zig");
 const net_pkt = @import("./pkt.zig");
@@ -28,6 +29,8 @@ pub const RawStream = struct {
         url: []const u8,
         wire_action: net_wire.WireAction,
     ) !?RawStream {
+        if (.windows == builtin.os.tag) return error.RawGitProtocolNotSupportedOnWindows;
+
         return switch (wire_action) {
             .list_upload_pack => try listUpload(io, allocator, wire_state, url),
             .list_receive_pack => try listReceive(io, allocator, wire_state, url),

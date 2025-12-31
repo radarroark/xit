@@ -21,11 +21,11 @@ fn addFile(
     content: []const u8,
 ) !void {
     if (std.fs.path.dirname(path)) |parent_path| {
-        try repo.core.work_dir.makePath(parent_path);
+        try repo.core.work_dir.createDirPath(io, parent_path);
     }
-    const file = try repo.core.work_dir.createFile(path, .{ .truncate = true });
-    defer file.close();
-    try file.writeAll(content);
+    const file = try repo.core.work_dir.createFile(io, path, .{ .truncate = true });
+    defer file.close(io);
+    try file.writeStreamingAll(io, content);
     try repo.add(io, allocator, &.{path});
 }
 
@@ -40,15 +40,15 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
     const temp_dir_name = "temp-test-repo-simple";
 
     // create the temp dir
-    const cwd = std.fs.cwd();
-    var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
+    const cwd = std.Io.Dir.cwd();
+    var temp_dir_or_err = cwd.openDir(io, temp_dir_name, .{});
     if (temp_dir_or_err) |*temp_dir| {
-        temp_dir.close();
-        try cwd.deleteTree(temp_dir_name);
+        temp_dir.close(io);
+        try cwd.deleteTree(io, temp_dir_name);
     } else |_| {}
-    var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
-    defer cwd.deleteTree(temp_dir_name) catch {};
-    defer temp_dir.close();
+    var temp_dir = try cwd.createDirPathOpen(io, temp_dir_name, .{});
+    defer cwd.deleteTree(io, temp_dir_name) catch {};
+    defer temp_dir.close(io);
 
     const cwd_path = try std.process.getCwdAlloc(allocator);
     defer allocator.free(cwd_path);
@@ -58,11 +58,11 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
     {
         var repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = work_path });
-        defer repo.deinit(allocator);
+        defer repo.deinit(io, allocator);
     }
 
     var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = work_path });
-    defer repo.deinit(allocator);
+    defer repo.deinit(io, allocator);
 
     try addFile(repo_kind, repo_opts, &repo, io, allocator, "README.md", "Hello, world!");
     const commit_a = try repo.commit(io, allocator, .{ .message = "a" });
@@ -132,7 +132,7 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
     }
 
     {
-        const readme_md_content = try repo.core.work_dir.readFileAlloc("README.md", allocator, .limited(1024));
+        const readme_md_content = try repo.core.work_dir.readFileAlloc(io, "README.md", allocator, .limited(1024));
         defer allocator.free(readme_md_content);
         try std.testing.expectEqualStrings("Goodbye, world!", readme_md_content);
     }
@@ -143,7 +143,7 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
     }
 
     {
-        const readme_md_content = try repo.core.work_dir.readFileAlloc("README.md", allocator, .limited(1024));
+        const readme_md_content = try repo.core.work_dir.readFileAlloc(io, "README.md", allocator, .limited(1024));
         defer allocator.free(readme_md_content);
         try std.testing.expectEqualStrings("Hello, world!", readme_md_content);
     }
@@ -153,8 +153,8 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
         defer result.deinit();
     }
 
-    if (repo.core.work_dir.openFile("README.md", .{ .mode = .read_only })) |readme_md| {
-        readme_md.close();
+    if (repo.core.work_dir.openFile(io, "README.md", .{ .mode = .read_only })) |readme_md| {
+        readme_md.close(io);
         return error.FileNotExpected;
     } else |err| switch (err) {
         error.FileNotFound => {},
@@ -190,15 +190,15 @@ fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
     const temp_dir_name = "temp-test-repo-merge";
 
     // create the temp dir
-    const cwd = std.fs.cwd();
-    var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
+    const cwd = std.Io.Dir.cwd();
+    var temp_dir_or_err = cwd.openDir(io, temp_dir_name, .{});
     if (temp_dir_or_err) |*temp_dir| {
-        temp_dir.close();
-        try cwd.deleteTree(temp_dir_name);
+        temp_dir.close(io);
+        try cwd.deleteTree(io, temp_dir_name);
     } else |_| {}
-    var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
-    defer cwd.deleteTree(temp_dir_name) catch {};
-    defer temp_dir.close();
+    var temp_dir = try cwd.createDirPathOpen(io, temp_dir_name, .{});
+    defer cwd.deleteTree(io, temp_dir_name) catch {};
+    defer temp_dir.close(io);
 
     const cwd_path = try std.process.getCwdAlloc(allocator);
     defer allocator.free(cwd_path);
@@ -208,11 +208,11 @@ fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 
     {
         var repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = work_path });
-        defer repo.deinit(allocator);
+        defer repo.deinit(io, allocator);
     }
 
     var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = work_path });
-    defer repo.deinit(allocator);
+    defer repo.deinit(io, allocator);
 
     // A --- B --- C --------- J --- K [master]
     //        \               /
@@ -300,7 +300,7 @@ fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
         try std.testing.expectEqual(commit_k, head_oid);
 
         // make sure file from commit k exists
-        const master_md_content = try repo.core.work_dir.readFileAlloc("master.md", allocator, .limited(1024));
+        const master_md_content = try repo.core.work_dir.readFileAlloc(io, "master.md", allocator, .limited(1024));
         defer allocator.free(master_md_content);
         try std.testing.expectEqualStrings("k", master_md_content);
     }
@@ -321,7 +321,7 @@ fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
         defer allocator.free(dest_work_path);
 
         var dest_repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = dest_work_path });
-        defer dest_repo.deinit(allocator);
+        defer dest_repo.deinit(io, allocator);
         try dest_repo.copyObjects(repo_kind, repo_opts, &obj_iter, io, null);
 
         var dest_obj_iter = try dest_repo.log(io, allocator, &.{commit_k});
@@ -342,15 +342,15 @@ fn testMergeSideBranch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.R
     const temp_dir_name = "temp-test-repo-merge-side-branch";
 
     // create the temp dir
-    const cwd = std.fs.cwd();
-    var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
+    const cwd = std.Io.Dir.cwd();
+    var temp_dir_or_err = cwd.openDir(io, temp_dir_name, .{});
     if (temp_dir_or_err) |*temp_dir| {
-        temp_dir.close();
-        try cwd.deleteTree(temp_dir_name);
+        temp_dir.close(io);
+        try cwd.deleteTree(io, temp_dir_name);
     } else |_| {}
-    var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
-    defer cwd.deleteTree(temp_dir_name) catch {};
-    defer temp_dir.close();
+    var temp_dir = try cwd.createDirPathOpen(io, temp_dir_name, .{});
+    defer cwd.deleteTree(io, temp_dir_name) catch {};
+    defer temp_dir.close(io);
 
     const cwd_path = try std.process.getCwdAlloc(allocator);
     defer allocator.free(cwd_path);
@@ -360,11 +360,11 @@ fn testMergeSideBranch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.R
 
     {
         var repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = work_path });
-        defer repo.deinit(allocator);
+        defer repo.deinit(io, allocator);
     }
 
     var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = work_path });
-    defer repo.deinit(allocator);
+    defer repo.deinit(io, allocator);
 
     //           C <------ D [side]
     //          /           \
@@ -494,15 +494,15 @@ fn testMergeConflictSameFile(comptime repo_kind: rp.RepoKind, comptime repo_opts
     const temp_dir_name = "temp-test-repo-merge-conflict-same-file";
 
     // create the temp dir
-    const cwd = std.fs.cwd();
-    var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
+    const cwd = std.Io.Dir.cwd();
+    var temp_dir_or_err = cwd.openDir(io, temp_dir_name, .{});
     if (temp_dir_or_err) |*temp_dir| {
-        temp_dir.close();
-        try cwd.deleteTree(temp_dir_name);
+        temp_dir.close(io);
+        try cwd.deleteTree(io, temp_dir_name);
     } else |_| {}
-    var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
-    defer cwd.deleteTree(temp_dir_name) catch {};
-    defer temp_dir.close();
+    var temp_dir = try cwd.createDirPathOpen(io, temp_dir_name, .{});
+    defer cwd.deleteTree(io, temp_dir_name) catch {};
+    defer temp_dir.close(io);
 
     const cwd_path = try std.process.getCwdAlloc(allocator);
     defer allocator.free(cwd_path);
@@ -512,11 +512,11 @@ fn testMergeConflictSameFile(comptime repo_kind: rp.RepoKind, comptime repo_opts
 
     {
         var repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = work_path });
-        defer repo.deinit(allocator);
+        defer repo.deinit(io, allocator);
     }
 
     var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = work_path });
-    defer repo.deinit(allocator);
+    defer repo.deinit(io, allocator);
 
     // A --- B --- D [master]
     //  \         /
@@ -556,7 +556,7 @@ fn testMergeConflictSameFile(comptime repo_kind: rp.RepoKind, comptime repo_opts
         try std.testing.expect(.conflict == merge.result);
 
         // verify f.txt has conflict markers
-        const f_txt_content = try repo.core.work_dir.readFileAlloc("f.txt", allocator, .limited(1024));
+        const f_txt_content = try repo.core.work_dir.readFileAlloc(io, "f.txt", allocator, .limited(1024));
         defer allocator.free(f_txt_content);
         const expected_f_txt_content = try std.fmt.allocPrint(allocator,
             \\a
@@ -763,15 +763,15 @@ fn testMergeConflictSameFileEmptyBase(comptime repo_kind: rp.RepoKind, comptime 
     const temp_dir_name = "temp-test-repo-merge-conflict-same-file-empty-base";
 
     // create the temp dir
-    const cwd = std.fs.cwd();
-    var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
+    const cwd = std.Io.Dir.cwd();
+    var temp_dir_or_err = cwd.openDir(io, temp_dir_name, .{});
     if (temp_dir_or_err) |*temp_dir| {
-        temp_dir.close();
-        try cwd.deleteTree(temp_dir_name);
+        temp_dir.close(io);
+        try cwd.deleteTree(io, temp_dir_name);
     } else |_| {}
-    var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
-    defer cwd.deleteTree(temp_dir_name) catch {};
-    defer temp_dir.close();
+    var temp_dir = try cwd.createDirPathOpen(io, temp_dir_name, .{});
+    defer cwd.deleteTree(io, temp_dir_name) catch {};
+    defer temp_dir.close(io);
 
     const cwd_path = try std.process.getCwdAlloc(allocator);
     defer allocator.free(cwd_path);
@@ -781,11 +781,11 @@ fn testMergeConflictSameFileEmptyBase(comptime repo_kind: rp.RepoKind, comptime 
 
     {
         var repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = work_path });
-        defer repo.deinit(allocator);
+        defer repo.deinit(io, allocator);
     }
 
     var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = work_path });
-    defer repo.deinit(allocator);
+    defer repo.deinit(io, allocator);
 
     // A --- B --- D [master]
     //  \         /
@@ -827,7 +827,7 @@ fn testMergeConflictSameFileEmptyBase(comptime repo_kind: rp.RepoKind, comptime 
         try std.testing.expect(.conflict == merge.result);
 
         // verify f.txt has conflict markers
-        const f_txt_content = try repo.core.work_dir.readFileAlloc("f.txt", allocator, .limited(1024));
+        const f_txt_content = try repo.core.work_dir.readFileAlloc(io, "f.txt", allocator, .limited(1024));
         defer allocator.free(f_txt_content);
         const expected_f_txt_content = try std.fmt.allocPrint(allocator,
             \\<<<<<<< target (master)
@@ -1044,15 +1044,15 @@ fn testMergeConflictSameFileAutoresolved(comptime repo_kind: rp.RepoKind, compti
     const temp_dir_name = "temp-test-repo-merge-conflict-same-file-autoresolved";
 
     // create the temp dir
-    const cwd = std.fs.cwd();
-    var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
+    const cwd = std.Io.Dir.cwd();
+    var temp_dir_or_err = cwd.openDir(io, temp_dir_name, .{});
     if (temp_dir_or_err) |*temp_dir| {
-        temp_dir.close();
-        try cwd.deleteTree(temp_dir_name);
+        temp_dir.close(io);
+        try cwd.deleteTree(io, temp_dir_name);
     } else |_| {}
-    var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
-    defer cwd.deleteTree(temp_dir_name) catch {};
-    defer temp_dir.close();
+    var temp_dir = try cwd.createDirPathOpen(io, temp_dir_name, .{});
+    defer cwd.deleteTree(io, temp_dir_name) catch {};
+    defer temp_dir.close(io);
 
     const cwd_path = try std.process.getCwdAlloc(allocator);
     defer allocator.free(cwd_path);
@@ -1062,11 +1062,11 @@ fn testMergeConflictSameFileAutoresolved(comptime repo_kind: rp.RepoKind, compti
 
     {
         var repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = work_path });
-        defer repo.deinit(allocator);
+        defer repo.deinit(io, allocator);
     }
 
     var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = work_path });
-    defer repo.deinit(allocator);
+    defer repo.deinit(io, allocator);
 
     // A --- B --- D [master]
     //  \         /
@@ -1106,7 +1106,7 @@ fn testMergeConflictSameFileAutoresolved(comptime repo_kind: rp.RepoKind, compti
         try std.testing.expect(.success == merge.result);
 
         // verify f.txt has been autoresolved
-        const f_txt_content = try repo.core.work_dir.readFileAlloc("f.txt", allocator, .limited(1024));
+        const f_txt_content = try repo.core.work_dir.readFileAlloc(io, "f.txt", allocator, .limited(1024));
         defer allocator.free(f_txt_content);
         try std.testing.expectEqualStrings(
             \\x
@@ -1146,15 +1146,15 @@ fn testMergeConflictSameFileAutoresolvedNeighboringLines(comptime repo_kind: rp.
     const temp_dir_name = "temp-test-repo-merge-conflict-same-file-autoresolved-neighboring-lines";
 
     // create the temp dir
-    const cwd = std.fs.cwd();
-    var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
+    const cwd = std.Io.Dir.cwd();
+    var temp_dir_or_err = cwd.openDir(io, temp_dir_name, .{});
     if (temp_dir_or_err) |*temp_dir| {
-        temp_dir.close();
-        try cwd.deleteTree(temp_dir_name);
+        temp_dir.close(io);
+        try cwd.deleteTree(io, temp_dir_name);
     } else |_| {}
-    var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
-    defer cwd.deleteTree(temp_dir_name) catch {};
-    defer temp_dir.close();
+    var temp_dir = try cwd.createDirPathOpen(io, temp_dir_name, .{});
+    defer cwd.deleteTree(io, temp_dir_name) catch {};
+    defer temp_dir.close(io);
 
     const cwd_path = try std.process.getCwdAlloc(allocator);
     defer allocator.free(cwd_path);
@@ -1164,11 +1164,11 @@ fn testMergeConflictSameFileAutoresolvedNeighboringLines(comptime repo_kind: rp.
 
     {
         var repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = work_path });
-        defer repo.deinit(allocator);
+        defer repo.deinit(io, allocator);
     }
 
     var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = work_path });
-    defer repo.deinit(allocator);
+    defer repo.deinit(io, allocator);
 
     // A --- B --- D [master]
     //  \         /
@@ -1216,7 +1216,7 @@ fn testMergeConflictSameFileAutoresolvedNeighboringLines(comptime repo_kind: rp.
                 try std.testing.expect(.success == merge.result);
 
                 // verify f.txt has been autoresolved
-                const f_txt_content = try repo.core.work_dir.readFileAlloc("f.txt", allocator, .limited(1024));
+                const f_txt_content = try repo.core.work_dir.readFileAlloc(io, "f.txt", allocator, .limited(1024));
                 defer allocator.free(f_txt_content);
                 try std.testing.expectEqualStrings(
                     \\a
@@ -1280,7 +1280,7 @@ fn testMergeConflictSameFileAutoresolvedNeighboringLines(comptime repo_kind: rp.
                 try std.testing.expect(.success == merge.result);
 
                 // verify f.txt has been autoresolved
-                const f_txt_content = try repo.core.work_dir.readFileAlloc("f.txt", allocator, .limited(1024));
+                const f_txt_content = try repo.core.work_dir.readFileAlloc(io, "f.txt", allocator, .limited(1024));
                 defer allocator.free(f_txt_content);
                 try std.testing.expectEqualStrings(
                     \\a
@@ -1324,15 +1324,15 @@ fn testMergeConflictModifyDelete(comptime repo_kind: rp.RepoKind, comptime repo_
     const temp_dir_name = "temp-test-repo-merge-conflict-modify-delete";
 
     // create the temp dir
-    const cwd = std.fs.cwd();
-    var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
+    const cwd = std.Io.Dir.cwd();
+    var temp_dir_or_err = cwd.openDir(io, temp_dir_name, .{});
     if (temp_dir_or_err) |*temp_dir| {
-        temp_dir.close();
-        try cwd.deleteTree(temp_dir_name);
+        temp_dir.close(io);
+        try cwd.deleteTree(io, temp_dir_name);
     } else |_| {}
-    var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
-    defer cwd.deleteTree(temp_dir_name) catch {};
-    defer temp_dir.close();
+    var temp_dir = try cwd.createDirPathOpen(io, temp_dir_name, .{});
+    defer cwd.deleteTree(io, temp_dir_name) catch {};
+    defer temp_dir.close(io);
 
     const cwd_path = try std.process.getCwdAlloc(allocator);
     defer allocator.free(cwd_path);
@@ -1342,11 +1342,11 @@ fn testMergeConflictModifyDelete(comptime repo_kind: rp.RepoKind, comptime repo_
 
     {
         var repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = work_path });
-        defer repo.deinit(allocator);
+        defer repo.deinit(io, allocator);
     }
 
     var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = work_path });
-    defer repo.deinit(allocator);
+    defer repo.deinit(io, allocator);
 
     // A --- B --- D [master]
     //  \         /
@@ -1465,15 +1465,15 @@ fn testMergeConflictDeleteModify(comptime repo_kind: rp.RepoKind, comptime repo_
     const temp_dir_name = "temp-test-repo-merge-conflict-delete-modify";
 
     // create the temp dir
-    const cwd = std.fs.cwd();
-    var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
+    const cwd = std.Io.Dir.cwd();
+    var temp_dir_or_err = cwd.openDir(io, temp_dir_name, .{});
     if (temp_dir_or_err) |*temp_dir| {
-        temp_dir.close();
-        try cwd.deleteTree(temp_dir_name);
+        temp_dir.close(io);
+        try cwd.deleteTree(io, temp_dir_name);
     } else |_| {}
-    var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
-    defer cwd.deleteTree(temp_dir_name) catch {};
-    defer temp_dir.close();
+    var temp_dir = try cwd.createDirPathOpen(io, temp_dir_name, .{});
+    defer cwd.deleteTree(io, temp_dir_name) catch {};
+    defer temp_dir.close(io);
 
     const cwd_path = try std.process.getCwdAlloc(allocator);
     defer allocator.free(cwd_path);
@@ -1483,11 +1483,11 @@ fn testMergeConflictDeleteModify(comptime repo_kind: rp.RepoKind, comptime repo_
 
     {
         var repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = work_path });
-        defer repo.deinit(allocator);
+        defer repo.deinit(io, allocator);
     }
 
     var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = work_path });
-    defer repo.deinit(allocator);
+    defer repo.deinit(io, allocator);
 
     // A --- B --- D [master]
     //  \         /
@@ -1604,15 +1604,15 @@ fn testMergeConflictFileDir(comptime repo_kind: rp.RepoKind, comptime repo_opts:
     const temp_dir_name = "temp-test-repo-merge-conflict-file-dir";
 
     // create the temp dir
-    const cwd = std.fs.cwd();
-    var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
+    const cwd = std.Io.Dir.cwd();
+    var temp_dir_or_err = cwd.openDir(io, temp_dir_name, .{});
     if (temp_dir_or_err) |*temp_dir| {
-        temp_dir.close();
-        try cwd.deleteTree(temp_dir_name);
+        temp_dir.close(io);
+        try cwd.deleteTree(io, temp_dir_name);
     } else |_| {}
-    var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
-    defer cwd.deleteTree(temp_dir_name) catch {};
-    defer temp_dir.close();
+    var temp_dir = try cwd.createDirPathOpen(io, temp_dir_name, .{});
+    defer cwd.deleteTree(io, temp_dir_name) catch {};
+    defer temp_dir.close(io);
 
     const cwd_path = try std.process.getCwdAlloc(allocator);
     defer allocator.free(cwd_path);
@@ -1622,11 +1622,11 @@ fn testMergeConflictFileDir(comptime repo_kind: rp.RepoKind, comptime repo_opts:
 
     {
         var repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = work_path });
-        defer repo.deinit(allocator);
+        defer repo.deinit(io, allocator);
     }
 
     var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = work_path });
-    defer repo.deinit(allocator);
+    defer repo.deinit(io, allocator);
 
     // A --- B --- D [master]
     //  \         /
@@ -1655,8 +1655,8 @@ fn testMergeConflictFileDir(comptime repo_kind: rp.RepoKind, comptime repo_opts:
     }
 
     // make sure renamed file exists
-    var renamed_file = try repo.core.work_dir.openFile("f.txt~master", .{});
-    defer renamed_file.close();
+    var renamed_file = try repo.core.work_dir.openFile(io, "f.txt~master", .{});
+    defer renamed_file.close(io);
 
     {
         var root = try ui.rootWidget(repo_kind, repo_opts, &repo, io, allocator, .status);
@@ -1815,15 +1815,15 @@ fn testMergeConflictDirFile(comptime repo_kind: rp.RepoKind, comptime repo_opts:
     const temp_dir_name = "temp-test-repo-merge-conflict-dir-file";
 
     // create the temp dir
-    const cwd = std.fs.cwd();
-    var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
+    const cwd = std.Io.Dir.cwd();
+    var temp_dir_or_err = cwd.openDir(io, temp_dir_name, .{});
     if (temp_dir_or_err) |*temp_dir| {
-        temp_dir.close();
-        try cwd.deleteTree(temp_dir_name);
+        temp_dir.close(io);
+        try cwd.deleteTree(io, temp_dir_name);
     } else |_| {}
-    var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
-    defer cwd.deleteTree(temp_dir_name) catch {};
-    defer temp_dir.close();
+    var temp_dir = try cwd.createDirPathOpen(io, temp_dir_name, .{});
+    defer cwd.deleteTree(io, temp_dir_name) catch {};
+    defer temp_dir.close(io);
 
     const cwd_path = try std.process.getCwdAlloc(allocator);
     defer allocator.free(cwd_path);
@@ -1833,11 +1833,11 @@ fn testMergeConflictDirFile(comptime repo_kind: rp.RepoKind, comptime repo_opts:
 
     {
         var repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = work_path });
-        defer repo.deinit(allocator);
+        defer repo.deinit(io, allocator);
     }
 
     var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = work_path });
-    defer repo.deinit(allocator);
+    defer repo.deinit(io, allocator);
 
     // A --- B --- D [master]
     //  \         /
@@ -1866,8 +1866,8 @@ fn testMergeConflictDirFile(comptime repo_kind: rp.RepoKind, comptime repo_opts:
     }
 
     // make sure renamed file exists
-    var renamed_file = try repo.core.work_dir.openFile("f.txt~foo", .{});
-    defer renamed_file.close();
+    var renamed_file = try repo.core.work_dir.openFile(io, "f.txt~foo", .{});
+    defer renamed_file.close(io);
 
     {
         var root = try ui.rootWidget(repo_kind, repo_opts, &repo, io, allocator, .status);
@@ -1998,15 +1998,15 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind, comptime repo_op
     const temp_dir_name = "temp-test-repo-merge-conflict-binary";
 
     // create the temp dir
-    const cwd = std.fs.cwd();
-    var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
+    const cwd = std.Io.Dir.cwd();
+    var temp_dir_or_err = cwd.openDir(io, temp_dir_name, .{});
     if (temp_dir_or_err) |*temp_dir| {
-        temp_dir.close();
-        try cwd.deleteTree(temp_dir_name);
+        temp_dir.close(io);
+        try cwd.deleteTree(io, temp_dir_name);
     } else |_| {}
-    var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
-    defer cwd.deleteTree(temp_dir_name) catch {};
-    defer temp_dir.close();
+    var temp_dir = try cwd.createDirPathOpen(io, temp_dir_name, .{});
+    defer cwd.deleteTree(io, temp_dir_name) catch {};
+    defer temp_dir.close(io);
 
     const cwd_path = try std.process.getCwdAlloc(allocator);
     defer allocator.free(cwd_path);
@@ -2016,11 +2016,11 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind, comptime repo_op
 
     {
         var repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = work_path });
-        defer repo.deinit(allocator);
+        defer repo.deinit(io, allocator);
     }
 
     var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = work_path });
-    defer repo.deinit(allocator);
+    defer repo.deinit(io, allocator);
 
     // A --- B --------- D [master]
     //  \               /
@@ -2098,7 +2098,7 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind, comptime repo_op
     // verify no lines are longer than one byte
     // so we know that conflict markers haven't been added
     {
-        const bin_file_content = try repo.core.work_dir.readFileAlloc("bin", allocator, .limited(1024));
+        const bin_file_content = try repo.core.work_dir.readFileAlloc(io, "bin", allocator, .limited(1024));
         defer allocator.free(bin_file_content);
         var iter = std.mem.splitScalar(u8, bin_file_content, '\n');
         while (iter.next()) |line| {
@@ -2124,10 +2124,10 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind, comptime repo_op
     // replace bin with a text file containing a single line that
     // is too long, and assert that it is considered a binary file
     {
-        const file = try repo.core.work_dir.createFile("bin", .{ .truncate = true });
-        defer file.close();
-        while (try file.getPos() < repo_opts.max_line_size) {
-            try file.writeAll(&[_]u8{' '} ** 256);
+        const file = try repo.core.work_dir.createFile(io, "bin", .{ .truncate = true });
+        defer file.close(io);
+        while (try file.length(io) < repo_opts.max_line_size) {
+            try file.writeStreamingAll(io, &[_]u8{' '} ** 256);
         }
 
         var status = try repo.status(io, allocator);
@@ -2161,15 +2161,15 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
     const temp_dir_name = "temp-test-repo-merge-conflict-shuffle";
 
     // create the temp dir
-    const cwd = std.fs.cwd();
-    var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
+    const cwd = std.Io.Dir.cwd();
+    var temp_dir_or_err = cwd.openDir(io, temp_dir_name, .{});
     if (temp_dir_or_err) |*temp_dir| {
-        temp_dir.close();
-        try cwd.deleteTree(temp_dir_name);
+        temp_dir.close(io);
+        try cwd.deleteTree(io, temp_dir_name);
     } else |_| {}
-    var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
-    defer cwd.deleteTree(temp_dir_name) catch {};
-    defer temp_dir.close();
+    var temp_dir = try cwd.createDirPathOpen(io, temp_dir_name, .{});
+    defer cwd.deleteTree(io, temp_dir_name) catch {};
+    defer temp_dir.close(io);
 
     const cwd_path = try std.process.getCwdAlloc(allocator);
     defer allocator.free(cwd_path);
@@ -2181,11 +2181,11 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
 
         {
             var repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = work_path });
-            defer repo.deinit(allocator);
+            defer repo.deinit(io, allocator);
         }
 
         var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = work_path });
-        defer repo.deinit(allocator);
+        defer repo.deinit(io, allocator);
 
         // A --- B --- C --- E [master]
         //  \               /
@@ -2232,7 +2232,7 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
             try std.testing.expect(.success == merge.result);
 
             // verify f.txt has been autoresolved
-            const f_txt_content = try repo.core.work_dir.readFileAlloc("f.txt", allocator, .limited(1024));
+            const f_txt_content = try repo.core.work_dir.readFileAlloc(io, "f.txt", allocator, .limited(1024));
             defer allocator.free(f_txt_content);
             switch (repo_kind) {
                 // git shuffles lines
@@ -2290,11 +2290,11 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
 
         {
             var repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = work_path });
-            defer repo.deinit(allocator);
+            defer repo.deinit(io, allocator);
         }
 
         var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = work_path });
-        defer repo.deinit(allocator);
+        defer repo.deinit(io, allocator);
 
         // A --- B --- C --- E [master]
         //  \               /
@@ -2381,7 +2381,7 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
             var merge = try repo.merge(io, allocator, .{ .kind = .full, .action = .{ .new = .{ .source = &.{.{ .ref = .{ .kind = .head, .name = "foo" } }} } } }, null);
             defer merge.deinit();
 
-            const f_txt_content = try repo.core.work_dir.readFileAlloc("f.txt", allocator, .limited(1024));
+            const f_txt_content = try repo.core.work_dir.readFileAlloc(io, "f.txt", allocator, .limited(1024));
             defer allocator.free(f_txt_content);
             switch (repo_kind) {
                 .git => {
@@ -2457,15 +2457,15 @@ fn testCherryPick(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOp
     const temp_dir_name = "temp-test-repo-cherry-pick";
 
     // create the temp dir
-    const cwd = std.fs.cwd();
-    var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
+    const cwd = std.Io.Dir.cwd();
+    var temp_dir_or_err = cwd.openDir(io, temp_dir_name, .{});
     if (temp_dir_or_err) |*temp_dir| {
-        temp_dir.close();
-        try cwd.deleteTree(temp_dir_name);
+        temp_dir.close(io);
+        try cwd.deleteTree(io, temp_dir_name);
     } else |_| {}
-    var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
-    defer cwd.deleteTree(temp_dir_name) catch {};
-    defer temp_dir.close();
+    var temp_dir = try cwd.createDirPathOpen(io, temp_dir_name, .{});
+    defer cwd.deleteTree(io, temp_dir_name) catch {};
+    defer temp_dir.close(io);
 
     const cwd_path = try std.process.getCwdAlloc(allocator);
     defer allocator.free(cwd_path);
@@ -2475,11 +2475,11 @@ fn testCherryPick(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOp
 
     {
         var repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = work_path });
-        defer repo.deinit(allocator);
+        defer repo.deinit(io, allocator);
     }
 
     var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = work_path });
-    defer repo.deinit(allocator);
+    defer repo.deinit(io, allocator);
 
     // A --- B ------------ D' [master]
     //        \
@@ -2516,8 +2516,8 @@ fn testCherryPick(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOp
     }
 
     // make sure stuff.md does not exist
-    if (repo.core.work_dir.openFile("stuff.md", .{})) |*file| {
-        file.close();
+    if (repo.core.work_dir.openFile(io, "stuff.md", .{})) |*file| {
+        file.close(io);
         return error.UnexpectedFile;
     } else |_| {}
 
@@ -2544,15 +2544,15 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
     const temp_dir_name = "temp-test-repo-cherry-pick-conflict";
 
     // create the temp dir
-    const cwd = std.fs.cwd();
-    var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
+    const cwd = std.Io.Dir.cwd();
+    var temp_dir_or_err = cwd.openDir(io, temp_dir_name, .{});
     if (temp_dir_or_err) |*temp_dir| {
-        temp_dir.close();
-        try cwd.deleteTree(temp_dir_name);
+        temp_dir.close(io);
+        try cwd.deleteTree(io, temp_dir_name);
     } else |_| {}
-    var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
-    defer cwd.deleteTree(temp_dir_name) catch {};
-    defer temp_dir.close();
+    var temp_dir = try cwd.createDirPathOpen(io, temp_dir_name, .{});
+    defer cwd.deleteTree(io, temp_dir_name) catch {};
+    defer temp_dir.close(io);
 
     const cwd_path = try std.process.getCwdAlloc(allocator);
     defer allocator.free(cwd_path);
@@ -2562,11 +2562,11 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
 
     {
         var repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = work_path });
-        defer repo.deinit(allocator);
+        defer repo.deinit(io, allocator);
     }
 
     var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = work_path });
-    defer repo.deinit(allocator);
+    defer repo.deinit(io, allocator);
 
     // A --- B ------------ D' [master]
     //        \
@@ -2598,7 +2598,7 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
         try std.testing.expect(.conflict == merge.result);
 
         // verify readme.md has conflict markers
-        const readme_md_content = try repo.core.work_dir.readFileAlloc("readme.md", allocator, .limited(1024));
+        const readme_md_content = try repo.core.work_dir.readFileAlloc(io, "readme.md", allocator, .limited(1024));
         defer allocator.free(readme_md_content);
         const expected_readme_md_content = try std.fmt.allocPrint(allocator,
             \\<<<<<<< target (master)
@@ -2692,15 +2692,15 @@ fn testLog(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo
     const temp_dir_name = "temp-test-repo-log";
 
     // create the temp dir
-    const cwd = std.fs.cwd();
-    var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
+    const cwd = std.Io.Dir.cwd();
+    var temp_dir_or_err = cwd.openDir(io, temp_dir_name, .{});
     if (temp_dir_or_err) |*temp_dir| {
-        temp_dir.close();
-        try cwd.deleteTree(temp_dir_name);
+        temp_dir.close(io);
+        try cwd.deleteTree(io, temp_dir_name);
     } else |_| {}
-    var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
-    defer cwd.deleteTree(temp_dir_name) catch {};
-    defer temp_dir.close();
+    var temp_dir = try cwd.createDirPathOpen(io, temp_dir_name, .{});
+    defer cwd.deleteTree(io, temp_dir_name) catch {};
+    defer temp_dir.close(io);
 
     const cwd_path = try std.process.getCwdAlloc(allocator);
     defer allocator.free(cwd_path);
@@ -2710,11 +2710,11 @@ fn testLog(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo
 
     {
         var repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = work_path });
-        defer repo.deinit(allocator);
+        defer repo.deinit(io, allocator);
     }
 
     var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = work_path });
-    defer repo.deinit(allocator);
+    defer repo.deinit(io, allocator);
 
     // A --- B --- C --------- G --- H [master]
     //        \               /

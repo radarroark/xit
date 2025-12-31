@@ -1420,15 +1420,16 @@ pub fn removeMergeState(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+    io: std.Io,
 ) !void {
     for (merge_head_names) |merge_head_name| {
-        rf.remove(repo_kind, repo_opts, state, merge_head_name) catch |err| switch (err) {
+        rf.remove(repo_kind, repo_opts, state, io, merge_head_name) catch |err| switch (err) {
             error.RefNotFound => {},
             else => |e| return e,
         };
     }
 
-    state.core.repo_dir.deleteFile(merge_msg_name) catch |err| switch (err) {
+    state.core.repo_dir.deleteFile(io, merge_msg_name) catch |err| switch (err) {
         error.FileNotFound => {},
         else => |e| return e,
     };
@@ -1674,8 +1675,8 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     switch (repo_kind) {
                         .git => {
                             // create lock file
-                            var lock = try fs.LockFile.init(state.core.repo_dir, "index");
-                            defer lock.deinit();
+                            var lock = try fs.LockFile.init(io, state.core.repo_dir, "index");
+                            defer lock.deinit(io);
 
                             // read index
                             var index = try idx.Index(repo_kind, repo_opts).init(state.readOnly(), io, allocator);
@@ -1694,7 +1695,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                             }
 
                             // update the index
-                            try index.write(allocator, .{ .core = state.core, .extra = .{ .lock_file_maybe = lock.lock_file } });
+                            try index.write(allocator, .{ .core = state.core, .extra = .{ .lock_file_maybe = lock.lock_file } }, io);
 
                             // finish lock
                             lock.success = true;
@@ -1703,9 +1704,9 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                             if (conflicts.count() > 0) {
                                 try rf.write(repo_kind, repo_opts, state, io, merge_head_name, .{ .oid = &source_oid });
 
-                                const merge_msg = try state.core.repo_dir.createFile(merge_msg_name, .{ .truncate = true, .lock = .exclusive });
-                                defer merge_msg.close();
-                                try merge_msg.writeAll(commit_metadata.message orelse "");
+                                const merge_msg = try state.core.repo_dir.createFile(io, merge_msg_name, .{ .truncate = true, .lock = .exclusive });
+                                defer merge_msg.close(io);
+                                try merge_msg.writeStreamingAll(io, commit_metadata.message orelse "");
 
                                 return .{
                                     .arena = arena,
@@ -1742,15 +1743,15 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                             }
 
                             // update the index
-                            try index.write(allocator, state);
+                            try index.write(allocator, state, io);
 
                             // exit early if there were conflicts
                             if (conflicts.count() > 0) {
                                 try rf.write(repo_kind, repo_opts, state, io, merge_head_name, .{ .oid = &source_oid });
 
-                                const merge_msg = try state.core.repo_dir.createFile(merge_msg_name, .{ .truncate = true, .lock = .exclusive });
-                                defer merge_msg.close();
-                                try merge_msg.writeAll(commit_metadata.message orelse "");
+                                const merge_msg = try state.core.repo_dir.createFile(io, merge_msg_name, .{ .truncate = true, .lock = .exclusive });
+                                defer merge_msg.close(io);
+                                try merge_msg.writeStreamingAll(io, commit_metadata.message orelse "");
 
                                 return .{
                                     .arena = arena,
@@ -1764,7 +1765,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                                 };
                             } else {
                                 // if any file conflicts were auto-resolved, there will be temporary state that must be cleaned up
-                                try removeMergeState(repo_kind, repo_opts, state);
+                                try removeMergeState(repo_kind, repo_opts, state, io);
                             }
                         },
                     }
@@ -1822,7 +1823,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 
                     // read the merge message
                     var commit_metadata: obj.CommitMetadata(repo_opts.hash) = merge_input.commit_metadata orelse .{};
-                    commit_metadata.message = state.core.repo_dir.readFileAlloc(merge_msg_name, arena.allocator(), @enumFromInt(repo_opts.max_read_size)) catch |err| switch (err) {
+                    commit_metadata.message = state.core.repo_dir.readFileAlloc(io, merge_msg_name, arena.allocator(), .limited(repo_opts.max_read_size)) catch |err| switch (err) {
                         error.FileNotFound => return error.MergeMessageNotFound,
                         else => |e| return e,
                     };
@@ -1848,7 +1849,7 @@ pub fn Merge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     }
 
                     // clean up the stored merge state
-                    try removeMergeState(repo_kind, repo_opts, state);
+                    try removeMergeState(repo_kind, repo_opts, state, io);
 
                     // commit the change
                     commit_metadata.parent_oids = switch (merge_input.kind) {
@@ -1890,7 +1891,7 @@ fn writePossiblePatches(
     const patch = @import("./patch.zig");
 
     var patch_writer = try patch.PatchWriter(repo_opts).init(state.readOnly(), io, allocator);
-    defer patch_writer.deinit(allocator);
+    defer patch_writer.deinit(io, allocator);
 
     var source_iter = try obj.ObjectIterator(.xit, repo_opts, .full).init(state.readOnly(), io, allocator, .{ .kind = .commit });
     defer source_iter.deinit();

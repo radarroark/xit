@@ -33,7 +33,7 @@ const ProgressCtx = struct {
     clear_line: *bool,
     node: *?std.Progress.Node,
 
-    pub fn run(self: @This(), event: rp.ProgressEvent) !void {
+    pub fn run(self: @This(), io: std.Io, event: rp.ProgressEvent) !void {
         switch (event) {
             .start => |start| {
                 if (self.node.*) |node| {
@@ -45,7 +45,7 @@ const ProgressCtx = struct {
                     .writing_patch => "Writing patch",
                     .sending_bytes => "Sending bytes",
                 };
-                self.node.* = std.Progress.start(.{ .root_name = name, .estimated_total_items = start.estimated_total_items });
+                self.node.* = std.Progress.start(io, .{ .root_name = name, .estimated_total_items = start.estimated_total_items });
             },
             .complete_one => if (self.node.*) |node| node.completeOne(),
             .complete_total => |complete_total| if (self.node.*) |node| node.setCompletedItems(complete_total.count),
@@ -100,14 +100,14 @@ pub fn run(
         .tui => |cmd_kind_maybe| if (.none == repo_opts.hash) {
             // if no hash was specified, use AnyRepo to detect the hash being used
             var any_repo = try rp.AnyRepo(repo_kind, repo_opts).open(io, allocator, .{ .path = cwd_path });
-            defer any_repo.deinit(allocator);
+            defer any_repo.deinit(io, allocator);
             switch (any_repo) {
                 .none => return error.HashKindNotFound,
                 inline else => |*repo| try ui.start(repo.self_repo_kind, repo.self_repo_opts, repo, io, allocator, cmd_kind_maybe),
             }
         } else {
             var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = cwd_path });
-            defer repo.deinit(allocator);
+            defer repo.deinit(io, allocator);
             try ui.start(repo_kind, repo_opts, &repo, io, allocator, cmd_kind_maybe);
         },
         .cli => |cli_cmd| switch (cli_cmd) {
@@ -120,7 +120,7 @@ pub fn run(
                 const work_path = try std.fs.path.resolve(allocator, &.{ cwd_path, init_cmd.dir });
                 defer allocator.free(work_path);
                 var repo = try rp.Repo(repo_kind, new_repo_opts).init(io, allocator, .{ .cwd_path = cwd_path, .path = work_path });
-                defer repo.deinit(allocator);
+                defer repo.deinit(io, allocator);
 
                 try writers.out.print(
                     \\congrats, you just created a new repo! aren't you special.
@@ -144,7 +144,7 @@ pub fn run(
                     work_path,
                     .{ .progress_ctx = if (repo_opts.ProgressCtx == void) {} else .{ .writers = writers, .clear_line = &clear_line, .node = &progress_node } },
                 );
-                defer repo.deinit(allocator);
+                defer repo.deinit(io, allocator);
 
                 if (repo_kind == .xit) {
                     try writers.out.print(
@@ -157,7 +157,7 @@ pub fn run(
             else => if (.none == repo_opts.hash) {
                 // if no hash was specified, use AnyRepo to detect the hash being used
                 var any_repo = try rp.AnyRepo(repo_kind, repo_opts).open(io, allocator, .{ .path = cwd_path });
-                defer any_repo.deinit(allocator);
+                defer any_repo.deinit(io, allocator);
                 switch (any_repo) {
                     .none => return error.HashKindNotFound,
                     inline else => |*repo| {
@@ -167,7 +167,7 @@ pub fn run(
                 }
             } else {
                 var repo = try rp.Repo(repo_kind, repo_opts).open(io, allocator, .{ .path = cwd_path });
-                defer repo.deinit(allocator);
+                defer repo.deinit(io, allocator);
                 try runCommand(repo_kind, repo_opts, &repo, io, allocator, cli_cmd, writers);
             },
         },
@@ -307,7 +307,7 @@ fn runCommand(
         .commit => |commit_cmd| _ = try repo.commit(io, allocator, commit_cmd),
         .tag => |tag_cmd| switch (tag_cmd) {
             .list => {
-                var ref_list = try repo.listTags(allocator);
+                var ref_list = try repo.listTags(io, allocator);
                 defer ref_list.deinit();
 
                 for (ref_list.refs.values()) |ref| {
@@ -315,7 +315,7 @@ fn runCommand(
                 }
             },
             .add => |add_tag| _ = try repo.addTag(io, allocator, add_tag),
-            .remove => |rm_tag| try repo.removeTag(rm_tag),
+            .remove => |rm_tag| try repo.removeTag(io, rm_tag),
         },
         .status => {
             var head_buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
@@ -470,7 +470,7 @@ fn runCommand(
                         .oid => "",
                     };
 
-                    var ref_list = try repo.listBranches(allocator);
+                    var ref_list = try repo.listBranches(io, allocator);
                     defer ref_list.deinit();
 
                     for (ref_list.refs.values()) |ref| {
@@ -737,7 +737,7 @@ pub fn main() !u8 {
         _ = debug_allocator.deinit();
     };
 
-    var threaded: std.Io.Threaded = .init(allocator);
+    var threaded: std.Io.Threaded = .init_single_threaded;
     defer threaded.deinit();
     const io = threaded.io();
 
@@ -751,8 +751,8 @@ pub fn main() !u8 {
         try args.append(allocator, arg);
     }
 
-    var stdout_writer = std.fs.File.stdout().writer(&.{});
-    var stderr_writer = std.fs.File.stderr().writer(&.{});
+    var stdout_writer = std.Io.File.stdout().writer(io, &.{});
+    var stderr_writer = std.Io.File.stderr().writer(io, &.{});
     const writers = Writers{ .out = &stdout_writer.interface, .err = &stderr_writer.interface };
 
     const cwd_path = try std.process.getCwdAlloc(allocator);

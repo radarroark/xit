@@ -163,9 +163,9 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
                     },
                     .ssh => {
                         // create priv host key
-                        const host_key_file = try std.fs.cwd().createFile(temp_dir_name ++ "/host_key", .{});
-                        defer host_key_file.close();
-                        try host_key_file.writeAll(
+                        const host_key_file = try std.Io.Dir.cwd().createFile(io, temp_dir_name ++ "/host_key", .{});
+                        defer host_key_file.close(io);
+                        try host_key_file.writeStreamingAll(io,
                             \\-----BEGIN OPENSSH PRIVATE KEY-----
                             \\b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAaAAAABNlY2RzYS
                             \\1zaGEyLW5pc3RwMjU2AAAACG5pc3RwMjU2AAAAQQS1ppUfk8n7yvVKEgz3tXjt4q76VGuj
@@ -178,13 +178,13 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
                             \\
                         );
                         if (.windows != builtin.os.tag) {
-                            try host_key_file.setPermissions(.{ .inner = .{ .mode = 0o600 } });
+                            try host_key_file.setPermissions(io, @enumFromInt(0o600));
                         }
 
                         // create priv client key
-                        const priv_key_file = try std.fs.cwd().createFile(temp_dir_name ++ "/key", .{});
-                        defer priv_key_file.close();
-                        try priv_key_file.writeAll(
+                        const priv_key_file = try std.Io.Dir.cwd().createFile(io, temp_dir_name ++ "/key", .{});
+                        defer priv_key_file.close(io);
+                        try priv_key_file.writeStreamingAll(io,
                             \\-----BEGIN OPENSSH PRIVATE KEY-----
                             \\b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
                             \\QyNTUxOQAAACCniLPJiaooAWecvOCeAjoJwCSeWxzysvpTNkpYjF22JgAAAJA+7hikPu4Y
@@ -195,44 +195,44 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
                             \\
                         );
                         if (.windows != builtin.os.tag) {
-                            try priv_key_file.setPermissions(.{ .inner = .{ .mode = 0o600 } });
+                            try priv_key_file.setPermissions(io, @enumFromInt(0o600));
                         }
 
                         // create pub key
-                        const pub_key_file = try std.fs.cwd().createFile(temp_dir_name ++ "/key.pub", .{});
-                        defer pub_key_file.close();
-                        try pub_key_file.writeAll(
+                        const pub_key_file = try std.Io.Dir.cwd().createFile(io, temp_dir_name ++ "/key.pub", .{});
+                        defer pub_key_file.close(io);
+                        try pub_key_file.writeStreamingAll(io,
                             \\ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKeIs8mJqigBZ5y84J4COgnAJJ5bHPKy+lM2SliMXbYm radar@roark
                             \\
                         );
                         if (.windows != builtin.os.tag) {
-                            try pub_key_file.setPermissions(.{ .inner = .{ .mode = 0o600 } });
+                            try pub_key_file.setPermissions(io, @enumFromInt(0o600));
                         }
 
                         // create authorized_keys file
-                        const auth_keys_file = try std.fs.cwd().createFile(temp_dir_name ++ "/authorized_keys", .{});
-                        defer auth_keys_file.close();
-                        try auth_keys_file.writeAll(
+                        const auth_keys_file = try std.Io.Dir.cwd().createFile(io, temp_dir_name ++ "/authorized_keys", .{});
+                        defer auth_keys_file.close(io);
+                        try auth_keys_file.writeStreamingAll(io,
                             \\ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKeIs8mJqigBZ5y84J4COgnAJJ5bHPKy+lM2SliMXbYm radar@roark
                             \\
                         );
                         if (.windows != builtin.os.tag) {
-                            try auth_keys_file.setPermissions(.{ .inner = .{ .mode = 0o600 } });
+                            try auth_keys_file.setPermissions(io, @enumFromInt(0o600));
                         }
 
                         // create known_hosts file
-                        const known_hosts_file = try std.fs.cwd().createFile(temp_dir_name ++ "/known_hosts", .{});
-                        defer known_hosts_file.close();
+                        const known_hosts_file = try std.Io.Dir.cwd().createFile(io, temp_dir_name ++ "/known_hosts", .{});
+                        defer known_hosts_file.close(io);
                         const port_str = std.fmt.comptimePrint("{}", .{port});
-                        try known_hosts_file.writeAll("[localhost]:" ++ port_str ++ " ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBLWmlR+TyfvK9UoSDPe1eO3irvpUa6MtxCVHCaiDOi9XjQstxfRpM5tmVBotZ/Mkw2kJr/O0ylCWvzqexqsTiUQ=");
+                        try known_hosts_file.writeStreamingAll(io, "[localhost]:" ++ port_str ++ " ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBLWmlR+TyfvK9UoSDPe1eO3irvpUa6MtxCVHCaiDOi9XjQstxfRpM5tmVBotZ/Mkw2kJr/O0ylCWvzqexqsTiUQ=");
                         if (.windows != builtin.os.tag) {
-                            try known_hosts_file.setPermissions(.{ .inner = .{ .mode = 0o600 } });
+                            try known_hosts_file.setPermissions(io, @enumFromInt(0o600));
                         }
 
                         // create sshd_config file
-                        const sshd_config_file = try std.fs.cwd().createFile(temp_dir_name ++ "/sshd_config", .{});
-                        defer sshd_config_file.close();
-                        try sshd_config_file.writeAll(
+                        const sshd_config_file = try std.Io.Dir.cwd().createFile(io, temp_dir_name ++ "/sshd_config", .{});
+                        defer sshd_config_file.close(io);
+                        try sshd_config_file.writeStreamingAll(io,
                             \\AuthenticationMethods publickey
                             \\PubkeyAuthentication yes
                             \\PasswordAuthentication no
@@ -240,7 +240,7 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
                             \\
                         );
                         if (.windows != builtin.os.tag) {
-                            try sshd_config_file.setPermissions(.{ .inner = .{ .mode = 0o600 } });
+                            try sshd_config_file.setPermissions(io, @enumFromInt(0o600));
                         }
 
                         // create sshd.sh contents
@@ -261,11 +261,11 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
                         try std.testing.expect(null == std.mem.indexOfScalar(u8, auth_keys_path, ' '));
 
                         // create sshd.sh
-                        const sshd_file = try std.fs.cwd().createFile(temp_dir_name ++ "/sshd.sh", .{});
-                        defer sshd_file.close();
-                        try sshd_file.writeAll(sshd_contents);
+                        const sshd_file = try std.Io.Dir.cwd().createFile(io, temp_dir_name ++ "/sshd.sh", .{});
+                        defer sshd_file.close(io);
+                        try sshd_file.writeStreamingAll(io, sshd_contents);
                         if (.windows != builtin.os.tag) {
-                            try sshd_file.setPermissions(.{ .inner = .{ .mode = 0o755 } });
+                            try sshd_file.setPermissions(io, .executable_file);
                         }
 
                         var process = std.process.Child.init(&.{"./sshd.sh"}, allocator);
@@ -379,13 +379,13 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
                                         process.stdout_behavior = .Pipe;
                                         process.stderr_behavior = .Pipe;
                                         process.env_map = &env_map;
-                                        try process.spawn();
+                                        try process.spawn(core.io);
 
                                         if (request.head.method == .POST) {
                                             const reader = try request.readerExpectContinue(&.{});
                                             const request_body = try reader.allocRemaining(core.allocator, .unlimited);
                                             defer core.allocator.free(request_body);
-                                            try process.stdin.?.writeAll(request_body);
+                                            try process.stdin.?.writeStreamingAll(core.io, request_body);
                                         }
 
                                         var stdout = std.ArrayList(u8){};
@@ -394,7 +394,7 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
                                         defer stderr.deinit(core.allocator);
                                         try process.collectOutput(core.allocator, &stdout, &stderr, 20 * 1024 * 1024);
 
-                                        _ = try process.wait();
+                                        _ = try process.wait(core.io);
 
                                         if (stderr.items.len > 0) {
                                             std.debug.print("Error from git-http-backend:\n{s}\n", .{stderr.items});
@@ -418,8 +418,8 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
                         };
                         self.core.server_thread = try std.Thread.spawn(.{}, ServerHandler.run, .{&self.core});
                     },
-                    .raw => try self.core.process.spawn(),
-                    .ssh => try self.core.process.spawn(),
+                    .raw => try self.core.process.spawn(self.core.io),
+                    .ssh => try self.core.process.spawn(self.core.io),
                 },
             }
 
@@ -439,8 +439,8 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
                         _ = client.fetch(.{ .location = .{ .url = self.core.stop_server_endpoint } }) catch return;
                         self.core.server_thread.join();
                     },
-                    .raw => _ = self.core.process.kill() catch {},
-                    .ssh => _ = self.core.process.kill() catch {},
+                    .raw => _ = self.core.process.kill(self.core.io) catch {},
+                    .ssh => _ = self.core.process.kill(self.core.io) catch {},
                 },
             }
         }
@@ -458,15 +458,15 @@ fn testFetch(
     const temp_dir_name = "temp-testnet-fetch";
 
     // create the temp dir
-    const cwd = std.fs.cwd();
-    var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
+    const cwd = std.Io.Dir.cwd();
+    var temp_dir_or_err = cwd.openDir(io, temp_dir_name, .{});
     if (temp_dir_or_err) |*temp_dir| {
-        temp_dir.close();
-        try cwd.deleteTree(temp_dir_name);
+        temp_dir.close(io);
+        try cwd.deleteTree(io, temp_dir_name);
     } else |_| {}
-    var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
-    defer cwd.deleteTree(temp_dir_name) catch {};
-    defer temp_dir.close();
+    var temp_dir = try cwd.createDirPathOpen(io, temp_dir_name, .{});
+    defer cwd.deleteTree(io, temp_dir_name) catch {};
+    defer temp_dir.close(io);
 
     // init server
     var server = try Server(transport_def).init(io, allocator, temp_dir_name, port);
@@ -480,21 +480,21 @@ fn testFetch(
     defer allocator.free(server_path);
 
     var server_repo = try rp.Repo(.git, .{ .is_test = true }).init(io, allocator, .{ .path = server_path });
-    defer server_repo.deinit(allocator);
+    defer server_repo.deinit(io, allocator);
 
     // make a commit
     const commit1 = blk: {
-        const hello_txt = try server_repo.core.work_dir.createFile("hello.txt", .{ .truncate = true });
-        defer hello_txt.close();
-        try hello_txt.writeAll("hello, world!");
+        const hello_txt = try server_repo.core.work_dir.createFile(io, "hello.txt", .{ .truncate = true });
+        defer hello_txt.close(io);
+        try hello_txt.writeStreamingAll(io, "hello, world!");
         try server_repo.add(io, allocator, &.{"hello.txt"});
         break :blk try server_repo.commit(io, allocator, .{ .message = "let there be light" });
     };
 
     // export server repo
     {
-        const export_file = try server_repo.core.repo_dir.createFile("git-daemon-export-ok", .{});
-        defer export_file.close();
+        const export_file = try server_repo.core.repo_dir.createFile(io, "git-daemon-export-ok", .{});
+        defer export_file.close(io);
 
         try server_repo.addConfig(io, allocator, .{ .name = "uploadpack.allowAnySHA1InWant", .value = "true" });
     }
@@ -506,7 +506,7 @@ fn testFetch(
     defer allocator.free(client_path);
 
     var client_repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = client_path });
-    defer client_repo.deinit(allocator);
+    defer client_repo.deinit(io, allocator);
 
     // add remote
     {
@@ -577,8 +577,8 @@ fn testFetch(
 
     // make sure fetch was successful
     {
-        const hello_txt = try temp_dir.openFile("client/hello.txt", .{});
-        defer hello_txt.close();
+        const hello_txt = try temp_dir.openFile(io, "client/hello.txt", .{});
+        defer hello_txt.close(io);
 
         try std.testing.expect(null != try client_repo.readRef(io, .{ .kind = .tag, .name = "1.0.0" }));
         try std.testing.expect(null != try client_repo.readRef(io, .{ .kind = .head, .name = "foo" }));
@@ -595,9 +595,9 @@ fn testFetch(
 
     // make another commit
     const commit2 = blk: {
-        const goodbye_txt = try server_repo.core.work_dir.createFile("goodbye.txt", .{ .truncate = true });
-        defer goodbye_txt.close();
-        try goodbye_txt.writeAll("goodbye, world!");
+        const goodbye_txt = try server_repo.core.work_dir.createFile(io, "goodbye.txt", .{ .truncate = true });
+        defer goodbye_txt.close(io);
+        try goodbye_txt.writeStreamingAll(io, "goodbye, world!");
         try server_repo.add(io, allocator, &.{"goodbye.txt"});
         break :blk try server_repo.commit(io, allocator, .{ .message = "goodbye" });
     };
@@ -625,8 +625,8 @@ fn testFetch(
 
     // make sure fetch was successful
     {
-        const goodbye_txt = try temp_dir.openFile("client/goodbye.txt", .{});
-        defer goodbye_txt.close();
+        const goodbye_txt = try temp_dir.openFile(io, "client/goodbye.txt", .{});
+        defer goodbye_txt.close(io);
 
         const oid_master = (try client_repo.readRef(io, .{ .kind = .head, .name = "master" })).?;
         try std.testing.expectEqualStrings(&commit2, &oid_master);
@@ -644,15 +644,15 @@ fn testPush(
     const temp_dir_name = "temp-testnet-push";
 
     // create the temp dir
-    const cwd = std.fs.cwd();
-    var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
+    const cwd = std.Io.Dir.cwd();
+    var temp_dir_or_err = cwd.openDir(io, temp_dir_name, .{});
     if (temp_dir_or_err) |*temp_dir| {
-        temp_dir.close();
-        try cwd.deleteTree(temp_dir_name);
+        temp_dir.close(io);
+        try cwd.deleteTree(io, temp_dir_name);
     } else |_| {}
-    var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
-    defer cwd.deleteTree(temp_dir_name) catch {};
-    defer temp_dir.close();
+    var temp_dir = try cwd.createDirPathOpen(io, temp_dir_name, .{});
+    defer cwd.deleteTree(io, temp_dir_name) catch {};
+    defer temp_dir.close(io);
 
     // init server
     var server = try Server(transport_def).init(io, allocator, temp_dir_name, port);
@@ -666,7 +666,7 @@ fn testPush(
     defer allocator.free(server_path);
 
     var server_repo = try rp.Repo(.git, .{ .is_test = true }).init(io, allocator, .{ .path = server_path });
-    defer server_repo.deinit(allocator);
+    defer server_repo.deinit(io, allocator);
 
     // add config
     switch (transport_def) {
@@ -680,21 +680,21 @@ fn testPush(
 
     // export server repo
     {
-        const export_file = try server_repo.core.repo_dir.createFile("git-daemon-export-ok", .{});
-        defer export_file.close();
+        const export_file = try server_repo.core.repo_dir.createFile(io, "git-daemon-export-ok", .{});
+        defer export_file.close(io);
     }
 
     const client_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "client" });
     defer allocator.free(client_path);
 
     var client_repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = client_path });
-    defer client_repo.deinit(allocator);
+    defer client_repo.deinit(io, allocator);
 
     // make a commit
     const commit1 = blk: {
-        const hello_txt = try client_repo.core.work_dir.createFile("hello.txt", .{ .truncate = true });
-        defer hello_txt.close();
-        try hello_txt.writeAll("hello, world!");
+        const hello_txt = try client_repo.core.work_dir.createFile(io, "hello.txt", .{ .truncate = true });
+        defer hello_txt.close(io);
+        try hello_txt.writeStreamingAll(io, "hello, world!");
         try client_repo.add(io, allocator, &.{"hello.txt"});
         break :blk try client_repo.commit(io, allocator, .{ .message = "let there be light" });
     };
@@ -779,18 +779,18 @@ fn testPush(
 
     // make a commit on the server
     {
-        const hello_txt = try server_repo.core.work_dir.createFile("hello.txt", .{ .truncate = true });
-        defer hello_txt.close();
-        try hello_txt.writeAll("hello, world from the server!");
+        const hello_txt = try server_repo.core.work_dir.createFile(io, "hello.txt", .{ .truncate = true });
+        defer hello_txt.close(io);
+        try hello_txt.writeStreamingAll(io, "hello, world from the server!");
         try server_repo.add(io, allocator, &.{"hello.txt"});
         _ = try server_repo.commit(io, allocator, .{ .message = "new commit from the server" });
     }
 
     // make another commit
     const commit2 = blk: {
-        const goodbye_txt = try client_repo.core.work_dir.createFile("goodbye.txt", .{ .truncate = true });
-        defer goodbye_txt.close();
-        try goodbye_txt.writeAll("goodbye, world!");
+        const goodbye_txt = try client_repo.core.work_dir.createFile(io, "goodbye.txt", .{ .truncate = true });
+        defer goodbye_txt.close(io);
+        try goodbye_txt.writeStreamingAll(io, "goodbye, world!");
         try client_repo.add(io, allocator, &.{"goodbye.txt"});
         break :blk try client_repo.commit(io, allocator, .{ .message = "goodbye" });
     };
@@ -813,9 +813,9 @@ fn testPush(
 
     // make a commit on the server with no parents, thus creating an incompatible git history
     {
-        const hello_txt = try server_repo.core.work_dir.createFile("hello.txt", .{ .truncate = true });
-        defer hello_txt.close();
-        try hello_txt.writeAll("hello, world from the server again!");
+        const hello_txt = try server_repo.core.work_dir.createFile(io, "hello.txt", .{ .truncate = true });
+        defer hello_txt.close(io);
+        try hello_txt.writeStreamingAll(io, "hello, world from the server again!");
         try server_repo.add(io, allocator, &.{"hello.txt"});
         _ = try server_repo.commit(io, allocator, .{ .message = "new git history on the server", .parent_oids = &.{} });
     }
@@ -913,15 +913,15 @@ fn testClone(
     const temp_dir_name = "temp-testnet-clone";
 
     // create the temp dir
-    const cwd = std.fs.cwd();
-    var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
+    const cwd = std.Io.Dir.cwd();
+    var temp_dir_or_err = cwd.openDir(io, temp_dir_name, .{});
     if (temp_dir_or_err) |*temp_dir| {
-        temp_dir.close();
-        try cwd.deleteTree(temp_dir_name);
+        temp_dir.close(io);
+        try cwd.deleteTree(io, temp_dir_name);
     } else |_| {}
-    var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
-    defer cwd.deleteTree(temp_dir_name) catch {};
-    defer temp_dir.close();
+    var temp_dir = try cwd.createDirPathOpen(io, temp_dir_name, .{});
+    defer cwd.deleteTree(io, temp_dir_name) catch {};
+    defer temp_dir.close(io);
 
     // init server
     var server = try Server(transport_def).init(io, allocator, temp_dir_name, port);
@@ -939,21 +939,21 @@ fn testClone(
 
     // init server repo with default branch name as main
     var server_repo = try rp.Repo(.git, .{ .is_test = true }).init(io, allocator, .{ .path = server_path, .create_default_branch = "main" });
-    defer server_repo.deinit(allocator);
+    defer server_repo.deinit(io, allocator);
 
     // make a commit
     {
-        const hello_txt = try server_repo.core.work_dir.createFile("hello.txt", .{ .truncate = true });
-        defer hello_txt.close();
-        try hello_txt.writeAll("hello, world!");
+        const hello_txt = try server_repo.core.work_dir.createFile(io, "hello.txt", .{ .truncate = true });
+        defer hello_txt.close(io);
+        try hello_txt.writeStreamingAll(io, "hello, world!");
         try server_repo.add(io, allocator, &.{"hello.txt"});
         _ = try server_repo.commit(io, allocator, .{ .message = "let there be light" });
     }
 
     // export server repo
     {
-        const export_file = try server_repo.core.repo_dir.createFile("git-daemon-export-ok", .{});
-        defer export_file.close();
+        const export_file = try server_repo.core.repo_dir.createFile(io, "git-daemon-export-ok", .{});
+        defer export_file.close(io);
     }
 
     const client_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "client" });
@@ -1013,11 +1013,11 @@ fn testClone(
         }
         return err;
     };
-    defer client_repo.deinit(allocator);
+    defer client_repo.deinit(io, allocator);
 
     // make sure clone was successful
-    const hello_txt = try temp_dir.openFile("client/hello.txt", .{});
-    defer hello_txt.close();
+    const hello_txt = try temp_dir.openFile(io, "client/hello.txt", .{});
+    defer hello_txt.close(io);
 
     // make sure HEAD points to the right default branch
     var current_branch_buffer = [_]u8{0} ** rf.MAX_REF_CONTENT_SIZE;
@@ -1036,15 +1036,15 @@ fn testFetchLarge(
     const temp_dir_name = "temp-testnet-fetch-large";
 
     // create the temp dir
-    const cwd = std.fs.cwd();
-    var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
+    const cwd = std.Io.Dir.cwd();
+    var temp_dir_or_err = cwd.openDir(io, temp_dir_name, .{});
     if (temp_dir_or_err) |*temp_dir| {
-        temp_dir.close();
-        try cwd.deleteTree(temp_dir_name);
+        temp_dir.close(io);
+        try cwd.deleteTree(io, temp_dir_name);
     } else |_| {}
-    var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
-    defer cwd.deleteTree(temp_dir_name) catch {};
-    defer temp_dir.close();
+    var temp_dir = try cwd.createDirPathOpen(io, temp_dir_name, .{});
+    defer cwd.deleteTree(io, temp_dir_name) catch {};
+    defer temp_dir.close(io);
 
     // init server
     var server = try Server(transport_def).init(io, allocator, temp_dir_name, port);
@@ -1058,20 +1058,20 @@ fn testFetchLarge(
     defer allocator.free(server_path);
 
     var server_repo = try rp.Repo(.git, .{ .is_test = true }).init(io, allocator, .{ .path = server_path });
-    defer server_repo.deinit(allocator);
+    defer server_repo.deinit(io, allocator);
 
-    var server_dir = try cwd.openDir(server_path, .{});
-    defer server_dir.close();
+    var server_dir = try cwd.openDir(io, server_path, .{});
+    defer server_dir.close(io);
 
     // copy files from current repo into server dir
     for (&[_][]const u8{ "src", "docs" }) |dir_name| {
-        var src_repo_dir = try cwd.openDir(dir_name, .{ .iterate = true });
-        defer src_repo_dir.close();
+        var src_repo_dir = try cwd.openDir(io, dir_name, .{ .iterate = true });
+        defer src_repo_dir.close(io);
 
-        var dest_repo_dir = try server_dir.makeOpenPath(dir_name, .{});
-        defer dest_repo_dir.close();
+        var dest_repo_dir = try server_dir.createDirPathOpen(io, dir_name, .{});
+        defer dest_repo_dir.close(io);
 
-        try copyDir(src_repo_dir, dest_repo_dir);
+        try copyDir(io, src_repo_dir, dest_repo_dir);
 
         try server_repo.add(io, allocator, &.{dir_name});
     }
@@ -1081,15 +1081,15 @@ fn testFetchLarge(
 
     // export server repo
     {
-        const export_file = try server_repo.core.repo_dir.createFile("git-daemon-export-ok", .{});
-        defer export_file.close();
+        const export_file = try server_repo.core.repo_dir.createFile(io, "git-daemon-export-ok", .{});
+        defer export_file.close(io);
     }
 
     const client_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "client" });
     defer allocator.free(client_path);
 
     var client_repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = client_path });
-    defer client_repo.deinit(allocator);
+    defer client_repo.deinit(io, allocator);
 
     // add remote
     {
@@ -1171,15 +1171,15 @@ fn testPushLarge(
     const temp_dir_name = "temp-testnet-push-large";
 
     // create the temp dir
-    const cwd = std.fs.cwd();
-    var temp_dir_or_err = cwd.openDir(temp_dir_name, .{});
+    const cwd = std.Io.Dir.cwd();
+    var temp_dir_or_err = cwd.openDir(io, temp_dir_name, .{});
     if (temp_dir_or_err) |*temp_dir| {
-        temp_dir.close();
-        try cwd.deleteTree(temp_dir_name);
+        temp_dir.close(io);
+        try cwd.deleteTree(io, temp_dir_name);
     } else |_| {}
-    var temp_dir = try cwd.makeOpenPath(temp_dir_name, .{});
-    defer cwd.deleteTree(temp_dir_name) catch {};
-    defer temp_dir.close();
+    var temp_dir = try cwd.createDirPathOpen(io, temp_dir_name, .{});
+    defer cwd.deleteTree(io, temp_dir_name) catch {};
+    defer temp_dir.close(io);
 
     // init server
     var server = try Server(transport_def).init(io, allocator, temp_dir_name, port);
@@ -1193,7 +1193,7 @@ fn testPushLarge(
     defer allocator.free(server_path);
 
     var server_repo = try rp.Repo(.git, .{ .is_test = true }).init(io, allocator, .{ .path = server_path });
-    defer server_repo.deinit(allocator);
+    defer server_repo.deinit(io, allocator);
 
     // add config
     switch (transport_def) {
@@ -1207,28 +1207,28 @@ fn testPushLarge(
 
     // export server repo
     {
-        const export_file = try server_repo.core.repo_dir.createFile("git-daemon-export-ok", .{});
-        defer export_file.close();
+        const export_file = try server_repo.core.repo_dir.createFile(io, "git-daemon-export-ok", .{});
+        defer export_file.close(io);
     }
 
     const client_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "client" });
     defer allocator.free(client_path);
 
     var client_repo = try rp.Repo(repo_kind, repo_opts).init(io, allocator, .{ .path = client_path });
-    defer client_repo.deinit(allocator);
+    defer client_repo.deinit(io, allocator);
 
-    var client_dir = try cwd.openDir(client_path, .{});
-    defer client_dir.close();
+    var client_dir = try cwd.openDir(io, client_path, .{});
+    defer client_dir.close(io);
 
     // copy files from current repo into client dir
     for (&[_][]const u8{ "src", "docs" }) |dir_name| {
-        var src_repo_dir = try cwd.openDir(dir_name, .{ .iterate = true });
-        defer src_repo_dir.close();
+        var src_repo_dir = try cwd.openDir(io, dir_name, .{ .iterate = true });
+        defer src_repo_dir.close(io);
 
-        var dest_repo_dir = try client_dir.makeOpenPath(dir_name, .{});
-        defer dest_repo_dir.close();
+        var dest_repo_dir = try client_dir.createDirPathOpen(io, dir_name, .{});
+        defer dest_repo_dir.close(io);
 
-        try copyDir(src_repo_dir, dest_repo_dir);
+        try copyDir(io, src_repo_dir, dest_repo_dir);
 
         try client_repo.add(io, allocator, &.{dir_name});
     }
@@ -1300,18 +1300,18 @@ fn testPushLarge(
     }
 }
 
-fn copyDir(src_dir: std.fs.Dir, dest_dir: std.fs.Dir) !void {
+fn copyDir(io: std.Io, src_dir: std.Io.Dir, dest_dir: std.Io.Dir) !void {
     var iter = src_dir.iterate();
-    while (try iter.next()) |entry| {
+    while (try iter.next(io)) |entry| {
         switch (entry.kind) {
-            .file => try src_dir.copyFile(entry.name, dest_dir, entry.name, .{}),
+            .file => try src_dir.copyFile(entry.name, dest_dir, entry.name, io, .{}),
             .directory => {
-                try dest_dir.makeDir(entry.name);
-                var dest_entry_dir = try dest_dir.openDir(entry.name, .{ .access_sub_paths = true, .iterate = true, .follow_symlinks = false });
-                defer dest_entry_dir.close();
-                var src_entry_dir = try src_dir.openDir(entry.name, .{ .access_sub_paths = true, .iterate = true, .follow_symlinks = false });
-                defer src_entry_dir.close();
-                try copyDir(src_entry_dir, dest_entry_dir);
+                try dest_dir.createDirPath(io, entry.name);
+                var dest_entry_dir = try dest_dir.openDir(io, entry.name, .{ .access_sub_paths = true, .iterate = true, .follow_symlinks = false });
+                defer dest_entry_dir.close(io);
+                var src_entry_dir = try src_dir.openDir(io, entry.name, .{ .access_sub_paths = true, .iterate = true, .follow_symlinks = false });
+                defer src_entry_dir.close(io);
+                try copyDir(io, src_entry_dir, dest_entry_dir);
             },
             else => {},
         }

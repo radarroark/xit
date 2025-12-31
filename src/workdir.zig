@@ -190,10 +190,10 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             modified: *std.StringArrayHashMapUnmanaged(Status(repo_kind, repo_opts).Entry),
             index: *const idx.Index(repo_kind, repo_opts),
             index_bools: *[]bool,
-            work_dir: std.fs.Dir,
+            work_dir: std.Io.Dir,
             path: []const u8,
         ) !bool {
-            const meta = try fs.Metadata.init(work_dir, path);
+            const meta = try fs.Metadata.init(io, work_dir, path);
             switch (meta.kind) {
                 .file, .sym_link => {
                     if (index.entries.getIndex(path)) |entry_index| {
@@ -212,15 +212,15 @@ pub fn Status(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                 .directory => {
                     const is_untracked = !(std.mem.eql(u8, path, ".") or index.dir_to_paths.contains(path) or index.entries.contains(path));
 
-                    var dir = try work_dir.openDir(path, .{ .iterate = true });
-                    defer dir.close();
+                    var dir = try work_dir.openDir(io, path, .{ .iterate = true });
+                    defer dir.close(io);
                     var iter = dir.iterate();
 
                     var child_untracked = std.ArrayList(Status(repo_kind, repo_opts).Entry){};
                     defer child_untracked.deinit(allocator);
                     var contains_file = false;
 
-                    while (try iter.next()) |entry| {
+                    while (try iter.next(io)) |entry| {
                         // ignore repo dir
                         const repo_dir_name = switch (repo_kind) {
                             .git => ".git",
@@ -283,7 +283,7 @@ pub fn indexDiffersFromWorkDir(
     comptime repo_opts: rp.RepoOpts(repo_kind),
     io: std.Io,
     entry: *const idx.Index(repo_kind, repo_opts).Entry,
-    parent_dir: std.fs.Dir,
+    parent_dir: std.Io.Dir,
     path: []const u8,
     meta: fs.Metadata,
 ) !bool {
@@ -298,8 +298,8 @@ pub fn indexDiffersFromWorkDir(
                     .mtime_secs = entry.mtime_secs,
                     .mtime_nsecs = entry.mtime_nsecs,
                 })) {
-                    const file = try parent_dir.openFile(path, .{ .mode = .read_only });
-                    defer file.close();
+                    const file = try parent_dir.openFile(io, path, .{ .mode = .read_only });
+                    defer file.close(io);
 
                     // create blob header
                     var header_buffer = [_]u8{0} ** 256; // should be plenty of space
@@ -318,7 +318,8 @@ pub fn indexDiffersFromWorkDir(
             .sym_link => {
                 // get the target path
                 var target_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-                const target_path = try parent_dir.readLink(path, &target_path_buffer);
+                const target_path_size = try parent_dir.readLink(io, path, &target_path_buffer);
+                const target_path = target_path_buffer[0..target_path_size];
 
                 // make reader
                 var reader = std.Io.Reader.fixed(target_path);
@@ -355,10 +356,10 @@ pub fn addPaths(
         const path_parts = try fs.splitPath(allocator, path);
         defer allocator.free(path_parts);
 
-        try index.addOrRemovePath(state, path_parts, .add, null);
+        try index.addOrRemovePath(state, io, path_parts, .add, null);
     }
 
-    try index.write(allocator, state);
+    try index.write(allocator, state, io);
 }
 
 /// removes the given paths from the index
@@ -382,7 +383,7 @@ pub fn unaddPaths(
             return error.RecursiveOptionRequired;
         }
 
-        try index.addOrRemovePath(state, path_parts, .rm, null);
+        try index.addOrRemovePath(state, io, path_parts, .rm, null);
 
         // iterate over the HEAD entries and add them to the index
         if (try tr.headTreeEntry(repo_kind, repo_opts, state.readOnly(), io, allocator, path_parts)) |*tree_entry| {
@@ -390,7 +391,7 @@ pub fn unaddPaths(
         }
     }
 
-    try index.write(allocator, state);
+    try index.write(allocator, state, io);
 }
 
 /// removes the given paths from the index and optionally from the work dir
@@ -417,7 +418,7 @@ pub fn removePaths(
         // remove from index
         const path_parts = try fs.splitPath(allocator, path);
         defer allocator.free(path_parts);
-        try index.addOrRemovePath(state, path_parts, .rm, &removed_paths);
+        try index.addOrRemovePath(state, io, path_parts, .rm, &removed_paths);
     }
 
     // safety check on the files we're about to remove
@@ -429,7 +430,7 @@ pub fn removePaths(
         defer head_tree.deinit();
 
         for (removed_paths.keys()) |path| {
-            const meta = fs.Metadata.init(state.core.work_dir, path) catch |err| switch (err) {
+            const meta = fs.Metadata.init(io, state.core.work_dir, path) catch |err| switch (err) {
                 error.FileNotFound => continue,
                 else => |e| return e,
             };
@@ -469,11 +470,11 @@ pub fn removePaths(
     // remove files from the work dir
     if (opts.update_work_dir) {
         for (removed_paths.keys()) |path| {
-            try state.core.work_dir.deleteFile(path);
+            try state.core.work_dir.deleteFile(io, path);
 
             var dir_path_maybe = std.fs.path.dirname(path);
             while (dir_path_maybe) |dir_path| {
-                state.core.work_dir.deleteDir(dir_path) catch |err| switch (err) {
+                state.core.work_dir.deleteDir(io, dir_path) catch |err| switch (err) {
                     error.DirNotEmpty, error.FileNotFound => break,
                     else => |e| return e,
                 };
@@ -482,7 +483,7 @@ pub fn removePaths(
         }
     }
 
-    try index.write(allocator, state);
+    try index.write(allocator, state, io);
 }
 
 pub fn objectToFile(
@@ -504,19 +505,22 @@ pub fn objectToFile(
 
             // create parent dir(s)
             if (std.fs.path.dirname(path)) |dir| {
-                try state.core.work_dir.makePath(dir);
+                try state.core.work_dir.createDirPath(io, dir);
             }
 
             // open the out file
-            const out_flags: std.fs.File.CreateFlags = switch (builtin.os.tag) {
+            const out_flags: std.Io.File.CreateFlags = switch (builtin.os.tag) {
                 .windows => .{ .truncate = true },
-                else => .{ .truncate = true, .mode = @as(u16, @bitCast(tree_entry.mode.content)) },
+                else => .{
+                    .truncate = true,
+                    .permissions = if (tree_entry.mode.content.unix_permission == 0o755) .executable_file else .default_file,
+                },
             };
-            const out_file = try state.core.work_dir.createFile(path, out_flags);
-            defer out_file.close();
+            const out_file = try state.core.work_dir.createFile(io, path, out_flags);
+            defer out_file.close(io);
 
             // write the decompressed data to the output file
-            var writer = out_file.writer(&.{});
+            var writer = out_file.writer(io, &.{});
             var read_buffer = [_]u8{0} ** repo_opts.read_size;
             while (true) {
                 const size = try obj_rdr.interface.readSliceShort(&read_buffer);
@@ -544,7 +548,7 @@ pub fn objectToFile(
             },
             else => {
                 // delete file if there is any in this location
-                state.core.work_dir.deleteFile(path) catch |err| switch (err) {
+                state.core.work_dir.deleteFile(io, path) catch |err| switch (err) {
                     error.FileNotFound => {},
                     else => |e| return e,
                 };
@@ -561,11 +565,11 @@ pub fn objectToFile(
 
                 // create parent dir(s)
                 if (std.fs.path.dirname(path)) |dir| {
-                    try state.core.work_dir.makePath(dir);
+                    try state.core.work_dir.createDirPath(io, dir);
                 }
 
                 // create the symlink
-                try state.core.work_dir.symLink(target_path, path, .{});
+                try state.core.work_dir.symLink(io, target_path, path, .{});
             },
         },
         // TODO: handle submodules
@@ -584,11 +588,11 @@ fn compareIndexToWorkDir(
     comptime repo_opts: rp.RepoOpts(repo_kind),
     io: std.Io,
     entry_maybe: ?idx.Index(repo_kind, repo_opts).Entry,
-    parent_dir: std.fs.Dir,
+    parent_dir: std.Io.Dir,
     path: []const u8,
 ) !TreeToWorkDirChange {
     if (entry_maybe) |entry| {
-        if (try indexDiffersFromWorkDir(repo_kind, repo_opts, io, &entry, parent_dir, path, try fs.Metadata.init(parent_dir, path))) {
+        if (try indexDiffersFromWorkDir(repo_kind, repo_opts, io, &entry, parent_dir, path, try fs.Metadata.init(io, parent_dir, path))) {
             return .modified;
         } else {
             return .none;
@@ -635,14 +639,15 @@ fn compareTreeToIndex(
 fn untrackedParent(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
-    work_dir: std.fs.Dir,
+    io: std.Io,
+    work_dir: std.Io.Dir,
     path: []const u8,
     index: *const idx.Index(repo_kind, repo_opts),
 ) ?[]const u8 {
     var parent = path;
     while (std.fs.path.dirname(parent)) |next_parent| {
         parent = next_parent;
-        const meta = fs.Metadata.init(work_dir, next_parent) catch continue;
+        const meta = fs.Metadata.init(io, work_dir, next_parent) catch continue;
         if (meta.kind != .file) continue;
         if (!index.entries.contains(next_parent)) {
             return next_parent;
@@ -656,22 +661,23 @@ fn untrackedParent(
 fn untrackedFile(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
+    io: std.Io,
     allocator: std.mem.Allocator,
-    work_dir: std.fs.Dir,
+    work_dir: std.Io.Dir,
     path: []const u8,
     index: *const idx.Index(repo_kind, repo_opts),
 ) !bool {
-    const meta = try fs.Metadata.init(work_dir, path);
+    const meta = try fs.Metadata.init(io, work_dir, path);
     switch (meta.kind) {
         .file, .sym_link => return !index.entries.contains(path),
         .directory => {
-            var dir = try work_dir.openDir(path, .{ .iterate = true });
-            defer dir.close();
+            var dir = try work_dir.openDir(io, path, .{ .iterate = true });
+            defer dir.close(io);
             var iter = dir.iterate();
-            while (try iter.next()) |dir_entry| {
+            while (try iter.next(io)) |dir_entry| {
                 const subpath = try fs.joinPath(allocator, &.{ path, dir_entry.name });
                 defer allocator.free(subpath);
-                if (try untrackedFile(repo_kind, repo_opts, allocator, work_dir, subpath, index)) {
+                if (try untrackedFile(repo_kind, repo_opts, io, allocator, work_dir, subpath, index)) {
                     return true;
                 }
             }
@@ -719,11 +725,11 @@ pub fn migrate(
                 switch_result.setConflict();
                 try switch_result.result.conflict.stale_files.put(path, {});
             } else {
-                const meta = fs.Metadata.init(state.core.work_dir, path) catch |err| switch (err) {
+                const meta = fs.Metadata.init(io, state.core.work_dir, path) catch |err| switch (err) {
                     error.FileNotFound, error.NotDir => {
                         // if the path doesn't exist in the work dir,
                         // but one of its parents *does* exist and isn't tracked
-                        if (untrackedParent(repo_kind, repo_opts, state.core.work_dir, path, index)) |_| {
+                        if (untrackedParent(repo_kind, repo_opts, io, state.core.work_dir, path, index)) |_| {
                             switch_result.setConflict();
                             if (entry_maybe) |_| {
                                 try switch_result.result.conflict.stale_files.put(path, {});
@@ -753,7 +759,7 @@ pub fn migrate(
                     },
                     .directory => {
                         // if the path is a dir with a descendent that isn't in the index
-                        if (try untrackedFile(repo_kind, repo_opts, allocator, state.core.work_dir, path, index)) {
+                        if (try untrackedFile(repo_kind, repo_opts, io, allocator, state.core.work_dir, path, index)) {
                             switch_result.setConflict();
                             if (entry_maybe) |_| {
                                 try switch_result.result.conflict.stale_files.put(path, {});
@@ -798,13 +804,13 @@ pub fn migrate(
     for (remove_files.keys()) |path| {
         // update work dir
         if (update_work_dir) {
-            state.core.work_dir.deleteFile(path) catch |err| switch (err) {
+            state.core.work_dir.deleteFile(io, path) catch |err| switch (err) {
                 error.FileNotFound => {},
                 else => |e| return e,
             };
             var dir_path_maybe = std.fs.path.dirname(path);
             while (dir_path_maybe) |dir_path| {
-                state.core.work_dir.deleteDir(dir_path) catch |err| switch (err) {
+                state.core.work_dir.deleteDir(io, dir_path) catch |err| switch (err) {
                     error.DirNotEmpty, error.FileNotFound => break,
                     else => |e| return e,
                 };
@@ -822,7 +828,7 @@ pub fn migrate(
             try objectToFile(repo_kind, repo_opts, state.readOnly(), io, allocator, path, tree_entry);
         }
         // update index
-        try index.addPath(state, path, &tree_entry);
+        try index.addPath(state, io, path, &tree_entry);
     }
 }
 
@@ -928,8 +934,8 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
             switch (repo_kind) {
                 .git => {
                     // create lock file
-                    var lock = try fs.LockFile.init(state.core.repo_dir, "index");
-                    defer lock.deinit();
+                    var lock = try fs.LockFile.init(io, state.core.repo_dir, "index");
+                    defer lock.deinit(io);
 
                     // read index
                     var index = try idx.Index(repo_kind, repo_opts).init(state.readOnly(), io, allocator);
@@ -944,7 +950,7 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     }
 
                     // update the index
-                    try index.write(allocator, .{ .core = state.core, .extra = .{ .lock_file_maybe = lock.lock_file } });
+                    try index.write(allocator, .{ .core = state.core, .extra = .{ .lock_file_maybe = lock.lock_file } }, io);
 
                     // update HEAD
                     switch (input.kind) {
@@ -969,7 +975,7 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
                     }
 
                     // update the index
-                    try index.write(allocator, state);
+                    try index.write(allocator, state, io);
 
                     // update HEAD
                     switch (input.kind) {
@@ -981,7 +987,7 @@ pub fn Switch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
             // if -f, we need to clean up stored merge state as well
             if (input.force) {
-                try mrg.removeMergeState(repo_kind, repo_opts, state);
+                try mrg.removeMergeState(repo_kind, repo_opts, state, io);
             }
 
             return switch_result;

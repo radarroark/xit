@@ -2,23 +2,23 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 pub const LockFile = struct {
-    dir: std.fs.Dir,
+    dir: std.Io.Dir,
     file_name: []const u8,
     lock_name_buffer: [lock_name_buffer_size]u8,
     lock_name_len: usize,
-    lock_file: std.fs.File,
+    lock_file: std.Io.File,
     success: bool,
 
     const suffix = ".lock";
     const lock_name_buffer_size = 256;
 
-    pub fn init(dir: std.fs.Dir, file_name: []const u8) !LockFile {
+    pub fn init(io: std.Io, dir: std.Io.Dir, file_name: []const u8) !LockFile {
         var lock_name_buffer = [_]u8{0} ** lock_name_buffer_size;
         const lock_name = try std.fmt.bufPrint(&lock_name_buffer, "{s}.lock", .{file_name});
-        const lock_file = try dir.createFile(lock_name, .{ .truncate = true, .lock = .exclusive, .read = true });
+        const lock_file = try dir.createFile(io, lock_name, .{ .truncate = true, .lock = .exclusive, .read = true });
         errdefer {
-            lock_file.close();
-            dir.deleteFile(lock_name) catch {};
+            lock_file.close(io);
+            dir.deleteFile(io, lock_name) catch {};
         }
         return .{
             .dir = dir,
@@ -30,16 +30,16 @@ pub const LockFile = struct {
         };
     }
 
-    pub fn deinit(self: *LockFile) void {
-        self.lock_file.close();
+    pub fn deinit(self: *LockFile, io: std.Io) void {
+        self.lock_file.close(io);
         const lock_name = self.lock_name_buffer[0..self.lock_name_len];
         if (self.success) {
-            self.dir.rename(lock_name, self.file_name) catch {
+            self.dir.rename(lock_name, self.dir, self.file_name, io) catch {
                 self.success = false;
             };
         }
         if (!self.success) {
-            self.dir.deleteFile(lock_name) catch {};
+            self.dir.deleteFile(io, lock_name) catch {};
         }
     }
 };
@@ -59,11 +59,8 @@ pub const Mode = packed struct(u32) {
     },
     padding: u16 = 0,
 
-    pub fn init(stat: std.fs.File.Stat) Mode {
-        const is_executable = switch (builtin.os.tag) {
-            .windows => false,
-            else => std.fs.File.PermissionsUnix.unixHas(.{ .mode = stat.mode }, .user, .execute),
-        };
+    pub fn init(stat: std.Io.File.Stat) Mode {
+        const is_executable = @intFromEnum(stat.permissions) & 0o100 != 0;
         const obj_type: Mode.ObjectType = switch (stat.kind) {
             .sym_link => .symbolic_link,
             else => .regular_file,
@@ -123,7 +120,7 @@ pub const Times = struct {
     mtime_secs: u32,
     mtime_nsecs: u32,
 
-    pub fn init(stat: std.fs.File.Stat) Times {
+    pub fn init(stat: std.Io.File.Stat) Times {
         const ctime = stat.ctime.toNanoseconds();
         const mtime = stat.mtime.toNanoseconds();
         return .{
@@ -156,6 +153,24 @@ pub const Stat = struct {
                 .uid = 0,
                 .gid = 0,
             },
+            .linux => {
+                var stat = std.mem.zeroInit(std.os.linux.Statx, .{});
+                if (0 != std.os.linux.statx(fd, "", 0, .{}, &stat)) {
+                    return .{
+                        .dev = 0, // TODO: get dev from dev_major and dev_minor
+                        .ino = @truncate(stat.ino),
+                        .uid = stat.uid,
+                        .gid = stat.gid,
+                    };
+                } else {
+                    return .{
+                        .dev = 0,
+                        .ino = 0,
+                        .uid = 0,
+                        .gid = 0,
+                    };
+                }
+            },
             else => {
                 const stat = try std.posix.fstat(fd);
                 return .{
@@ -170,23 +185,23 @@ pub const Stat = struct {
 };
 
 pub const Metadata = struct {
-    kind: std.fs.File.Kind,
+    kind: std.Io.File.Kind,
     times: Times,
     stat: Stat,
     mode: Mode,
     size: u64,
 
-    pub fn init(parent_dir: std.fs.Dir, path: []const u8) !Metadata {
+    pub fn init(io: std.Io, parent_dir: std.Io.Dir, path: []const u8) !Metadata {
         // special handling for symlinks
         if (.windows != builtin.os.tag) {
             var target_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-            if (parent_dir.readLink(path, &target_path_buffer)) |target_path| {
+            if (parent_dir.readLink(io, path, &target_path_buffer)) |target_path_size| {
                 return .{
                     .kind = .sym_link,
                     .times = std.mem.zeroes(Times),
                     .stat = std.mem.zeroes(Stat),
                     .mode = .{ .content = .{ .unix_permission = 0, .object_type = .symbolic_link } },
-                    .size = target_path.len,
+                    .size = target_path_size,
                 };
             } else |err| switch (err) {
                 error.NotLink => {},
@@ -196,18 +211,18 @@ pub const Metadata = struct {
 
         // on windows, openFile returns error.IsDir on a dir.
         // so we need to call openDir in that case.
-        var stat: std.fs.File.Stat = undefined;
+        var stat: std.Io.File.Stat = undefined;
         var fstat: Stat = undefined;
-        if (parent_dir.openFile(path, .{ .mode = .read_only })) |file| {
-            defer file.close();
-            stat = try file.stat();
+        if (parent_dir.openFile(io, path, .{ .mode = .read_only })) |file| {
+            defer file.close(io);
+            stat = try file.stat(io);
             fstat = try Stat.init(file.handle);
         } else |err| switch (err) {
             error.IsDir => {
-                var dir = try parent_dir.openDir(path, .{});
-                defer dir.close();
-                stat = try dir.stat();
-                fstat = try Stat.init(dir.fd);
+                var dir = try parent_dir.openDir(io, path, .{});
+                defer dir.close(io);
+                stat = try dir.stat(io);
+                fstat = try Stat.init(dir.handle);
             },
             else => |e| return e,
         }
@@ -215,12 +230,12 @@ pub const Metadata = struct {
         return try initFromFileMetadata(stat, fstat);
     }
 
-    pub fn initFromFile(file: std.fs.File) !Metadata {
+    pub fn initFromFile(file: std.Io.File) !Metadata {
         const meta = try file.metadata();
         return initFromFileMetadata(meta, try Stat.init(file.handle));
     }
 
-    pub fn initFromFileMetadata(stat: std.fs.File.Stat, fstat: Stat) !Metadata {
+    pub fn initFromFileMetadata(stat: std.Io.File.Stat, fstat: Stat) !Metadata {
         return .{
             .kind = stat.kind,
             .times = Times.init(stat),

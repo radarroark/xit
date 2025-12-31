@@ -46,24 +46,25 @@ pub fn remove(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
+    io: std.Io,
     input: RemoveTagInput,
 ) !void {
     switch (repo_kind) {
         .git => {
-            var refs_dir = try state.core.repo_dir.openDir("refs", .{});
-            defer refs_dir.close();
-            var tags_dir = try refs_dir.makeOpenPath("tags", .{});
-            defer tags_dir.close();
+            var refs_dir = try state.core.repo_dir.openDir(io, "refs", .{});
+            defer refs_dir.close(io);
+            var tags_dir = try refs_dir.createDirPathOpen(io, "tags", .{});
+            defer tags_dir.close(io);
 
             // delete file
-            try tags_dir.deleteFile(input.name);
+            try tags_dir.deleteFile(io, input.name);
 
             // delete parent dirs
             // this is only necessary because tags with a slash
             // in their name are stored on disk as subdirectories
             var parent_path_maybe = std.fs.path.dirname(input.name);
             while (parent_path_maybe) |parent_path| {
-                tags_dir.deleteDir(parent_path) catch |err| switch (err) {
+                tags_dir.deleteDir(io, parent_path) catch |err| switch (err) {
                     error.DirNotEmpty => break,
                     else => |e| return e,
                 };

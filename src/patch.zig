@@ -130,18 +130,18 @@ pub fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
         const DB = rp.Repo(.xit, repo_opts).DB;
         const db_name = "temp.db";
 
-        repo_dir: std.fs.Dir,
-        db_file: std.fs.File,
+        repo_dir: std.Io.Dir,
+        db_file: std.Io.File,
         db: *DB,
         parent_to_children: DB.HashMap(.read_write),
         oid_queue: std.AutoArrayHashMapUnmanaged([hash.byteLen(repo_opts.hash)]u8, void),
         commit_count: usize,
 
         pub fn init(state: rp.Repo(.xit, repo_opts).State(.read_only), io: std.Io, allocator: std.mem.Allocator) !PatchWriter(repo_opts) {
-            const db_file = try state.core.repo_dir.createFile(db_name, .{ .truncate = true, .lock = .exclusive, .read = true });
+            const db_file = try state.core.repo_dir.createFile(io, db_name, .{ .truncate = true, .lock = .exclusive, .read = true });
             errdefer {
-                db_file.close();
-                state.core.repo_dir.deleteFile(db_name) catch {};
+                db_file.close(io);
+                state.core.repo_dir.deleteFile(io, db_name) catch {};
             }
 
             const buffer_ptr = try allocator.create(std.Io.Writer.Allocating);
@@ -169,11 +169,11 @@ pub fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
             };
         }
 
-        pub fn deinit(self: *PatchWriter(repo_opts), allocator: std.mem.Allocator) void {
-            self.db_file.close();
+        pub fn deinit(self: *PatchWriter(repo_opts), io: std.Io, allocator: std.mem.Allocator) void {
+            self.db_file.close(io);
             self.db.core.memory.buffer.deinit();
             allocator.destroy(self.db.core.memory.buffer);
-            self.repo_dir.deleteFile(db_name) catch {};
+            self.repo_dir.deleteFile(io, db_name) catch {};
             allocator.destroy(self.db);
             self.oid_queue.deinit(allocator);
         }
@@ -238,7 +238,7 @@ pub fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
         ) !void {
             if (repo_opts.ProgressCtx != void) {
                 if (progress_ctx_maybe) |progress_ctx| {
-                    try progress_ctx.run(.{ .start = .{
+                    try progress_ctx.run(io, .{ .start = .{
                         .kind = .writing_patch,
                         .estimated_total_items = self.commit_count,
                     } });
@@ -257,7 +257,7 @@ pub fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
 
                 if (repo_opts.ProgressCtx != void) {
                     if (progress_ctx_maybe) |progress_ctx| {
-                        try progress_ctx.run(.{ .complete_one = .writing_patch });
+                        try progress_ctx.run(io, .{ .complete_one = .writing_patch });
                     }
                 }
 
@@ -279,8 +279,8 @@ pub fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
                             const current_time = (try std.Io.Clock.Timestamp.now(io, .real)).raw.toSeconds();
                             if (current_time - start_time >= 5) {
                                 showed_perf_warning = true;
-                                try progress_ctx.run(.{ .child_text = "making patches can take a while." });
-                                try progress_ctx.run(.{ .child_text = "run `xit patch off` to disable it." });
+                                try progress_ctx.run(io, .{ .child_text = "making patches can take a while." });
+                                try progress_ctx.run(io, .{ .child_text = "run `xit patch off` to disable it." });
                             }
                         }
                     }
@@ -289,7 +289,7 @@ pub fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
 
             if (repo_opts.ProgressCtx != void) {
                 if (progress_ctx_maybe) |progress_ctx| {
-                    try progress_ctx.run(.{ .end = .writing_patch });
+                    try progress_ctx.run(io, .{ .end = .writing_patch });
                 }
             }
         }
@@ -374,7 +374,7 @@ pub fn applyPatch(
             else => |e| return e,
         };
 
-        switch (try std.meta.intToEnum(ChangeKind, change_kind)) {
+        switch (std.enums.fromInt(ChangeKind, change_kind) orelse return error.InvalidEnumTag) {
             .new_edge => {
                 var line_id_int = try change_list_reader.interface.takeInt(LineId(repo_opts.hash).Int, .big);
                 var parent_line_id_int = try change_list_reader.interface.takeInt(LineId(repo_opts.hash).Int, .big);

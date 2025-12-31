@@ -25,7 +25,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                 eof: bool,
             },
             work_dir: struct {
-                file: std.fs.File,
+                file: std.Io.File,
                 pos: u64,
                 eof: bool,
             },
@@ -36,10 +36,10 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
             nothing,
             binary,
 
-            fn deinit(self: *Source, allocator: std.mem.Allocator) void {
+            fn deinit(self: *Source, io: std.Io, allocator: std.mem.Allocator) void {
                 switch (self.*) {
                     .object => |*object| object.object_reader.deinit(),
-                    .work_dir => |*work_dir| work_dir.file.close(),
+                    .work_dir => |*work_dir| work_dir.file.close(io),
                     .buffer => |*buffer| {
                         buffer.arena.deinit();
                         allocator.destroy(buffer.arena);
@@ -96,9 +96,9 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
         ) !LineIterator(repo_kind, repo_opts) {
             switch (mode.content.object_type) {
                 .regular_file => {
-                    var file = try state.core.work_dir.openFile(path, .{ .mode = .read_only });
-                    errdefer file.close();
-                    const file_size = (try file.stat()).size;
+                    var file = try state.core.work_dir.openFile(io, path, .{ .mode = .read_only });
+                    errdefer file.close(io);
+                    const file_size = try file.length(io);
                     const header = try std.fmt.allocPrint(allocator, "blob {}\x00", .{file_size});
                     defer allocator.free(header);
 
@@ -139,7 +139,8 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                 },
                 .symbolic_link => {
                     var target_path_buffer = [_]u8{0} ** std.fs.max_path_bytes;
-                    const target_path = try state.core.work_dir.readLink(path, &target_path_buffer);
+                    const target_path_size = try state.core.work_dir.readLink(io, path, &target_path_buffer);
+                    const target_path = target_path_buffer[0..target_path_size];
 
                     // make reader
                     var reader = std.Io.Reader.fixed(target_path);
@@ -369,7 +370,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                 try lines.append(arena.allocator(), dupe);
             }
 
-            self.source.deinit(self.allocator);
+            self.source.deinit(self.io, self.allocator);
             self.source = .{
                 .buffer = .{
                     .arena = arena,
@@ -485,7 +486,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
         }
 
         pub fn deinit(self: *LineIterator(repo_kind, repo_opts)) void {
-            self.source.deinit(self.allocator);
+            self.source.deinit(self.io, self.allocator);
             self.allocator.free(self.line_offsets);
         }
 
@@ -545,7 +546,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
             }
 
             if (convert_to_binary) {
-                self.source.deinit(self.allocator);
+                self.source.deinit(self.io, self.allocator);
                 self.source = .binary;
                 offsets.clearAndFree(self.allocator);
             }
@@ -1518,7 +1519,7 @@ pub fn LineIteratorPair(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                 .not_added => |not_added| {
                     switch (not_added) {
                         .modified => {
-                            const meta = try fs.Metadata.init(state.core.work_dir, path);
+                            const meta = try fs.Metadata.init(io, state.core.work_dir, path);
                             const index_entries_for_path = stat.index.entries.get(path) orelse return error.EntryNotFound;
                             var a = try LineIterator(repo_kind, repo_opts).initFromIndex(state, io, allocator, index_entries_for_path[0] orelse return error.NullEntry);
                             errdefer a.deinit();
@@ -1535,7 +1536,7 @@ pub fn LineIteratorPair(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                             return .{ .path = path, .a = a, .b = b };
                         },
                         .conflict => {
-                            const meta = try fs.Metadata.init(state.core.work_dir, path);
+                            const meta = try fs.Metadata.init(io, state.core.work_dir, path);
                             const index_entries_for_path = stat.index.entries.get(path) orelse return error.EntryNotFound;
                             const conflict_entry = index_entries_for_path[2] orelse index_entries_for_path[3] orelse return error.NullEntry;
                             var a = try LineIterator(repo_kind, repo_opts).initFromIndex(state, io, allocator, conflict_entry);
@@ -1547,7 +1548,7 @@ pub fn LineIteratorPair(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     }
                 },
                 .not_tracked => {
-                    const meta = try fs.Metadata.init(state.core.work_dir, path);
+                    const meta = try fs.Metadata.init(io, state.core.work_dir, path);
                     var a = try LineIterator(repo_kind, repo_opts).initFromNothing(io, allocator, path);
                     errdefer a.deinit();
                     var b = try LineIterator(repo_kind, repo_opts).initFromWorkDir(state, io, allocator, path, meta.mode);
@@ -1596,7 +1597,7 @@ pub fn FileIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                 .work_dir => |work_dir| {
                     if (next_index < work_dir.status.unresolved_conflicts.count()) {
                         const path = work_dir.status.unresolved_conflicts.keys()[next_index];
-                        const meta = try fs.Metadata.init(self.core.work_dir, path);
+                        const meta = try fs.Metadata.init(self.io, self.core.work_dir, path);
                         const stage: usize = switch (work_dir.conflict_diff_kind) {
                             .base => 1,
                             .target => 2,

@@ -31,14 +31,14 @@ pub fn FileTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             };
         }
 
-        pub fn deinit(self: *FileTransport(repo_kind, repo_opts), allocator: std.mem.Allocator) void {
+        pub fn deinit(self: *FileTransport(repo_kind, repo_opts), io: std.Io, allocator: std.mem.Allocator) void {
             for (self.heads.items) |*head| {
                 head.deinit(allocator);
             }
             self.heads.deinit(allocator);
-            self.close(allocator);
+            self.close(io, allocator);
             if (self.remote_repo) |*remote_repo| {
-                remote_repo.deinit(allocator);
+                remote_repo.deinit(io, allocator);
                 self.remote_repo = null;
             }
         }
@@ -86,7 +86,7 @@ pub fn FileTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             defer allocator.free(work_path);
 
             var remote_repo = try rp.Repo(.git, remote_repo_opts).open(io, allocator, .{ .path = work_path });
-            errdefer remote_repo.deinit(allocator);
+            errdefer remote_repo.deinit(io, allocator);
 
             try self.addRefs(.{ .core = &remote_repo.core, .extra = .{} }, io, allocator);
 
@@ -119,7 +119,7 @@ pub fn FileTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                 defer allocator.free(work_path);
 
                 var any_repo = try rp.AnyRepo(.git, .{ .hash = .none, .ProgressCtx = repo_opts.ProgressCtx }).open(io, allocator, .{ .path = work_path });
-                defer any_repo.deinit(allocator);
+                defer any_repo.deinit(io, allocator);
 
                 const obj_iter: *obj.ObjectIterator(repo_kind, repo_opts, .raw) = &git_push.obj_iter;
 
@@ -141,14 +141,14 @@ pub fn FileTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                 if (lref.len > 0) {
                     try rf.write(.git, remote_repo_opts, .{ .core = &remote_repo.core, .extra = .{} }, io, rref, .{ .oid = loid });
                 } else {
-                    try rf.remove(.git, remote_repo_opts, .{ .core = &remote_repo.core, .extra = .{} }, rref);
+                    try rf.remove(.git, remote_repo_opts, .{ .core = &remote_repo.core, .extra = .{} }, io, rref);
                 }
             }
 
             if (git_push.specs.items.len > 0) {
                 const url = try allocator.dupe(u8, self.url orelse return error.NotConnected);
                 defer allocator.free(url);
-                self.close(allocator);
+                self.close(io, allocator);
                 try self.connect(state, io, allocator, url, .push);
             }
         }
@@ -178,7 +178,7 @@ pub fn FileTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             defer allocator.free(work_path);
 
             var repo = try rp.Repo(.git, remote_repo_opts).open(io, allocator, .{ .path = work_path });
-            defer repo.deinit(allocator);
+            defer repo.deinit(io, allocator);
 
             var obj_iter = try repo.logRaw(io, allocator, .{ .kind = .all });
             defer obj_iter.deinit();
@@ -203,7 +203,7 @@ pub fn FileTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             return self.connected;
         }
 
-        pub fn close(self: *FileTransport(repo_kind, repo_opts), allocator: std.mem.Allocator) void {
+        pub fn close(self: *FileTransport(repo_kind, repo_opts), io: std.Io, allocator: std.mem.Allocator) void {
             self.connected = false;
 
             if (self.url) |url| {
@@ -212,7 +212,7 @@ pub fn FileTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             }
 
             if (self.remote_repo) |*remote_repo| {
-                remote_repo.deinit(allocator);
+                remote_repo.deinit(io, allocator);
                 self.remote_repo = null;
             }
         }
@@ -292,14 +292,14 @@ pub fn FileTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                 try self.addHead(state, io, allocator, .{ .kind = .none, .name = "HEAD" });
             }
 
-            var tags = try rf.RefList.init(.git, remote_repo_opts, state, allocator, .tag);
+            var tags = try rf.RefList.init(.git, remote_repo_opts, state, io, allocator, .tag);
             defer tags.deinit();
 
             for (tags.refs.values()) |ref| {
                 try self.addHead(state, io, allocator, ref);
             }
 
-            var heads = try rf.RefList.init(.git, remote_repo_opts, state, allocator, .head);
+            var heads = try rf.RefList.init(.git, remote_repo_opts, state, io, allocator, .head);
             defer heads.deinit();
 
             for (heads.refs.values()) |ref| {

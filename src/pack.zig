@@ -7,17 +7,17 @@ pub fn PackObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
     return struct {
         io: std.Io,
         allocator: std.mem.Allocator,
-        pack_dir: std.fs.Dir,
+        pack_dir: std.Io.Dir,
         pack_file_name: []const u8,
-        pack_file: std.fs.File,
+        pack_file: std.Io.File,
         start_position: u64,
         object_count: u32,
         object_index: u32,
         pack_reader: PackObjectReader(repo_kind, repo_opts),
 
-        pub fn init(io: std.Io, allocator: std.mem.Allocator, pack_dir: std.fs.Dir, pack_file_name: []const u8) !PackObjectIterator(repo_kind, repo_opts) {
-            var pack_file = try pack_dir.openFile(pack_file_name, .{ .mode = .read_only });
-            errdefer pack_file.close();
+        pub fn init(io: std.Io, allocator: std.mem.Allocator, pack_dir: std.Io.Dir, pack_file_name: []const u8) !PackObjectIterator(repo_kind, repo_opts) {
+            var pack_file = try pack_dir.openFile(io, pack_file_name, .{ .mode = .read_only });
+            errdefer pack_file.close(io);
 
             var reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
             var reader = pack_file.reader(io, &reader_buffer);
@@ -54,7 +54,7 @@ pub fn PackObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
             const start_position = self.start_position;
 
             var pack_reader = try PackObjectReader(repo_kind, repo_opts).initAtPosition(self.io, self.allocator, self.pack_dir, self.pack_file_name, start_position);
-            errdefer pack_reader.deinit(self.allocator);
+            errdefer pack_reader.deinit(self.io, self.allocator);
 
             switch (pack_reader.internal) {
                 .basic => {},
@@ -70,7 +70,7 @@ pub fn PackObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
         }
 
         pub fn deinit(self: *PackObjectIterator(repo_kind, repo_opts)) void {
-            self.pack_file.close();
+            self.pack_file.close(self.io);
         }
     };
 }
@@ -90,12 +90,12 @@ fn PackOrChunkObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: 
             .xit => @import("./chunk.zig").ChunkObjectReader(repo_opts),
         };
 
-        pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+        pub fn deinit(self: *@This(), io: std.Io, allocator: std.mem.Allocator) void {
             switch (self.*) {
-                .pack => |*pack| pack.deinit(allocator),
+                .pack => |*pack| pack.deinit(io, allocator),
                 .chunk => |*chunk_reader| switch (repo_kind) {
                     .git => unreachable,
-                    .xit => chunk_reader.deinit(allocator),
+                    .xit => chunk_reader.deinit(io, allocator),
                 },
             }
         }
@@ -179,8 +179,8 @@ const PackObjectStream = union(enum) {
     file: struct {
         io: std.Io,
         allocator: std.mem.Allocator,
-        pack_file: std.fs.File,
-        pack_file_reader: *std.fs.File.Reader,
+        pack_file: std.Io.File,
+        pack_file_reader: *std.Io.File.Reader,
         pack_file_reader_buffer: []u8,
         zlib_stream: *std.compress.flate.Decompress,
         zlib_stream_buffer: []u8,
@@ -197,7 +197,7 @@ const PackObjectStream = union(enum) {
         comptime buffer_size: usize,
         io: std.Io,
         allocator: std.mem.Allocator,
-        pack_file: std.fs.File,
+        pack_file: std.Io.File,
         start_position: u64,
     ) !PackObjectStream {
         // set the OS file position
@@ -209,7 +209,7 @@ const PackObjectStream = union(enum) {
         const reader_buffer = try allocator.alloc(u8, buffer_size);
         errdefer allocator.free(reader_buffer);
 
-        const reader = try allocator.create(std.fs.File.Reader);
+        const reader = try allocator.create(std.Io.File.Reader);
         errdefer allocator.destroy(reader);
         reader.* = pack_file.reader(io, reader_buffer);
         try reader.seekTo(start_position);
@@ -238,7 +238,7 @@ const PackObjectStream = union(enum) {
     pub fn deinit(self: *PackObjectStream) void {
         switch (self.*) {
             .file => |*file| {
-                file.pack_file.close();
+                file.pack_file.close(file.io);
                 file.allocator.destroy(file.pack_file_reader);
                 file.allocator.free(file.pack_file_reader_buffer);
                 file.allocator.destroy(file.zlib_stream);
@@ -328,7 +328,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             delta: struct {
                 init: union(enum) {
                     ofs: struct {
-                        pack_dir: std.fs.Dir,
+                        pack_dir: std.Io.Dir,
                         pack_file_name: []const u8,
                         position: u64,
                     },
@@ -372,7 +372,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             oid_hex: *const [hash.hexLen(repo_opts.hash)]u8,
         ) !PackObjectReader(repo_kind, repo_opts) {
             var pack_reader = try PackObjectReader(repo_kind, repo_opts).initWithIndex(state.core, io, allocator, oid_hex);
-            errdefer pack_reader.deinit(allocator);
+            errdefer pack_reader.deinit(io, allocator);
             try pack_reader.initDeltaAndCache(io, allocator, state);
             return pack_reader;
         }
@@ -381,7 +381,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             io: std.Io,
             allocator: std.mem.Allocator,
             state: rp.Repo(repo_kind, repo_opts).State(.read_only),
-            pack_dir: std.fs.Dir,
+            pack_dir: std.Io.Dir,
             pack_file_name: []const u8,
             oid_hex: *const [hash.hexLen(repo_opts.hash)]u8,
         ) !PackObjectReader(repo_kind, repo_opts) {
@@ -390,7 +390,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
 
             while (try iter.next(state)) |pack_reader| {
                 {
-                    errdefer pack_reader.deinit(allocator);
+                    errdefer pack_reader.deinit(io, allocator);
 
                     // serialize object header
                     var header_bytes = [_]u8{0} ** 32;
@@ -430,7 +430,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     }
                 }
 
-                pack_reader.deinit(allocator);
+                pack_reader.deinit(io, allocator);
             }
 
             return error.ObjectNotFound;
@@ -442,8 +442,8 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             allocator: std.mem.Allocator,
             oid_hex: *const [hash.hexLen(repo_opts.hash)]u8,
         ) !PackObjectReader(repo_kind, repo_opts) {
-            var pack_dir = try core.repo_dir.openDir("objects/pack", .{ .iterate = true });
-            defer pack_dir.close();
+            var pack_dir = try core.repo_dir.openDir(io, "objects/pack", .{ .iterate = true });
+            defer pack_dir.close(io);
 
             const pack_offset = try searchPackIndexes(repo_opts.hash, io, pack_dir, oid_hex);
 
@@ -454,8 +454,8 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             var file_name_buf = [_]u8{0} ** pack_file_name_len;
             const file_name = try std.fmt.bufPrint(&file_name_buf, "{s}{s}{s}", .{ pack_prefix, pack_offset.pack_id, pack_suffix });
 
-            var pack_file = try pack_dir.openFile(file_name, .{ .mode = .read_only });
-            defer pack_file.close();
+            var pack_file = try pack_dir.openFile(io, file_name, .{ .mode = .read_only });
+            defer pack_file.close(io);
 
             var reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
             var reader = pack_file.reader(io, &reader_buffer);
@@ -477,12 +477,12 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
         fn initAtPosition(
             io: std.Io,
             allocator: std.mem.Allocator,
-            pack_dir: std.fs.Dir,
+            pack_dir: std.Io.Dir,
             pack_file_name: []const u8,
             position: u64,
         ) !PackObjectReader(repo_kind, repo_opts) {
-            var pack_file = try pack_dir.openFile(pack_file_name, .{ .mode = .read_only });
-            errdefer pack_file.close();
+            var pack_file = try pack_dir.openFile(io, pack_file_name, .{ .mode = .read_only });
+            errdefer pack_file.close(io);
 
             var file_reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
             var file_reader = pack_file.reader(io, &file_reader_buffer);
@@ -556,8 +556,8 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                         }
                     }
 
-                    var pack_dir_copy = try pack_dir.openDir(".", .{});
-                    errdefer pack_dir_copy.close();
+                    var pack_dir_copy = try pack_dir.openDir(io, ".", .{});
+                    errdefer pack_dir_copy.close(io);
 
                     const pack_file_name_copy = try allocator.dupe(u8, pack_file_name);
                     errdefer allocator.free(pack_file_name_copy);
@@ -667,7 +667,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     .xit => .{ .chunk = try PackOrChunkObjectReader(repo_kind, repo_opts).ChunkObjectReader.init(state, io, allocator, &ref.oid_hex) },
                 },
             };
-            errdefer base_reader.deinit(allocator);
+            errdefer base_reader.deinit(io, allocator);
 
             var bytes_read: u64 = 0;
 
@@ -867,20 +867,20 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             }
         }
 
-        pub fn deinit(self: *PackObjectReader(repo_kind, repo_opts), allocator: std.mem.Allocator) void {
+        pub fn deinit(self: *PackObjectReader(repo_kind, repo_opts), io: std.Io, allocator: std.mem.Allocator) void {
             self.stream.deinit();
             switch (self.internal) {
                 .basic => {},
                 .delta => |*delta| {
                     switch (delta.init) {
                         .ofs => |*ofs| {
-                            ofs.pack_dir.close();
+                            ofs.pack_dir.close(io);
                             allocator.free(ofs.pack_file_name);
                         },
                         .ref => {},
                     }
                     if (delta.state) |*state| {
-                        state.base_reader.deinit(allocator);
+                        state.base_reader.deinit(io, allocator);
                         allocator.destroy(state.base_reader);
                         state.chunks.deinit(allocator);
                         state.cache.deinit();
@@ -988,8 +988,8 @@ pub fn LooseOrPackObjectReader(comptime repo_opts: rp.RepoOpts(.git)) type {
     return union(enum) {
         loose: struct {
             io: std.Io,
-            file: std.fs.File,
-            file_reader: *std.fs.File.Reader,
+            file: std.Io.File,
+            file_reader: *std.Io.File.Reader,
             file_reader_buffer: []u8,
             zlib_stream: *std.compress.flate.Decompress,
             zlib_stream_buffer: []u8,
@@ -1004,24 +1004,24 @@ pub fn LooseOrPackObjectReader(comptime repo_opts: rp.RepoOpts(.git)) type {
             oid_hex: *const [hash.hexLen(repo_opts.hash)]u8,
         ) !LooseOrPackObjectReader(repo_opts) {
             // open the objects dir
-            var objects_dir = try state.core.repo_dir.openDir("objects", .{});
-            defer objects_dir.close();
+            var objects_dir = try state.core.repo_dir.openDir(io, "objects", .{});
+            defer objects_dir.close(io);
 
             // open the object file
             var path_buf = [_]u8{0} ** (hash.hexLen(repo_opts.hash) + 1);
             const path = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ oid_hex[0..2], oid_hex[2..] });
-            var object_file = objects_dir.openFile(path, .{ .mode = .read_only }) catch |err| switch (err) {
+            var object_file = objects_dir.openFile(io, path, .{ .mode = .read_only }) catch |err| switch (err) {
                 error.FileNotFound => return .{
                     .pack = try PackObjectReader(.git, repo_opts).init(io, allocator, state, oid_hex),
                 },
                 else => |e| return e,
             };
-            errdefer object_file.close();
+            errdefer object_file.close(io);
 
             const reader_buffer = try allocator.alloc(u8, repo_opts.buffer_size);
             errdefer allocator.free(reader_buffer);
 
-            const reader = try allocator.create(std.fs.File.Reader);
+            const reader = try allocator.create(std.Io.File.Reader);
             errdefer allocator.destroy(reader);
             reader.* = object_file.reader(io, reader_buffer);
 
@@ -1045,16 +1045,16 @@ pub fn LooseOrPackObjectReader(comptime repo_opts: rp.RepoOpts(.git)) type {
             };
         }
 
-        pub fn deinit(self: *LooseOrPackObjectReader(repo_opts), allocator: std.mem.Allocator) void {
+        pub fn deinit(self: *LooseOrPackObjectReader(repo_opts), io: std.Io, allocator: std.mem.Allocator) void {
             switch (self.*) {
                 .loose => |*loose| {
-                    loose.file.close();
+                    loose.file.close(io);
                     allocator.destroy(loose.file_reader);
                     allocator.destroy(loose.zlib_stream);
                     allocator.free(loose.file_reader_buffer);
                     allocator.free(loose.zlib_stream_buffer);
                 },
-                .pack => |*pack| pack.deinit(allocator),
+                .pack => |*pack| pack.deinit(io, allocator),
             }
         }
 
@@ -1291,7 +1291,7 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
 fn findOid(
     comptime hash_kind: hash.HashKind,
     io: std.Io,
-    idx_file: std.fs.File,
+    idx_file: std.Io.File,
     oid_list_pos: u64,
     index: usize,
 ) ![hash.byteLen(hash_kind)]u8 {
@@ -1305,7 +1305,7 @@ fn findOid(
 fn findObjectIndex(
     comptime hash_kind: hash.HashKind,
     io: std.Io,
-    idx_file: std.fs.File,
+    idx_file: std.Io.File,
     fanout_table: [256]u32,
     oid_list_pos: u64,
     oid_bytes: *const [hash.byteLen(hash_kind)]u8,
@@ -1345,7 +1345,7 @@ fn findObjectIndex(
 fn findOffset(
     comptime hash_kind: hash.HashKind,
     io: std.Io,
-    idx_file: std.fs.File,
+    idx_file: std.Io.File,
     fanout_table: [256]u32,
     oid_list_pos: u64,
     index: usize,
@@ -1380,7 +1380,7 @@ fn findOffset(
 fn searchPackIndex(
     comptime hash_kind: hash.HashKind,
     io: std.Io,
-    idx_file: std.fs.File,
+    idx_file: std.Io.File,
     oid_bytes: *const [hash.byteLen(hash_kind)]u8,
 ) !?u64 {
     var reader_buffer = [_]u8{0} ** 256;
@@ -1415,7 +1415,7 @@ fn PackOffset(comptime hash_kind: hash.HashKind) type {
 fn searchPackIndexes(
     comptime hash_kind: hash.HashKind,
     io: std.Io,
-    pack_dir: std.fs.Dir,
+    pack_dir: std.Io.Dir,
     oid_hex: *const [hash.hexLen(hash_kind)]u8,
 ) !PackOffset(hash_kind) {
     const oid_bytes = try hash.hexToBytes(hash_kind, oid_hex.*);
@@ -1424,15 +1424,15 @@ fn searchPackIndexes(
     const suffix = ".idx";
 
     var iter = pack_dir.iterate();
-    while (try iter.next()) |entry| {
+    while (try iter.next(io)) |entry| {
         switch (entry.kind) {
             .file => {
                 if (std.mem.startsWith(u8, entry.name, prefix) and std.mem.endsWith(u8, entry.name, suffix)) {
                     const pack_id = entry.name[prefix.len .. entry.name.len - suffix.len];
 
                     if (pack_id.len == hash.hexLen(hash_kind)) {
-                        var idx_file = try pack_dir.openFile(entry.name, .{ .mode = .read_only });
-                        defer idx_file.close();
+                        var idx_file = try pack_dir.openFile(io, entry.name, .{ .mode = .read_only });
+                        defer idx_file.close(io);
 
                         if (try searchPackIndex(hash_kind, io, idx_file, &oid_bytes)) |offset| {
                             return .{

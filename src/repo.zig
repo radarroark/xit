@@ -94,20 +94,20 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
         pub const Core = switch (repo_kind) {
             .git => struct {
                 cwd_path: []const u8,
-                cwd: std.fs.Dir,
+                cwd: std.Io.Dir,
                 work_path: []const u8,
-                work_dir: std.fs.Dir,
-                repo_dir: std.fs.Dir,
+                work_dir: std.Io.Dir,
+                repo_dir: std.Io.Dir,
 
                 pub fn latestMoment(_: *@This()) !void {}
             },
             .xit => struct {
                 cwd_path: []const u8,
-                cwd: std.fs.Dir,
+                cwd: std.Io.Dir,
                 work_path: []const u8,
-                work_dir: std.fs.Dir,
-                repo_dir: std.fs.Dir,
-                db_file: std.fs.File,
+                work_dir: std.Io.Dir,
+                repo_dir: std.Io.Dir,
+                db_file: std.Io.File,
                 db: DB,
 
                 /// used by read-only fns to get a moment without starting a transaction
@@ -157,7 +157,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                             moment: *void = undefined, // does nothing, but allows `{ .moment = &moment }` to compile
                         },
                         .read_write => struct {
-                            lock_file_maybe: ?std.fs.File = null,
+                            lock_file_maybe: ?std.Io.File = null,
                         },
                     },
                     .xit => struct {
@@ -182,16 +182,16 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             const cwd_path_resolved = try std.fs.path.resolve(allocator, &.{ cwd_path, "." });
             errdefer allocator.free(cwd_path_resolved);
 
-            var cwd = try std.fs.cwd().makeOpenPath(cwd_path_resolved, .{});
-            errdefer cwd.close();
+            var cwd = try std.Io.Dir.cwd().createDirPathOpen(io, cwd_path_resolved, .{});
+            errdefer cwd.close(io);
 
             // resolve work path to ensure it is well-formed
             if (!std.fs.path.isAbsolute(opts.path)) return error.PathMustBeAbsolute;
             const work_path_resolved = try std.fs.path.resolve(allocator, &.{ opts.path, "." });
             errdefer allocator.free(work_path_resolved);
 
-            var work_dir = try cwd.makeOpenPath(work_path_resolved, .{});
-            errdefer work_dir.close();
+            var work_dir = try cwd.createDirPathOpen(io, work_path_resolved, .{});
+            errdefer work_dir.close(io);
 
             const repo_dir_name = switch (repo_kind) {
                 .git => ".git",
@@ -200,23 +200,23 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
             // return if dir already exists
             {
-                var repo_dir_or_err = work_dir.openDir(repo_dir_name, .{});
+                var repo_dir_or_err = work_dir.openDir(io, repo_dir_name, .{});
                 if (repo_dir_or_err) |*repo_dir| {
-                    repo_dir.close();
+                    repo_dir.close(io);
                     return error.RepoAlreadyExists;
                 } else |_| {}
             }
 
-            var repo_dir = try work_dir.makeOpenPath(repo_dir_name, .{});
-            errdefer repo_dir.close();
+            var repo_dir = try work_dir.createDirPathOpen(io, repo_dir_name, .{});
+            errdefer repo_dir.close(io);
 
             switch (repo_kind) {
                 .git => {
                     // make a few dirs inside of .git
-                    try repo_dir.makePath("objects");
-                    try repo_dir.makePath("objects/pack");
-                    try repo_dir.makePath("refs");
-                    try repo_dir.makePath("refs/heads");
+                    try repo_dir.createDirPath(io, "objects");
+                    try repo_dir.createDirPath(io, "objects/pack");
+                    try repo_dir.createDirPath(io, "refs");
+                    try repo_dir.createDirPath(io, "refs/heads");
 
                     var self = Repo(repo_kind, repo_opts){
                         .core = .{
@@ -237,8 +237,8 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                 },
                 .xit => {
                     // create the db file
-                    const db_file = try repo_dir.createFile("db", .{ .exclusive = true, .lock = .exclusive, .read = true });
-                    errdefer db_file.close();
+                    const db_file = try repo_dir.createFile(io, "db", .{ .exclusive = true, .lock = .exclusive, .read = true });
+                    errdefer db_file.close(io);
 
                     const buffer_ptr = try allocator.create(std.Io.Writer.Allocating);
                     errdefer allocator.destroy(buffer_ptr);
@@ -282,8 +282,8 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             const cwd_path_resolved = try std.fs.path.resolve(allocator, &.{ cwd_path, "." });
             errdefer allocator.free(cwd_path_resolved);
 
-            var cwd = try std.fs.cwd().makeOpenPath(cwd_path_resolved, .{});
-            errdefer cwd.close();
+            var cwd = try std.Io.Dir.cwd().createDirPathOpen(io, cwd_path_resolved, .{});
+            errdefer cwd.close(io);
 
             const repo_dir_name = switch (repo_kind) {
                 .git => ".git",
@@ -293,17 +293,17 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             // search all parent dirs for one containing the repo dir
             var dir_path_maybe: ?[]const u8 = opts.path;
             while (dir_path_maybe) |dir_path| {
-                var work_dir = try std.fs.openDirAbsolute(dir_path, .{});
-                defer work_dir.close();
+                var work_dir = try std.Io.Dir.openDirAbsolute(io, dir_path, .{});
+                defer work_dir.close(io);
 
-                var repo_dir = work_dir.openDir(repo_dir_name, .{}) catch |err| switch (err) {
+                var repo_dir = work_dir.openDir(io, repo_dir_name, .{}) catch |err| switch (err) {
                     error.FileNotFound => {
                         dir_path_maybe = std.fs.path.dirname(dir_path);
                         continue;
                     },
                     else => |e| return e,
                 };
-                defer repo_dir.close();
+                defer repo_dir.close(io);
 
                 break;
             }
@@ -315,11 +315,11 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             const work_path_resolved = try std.fs.path.resolve(allocator, &.{ work_path, "." });
             errdefer allocator.free(work_path_resolved);
 
-            var work_dir = try std.fs.openDirAbsolute(work_path_resolved, .{});
-            errdefer work_dir.close();
+            var work_dir = try std.Io.Dir.openDirAbsolute(io, work_path_resolved, .{});
+            errdefer work_dir.close(io);
 
-            var repo_dir = try work_dir.openDir(repo_dir_name, .{});
-            errdefer repo_dir.close();
+            var repo_dir = try work_dir.openDir(io, repo_dir_name, .{});
+            errdefer repo_dir.close(io);
 
             switch (repo_kind) {
                 .git => {
@@ -334,11 +334,11 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     };
                 },
                 .xit => {
-                    var db_file = repo_dir.openFile("db", .{ .mode = .read_write, .lock = .exclusive }) catch |err| switch (err) {
+                    var db_file = repo_dir.openFile(io, "db", .{ .mode = .read_write, .lock = .exclusive }) catch |err| switch (err) {
                         error.FileNotFound => return error.RepoNotFound,
                         else => |e| return e,
                     };
-                    errdefer db_file.close();
+                    errdefer db_file.close(io);
 
                     return .{
                         .core = .{
@@ -374,22 +374,22 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
-        pub fn deinit(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator) void {
+        pub fn deinit(self: *Repo(repo_kind, repo_opts), io: std.Io, allocator: std.mem.Allocator) void {
             switch (repo_kind) {
                 .git => {
                     allocator.free(self.core.cwd_path);
-                    self.core.cwd.close();
+                    self.core.cwd.close(io);
                     allocator.free(self.core.work_path);
-                    self.core.work_dir.close();
-                    self.core.repo_dir.close();
+                    self.core.work_dir.close(io);
+                    self.core.repo_dir.close(io);
                 },
                 .xit => {
                     allocator.free(self.core.cwd_path);
-                    self.core.cwd.close();
+                    self.core.cwd.close(io);
                     allocator.free(self.core.work_path);
-                    self.core.work_dir.close();
-                    self.core.repo_dir.close();
-                    self.core.db_file.close();
+                    self.core.work_dir.close(io);
+                    self.core.repo_dir.close(io);
+                    self.core.db_file.close(io);
                     if (DB != void) {
                         self.core.db.core.memory.buffer.deinit();
                         allocator.destroy(self.core.db.core.memory.buffer);
@@ -455,10 +455,10 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
-        pub fn listTags(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator) !rf.RefList {
+        pub fn listTags(self: *Repo(repo_kind, repo_opts), io: std.Io, allocator: std.mem.Allocator) !rf.RefList {
             var moment = try self.core.latestMoment();
             const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
-            return try rf.RefList.init(repo_kind, repo_opts, state, allocator, .tag);
+            return try rf.RefList.init(repo_kind, repo_opts, state, io, allocator, .tag);
         }
 
         pub fn addTag(
@@ -498,18 +498,19 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             }
         }
 
-        pub fn removeTag(self: *Repo(repo_kind, repo_opts), input: tg.RemoveTagInput) !void {
+        pub fn removeTag(self: *Repo(repo_kind, repo_opts), io: std.Io, input: tg.RemoveTagInput) !void {
             switch (repo_kind) {
-                .git => try tg.remove(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, input),
+                .git => try tg.remove(repo_kind, repo_opts, .{ .core = &self.core, .extra = .{} }, io, input),
                 .xit => {
                     const Ctx = struct {
                         core: *Repo(repo_kind, repo_opts).Core,
+                        io: std.Io,
                         input: tg.RemoveTagInput,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            try tg.remove(repo_kind, repo_opts, state, ctx.input);
+                            try tg.remove(repo_kind, repo_opts, state, ctx.io, ctx.input);
                             try un.writeMessage(repo_opts, state, .{ .tag = .{ .remove = ctx.input } });
                         }
                     };
@@ -517,7 +518,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
                     try history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
-                        Ctx{ .core = &self.core, .input = input },
+                        Ctx{ .core = &self.core, .io = io, .input = input },
                     );
                 },
             }
@@ -544,8 +545,8 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
             switch (repo_kind) {
                 .git => {
-                    var lock = try fs.LockFile.init(self.core.repo_dir, "index");
-                    defer lock.deinit();
+                    var lock = try fs.LockFile.init(io, self.core.repo_dir, "index");
+                    defer lock.deinit(io);
 
                     const state = State(.read_write){ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } };
                     try work.addPaths(repo_kind, repo_opts, state, io, allocator, normalized_paths.items);
@@ -598,8 +599,8 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
             switch (repo_kind) {
                 .git => {
-                    var lock = try fs.LockFile.init(self.core.repo_dir, "index");
-                    defer lock.deinit();
+                    var lock = try fs.LockFile.init(io, self.core.repo_dir, "index");
+                    defer lock.deinit(io);
 
                     const state = State(.read_write){ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } };
                     try work.unaddPaths(repo_kind, repo_opts, state, io, allocator, normalized_paths.items, opts);
@@ -667,8 +668,8 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
             switch (repo_kind) {
                 .git => {
-                    var lock = try fs.LockFile.init(self.core.repo_dir, "index");
-                    defer lock.deinit();
+                    var lock = try fs.LockFile.init(io, self.core.repo_dir, "index");
+                    defer lock.deinit(io);
 
                     const state = State(.read_write){ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } };
                     try work.removePaths(repo_kind, repo_opts, state, io, allocator, normalized_paths.items, opts);
@@ -757,10 +758,10 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             return try rf.readRecur(repo_kind, repo_opts, state, io, .{ .ref = ref });
         }
 
-        pub fn listBranches(self: *Repo(repo_kind, repo_opts), allocator: std.mem.Allocator) !rf.RefList {
+        pub fn listBranches(self: *Repo(repo_kind, repo_opts), io: std.Io, allocator: std.mem.Allocator) !rf.RefList {
             var moment = try self.core.latestMoment();
             const state = State(.read_only){ .core = &self.core, .extra = .{ .moment = &moment } };
-            return try rf.RefList.init(repo_kind, repo_opts, state, allocator, .head);
+            return try rf.RefList.init(repo_kind, repo_opts, state, io, allocator, .head);
         }
 
         pub fn addBranch(self: *Repo(repo_kind, repo_opts), io: std.Io, input: bch.AddBranchInput) !void {
@@ -1015,23 +1016,24 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
             switch (repo_kind) {
                 .git => {
-                    var lock = try fs.LockFile.init(self.core.repo_dir, "config");
-                    defer lock.deinit();
+                    var lock = try fs.LockFile.init(io, self.core.repo_dir, "config");
+                    defer lock.deinit(io);
 
-                    try config.add(.{ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } }, input);
+                    try config.add(.{ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } }, io, input);
 
                     lock.success = true;
                 },
                 .xit => {
                     const Ctx = struct {
                         core: *Repo(repo_kind, repo_opts).Core,
+                        io: std.Io,
                         config: *cfg.Config(repo_kind, repo_opts),
                         input: cfg.AddConfigInput,
 
                         pub fn run(ctx: @This(), cursor: *DB.Cursor(.read_write)) !void {
                             var moment = try DB.HashMap(.read_write).init(cursor.*);
                             const state = State(.read_write){ .core = ctx.core, .extra = .{ .moment = &moment } };
-                            try ctx.config.add(state, ctx.input);
+                            try ctx.config.add(state, ctx.io, ctx.input);
                             try un.writeMessage(repo_opts, state, .{ .config = .{ .add = ctx.input } });
                         }
                     };
@@ -1039,7 +1041,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     const history = try DB.ArrayList(.read_write).init(self.core.db.rootCursor());
                     try history.appendContext(
                         .{ .slot = try history.getSlot(-1) },
-                        Ctx{ .core = &self.core, .config = &config, .input = input },
+                        Ctx{ .core = &self.core, .io = io, .config = &config, .input = input },
                     );
                 },
             }
@@ -1051,8 +1053,8 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
             switch (repo_kind) {
                 .git => {
-                    var lock = try fs.LockFile.init(self.core.repo_dir, "config");
-                    defer lock.deinit();
+                    var lock = try fs.LockFile.init(io, self.core.repo_dir, "config");
+                    defer lock.deinit(io);
 
                     try config.remove(.{ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } }, io, input);
 
@@ -1114,7 +1116,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                         }
                     }
 
-                    try config.add(state, .{ .name = "merge.algorithm", .value = merge_algo_str });
+                    try config.add(state, ctx.io, .{ .name = "merge.algorithm", .value = merge_algo_str });
 
                     switch (ctx.merge_algo) {
                         .diff3 => try un.writeMessage(repo_opts, state, .{ .patch = .off }),
@@ -1152,7 +1154,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     {
                         var config = try cfg.Config(.xit, repo_opts).init(state.readOnly(), ctx.io, ctx.allocator);
                         defer config.deinit();
-                        try config.add(state, .{ .name = "merge.algorithm", .value = "patch" });
+                        try config.add(state, ctx.io, .{ .name = "merge.algorithm", .value = "patch" });
                     }
 
                     var obj_iter = try obj.ObjectIterator(repo_kind, repo_opts, .full).init(state.readOnly(), ctx.io, ctx.allocator, .{ .kind = .commit });
@@ -1160,7 +1162,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
                     // add heads
                     {
-                        var ref_list = try rf.RefList.init(repo_kind, repo_opts, state.readOnly(), ctx.allocator, .head);
+                        var ref_list = try rf.RefList.init(repo_kind, repo_opts, state.readOnly(), ctx.io, ctx.allocator, .head);
                         defer ref_list.deinit();
 
                         for (ref_list.refs.values()) |ref| {
@@ -1172,7 +1174,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
 
                     // add tags
                     {
-                        var ref_list = try rf.RefList.init(repo_kind, repo_opts, state.readOnly(), ctx.allocator, .tag);
+                        var ref_list = try rf.RefList.init(repo_kind, repo_opts, state.readOnly(), ctx.io, ctx.allocator, .tag);
                         defer ref_list.deinit();
 
                         for (ref_list.refs.values()) |ref| {
@@ -1185,7 +1187,7 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
                     const patch = @import("./patch.zig");
 
                     var patch_writer = try patch.PatchWriter(repo_opts).init(state.readOnly(), ctx.io, ctx.allocator);
-                    defer patch_writer.deinit(ctx.allocator);
+                    defer patch_writer.deinit(ctx.io, ctx.allocator);
 
                     while (try obj_iter.next()) |commit_object| {
                         defer commit_object.deinit();
@@ -1218,14 +1220,14 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
             allocator: std.mem.Allocator,
             input: cfg.AddConfigInput,
         ) !void {
-            if (!net.validateUrl(self.core.cwd, input.value)) {
+            if (!net.validateUrl(io, self.core.cwd, input.value)) {
                 return error.InvalidRemoteUrl;
             }
 
             switch (repo_kind) {
                 .git => {
-                    var lock = try fs.LockFile.init(self.core.repo_dir, "config");
-                    defer lock.deinit();
+                    var lock = try fs.LockFile.init(io, self.core.repo_dir, "config");
+                    defer lock.deinit(io);
 
                     try net.Remote(repo_kind, repo_opts).addConfig(
                         .{ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } },
@@ -1269,8 +1271,8 @@ pub fn Repo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_kind
         ) !void {
             switch (repo_kind) {
                 .git => {
-                    var lock = try fs.LockFile.init(self.core.repo_dir, "config");
-                    defer lock.deinit();
+                    var lock = try fs.LockFile.init(io, self.core.repo_dir, "config");
+                    defer lock.deinit(io);
 
                     try net.Remote(repo_kind, repo_opts).removeConfig(
                         .{ .core = &self.core, .extra = .{ .lock_file_maybe = lock.lock_file } },
@@ -1464,7 +1466,7 @@ pub fn AnyRepo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_k
                 .none => {
                     const hash_kind = blk: {
                         var repo = try Repo(repo_kind, repo_opts).open(io, allocator, init_opts);
-                        defer repo.deinit(allocator);
+                        defer repo.deinit(io, allocator);
                         break :blk try repo.hashKind(io);
                     };
                     return switch (hash_kind) {
@@ -1478,10 +1480,10 @@ pub fn AnyRepo(comptime repo_kind: RepoKind, comptime repo_opts: RepoOpts(repo_k
             }
         }
 
-        pub fn deinit(self: *AnyRepo(repo_kind, repo_opts), allocator: std.mem.Allocator) void {
+        pub fn deinit(self: *AnyRepo(repo_kind, repo_opts), io: std.Io, allocator: std.mem.Allocator) void {
             switch (self.*) {
                 .none => {},
-                inline else => |*case| case.deinit(allocator),
+                inline else => |*case| case.deinit(io, allocator),
             }
         }
     };

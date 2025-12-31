@@ -40,10 +40,10 @@ pub fn add(
 
     switch (repo_kind) {
         .git => {
-            var refs_dir = try state.core.repo_dir.openDir("refs", .{});
-            defer refs_dir.close();
-            var heads_dir = try refs_dir.makeOpenPath("heads", .{});
-            defer heads_dir.close();
+            var refs_dir = try state.core.repo_dir.openDir(io, "refs", .{});
+            defer refs_dir.close(io);
+            var heads_dir = try refs_dir.createDirPathOpen(io, "heads", .{});
+            defer heads_dir.close(io);
 
             // if there are any slashes in the branch name,
             // we must treat it as a path and make dirs.
@@ -52,16 +52,16 @@ pub fn add(
             var subdir_maybe = blk: {
                 if (std.mem.lastIndexOfScalar(u8, name, '/')) |last_slash| {
                     leaf_name = name[last_slash + 1 ..];
-                    break :blk try heads_dir.makeOpenPath(name[0..last_slash], .{});
+                    break :blk try heads_dir.createDirPathOpen(io, name[0..last_slash], .{});
                 } else {
                     break :blk null;
                 }
             };
-            defer if (subdir_maybe) |*subdir| subdir.close();
+            defer if (subdir_maybe) |*subdir| subdir.close(io);
 
             // create lock file
-            var lock = try fs.LockFile.init(if (subdir_maybe) |subdir| subdir else heads_dir, leaf_name);
-            defer lock.deinit();
+            var lock = try fs.LockFile.init(io, if (subdir_maybe) |subdir| subdir else heads_dir, leaf_name);
+            defer lock.deinit(io);
 
             // get HEAD contents and write to lock file
             const oid_maybe = rf.readHeadRecurMaybe(repo_kind, repo_opts, state.readOnly(), io) catch |err| switch (err) {
@@ -69,8 +69,8 @@ pub fn add(
                 else => |e| return e,
             };
             if (oid_maybe) |oid| {
-                try lock.lock_file.writeAll(&oid);
-                try lock.lock_file.writeAll("\n");
+                try lock.lock_file.writeStreamingAll(io, &oid);
+                try lock.lock_file.writeStreamingAll(io, "\n");
                 lock.success = true;
             }
         },
@@ -126,24 +126,24 @@ pub fn remove(
 
     switch (repo_kind) {
         .git => {
-            var refs_dir = try state.core.repo_dir.openDir("refs", .{});
-            defer refs_dir.close();
-            var heads_dir = try refs_dir.makeOpenPath("heads", .{});
-            defer heads_dir.close();
+            var refs_dir = try state.core.repo_dir.openDir(io, "refs", .{});
+            defer refs_dir.close(io);
+            var heads_dir = try refs_dir.createDirPathOpen(io, "heads", .{});
+            defer heads_dir.close(io);
 
             // create lock file for HEAD
-            var head_lock = try fs.LockFile.init(state.core.repo_dir, "HEAD");
-            defer head_lock.deinit();
+            var head_lock = try fs.LockFile.init(io, state.core.repo_dir, "HEAD");
+            defer head_lock.deinit(io);
 
             // delete file
-            try heads_dir.deleteFile(input.name);
+            try heads_dir.deleteFile(io, input.name);
 
             // delete parent dirs
             // this is only necessary because branches with a slash
             // in their name are stored on disk as subdirectories
             var parent_path_maybe = std.fs.path.dirname(input.name);
             while (parent_path_maybe) |parent_path| {
-                heads_dir.deleteDir(parent_path) catch |err| switch (err) {
+                heads_dir.deleteDir(io, parent_path) catch |err| switch (err) {
                     error.DirNotEmpty => break,
                     else => |e| return e,
                 };

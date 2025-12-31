@@ -39,7 +39,7 @@ pub fn Transport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpt
             url: []const u8,
             opts: Opts(repo_opts.ProgressCtx),
         ) !Transport(repo_kind, repo_opts) {
-            const transport_def_kind = TransportDefinition.init(state.core.cwd, url) orelse return error.UnsupportedUrl;
+            const transport_def_kind = TransportDefinition.init(io, state.core.cwd, url) orelse return error.UnsupportedUrl;
             return switch (transport_def_kind) {
                 .file => .{ .file = try net_file.FileTransport(repo_kind, repo_opts).init(opts) },
                 .wire => |wire_kind| .{ .wire = try net_wire.WireTransport(repo_kind, repo_opts).init(state, io, allocator, wire_kind, opts) },
@@ -48,7 +48,7 @@ pub fn Transport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpt
 
         pub fn deinit(self: *Transport(repo_kind, repo_opts), io: std.Io, allocator: std.mem.Allocator) void {
             switch (self.*) {
-                .file => |*file| file.deinit(allocator),
+                .file => |*file| file.deinit(io, allocator),
                 .wire => |*wire| wire.deinit(io, allocator),
             }
         }
@@ -128,7 +128,7 @@ pub fn Transport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpt
 
         pub fn close(self: *Transport(repo_kind, repo_opts), io: std.Io, allocator: std.mem.Allocator) void {
             switch (self.*) {
-                .file => |*file| file.close(allocator),
+                .file => |*file| file.close(io, allocator),
                 .wire => |*wire| wire.close(io, allocator),
             }
         }
@@ -147,7 +147,7 @@ pub const TransportDefinition = union(TransportKind) {
     file,
     wire: net_wire.WireKind,
 
-    pub fn init(cwd: std.fs.Dir, url: []const u8) ?TransportDefinition {
+    pub fn init(io: std.Io, cwd: std.Io.Dir, url: []const u8) ?TransportDefinition {
         if (initWithUrl(url)) |def| {
             return def;
         }
@@ -156,9 +156,9 @@ pub const TransportDefinition = union(TransportKind) {
             return .{ .wire = .ssh };
         } else |_| {}
 
-        var dir_or_err = cwd.openDir(url, .{});
+        var dir_or_err = cwd.openDir(io, url, .{});
         if (dir_or_err) |*dir| {
-            defer dir.close();
+            defer dir.close(io);
             return .file;
         } else |_| {}
 

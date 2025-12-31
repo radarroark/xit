@@ -156,8 +156,8 @@ pub fn start(
     defer root.deinit();
 
     // init term
-    var terminal = try term.Terminal.init(allocator);
-    defer terminal.deinit();
+    var terminal = try term.Terminal.init(io, allocator);
+    defer terminal.deinit(io);
 
     var last_size = layout.Size{ .width = 0, .height = 0 };
     var last_grid = try Grid.init(allocator, last_size);
@@ -168,7 +168,7 @@ pub fn start(
         try terminal.render(&root, &last_grid, &last_size);
 
         // process any inputs
-        while (try terminal.readKey()) |key| {
+        while (try terminal.readKey(io)) |key| {
             switch (key) {
                 .codepoint => |cp| if (cp == 'q') return,
                 else => {},
