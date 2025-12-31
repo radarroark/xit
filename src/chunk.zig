@@ -354,7 +354,8 @@ pub fn writeChunks(
                     const compress_kind_size = @sizeOf(CompressKind);
                     const checksum_size = @sizeOf(u32);
                     if (try lock.lock_file.getPos() >= compress_kind_size + checksum_size + chunk.len) {
-                        try lock.lock_file.seekTo(0);
+                        var file_writer_streaming = lock.lock_file.writerStreaming(&.{});
+                        try file_writer_streaming.seekTo(0);
                         try lock.lock_file.setEndPos(0);
                     } else {
                         lock.success = true;

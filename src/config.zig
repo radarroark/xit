@@ -389,7 +389,8 @@ pub fn Config(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
 
         fn write(self: *Config(.git, repo_opts), state: rp.Repo(.git, repo_opts).State(.read_write)) !void {
             const lock_file = state.extra.lock_file_maybe orelse return error.NoLockFile;
-            try lock_file.seekTo(0);
+            var file_writer_streaming = lock_file.writerStreaming(&.{});
+            try file_writer_streaming.seekTo(0);
             try lock_file.setEndPos(0); // truncate file in case this method is called multiple times
 
             for (self.sections.keys(), self.sections.values()) |section_name, variables| {

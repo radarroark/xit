@@ -109,7 +109,9 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                         error.ReadFailed => |e| return reader.err orelse e,
                         else => |e| return e,
                     };
-                    try file.seekTo(0);
+
+                    var file_writer_streaming = file.writerStreaming(&.{});
+                    try file_writer_streaming.seekTo(0);
 
                     var iter = LineIterator(repo_kind, repo_opts){
                         .io = io,
@@ -427,7 +429,8 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                     }
 
                     // update file seek position
-                    try work_dir.file.seekTo(reader.logicalPos());
+                    var file_writer_streaming = work_dir.file.writerStreaming(&.{});
+                    try file_writer_streaming.seekTo(reader.logicalPos());
 
                     const line = try line_writer.toOwnedSlice();
                     self.current_line += 1;
@@ -471,7 +474,8 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                 },
                 .work_dir => |*work_dir| {
                     work_dir.eof = false;
-                    try work_dir.file.seekTo(0);
+                    var file_writer_streaming = work_dir.file.writerStreaming(&.{});
+                    try file_writer_streaming.seekTo(0);
                 },
                 .buffer => {},
                 .nothing => {},
@@ -504,7 +508,8 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                 },
                 .work_dir => |*work_dir| {
                     try self.reset();
-                    try work_dir.file.seekTo(position);
+                    var file_writer_streaming = work_dir.file.writerStreaming(&.{});
+                    try file_writer_streaming.seekTo(position);
                 },
                 .buffer => {},
                 .nothing => {},
