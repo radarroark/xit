@@ -110,7 +110,7 @@ pub fn writeAndApplyPatches(
     // parent commit and copying it. we don't want that snapshot to
     // be mutable, so we have to make xitdb think the transaction
     // just started.
-    state.core.db.tx_start = try state.core.db.core.getSize();
+    try state.core.db.freeze();
 }
 
 pub fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
