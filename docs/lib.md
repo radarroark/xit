@@ -31,24 +31,28 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
+    var threaded: std.Io.Threaded = .init_single_threaded;
+    defer threaded.deinit();
+    const io = threaded.io();
+
     const cwd_path = try std.process.getCwdAlloc(allocator);
     defer allocator.free(cwd_path);
 
     const work_path = try std.fs.path.resolve(allocator, &.{ cwd_path, "myrepo" });
     defer allocator.free(work_path);
 
-    var repo = try rp.Repo(.xit, .{}).init(allocator, .{ .path = work_path });
-    defer repo.deinit(allocator);
+    var repo = try rp.Repo(.xit, .{}).init(io, allocator, .{ .path = work_path });
+    defer repo.deinit(io, allocator);
 
-    try repo.addConfig(allocator, .{ .name = "user.name", .value = "mr magoo" });
-    try repo.addConfig(allocator, .{ .name = "user.email", .value = "mister@magoo" });
+    try repo.addConfig(io, allocator, .{ .name = "user.name", .value = "mr magoo" });
+    try repo.addConfig(io, allocator, .{ .name = "user.email", .value = "mister@magoo" });
 
-    const readme = try repo.core.work_dir.createFile("README.md", .{});
-    defer readme.close();
-    try readme.writeAll("hello, world!");
-    try repo.add(allocator, &.{"README.md"});
+    const readme = try repo.core.work_dir.createFile(io, "README.md", .{});
+    defer readme.close(io);
+    try readme.writeStreamingAll(io, "hello, world!");
+    try repo.add(io, allocator, &.{"README.md"});
 
-    const oid = try repo.commit(allocator, .{ .message = "initial commit" });
+    const oid = try repo.commit(io, allocator, .{ .message = "initial commit" });
     std.debug.print("committed with object id: {s}\n", .{oid});
 }
 ```
