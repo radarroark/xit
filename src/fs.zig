@@ -174,8 +174,8 @@ pub const Stat = struct {
             else => {
                 const stat = try std.posix.fstat(fd);
                 return .{
-                    .dev = @intCast(stat.dev),
-                    .ino = @intCast(stat.ino),
+                    .dev = @truncate(stat.dev),
+                    .ino = @truncate(stat.ino),
                     .uid = stat.uid,
                     .gid = stat.gid,
                 };
