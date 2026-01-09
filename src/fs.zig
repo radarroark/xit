@@ -156,7 +156,7 @@ pub const Stat = struct {
                 .uid = 0,
                 .gid = 0,
             },
-            else => {
+            .linux => {
                 const stat = try std.posix.fstat(fd);
                 return .{
                     .dev = @truncate(stat.dev),
@@ -165,6 +165,16 @@ pub const Stat = struct {
                     .gid = stat.gid,
                 };
             },
+            .macos => {
+                const stat = try std.posix.fstat(fd);
+                return .{
+                    .dev = @intCast(stat.dev),
+                    .ino = @intCast(stat.ino),
+                    .uid = stat.uid,
+                    .gid = stat.gid,
+                };
+            },
+            else => unreachable,
         }
     }
 };
