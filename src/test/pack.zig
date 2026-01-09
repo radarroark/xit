@@ -10,10 +10,10 @@ const c = @cImport({
     @cInclude("git2.h");
 });
 
-test "pack" {
+test "create and read pack" {
     const io = std.testing.io;
     const allocator = std.testing.allocator;
-    const temp_dir_name = "temp-test-pack";
+    const temp_dir_name = "temp-test-create-and-read-pack";
     const repo_opts = rp.RepoOpts(.git){ .is_test = true };
 
     // start libgit
@@ -249,25 +249,95 @@ test "pack" {
             try std.testing.expectEqual(0, pack_reader.relative_position);
         }
     }
+}
 
-    // read packed refs
-    {
-        var r = try rp.Repo(.git, repo_opts).open(io, allocator, .{ .path = work_path });
-        defer r.deinit(io, allocator);
+test "iterate over large pack" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+    const temp_dir_name = "temp-test-iterate-over-large-pack";
+    const repo_opts = rp.RepoOpts(.git){ .is_test = true };
 
-        var packed_refs = try repo_dir.createFile(io, "packed-refs", .{});
-        defer packed_refs.close(io);
-        try packed_refs.writeStreamingAll(io,
-            \\# pack-refs with: peeled fully-peeled sorted
-            \\5246e54744f4e1824ca280e6a2630a87959d7cf4 refs/remotes/origin/master
-            \\1ea47a890400815b24a0073f110a41530322a44f refs/remotes/sync/chunk
-            \\5246e54744f4e1824ca280e6a2630a87959d7cf4 refs/remotes/sync/master
-            \\1f6190c71bd33b37cfd885491889a0410f849f5b refs/remotes/sync/zig-0.14.0
-        );
+    // create the temp dir
+    const cwd = std.Io.Dir.cwd();
+    var temp_dir_or_err = cwd.openDir(io, temp_dir_name, .{});
+    if (temp_dir_or_err) |*temp_dir| {
+        temp_dir.close(io);
+        try cwd.deleteTree(io, temp_dir_name);
+    } else |_| {}
+    var temp_dir = try cwd.createDirPathOpen(io, temp_dir_name, .{});
+    defer cwd.deleteTree(io, temp_dir_name) catch {};
+    defer temp_dir.close(io);
 
-        const oid_maybe = try r.readRef(io, .{ .kind = .{ .remote = "sync" }, .name = "master" });
-        try std.testing.expectEqualStrings("5246e54744f4e1824ca280e6a2630a87959d7cf4", &oid_maybe.?);
+    // get the cwd path
+    const cwd_path = try std.process.getCwdAlloc(allocator);
+    defer allocator.free(cwd_path);
 
-        try std.testing.expect(null == try r.readRef(io, .{ .kind = .{ .remote = "sync" }, .name = "foo" }));
+    // get work dir path (null-terminated because it's used by libgit)
+    const work_path = try std.fs.path.joinZ(allocator, &.{ cwd_path, temp_dir_name, "repo" });
+    defer allocator.free(work_path);
+
+    var r = try rp.Repo(.git, repo_opts).init(io, allocator, .{ .path = work_path });
+    defer r.deinit(io, allocator);
+
+    var bin_dir = try cwd.openDir(io, "src/test/bin", .{});
+    defer bin_dir.close(io);
+
+    var pack_iter = try pack.PackObjectIterator(.git, repo_opts).init(io, allocator, bin_dir, "pack-b7f085e431fc05b0bca3d5c306dc148d7bbed2f4.pack");
+    defer pack_iter.deinit();
+
+    while (try pack_iter.next(.{ .core = &r.core, .extra = .{} })) |pack_reader| {
+        defer pack_reader.deinit(io, allocator);
     }
+}
+
+test "read packed refs" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+    const temp_dir_name = "temp-test-read-packed-refs";
+    const repo_opts = rp.RepoOpts(.git){ .is_test = true };
+
+    // create the temp dir
+    const cwd = std.Io.Dir.cwd();
+    var temp_dir_or_err = cwd.openDir(io, temp_dir_name, .{});
+    if (temp_dir_or_err) |*temp_dir| {
+        temp_dir.close(io);
+        try cwd.deleteTree(io, temp_dir_name);
+    } else |_| {}
+    var temp_dir = try cwd.createDirPathOpen(io, temp_dir_name, .{});
+    defer cwd.deleteTree(io, temp_dir_name) catch {};
+    defer temp_dir.close(io);
+
+    // get the cwd path
+    const cwd_path = try std.process.getCwdAlloc(allocator);
+    defer allocator.free(cwd_path);
+
+    // get work dir path (null-terminated because it's used by libgit)
+    const work_path = try std.fs.path.joinZ(allocator, &.{ cwd_path, temp_dir_name, "repo" });
+    defer allocator.free(work_path);
+
+    // create the work dir
+    var work_dir = try cwd.createDirPathOpen(io, work_path, .{});
+    defer work_dir.close(io);
+
+    var r = try rp.Repo(.git, repo_opts).init(io, allocator, .{ .path = work_path });
+    defer r.deinit(io, allocator);
+
+    // make sure the git dir was created
+    var repo_dir = try work_dir.openDir(io, ".git", .{});
+    defer repo_dir.close(io);
+
+    var packed_refs = try repo_dir.createFile(io, "packed-refs", .{});
+    defer packed_refs.close(io);
+    try packed_refs.writeStreamingAll(io,
+        \\# pack-refs with: peeled fully-peeled sorted
+        \\5246e54744f4e1824ca280e6a2630a87959d7cf4 refs/remotes/origin/master
+        \\1ea47a890400815b24a0073f110a41530322a44f refs/remotes/sync/chunk
+        \\5246e54744f4e1824ca280e6a2630a87959d7cf4 refs/remotes/sync/master
+        \\1f6190c71bd33b37cfd885491889a0410f849f5b refs/remotes/sync/zig-0.14.0
+    );
+
+    const oid_maybe = try r.readRef(io, .{ .kind = .{ .remote = "sync" }, .name = "master" });
+    try std.testing.expectEqualStrings("5246e54744f4e1824ca280e6a2630a87959d7cf4", &oid_maybe.?);
+
+    try std.testing.expect(null == try r.readRef(io, .{ .kind = .{ .remote = "sync" }, .name = "foo" }));
 }
