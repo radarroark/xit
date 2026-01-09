@@ -201,10 +201,7 @@ const PackObjectStream = union(enum) {
         start_position: u64,
     ) !PackObjectStream {
         // set the OS file position
-        {
-            var file_reader_streaming = pack_file.readerStreaming(io, &.{});
-            try file_reader_streaming.seekTo(start_position);
-        }
+        try io.vtable.fileSeekTo(io.userdata, pack_file, start_position);
 
         const reader_buffer = try allocator.alloc(u8, buffer_size);
         errdefer allocator.free(reader_buffer);
