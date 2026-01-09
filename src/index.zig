@@ -568,7 +568,6 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                 file.close(io);
             } else |err| {
                 switch (err) {
-                    error.IsDir => {}, // only happens on windows
                     error.FileNotFound => {
                         if (!self.entries.contains(path) and !self.dir_to_paths.contains(path)) {
                             return switch (action) {

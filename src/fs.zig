@@ -209,23 +209,11 @@ pub const Metadata = struct {
             }
         }
 
-        // on windows, openFile returns error.IsDir on a dir.
-        // so we need to call openDir in that case.
-        var stat: std.Io.File.Stat = undefined;
-        var fstat: Stat = undefined;
-        if (parent_dir.openFile(io, path, .{ .mode = .read_only })) |file| {
-            defer file.close(io);
-            stat = try file.stat(io);
-            fstat = try Stat.init(file.handle);
-        } else |err| switch (err) {
-            error.IsDir => {
-                var dir = try parent_dir.openDir(io, path, .{});
-                defer dir.close(io);
-                stat = try dir.stat(io);
-                fstat = try Stat.init(dir.handle);
-            },
-            else => |e| return e,
-        }
+        const file = try parent_dir.openFile(io, path, .{ .mode = .read_only });
+        defer file.close(io);
+
+        const stat = try file.stat(io);
+        const fstat = try Stat.init(file.handle);
 
         return try initFromFileMetadata(stat, fstat);
     }
