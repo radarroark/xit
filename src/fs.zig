@@ -147,12 +147,6 @@ pub const Stat = struct {
 
     pub fn init(fd: std.posix.fd_t) !Stat {
         switch (builtin.os.tag) {
-            .windows => return .{
-                .dev = 0,
-                .ino = 0,
-                .uid = 0,
-                .gid = 0,
-            },
             .linux => {
                 var stat = std.mem.zeroInit(std.os.linux.Statx, .{});
                 if (0 != std.os.linux.statx(fd, "", 0, .{}, &stat)) {
@@ -180,14 +174,11 @@ pub const Stat = struct {
                     .gid = stat.gid,
                 };
             },
-            else => {
-                const stat = try std.posix.fstat(fd);
-                return .{
-                    .dev = @truncate(stat.dev),
-                    .ino = @truncate(stat.ino),
-                    .uid = stat.uid,
-                    .gid = stat.gid,
-                };
+            else => return .{
+                .dev = 0,
+                .ino = 0,
+                .uid = 0,
+                .gid = 0,
             },
         }
     }
