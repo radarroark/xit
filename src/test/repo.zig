@@ -2124,7 +2124,7 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind, comptime repo_op
     // replace bin with a text file containing a single line that
     // is too long, and assert that it is considered a binary file
     {
-        const file = try repo.core.work_dir.createFile(io, "bin", .{ .truncate = true });
+        const file = try repo.core.work_dir.createFile(io, "bin", .{ .truncate = true, .read = true });
         defer file.close(io);
         while (try file.length(io) < repo_opts.max_line_size) {
             try file.writeStreamingAll(io, &[_]u8{' '} ** 256);
