@@ -171,6 +171,15 @@ pub const Stat = struct {
                     };
                 }
             },
+            .macos => {
+                const stat = try std.posix.fstat(fd);
+                return .{
+                    .dev = @intCast(stat.dev),
+                    .ino = @intCast(stat.ino),
+                    .uid = stat.uid,
+                    .gid = stat.gid,
+                };
+            },
             else => {
                 const stat = try std.posix.fstat(fd);
                 return .{
