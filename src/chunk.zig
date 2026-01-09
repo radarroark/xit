@@ -330,7 +330,7 @@ pub fn writeChunks(
 
         // write chunk unless it already exists
         const chunk_hash_hex = std.fmt.bytesToHex(chunk_hash_bytes, .lower);
-        if (chunks_dir.openFile(io, &chunk_hash_hex, .{})) |chunk_file| {
+        if (chunks_dir.openFile(io, &chunk_hash_hex, .{ .allow_directory = false })) |chunk_file| {
             chunk_file.close(io);
         } else |err| switch (err) {
             error.FileNotFound => {

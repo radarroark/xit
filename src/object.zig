@@ -55,13 +55,12 @@ pub fn writeObject(
             const hash_suffix = hash_hex[2..];
 
             // exit early if the file already exists
-            if (hash_prefix_dir.openFile(io, hash_suffix, .{})) |hash_suffix_file| {
+            if (hash_prefix_dir.openFile(io, hash_suffix, .{ .allow_directory = false })) |hash_suffix_file| {
                 hash_suffix_file.close(io);
                 return;
-            } else |err| {
-                if (err != error.FileNotFound) {
-                    return err;
-                }
+            } else |err| switch (err) {
+                error.FileNotFound => {},
+                else => |e| return e,
             }
 
             // create lock file
@@ -220,13 +219,12 @@ fn writeTree(
             const tree_hash_suffix = tree_hash_hex[2..];
 
             // exit early if there is nothing to commit
-            if (tree_hash_prefix_dir.openFile(io, tree_hash_suffix, .{})) |tree_hash_suffix_file| {
+            if (tree_hash_prefix_dir.openFile(io, tree_hash_suffix, .{ .allow_directory = false })) |tree_hash_suffix_file| {
                 tree_hash_suffix_file.close(io);
                 return;
-            } else |err| {
-                if (err != error.FileNotFound) {
-                    return err;
-                }
+            } else |err| switch (err) {
+                error.FileNotFound => {},
+                else => |e| return e,
             }
 
             // create lock file

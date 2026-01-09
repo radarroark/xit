@@ -96,7 +96,7 @@ pub fn LineIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
         ) !LineIterator(repo_kind, repo_opts) {
             switch (mode.content.object_type) {
                 .regular_file => {
-                    var file = try state.core.work_dir.openFile(io, path, .{ .mode = .read_only });
+                    var file = try state.core.work_dir.openFile(io, path, .{ .mode = .read_only, .allow_directory = false });
                     errdefer file.close(io);
                     const file_size = try file.length(io);
                     const header = try std.fmt.allocPrint(allocator, "blob {}\x00", .{file_size});
