@@ -279,10 +279,10 @@ test "iterate over large pack" {
     var r = try rp.Repo(.git, repo_opts).init(io, allocator, .{ .path = work_path });
     defer r.deinit(io, allocator);
 
-    var bin_dir = try cwd.openDir(io, "src/test/bin", .{});
-    defer bin_dir.close(io);
+    var pack_dir = try cwd.openDir(io, "src/test/data", .{});
+    defer pack_dir.close(io);
 
-    var pack_iter = try pack.PackObjectIterator(.git, repo_opts).init(io, allocator, bin_dir, "pack-b7f085e431fc05b0bca3d5c306dc148d7bbed2f4.pack");
+    var pack_iter = try pack.PackObjectIterator(.git, repo_opts).init(io, allocator, pack_dir, "pack-b7f085e431fc05b0bca3d5c306dc148d7bbed2f4.pack");
     defer pack_iter.deinit();
 
     while (try pack_iter.next(.{ .core = &r.core, .extra = .{} })) |pack_reader| {

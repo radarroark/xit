@@ -167,7 +167,7 @@ test "fastcdc sekien 16k chunks" {
         .max_size = 65535,
         .normalization = .level1,
     };
-    const buffer = @embedFile("test/bin/SekienAkashita.jpg");
+    const buffer = @embedFile("test/data/SekienAkashita.jpg");
     var reader = std.Io.Reader.fixed(buffer);
     var iter = FastCdc(opts).init(buffer.len);
     var chunk_buffer = [_]u8{0} ** opts.max_size;
@@ -192,7 +192,7 @@ test "fastcdc sekien 32k chunks" {
         .max_size = 131072,
         .normalization = .level1,
     };
-    const buffer = @embedFile("test/bin/SekienAkashita.jpg");
+    const buffer = @embedFile("test/data/SekienAkashita.jpg");
     var reader = std.Io.Reader.fixed(buffer);
     var iter = FastCdc(opts).init(buffer.len);
     var chunk_buffer = [_]u8{0} ** opts.max_size;
@@ -214,7 +214,7 @@ test "fastcdc sekien 64k chunks" {
         .max_size = 262144,
         .normalization = .level1,
     };
-    const buffer = @embedFile("test/bin/SekienAkashita.jpg");
+    const buffer = @embedFile("test/data/SekienAkashita.jpg");
     var reader = std.Io.Reader.fixed(buffer);
     var iter = FastCdc(opts).init(buffer.len);
     var chunk_buffer = [_]u8{0} ** opts.max_size;
