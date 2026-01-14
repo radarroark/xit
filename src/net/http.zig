@@ -18,8 +18,10 @@ pub const HttpState = struct {
             allocator.destroy(arena);
         }
 
-        var client: std.http.Client = .{ .io = io, .allocator = arena.allocator() };
-        try client.initDefaultProxies(arena.allocator());
+        const client: std.http.Client = .{ .io = io, .allocator = arena.allocator() };
+        // TODO: call `initDefaultProxies` here. the call was removed
+        // because it requires an env map, which needs to be passed here
+        // all the way from the main fn.
 
         return .{
             .http_client = client,

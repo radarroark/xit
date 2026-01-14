@@ -47,7 +47,7 @@ pub const SocketStream = struct {
         data: [*c]u8,
         len: usize,
     ) !usize {
-        return try std.posix.recv(self.socket, data[0..len], 0);
+        return try recv(self.socket, data[0..len], 0);
     }
 
     pub fn write(
@@ -55,7 +55,7 @@ pub const SocketStream = struct {
         data: [*c]const u8,
         len: usize,
     ) !usize {
-        return try std.posix.send(self.socket, data[0..len], 0);
+        return try send(self.socket, data[0..len], 0);
     }
 
     pub fn writeAll(
@@ -96,7 +96,7 @@ pub const SocketStream = struct {
             .ip6 => std.c.AF.INET6,
         };
 
-        const s = try std.posix.socket(family, std.posix.SOCK.STREAM, std.posix.IPPROTO.TCP);
+        const s = try initSocket(family, std.posix.SOCK.STREAM, std.posix.IPPROTO.TCP);
 
         if (INVALID_SOCKET != s) {
             try connectWithTimeout(s, &address, CONNECT_TIMEOUT);
@@ -107,6 +107,104 @@ pub const SocketStream = struct {
         self.socket = s;
     }
 };
+
+fn initSocket(domain: u32, socket_type: u32, protocol: u32) !std.posix.socket_t {
+    const rc = std.posix.system.socket(domain, socket_type, protocol);
+    switch (std.posix.errno(rc)) {
+        .SUCCESS => return @intCast(rc),
+        else => return error.SocketCreationFailure,
+    }
+}
+
+fn send(sockfd: std.posix.socket_t, buf: []const u8, flags: u32) !usize {
+    const rc = std.posix.system.sendto(sockfd, buf.ptr, buf.len, flags, null, 0);
+    switch (std.posix.errno(rc)) {
+        .SUCCESS => return @intCast(rc),
+        else => return error.SendFailed,
+    }
+}
+
+pub const RecvFromError = error{
+    /// The socket is marked nonblocking and the requested operation would block, and
+    /// there is no global event loop configured.
+    WouldBlock,
+
+    /// A remote host refused to allow the network connection, typically because it is not
+    /// running the requested service.
+    ConnectionRefused,
+
+    /// Could not allocate kernel memory.
+    SystemResources,
+
+    ConnectionResetByPeer,
+    Timeout,
+
+    /// The socket has not been bound.
+    SocketNotBound,
+
+    /// The UDP message was too big for the buffer and part of it has been discarded
+    MessageOversize,
+
+    /// The network subsystem has failed.
+    NetworkDown,
+
+    /// The socket is not connected (connection-oriented sockets only).
+    SocketUnconnected,
+
+    /// The other end closed the socket unexpectedly or a read is executed on a shut down socket
+    BrokenPipe,
+} || std.Io.UnexpectedError;
+
+pub fn recv(sock: std.posix.socket_t, buf: []u8, flags: u32) RecvFromError!usize {
+    return recvfrom(sock, buf, flags, null, null);
+}
+
+pub fn recvfrom(
+    sockfd: std.posix.socket_t,
+    buf: []u8,
+    flags: u32,
+    src_addr: ?*std.posix.sockaddr,
+    addrlen: ?*std.posix.socklen_t,
+) RecvFromError!usize {
+    while (true) {
+        const rc = std.posix.system.recvfrom(sockfd, buf.ptr, buf.len, flags, src_addr, addrlen);
+        if (builtin.os.tag == .windows) {
+            if (rc == std.os.windows.ws2_32.SOCKET_ERROR) {
+                switch (std.os.windows.ws2_32.WSAGetLastError()) {
+                    .NOTINITIALISED => unreachable,
+                    .ECONNRESET => return error.ConnectionResetByPeer,
+                    .EINVAL => return error.SocketNotBound,
+                    .EMSGSIZE => return error.MessageOversize,
+                    .ENETDOWN => return error.NetworkDown,
+                    .ENOTCONN => return error.SocketUnconnected,
+                    .EWOULDBLOCK => return error.WouldBlock,
+                    .ETIMEDOUT => return error.Timeout,
+                    // TODO: handle more errors
+                    else => |err| return std.os.windows.unexpectedWSAError(err),
+                }
+            } else {
+                return @intCast(rc);
+            }
+        } else {
+            switch (std.posix.errno(rc)) {
+                .SUCCESS => return @intCast(rc),
+                .BADF => unreachable, // always a race condition
+                .FAULT => unreachable,
+                .INVAL => unreachable,
+                .NOTCONN => return error.SocketUnconnected,
+                .NOTSOCK => unreachable,
+                .INTR => continue,
+                .AGAIN => return error.WouldBlock,
+                .NOMEM => return error.SystemResources,
+                .CONNREFUSED => return error.ConnectionRefused,
+                .CONNRESET => return error.ConnectionResetByPeer,
+                .TIMEDOUT => return error.Timeout,
+                .PIPE => return error.BrokenPipe,
+                else => |err| return std.posix.unexpectedErrno(err),
+            }
+        }
+    }
+}
 
 fn setBlocking(s: std.posix.socket_t, blocking: bool) !void {
     if (.windows == builtin.os.tag) {

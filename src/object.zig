@@ -276,16 +276,15 @@ fn sign(
     try content_file.writeStreamingAll(io, content);
 
     // sign the file
-    var process = std.process.Child.init(
-        &.{ "ssh-keygen", "-Y", "sign", "-n", "git", "-f", signing_key, content_file_path },
-        allocator,
-    );
-    const behavior: std.process.Child.StdIo = if (repo_opts.is_test) .Ignore else .Inherit;
-    process.stdin_behavior = behavior;
-    process.stdout_behavior = behavior;
-    process.stderr_behavior = behavior;
-    const term = try process.spawnAndWait(io);
-    if (0 != term.Exited) {
+    const behavior: std.process.SpawnOptions.StdIo = if (repo_opts.is_test) .ignore else .inherit;
+    var process = try std.process.spawn(io, .{
+        .argv = &.{ "ssh-keygen", "-Y", "sign", "-n", "git", "-f", signing_key, content_file_path },
+        .stdin = behavior,
+        .stdout = behavior,
+        .stderr = behavior,
+    });
+    const term = try process.wait(io);
+    if (0 != term.exited) {
         return error.ObjectSigningFailed;
     }
 

@@ -27,7 +27,7 @@ fn copyDir(io: std.Io, src_dir: std.Io.Dir, dest_dir: std.Io.Dir) !void {
     }
 }
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
@@ -72,7 +72,7 @@ pub fn main() !void {
 
     var patch_enabled = false;
 
-    var arg_it = try std.process.argsWithAllocator(allocator);
+    var arg_it = try init.minimal.args.iterateAllocator(allocator);
     defer arg_it.deinit();
     _ = arg_it.skip();
     while (arg_it.next()) |arg| {

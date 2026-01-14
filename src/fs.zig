@@ -284,7 +284,7 @@ pub fn relativePath(allocator: std.mem.Allocator, work_path: []const u8, cwd_pat
     }
 
     // compute the path relative to the repo path
-    return try std.fs.path.relative(allocator, work_path, input_path);
+    return try std.fs.path.relative(allocator, ".", null, work_path, input_path);
 }
 
 pub fn splitPath(allocator: std.mem.Allocator, path: []const u8) ![]const []const u8 {

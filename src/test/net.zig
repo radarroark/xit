@@ -97,7 +97,11 @@ test "git push large" {
     try testPushLarge(.git, .{ .is_test = true }, .file, 0, io, allocator);
 }
 
-fn Server(comptime transport_def: net.TransportDefinition) type {
+fn Server(
+    comptime transport_def: net.TransportDefinition,
+    comptime temp_dir_name: []const u8,
+    comptime port: u16,
+) type {
     return struct {
         core: Core,
 
@@ -114,11 +118,11 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
                 },
                 .raw => struct {
                     io: std.Io,
-                    process: std.process.Child,
+                    process: ?std.process.Child,
                 },
                 .ssh => struct {
                     io: std.Io,
-                    process: std.process.Child,
+                    process: ?std.process.Child,
                 },
             },
         };
@@ -126,9 +130,7 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
         fn init(
             io: std.Io,
             allocator: std.mem.Allocator,
-            comptime temp_dir_name: []const u8,
-            comptime port: u16,
-        ) !Server(transport_def) {
+        ) !Server(transport_def, temp_dir_name, port) {
             switch (transport_def) {
                 .file => return .{ .core = {} },
                 .wire => |wire_kind| switch (wire_kind) {
@@ -147,19 +149,8 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
                             },
                         };
                     },
-                    .raw => {
-                        const port_str = std.fmt.comptimePrint("{}", .{port});
-                        var process = std.process.Child.init(
-                            &.{ "git", "daemon", "--reuseaddr", "--base-path=.", "--export-all", "--enable=receive-pack", "--log-destination=stderr", "--port=" ++ port_str },
-                            allocator,
-                        );
-                        process.cwd = temp_dir_name;
-                        process.stdin_behavior = .Ignore;
-                        process.stdout_behavior = .Ignore;
-                        process.stderr_behavior = .Ignore;
-                        return .{
-                            .core = .{ .io = io, .process = process },
-                        };
+                    .raw => return .{
+                        .core = .{ .io = io, .process = null },
                     },
                     .ssh => {
                         // create priv host key
@@ -261,27 +252,24 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
                         try std.testing.expect(null == std.mem.indexOfScalar(u8, auth_keys_path, ' '));
 
                         // create sshd.sh
-                        const sshd_file = try std.Io.Dir.cwd().createFile(io, temp_dir_name ++ "/sshd.sh", .{});
-                        defer sshd_file.close(io);
-                        try sshd_file.writeStreamingAll(io, sshd_contents);
-                        if (.windows != builtin.os.tag) {
-                            try sshd_file.setPermissions(io, .executable_file);
+                        {
+                            const sshd_file = try std.Io.Dir.cwd().createFile(io, temp_dir_name ++ "/sshd.sh", .{});
+                            defer sshd_file.close(io);
+                            try sshd_file.writeStreamingAll(io, sshd_contents);
+                            if (.windows != builtin.os.tag) {
+                                try sshd_file.setPermissions(io, .executable_file);
+                            }
                         }
 
-                        var process = std.process.Child.init(&.{"./sshd.sh"}, allocator);
-                        process.cwd = temp_dir_name;
-                        process.stdin_behavior = .Pipe;
-                        process.stdout_behavior = .Pipe;
-                        process.stderr_behavior = .Pipe;
                         return .{
-                            .core = .{ .io = io, .process = process },
+                            .core = .{ .io = io, .process = null },
                         };
                     },
                 },
             }
         }
 
-        fn start(self: *Server(transport_def)) !void {
+        fn start(self: *Server(transport_def, temp_dir_name, port)) !void {
             switch (transport_def) {
                 .file => {},
                 .wire => |wire_kind| switch (wire_kind) {
@@ -331,7 +319,7 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
                                         defer core.allocator.free(path_translated);
 
                                         // init env map
-                                        var env_map = std.process.EnvMap.init(core.allocator);
+                                        var env_map = std.process.Environ.Map.init(core.allocator);
                                         defer env_map.deinit();
                                         try env_map.put("GATEWAY_INTERFACE", "CGI/1.1");
                                         try env_map.put("REQUEST_METHOD", @tagName(request.head.method));
@@ -373,13 +361,13 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
                                             try env_map.put("HTTP_ACCEPT", accept_str);
                                         }
 
-                                        var process = std.process.Child.init(&.{ "git", "http-backend" }, core.allocator);
-                                        process.cwd = core.temp_dir_name;
-                                        process.stdin_behavior = .Pipe;
-                                        process.stdout_behavior = .Pipe;
-                                        process.stderr_behavior = .Pipe;
-                                        process.env_map = &env_map;
-                                        try process.spawn(core.io);
+                                        var process = try std.process.spawn(core.io, .{
+                                            .argv = &.{ "git", "http-backend" },
+                                            .environ_map = &env_map,
+                                            .stdin = .pipe,
+                                            .stdout = .pipe,
+                                            .stderr = .pipe,
+                                        });
 
                                         if (request.head.method == .POST) {
                                             const reader = try request.readerExpectContinue(&.{});
@@ -418,8 +406,27 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
                         };
                         self.core.server_thread = try std.Thread.spawn(.{}, ServerHandler.run, .{&self.core});
                     },
-                    .raw => try self.core.process.spawn(self.core.io),
-                    .ssh => try self.core.process.spawn(self.core.io),
+                    .raw => {
+                        std.debug.assert(self.core.process == null);
+                        const port_str = std.fmt.comptimePrint("{}", .{port});
+                        self.core.process = try std.process.spawn(self.core.io, .{
+                            .argv = &.{ "git", "daemon", "--reuseaddr", "--base-path=.", "--export-all", "--enable=receive-pack", "--log-destination=stderr", "--port=" ++ port_str },
+                            .cwd = temp_dir_name,
+                            .stdin = .ignore,
+                            .stdout = .ignore,
+                            .stderr = .ignore,
+                        });
+                    },
+                    .ssh => {
+                        std.debug.assert(self.core.process == null);
+                        self.core.process = try std.process.spawn(self.core.io, .{
+                            .argv = &.{"./sshd.sh"},
+                            .cwd = temp_dir_name,
+                            .stdin = .pipe,
+                            .stdout = .pipe,
+                            .stderr = .pipe,
+                        });
+                    },
                 },
             }
 
@@ -429,7 +436,7 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
             }
         }
 
-        fn stop(self: *Server(transport_def)) void {
+        fn stop(self: *Server(transport_def, temp_dir_name, port)) void {
             switch (transport_def) {
                 .file => {},
                 .wire => |wire_kind| switch (wire_kind) {
@@ -439,8 +446,14 @@ fn Server(comptime transport_def: net.TransportDefinition) type {
                         _ = client.fetch(.{ .location = .{ .url = self.core.stop_server_endpoint } }) catch return;
                         self.core.server_thread.join();
                     },
-                    .raw => _ = self.core.process.kill(self.core.io) catch {},
-                    .ssh => _ = self.core.process.kill(self.core.io) catch {},
+                    .raw => {
+                        _ = self.core.process.?.kill(self.core.io);
+                        self.core.process = null;
+                    },
+                    .ssh => {
+                        _ = self.core.process.?.kill(self.core.io);
+                        self.core.process = null;
+                    },
                 },
             }
         }
@@ -469,7 +482,7 @@ fn testFetch(
     defer temp_dir.close(io);
 
     // init server
-    var server = try Server(transport_def).init(io, allocator, temp_dir_name, port);
+    var server = try Server(transport_def, temp_dir_name, port).init(io, allocator);
     try server.start();
     defer server.stop();
 
@@ -655,7 +668,7 @@ fn testPush(
     defer temp_dir.close(io);
 
     // init server
-    var server = try Server(transport_def).init(io, allocator, temp_dir_name, port);
+    var server = try Server(transport_def, temp_dir_name, port).init(io, allocator);
     try server.start();
     defer server.stop();
 
@@ -924,7 +937,7 @@ fn testClone(
     defer temp_dir.close(io);
 
     // init server
-    var server = try Server(transport_def).init(io, allocator, temp_dir_name, port);
+    var server = try Server(transport_def, temp_dir_name, port).init(io, allocator);
     try server.start();
     defer server.stop();
 
@@ -1047,7 +1060,7 @@ fn testFetchLarge(
     defer temp_dir.close(io);
 
     // init server
-    var server = try Server(transport_def).init(io, allocator, temp_dir_name, port);
+    var server = try Server(transport_def, temp_dir_name, port).init(io, allocator);
     try server.start();
     defer server.stop();
 
@@ -1182,7 +1195,7 @@ fn testPushLarge(
     defer temp_dir.close(io);
 
     // init server
-    var server = try Server(transport_def).init(io, allocator, temp_dir_name, port);
+    var server = try Server(transport_def, temp_dir_name, port).init(io, allocator);
     try server.start();
     defer server.stop();
 

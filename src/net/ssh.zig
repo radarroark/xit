@@ -32,15 +32,6 @@ pub const SshState = struct {
         const command = if (opts.command) |cmd|
             try arena_ptr.allocator().dupe(u8, cmd)
         else blk: {
-            const env_var_maybe = std.process.getEnvVarOwned(allocator, "XIT_SSH_COMMAND") catch |err| switch (err) {
-                error.EnvironmentVariableNotFound => null,
-                else => |e| return e,
-            };
-            if (env_var_maybe) |env_var| {
-                defer allocator.free(env_var);
-                break :blk try arena_ptr.allocator().dupe(u8, env_var);
-            }
-
             var config = try cfg.Config(repo_kind, repo_opts).init(state, io, allocator);
             defer config.deinit();
             const core_section = config.sections.get("core") orelse break :blk null;
@@ -48,7 +39,6 @@ pub const SshState = struct {
             if (ssh_cmd.len > 0) {
                 break :blk try arena_ptr.allocator().dupe(u8, ssh_cmd);
             }
-
             break :blk null;
         };
 
@@ -69,7 +59,7 @@ pub const SshState = struct {
 
     pub fn close(self: *SshState, io: std.Io) !void {
         if (self.process) |*process| {
-            _ = try process.kill(io);
+            _ = process.kill(io);
             self.process = null;
         }
     }
@@ -147,7 +137,7 @@ fn spawnSsh(
     const command = if (command_maybe) |cmd| cmd else "ssh";
 
     // TODO: fix paths that have spaces
-    var arg_iter = try std.process.ArgIteratorGeneral(.{ .single_quotes = true }).init(wire_state.allocator, command);
+    var arg_iter = try std.process.Args.IteratorGeneral(.{ .single_quotes = true }).init(wire_state.allocator, command);
     defer arg_iter.deinit();
     while (arg_iter.next()) |arg| {
         try args.append(wire_state.arena.allocator(), arg);
@@ -197,12 +187,10 @@ fn spawnSsh(
 
     const ssh_cmdline = try args.toOwnedSlice(wire_state.arena.allocator());
 
-    var process = std.process.Child.init(ssh_cmdline, wire_state.allocator);
-    process.stdin_behavior = .Pipe;
-    process.stdout_behavior = .Pipe;
-    process.stderr_behavior = .Ignore;
-
-    try process.spawn(wire_state.io);
-
-    wire_state.process = process;
+    wire_state.process = try std.process.spawn(wire_state.io, .{
+        .argv = ssh_cmdline,
+        .stdin = .pipe,
+        .stdout = .pipe,
+        .stderr = .ignore,
+    });
 }
