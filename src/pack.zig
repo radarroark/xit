@@ -200,9 +200,6 @@ const PackObjectStream = union(enum) {
         pack_file: std.Io.File,
         start_position: u64,
     ) !PackObjectStream {
-        // set the OS file position
-        try io.vtable.fileSeekTo(io.userdata, pack_file, start_position);
-
         const reader_buffer = try allocator.alloc(u8, buffer_size);
         errdefer allocator.free(reader_buffer);
 
@@ -668,10 +665,8 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
 
             var bytes_read: u64 = 0;
 
-            var file_reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
-            var file_reader = self.stream.file.pack_file.readerStreaming(io, &file_reader_buffer);
             var zlib_stream_buffer = [_]u8{0} ** std.compress.flate.max_window_len;
-            var zlib_stream: std.compress.flate.Decompress = .init(&file_reader.interface, .zlib, &zlib_stream_buffer);
+            var zlib_stream: std.compress.flate.Decompress = .init(&self.stream.file.pack_file_reader.interface, .zlib, &zlib_stream_buffer);
 
             // get size of base object (little endian variable length format)
             var base_size: u64 = 0;
