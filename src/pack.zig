@@ -7,53 +7,50 @@ pub fn PackObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
     return struct {
         io: std.Io,
         allocator: std.mem.Allocator,
-        pack_dir: std.Io.Dir,
-        pack_file_name: []const u8,
-        pack_file: std.Io.File,
+        pack_stream: *PackStream,
         start_position: u64,
         object_count: u32,
         object_index: u32,
         pack_reader: PackObjectReader(repo_kind, repo_opts),
 
-        pub fn init(io: std.Io, allocator: std.mem.Allocator, pack_dir: std.Io.Dir, pack_file_name: []const u8) !PackObjectIterator(repo_kind, repo_opts) {
-            var pack_file = try pack_dir.openFile(io, pack_file_name, .{ .mode = .read_only });
-            errdefer pack_file.close(io);
-
-            var reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
-            var reader = pack_file.reader(io, &reader_buffer);
-
+        pub fn init(io: std.Io, allocator: std.mem.Allocator, pack_stream: *PackStream) !PackObjectIterator(repo_kind, repo_opts) {
             // parse header
-            const sig = try reader.interface.takeArray(4);
+            const sig = try pack_stream.reader().takeArray(4);
             if (!std.mem.eql(u8, "PACK", sig)) {
                 return error.InvalidPackFileSig;
             }
-            const version = try reader.interface.takeInt(u32, .big);
+            const version = try pack_stream.reader().takeInt(u32, .big);
             if (version != 2) {
                 return error.InvalidPackFileVersion;
             }
-            const obj_count = try reader.interface.takeInt(u32, .big);
+            const obj_count = try pack_stream.reader().takeInt(u32, .big);
 
             return .{
                 .io = io,
                 .allocator = allocator,
-                .pack_dir = pack_dir,
-                .pack_file_name = pack_file_name,
-                .pack_file = pack_file,
-                .start_position = reader.logicalPos(),
+                .pack_stream = pack_stream,
+                .start_position = pack_stream.logicalPos(),
                 .object_count = obj_count,
                 .object_index = 0,
                 .pack_reader = undefined,
             };
         }
 
-        pub fn next(self: *PackObjectIterator(repo_kind, repo_opts), state: rp.Repo(repo_kind, repo_opts).State(.read_only)) !?*PackObjectReader(repo_kind, repo_opts) {
+        pub fn next(
+            self: *PackObjectIterator(repo_kind, repo_opts),
+            state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+        ) !?*PackObjectReader(repo_kind, repo_opts) {
             if (self.object_index == self.object_count) {
                 return null;
             }
 
             const start_position = self.start_position;
 
-            var pack_reader = try PackObjectReader(repo_kind, repo_opts).initAtPosition(self.io, self.allocator, self.pack_dir, self.pack_file_name, start_position);
+            var pack_reader = blk: {
+                var pack_stream = try self.pack_stream.dupe();
+                errdefer pack_stream.deinit();
+                break :blk try PackObjectReader(repo_kind, repo_opts).initAtPosition(self.io, self.allocator, &pack_stream, start_position);
+            };
             errdefer pack_reader.deinit(self.io, self.allocator);
 
             switch (pack_reader.internal) {
@@ -67,10 +64,6 @@ pub fn PackObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
             try pack_reader.reset();
             self.pack_reader = pack_reader;
             return &self.pack_reader;
-        }
-
-        pub fn deinit(self: *PackObjectIterator(repo_kind, repo_opts)) void {
-            self.pack_file.close(self.io);
         }
     };
 }
@@ -173,138 +166,224 @@ const PackObjectHeader = packed struct {
     extra: bool,
 };
 
-/// contains the stream used to read a pack object.
-/// it can either be read from a file on disk or from an in-memory buffer.
-const PackObjectStream = union(enum) {
+pub const PackStream = union(enum) {
     file: struct {
         io: std.Io,
         allocator: std.mem.Allocator,
-        pack_file: std.Io.File,
-        pack_file_reader: *std.Io.File.Reader,
-        pack_file_reader_buffer: []u8,
-        zlib_stream: *std.compress.flate.Decompress,
-        zlib_stream_buffer: []u8,
-        start_position: u64,
-    },
-    memory: struct {
-        allocator: std.mem.Allocator,
-        buffer: []u8,
-        interface: std.Io.Reader,
-        end_position: u64,
+        dir: std.Io.Dir,
+        file_name: []const u8,
+        buffer_size: usize,
+        file: std.Io.File,
+        file_reader: *std.Io.File.Reader,
+        file_reader_buffer: []u8,
     },
 
-    pub fn initFile(
-        comptime buffer_size: usize,
+    const buffer_size = 4 * 1024;
+
+    pub fn initFile(io: std.Io, allocator: std.mem.Allocator, dir: std.Io.Dir, file_name: []const u8) !PackStream {
+        const file = try dir.openFile(io, file_name, .{ .mode = .read_only });
+        errdefer file.close(io);
+
+        const buffer = try allocator.alloc(u8, buffer_size);
+        errdefer allocator.free(buffer);
+
+        const file_reader = try allocator.create(std.Io.File.Reader);
+        errdefer allocator.destroy(file_reader);
+        file_reader.* = file.reader(io, buffer);
+
+        var dir_copy = try dir.openDir(io, ".", .{});
+        errdefer dir_copy.close(io);
+
+        const file_name_copy = try allocator.dupe(u8, file_name);
+        errdefer allocator.free(file_name_copy);
+
+        return .{
+            .file = .{
+                .io = io,
+                .allocator = allocator,
+                .dir = dir_copy,
+                .file_name = file_name_copy,
+                .buffer_size = buffer_size,
+                .file = file,
+                .file_reader = file_reader,
+                .file_reader_buffer = buffer,
+            },
+        };
+    }
+
+    pub fn deinit(self: *PackStream) void {
+        switch (self.*) {
+            .file => |*file| {
+                file.dir.close(file.io);
+                file.allocator.free(file.file_name);
+                file.file.close(file.io);
+                file.allocator.free(file.file_reader_buffer);
+                file.allocator.destroy(file.file_reader);
+            },
+        }
+    }
+
+    pub fn dupe(self: *const PackStream) !PackStream {
+        switch (self.*) {
+            .file => |*file| return try .initFile(file.io, file.allocator, file.dir, file.file_name),
+        }
+    }
+
+    pub fn seekTo(self: *PackStream, position: u64) !void {
+        switch (self.*) {
+            .file => |*file| try file.file_reader.seekTo(position),
+        }
+    }
+
+    pub fn logicalPos(self: *const PackStream) u64 {
+        switch (self.*) {
+            .file => |*file| return file.file_reader.logicalPos(),
+        }
+    }
+
+    pub fn reader(self: *PackStream) *std.Io.Reader {
+        switch (self.*) {
+            .file => |*file| return &file.file_reader.interface,
+        }
+    }
+};
+
+const PackObjectStream = struct {
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    pack_stream: PackStream,
+    object_stream: union(enum) {
+        zlib: struct {
+            stream: *std.compress.flate.Decompress,
+            stream_buffer: []u8,
+
+            fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+                allocator.destroy(self.stream);
+                allocator.free(self.stream_buffer);
+            }
+        },
+        memory: struct {
+            buffer: []u8,
+            interface: std.Io.Reader,
+            end_position: u64,
+
+            fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+                allocator.free(self.buffer);
+            }
+        },
+    },
+    start_position: u64,
+
+    fn init(
         io: std.Io,
         allocator: std.mem.Allocator,
-        pack_file: std.Io.File,
+        pack_stream: *PackStream,
         start_position: u64,
     ) !PackObjectStream {
-        const reader_buffer = try allocator.alloc(u8, buffer_size);
-        errdefer allocator.free(reader_buffer);
-
-        const reader = try allocator.create(std.Io.File.Reader);
-        errdefer allocator.destroy(reader);
-        reader.* = pack_file.reader(io, reader_buffer);
-        try reader.seekTo(start_position);
+        try pack_stream.seekTo(start_position);
 
         const zlib_stream_buffer = try allocator.alloc(u8, std.compress.flate.max_window_len);
         errdefer allocator.free(zlib_stream_buffer);
 
         const zlib_stream = try allocator.create(std.compress.flate.Decompress);
         errdefer allocator.destroy(zlib_stream);
-        zlib_stream.* = .init(&reader.interface, .zlib, zlib_stream_buffer);
+        zlib_stream.* = .init(pack_stream.reader(), .zlib, zlib_stream_buffer);
 
         return .{
-            .file = .{
-                .io = io,
-                .allocator = allocator,
-                .pack_file = pack_file,
-                .pack_file_reader = reader,
-                .pack_file_reader_buffer = reader_buffer,
-                .zlib_stream = zlib_stream,
-                .zlib_stream_buffer = zlib_stream_buffer,
-                .start_position = start_position,
+            .io = io,
+            .allocator = allocator,
+            .pack_stream = pack_stream.*,
+            .object_stream = .{
+                .zlib = .{
+                    .stream = zlib_stream,
+                    .stream_buffer = zlib_stream_buffer,
+                },
             },
+            .start_position = start_position,
         };
     }
 
-    pub fn deinit(self: *PackObjectStream) void {
-        switch (self.*) {
-            .file => |*file| {
-                file.pack_file.close(file.io);
-                file.allocator.destroy(file.pack_file_reader);
-                file.allocator.free(file.pack_file_reader_buffer);
-                file.allocator.destroy(file.zlib_stream);
-                file.allocator.free(file.zlib_stream_buffer);
-            },
-            .memory => |*memory| memory.allocator.free(memory.buffer),
+    fn deinit(self: *PackObjectStream) void {
+        self.pack_stream.deinit();
+        switch (self.object_stream) {
+            .zlib => |*zlib| zlib.deinit(self.allocator),
+            .memory => |*memory| memory.deinit(self.allocator),
         }
     }
 
-    pub fn convertToBuffer(self: *PackObjectStream, allocator: std.mem.Allocator, buffer_size: u64) !void {
-        try self.reset();
+    pub fn readIntoMemoryMaybe(self: *PackObjectStream, allocator: std.mem.Allocator, object_size: u64) !void {
+        switch (self.pack_stream) {
+            .file => {
+                switch (self.object_stream) {
+                    .zlib => |*zlib| {
+                        // objects larger than this (in bytes) will not be read entirely into memory
+                        const max_buffer_size = 50_000_000;
 
-        const buffer = try allocator.alloc(u8, buffer_size);
-        errdefer allocator.free(buffer);
+                        if (object_size <= max_buffer_size) {
+                            try self.reset();
 
-        var bytes_read: usize = 0;
-        while (bytes_read < buffer_size) {
-            const size = try self.read(buffer[bytes_read..]);
-            if (size == 0) {
-                break;
-            }
-            bytes_read += size;
-        }
+                            const buffer = try allocator.alloc(u8, object_size);
+                            errdefer allocator.free(buffer);
 
-        if (bytes_read != buffer_size) {
-            return error.EndOfStream;
-        }
+                            var bytes_read: usize = 0;
+                            while (bytes_read < object_size) {
+                                const size = try self.read(buffer[bytes_read..]);
+                                if (size == 0) {
+                                    break;
+                                }
+                                bytes_read += size;
+                            }
 
-        const end_position = try self.getEndPos();
+                            if (bytes_read != object_size) {
+                                return error.EndOfStream;
+                            }
 
-        self.deinit();
-        self.* = .{
-            .memory = .{
-                .allocator = allocator,
-                .buffer = buffer,
-                .interface = std.Io.Reader.fixed(buffer),
-                .end_position = end_position,
+                            const end_position = try self.getEndPos();
+
+                            zlib.deinit(allocator);
+                            self.object_stream = .{
+                                .memory = .{
+                                    .buffer = buffer,
+                                    .interface = std.Io.Reader.fixed(buffer),
+                                    .end_position = end_position,
+                                },
+                            };
+                        }
+                    },
+                    .memory => {},
+                }
             },
-        };
+        }
     }
 
-    pub fn reset(self: *PackObjectStream) !void {
-        switch (self.*) {
-            .file => |*file| {
-                file.pack_file_reader.* = file.pack_file.reader(file.io, file.pack_file_reader_buffer);
-                try file.pack_file_reader.seekTo(file.start_position);
-                file.zlib_stream.* = .init(&file.pack_file_reader.interface, .zlib, file.zlib_stream_buffer);
-            },
+    fn reset(self: *PackObjectStream) !void {
+        try self.pack_stream.seekTo(self.start_position);
+        switch (self.object_stream) {
+            .zlib => |*zlib| zlib.stream.* = .init(self.pack_stream.reader(), .zlib, zlib.stream_buffer),
             .memory => |*memory| memory.interface.seek = 0,
         }
     }
 
-    pub fn getEndPos(self: *PackObjectStream) !u64 {
-        switch (self.*) {
-            .file => |*file| {
-                _ = try file.zlib_stream.reader.discardRemaining();
-                return file.pack_file_reader.logicalPos();
+    fn getEndPos(self: *PackObjectStream) !u64 {
+        switch (self.object_stream) {
+            .zlib => |*zlib| {
+                _ = try zlib.stream.reader.discardRemaining();
+                return self.pack_stream.logicalPos();
             },
             .memory => |*memory| return memory.end_position,
         }
     }
 
-    pub fn read(self: *PackObjectStream, dest: []u8) !usize {
-        return switch (self.*) {
-            .file => |*file| try file.zlib_stream.reader.readSliceShort(dest),
-            .memory => |*memory| try memory.interface.readSliceShort(dest),
-        };
+    fn read(self: *PackObjectStream, dest: []u8) !usize {
+        switch (self.object_stream) {
+            .zlib => |*zlib| return try zlib.stream.reader.readSliceShort(dest),
+            .memory => |*memory| return try memory.interface.readSliceShort(dest),
+        }
     }
 
-    pub fn skipBytes(self: *PackObjectStream, num_bytes: u64) !void {
-        switch (self.*) {
-            .file => |*file| _ = try file.zlib_stream.reader.take(num_bytes),
+    fn skipBytes(self: *PackObjectStream, num_bytes: u64) !void {
+        switch (self.object_stream) {
+            .zlib => |*zlib| _ = try zlib.stream.reader.take(num_bytes),
             .memory => |*memory| memory.interface.toss(num_bytes),
         }
     }
@@ -322,8 +401,6 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             delta: struct {
                 init: union(enum) {
                     ofs: struct {
-                        pack_dir: std.Io.Dir,
-                        pack_file_name: []const u8,
                         position: u64,
                     },
                     ref: struct {
@@ -356,9 +433,6 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             },
         };
 
-        // objects larger than this (in bytes) will not be read entirely into memory
-        const max_buffer_size = 50_000_000;
-
         pub fn init(
             io: std.Io,
             allocator: std.mem.Allocator,
@@ -371,16 +445,14 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             return pack_reader;
         }
 
-        pub fn initWithPath(
+        pub fn initWithoutIndex(
             io: std.Io,
             allocator: std.mem.Allocator,
             state: rp.Repo(repo_kind, repo_opts).State(.read_only),
-            pack_dir: std.Io.Dir,
-            pack_file_name: []const u8,
+            pack_stream: *PackStream,
             oid_hex: *const [hash.hexLen(repo_opts.hash)]u8,
         ) !PackObjectReader(repo_kind, repo_opts) {
-            var iter = try PackObjectIterator(repo_kind, repo_opts).init(io, allocator, pack_dir, pack_file_name);
-            defer iter.deinit();
+            var iter = try PackObjectIterator(repo_kind, repo_opts).init(io, allocator, pack_stream);
 
             while (try iter.next(state)) |pack_reader| {
                 {
@@ -448,40 +520,31 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             var file_name_buf = [_]u8{0} ** pack_file_name_len;
             const file_name = try std.fmt.bufPrint(&file_name_buf, "{s}{s}{s}", .{ pack_prefix, pack_offset.pack_id, pack_suffix });
 
-            var pack_file = try pack_dir.openFile(io, file_name, .{ .mode = .read_only });
-            defer pack_file.close(io);
-
-            var reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
-            var reader = pack_file.reader(io, &reader_buffer);
+            var pack_stream = try PackStream.initFile(io, allocator, pack_dir, file_name);
+            errdefer pack_stream.deinit();
 
             // parse header
-            const sig = try reader.interface.takeArray(4);
+            const sig = try pack_stream.reader().takeArray(4);
             if (!std.mem.eql(u8, "PACK", sig)) {
                 return error.InvalidPackFileSig;
             }
-            const version = try reader.interface.takeInt(u32, .big);
+            const version = try pack_stream.reader().takeInt(u32, .big);
             if (version != 2) {
                 return error.InvalidPackFileVersion;
             }
-            _ = try reader.interface.takeInt(u32, .big); // number of objects
+            _ = try pack_stream.reader().takeInt(u32, .big); // number of objects
 
-            return try PackObjectReader(repo_kind, repo_opts).initAtPosition(io, allocator, pack_dir, file_name, pack_offset.value);
+            return try PackObjectReader(repo_kind, repo_opts).initAtPosition(io, allocator, &pack_stream, pack_offset.value);
         }
 
         fn initAtPosition(
             io: std.Io,
             allocator: std.mem.Allocator,
-            pack_dir: std.Io.Dir,
-            pack_file_name: []const u8,
+            pack_stream: *PackStream,
             position: u64,
         ) !PackObjectReader(repo_kind, repo_opts) {
-            var pack_file = try pack_dir.openFile(io, pack_file_name, .{ .mode = .read_only });
-            errdefer pack_file.close(io);
-
-            var file_reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
-            var file_reader = pack_file.reader(io, &file_reader_buffer);
-            try file_reader.seekTo(position);
-            const reader = &file_reader.interface;
+            try pack_stream.seekTo(position);
+            const reader = pack_stream.reader();
 
             // parse object header
             const obj_header: PackObjectHeader = @bitCast(try reader.takeByte());
@@ -505,13 +568,12 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
 
             switch (obj_header.kind) {
                 inline .commit, .tree, .blob, .tag => |pack_obj_kind| {
-                    const start_position = file_reader.logicalPos();
+                    const start_position = pack_stream.logicalPos();
 
-                    var stream = try PackObjectStream.initFile(repo_opts.buffer_size, io, allocator, pack_file, start_position);
+                    var stream = try PackObjectStream.init(io, allocator, pack_stream, start_position);
                     errdefer stream.deinit();
-                    if (size <= max_buffer_size) {
-                        try stream.convertToBuffer(allocator, size);
-                    }
+
+                    try stream.readIntoMemoryMaybe(allocator, size);
 
                     return .{
                         .stream = stream,
@@ -550,15 +612,9 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                         }
                     }
 
-                    var pack_dir_copy = try pack_dir.openDir(io, ".", .{});
-                    errdefer pack_dir_copy.close(io);
+                    const start_position = pack_stream.logicalPos();
 
-                    const pack_file_name_copy = try allocator.dupe(u8, pack_file_name);
-                    errdefer allocator.free(pack_file_name_copy);
-
-                    const start_position = file_reader.logicalPos();
-
-                    var stream = try PackObjectStream.initFile(repo_opts.buffer_size, io, allocator, pack_file, start_position);
+                    var stream = try PackObjectStream.init(io, allocator, pack_stream, start_position);
                     errdefer stream.deinit();
 
                     return .{
@@ -569,8 +625,6 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                             .delta = .{
                                 .init = .{
                                     .ofs = .{
-                                        .pack_dir = pack_dir_copy,
-                                        .pack_file_name = pack_file_name_copy,
                                         .position = position - offset,
                                     },
                                 },
@@ -582,9 +636,9 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                 .ref_delta => {
                     const base_oid = try reader.takeArray(hash.byteLen(repo_opts.hash));
 
-                    const start_position = file_reader.logicalPos();
+                    const start_position = pack_stream.logicalPos();
 
-                    var stream = try PackObjectStream.initFile(repo_opts.buffer_size, io, allocator, pack_file, start_position);
+                    var stream = try PackObjectStream.init(io, allocator, pack_stream, start_position);
                     errdefer stream.deinit();
 
                     return .{
@@ -655,7 +709,11 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             errdefer allocator.destroy(base_reader);
 
             base_reader.* = switch (self.internal.delta.init) {
-                .ofs => |ofs| .{ .pack = try PackObjectReader(repo_kind, repo_opts).initAtPosition(io, allocator, ofs.pack_dir, ofs.pack_file_name, ofs.position) },
+                .ofs => |ofs| blk: {
+                    var pack_stream = try self.stream.pack_stream.dupe();
+                    errdefer pack_stream.deinit();
+                    break :blk .{ .pack = try PackObjectReader(repo_kind, repo_opts).initAtPosition(io, allocator, &pack_stream, ofs.position) };
+                },
                 .ref => |ref| switch (repo_kind) {
                     .git => .{ .pack = try PackObjectReader(repo_kind, repo_opts).initWithIndex(state.core, io, allocator, &ref.oid_hex) },
                     .xit => .{ .chunk = try PackOrChunkObjectReader(repo_kind, repo_opts).ChunkObjectReader.init(state, io, allocator, &ref.oid_hex) },
@@ -665,8 +723,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
 
             var bytes_read: u64 = 0;
 
-            var zlib_stream_buffer = [_]u8{0} ** std.compress.flate.max_window_len;
-            var zlib_stream: std.compress.flate.Decompress = .init(&self.stream.file.pack_file_reader.interface, .zlib, &zlib_stream_buffer);
+            const zlib_stream = self.stream.object_stream.zlib.stream;
 
             // get size of base object (little endian variable length format)
             var base_size: u64 = 0;
@@ -780,9 +837,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             };
             cache.sort(SortCtx{ .keys = cache.keys() });
 
-            if (self.size <= max_buffer_size) {
-                try self.stream.convertToBuffer(allocator, self.size);
-            }
+            try self.stream.readIntoMemoryMaybe(allocator, self.size);
 
             self.* = .{
                 .stream = self.stream,
@@ -864,13 +919,6 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             switch (self.internal) {
                 .basic => {},
                 .delta => |*delta| {
-                    switch (delta.init) {
-                        .ofs => |*ofs| {
-                            ofs.pack_dir.close(io);
-                            allocator.free(ofs.pack_file_name);
-                        },
-                        .ref => {},
-                    }
                     if (delta.state) |*state| {
                         state.base_reader.deinit(io, allocator);
                         allocator.destroy(state.base_reader);
