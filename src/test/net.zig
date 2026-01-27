@@ -88,13 +88,13 @@ test "git fetch large" {
 test "git push large" {
     const io = std.testing.io;
     const allocator = std.testing.allocator;
-    try testPushLarge(.git, .{ .is_test = true }, .{ .wire = .http }, 3022, io, allocator);
+    try testPushLarge(.git, .{ .is_test = true }, .{ .wire = .http }, 3022, false, io, allocator);
     if (true) return; // skip the rest for now because they're slow
     if (.windows != builtin.os.tag) {
-        try testPushLarge(.git, .{ .is_test = true }, .{ .wire = .raw }, 3023, io, allocator);
-        try testPushLarge(.git, .{ .is_test = true }, .{ .wire = .ssh }, 3024, io, allocator);
+        try testPushLarge(.git, .{ .is_test = true }, .{ .wire = .raw }, 3023, false, io, allocator);
+        try testPushLarge(.git, .{ .is_test = true }, .{ .wire = .ssh }, 3024, false, io, allocator);
     }
-    try testPushLarge(.git, .{ .is_test = true }, .file, 0, io, allocator);
+    try testPushLarge(.git, .{ .is_test = true }, .file, 0, io, false, allocator);
 }
 
 fn Server(
@@ -1178,6 +1178,7 @@ fn testPushLarge(
     comptime repo_opts: rp.RepoOpts(repo_kind),
     comptime transport_def: net.TransportDefinition,
     comptime port: u16,
+    comptime shell_out_to_git: bool,
     io: std.Io,
     allocator: std.mem.Allocator,
 ) !void {
@@ -1246,8 +1247,32 @@ fn testPushLarge(
         try client_repo.add(io, allocator, &.{dir_name});
     }
 
-    // make a commit
-    const commit1 = try client_repo.commit(io, allocator, .{ .message = "let there be light" });
+    _ = try client_repo.commit(io, allocator, .{ .message = "let there be light" });
+
+    // change the files so git will send them as delta objects
+    for (&[_][]const u8{ "src", "docs" }) |dir_name| {
+        var dest_repo_dir = try client_dir.createDirPathOpen(io, dir_name, .{ .open_options = .{ .iterate = true } });
+        defer dest_repo_dir.close(io);
+
+        {
+            var iter = dest_repo_dir.iterate();
+            while (try iter.next(io)) |entry| {
+                switch (entry.kind) {
+                    .file => {
+                        const file = try dest_repo_dir.openFile(io, entry.name, .{ .mode = .read_write });
+                        defer file.close(io);
+                        var writer = file.writer(io, &.{});
+                        try writer.interface.writeAll("EDIT");
+                    },
+                    else => {},
+                }
+            }
+        }
+
+        try client_repo.add(io, allocator, &.{dir_name});
+    }
+
+    const commit2 = try client_repo.commit(io, allocator, .{ .message = "more stuff" });
 
     // add remote
     {
@@ -1271,45 +1296,61 @@ fn testPushLarge(
         try client_repo.addConfig(io, allocator, .{ .name = "branch.master.remote", .value = "origin" });
     }
 
-    const is_ssh = switch (transport_def) {
-        .file => false,
-        .wire => |wire_kind| .ssh == wire_kind,
-    };
-    const ssh_cmd_maybe: ?[]const u8 = if (is_ssh) blk: {
-        const known_hosts_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "known_hosts" });
-        defer allocator.free(known_hosts_path);
-
-        const priv_key_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "key" });
-        defer allocator.free(priv_key_path);
-
-        break :blk try std.fmt.allocPrint(allocator, "ssh -o UserKnownHostsFile=\"{s}\" -o IdentityFile=\"{s}\"", .{ known_hosts_path, priv_key_path });
-    } else null;
-    defer if (ssh_cmd_maybe) |ssh_cmd| allocator.free(ssh_cmd);
-
-    client_repo.push(
-        io,
-        allocator,
-        "origin",
-        "master",
-        false,
-        .{ .refspecs = &.{}, .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
-    ) catch |err| {
-        if (false) {
-            var stdout = std.ArrayList(u8){};
-            defer stdout.deinit(allocator);
-            var stderr = std.ArrayList(u8){};
-            defer stderr.deinit(allocator);
-            try server.core.process.collectOutput(allocator, &stdout, &stderr, 1024 * 1024);
-            if (stdout.items.len > 0) std.debug.print("server output:\n{s}\n", .{stdout.items});
-            if (stderr.items.len > 0) std.debug.print("server error:\n{s}\n", .{stderr.items});
+    if (shell_out_to_git) {
+        // shell out to git so it will send delta objects
+        var process = try std.process.spawn(io, .{
+            .argv = &.{ "git", "push", "origin", "master" },
+            .cwd = client_path,
+            .stdin = .ignore,
+            .stdout = .ignore,
+            .stderr = .ignore,
+        });
+        const term = try process.wait(io);
+        if (term != .exited) {
+            return error.GitCommandFailed;
         }
-        return err;
-    };
+    } else {
+        const is_ssh = switch (transport_def) {
+            .file => false,
+            .wire => |wire_kind| .ssh == wire_kind,
+        };
+
+        const ssh_cmd_maybe: ?[]const u8 = if (is_ssh) blk: {
+            const known_hosts_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "known_hosts" });
+            defer allocator.free(known_hosts_path);
+
+            const priv_key_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "key" });
+            defer allocator.free(priv_key_path);
+
+            break :blk try std.fmt.allocPrint(allocator, "ssh -o UserKnownHostsFile=\"{s}\" -o IdentityFile=\"{s}\"", .{ known_hosts_path, priv_key_path });
+        } else null;
+        defer if (ssh_cmd_maybe) |ssh_cmd| allocator.free(ssh_cmd);
+
+        client_repo.push(
+            io,
+            allocator,
+            "origin",
+            "master",
+            false,
+            .{ .refspecs = &.{}, .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
+        ) catch |err| {
+            if (false) {
+                var stdout = std.ArrayList(u8){};
+                defer stdout.deinit(allocator);
+                var stderr = std.ArrayList(u8){};
+                defer stderr.deinit(allocator);
+                try server.core.process.collectOutput(allocator, &stdout, &stderr, 1024 * 1024);
+                if (stdout.items.len > 0) std.debug.print("server output:\n{s}\n", .{stdout.items});
+                if (stderr.items.len > 0) std.debug.print("server error:\n{s}\n", .{stderr.items});
+            }
+            return err;
+        };
+    }
 
     // make sure push was successful
     {
         const oid_master = (try server_repo.readRef(io, .{ .kind = .head, .name = "master" })).?;
-        try std.testing.expectEqualStrings(&commit1, &oid_master);
+        try std.testing.expectEqualStrings(&commit2, &oid_master);
     }
 }
 
