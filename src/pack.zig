@@ -161,7 +161,7 @@ fn PackOrChunkObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: 
             .xit => @import("./chunk.zig").ChunkObjectReader(repo_opts),
         };
 
-        pub fn deinit(self: *@This(), io: std.Io, allocator: std.mem.Allocator) void {
+        pub fn deinit(self: *PackOrChunkObjectReader(repo_kind, repo_opts), io: std.Io, allocator: std.mem.Allocator) void {
             switch (self.*) {
                 .pack => |*pack| pack.deinit(io, allocator),
                 .chunk => |*chunk_reader| switch (repo_kind) {
@@ -171,7 +171,7 @@ fn PackOrChunkObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: 
             }
         }
 
-        pub fn header(self: *const @This()) obj.ObjectHeader {
+        pub fn header(self: *const PackOrChunkObjectReader(repo_kind, repo_opts)) obj.ObjectHeader {
             return switch (self.*) {
                 .pack => |*pack| pack.header(),
                 .chunk => |*chunk_reader| switch (repo_kind) {
@@ -181,7 +181,7 @@ fn PackOrChunkObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: 
             };
         }
 
-        pub fn reset(self: *@This()) anyerror!void {
+        pub fn reset(self: *PackOrChunkObjectReader(repo_kind, repo_opts)) anyerror!void {
             switch (self.*) {
                 .pack => |*pack| try pack.reset(),
                 .chunk => |*chunk_reader| switch (repo_kind) {
@@ -191,7 +191,7 @@ fn PackOrChunkObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: 
             }
         }
 
-        pub fn position(self: *const @This()) u64 {
+        pub fn position(self: *const PackOrChunkObjectReader(repo_kind, repo_opts)) u64 {
             return switch (self.*) {
                 .pack => |*pack| switch (pack.internal) {
                     .basic => pack.relative_position,
@@ -207,7 +207,7 @@ fn PackOrChunkObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: 
             };
         }
 
-        pub fn skipBytes(self: *@This(), num_bytes: u64) !void {
+        pub fn skipBytes(self: *PackOrChunkObjectReader(repo_kind, repo_opts), num_bytes: u64) !void {
             switch (self.*) {
                 .pack => |*pack| try pack.skipBytes(num_bytes),
                 .chunk => |*chunk_reader| switch (repo_kind) {
@@ -217,7 +217,7 @@ fn PackOrChunkObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: 
             }
         }
 
-        pub fn read(self: *@This(), buf: []u8) !usize {
+        pub fn read(self: *PackOrChunkObjectReader(repo_kind, repo_opts), buf: []u8) !usize {
             return switch (self.*) {
                 .pack => |*pack| try pack.read(buf),
                 .chunk => |*chunk_reader| switch (repo_kind) {
