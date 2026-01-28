@@ -1287,8 +1287,8 @@ pub fn copyFromPackObjectIterator(
         }
     }
 
-    while (try pack_iter.next(state.readOnly())) |pack_reader| {
-        defer pack_reader.deinit(io, allocator);
+    while (try pack_iter.next(state.readOnly())) |pack_obj_rdr| {
+        defer pack_obj_rdr.deinit(io, allocator);
 
         const Stream = struct {
             reader: *pack.PackObjectReader(repo_kind, repo_opts),
@@ -1327,10 +1327,10 @@ pub fn copyFromPackObjectIterator(
         };
 
         var reader_buffer = [_]u8{0} ** repo_opts.buffer_size;
-        var stream = Stream.init(pack_reader, &reader_buffer);
+        var stream = Stream.init(pack_obj_rdr, &reader_buffer);
 
         var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-        const header = pack_reader.header();
+        const header = pack_obj_rdr.header();
         try writeObject(repo_kind, repo_opts, state, io, &stream, header, &oid);
 
         if (repo_opts.ProgressCtx != void) {

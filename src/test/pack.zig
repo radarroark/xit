@@ -242,14 +242,14 @@ test "create and read pack" {
             var commit_oid_hex = [_]u8{0} ** hash.hexLen(repo_opts.hash);
             try std.testing.expectEqual(0, c.git_oid_fmt(@ptrCast(&commit_oid_hex), commit_oid));
 
-            var pack_stream = try pack.PackStream.initFile(io, allocator, temp_dir, "test.pack");
-            defer pack_stream.deinit();
+            var pack_reader = try pack.PackReader.initFile(io, allocator, temp_dir, "test.pack");
+            defer pack_reader.deinit();
 
-            var pack_reader = try pack.PackObjectReader(.git, repo_opts).initWithoutIndex(io, allocator, .{ .core = &r.core, .extra = .{} }, &pack_stream, &commit_oid_hex);
-            defer pack_reader.deinit(io, allocator);
+            var pack_obj_rdr = try pack.PackObjectReader(.git, repo_opts).initWithoutIndex(io, allocator, .{ .core = &r.core, .extra = .{} }, &pack_reader, &commit_oid_hex);
+            defer pack_obj_rdr.deinit(io, allocator);
 
             // make sure the reader's position is at the beginning
-            try std.testing.expectEqual(0, pack_reader.relative_position);
+            try std.testing.expectEqual(0, pack_obj_rdr.relative_position);
         }
     }
 }
@@ -285,13 +285,13 @@ test "iterate over large pack" {
     var pack_dir = try cwd.openDir(io, "src/test/data", .{});
     defer pack_dir.close(io);
 
-    var pack_stream = try pack.PackStream.initFile(io, allocator, pack_dir, "pack-b7f085e431fc05b0bca3d5c306dc148d7bbed2f4.pack");
-    defer pack_stream.deinit();
+    var pack_reader = try pack.PackReader.initFile(io, allocator, pack_dir, "pack-b7f085e431fc05b0bca3d5c306dc148d7bbed2f4.pack");
+    defer pack_reader.deinit();
 
-    var pack_iter = try pack.PackObjectIterator(.git, repo_opts).init(io, allocator, &pack_stream);
+    var pack_iter = try pack.PackObjectIterator(.git, repo_opts).init(io, allocator, &pack_reader);
 
-    while (try pack_iter.next(.{ .core = &r.core, .extra = .{} })) |pack_reader| {
-        defer pack_reader.deinit(io, allocator);
+    while (try pack_iter.next(.{ .core = &r.core, .extra = .{} })) |pack_obj_rdr| {
+        defer pack_obj_rdr.deinit(io, allocator);
     }
 }
 
