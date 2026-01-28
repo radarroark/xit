@@ -46,11 +46,7 @@ pub fn PackObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
 
             const start_position = self.start_position;
 
-            var pack_reader = blk: {
-                var pack_stream = try self.pack_stream.dupe();
-                errdefer pack_stream.deinit();
-                break :blk try PackObjectReader(repo_kind, repo_opts).initAtPosition(self.io, self.allocator, &pack_stream, start_position);
-            };
+            var pack_reader = try PackObjectReader(repo_kind, repo_opts).initAtPosition(self.io, self.allocator, self.pack_stream, start_position);
             errdefer pack_reader.deinit(self.io, self.allocator);
 
             switch (pack_reader.internal) {
@@ -251,7 +247,7 @@ pub const PackStream = union(enum) {
 const PackObjectStream = struct {
     io: std.Io,
     allocator: std.mem.Allocator,
-    pack_stream: PackStream,
+    pack_stream: *PackStream,
     object_stream: union(enum) {
         zlib: struct {
             stream: *std.compress.flate.Decompress,
@@ -277,9 +273,15 @@ const PackObjectStream = struct {
     fn init(
         io: std.Io,
         allocator: std.mem.Allocator,
-        pack_stream: *PackStream,
+        pack_stream_orig: *PackStream,
         start_position: u64,
     ) !PackObjectStream {
+        const pack_stream = try allocator.create(PackStream);
+        errdefer allocator.destroy(pack_stream);
+
+        pack_stream.* = try pack_stream_orig.dupe();
+        errdefer pack_stream.deinit();
+
         try pack_stream.seekTo(start_position);
 
         const zlib_stream_buffer = try allocator.alloc(u8, std.compress.flate.max_window_len);
@@ -292,7 +294,7 @@ const PackObjectStream = struct {
         return .{
             .io = io,
             .allocator = allocator,
-            .pack_stream = pack_stream.*,
+            .pack_stream = pack_stream,
             .object_stream = .{
                 .zlib = .{
                     .stream = zlib_stream,
@@ -305,6 +307,7 @@ const PackObjectStream = struct {
 
     fn deinit(self: *PackObjectStream) void {
         self.pack_stream.deinit();
+        self.allocator.destroy(self.pack_stream);
         switch (self.object_stream) {
             .zlib => |*zlib| zlib.deinit(self.allocator),
             .memory => |*memory| memory.deinit(self.allocator),
@@ -312,7 +315,7 @@ const PackObjectStream = struct {
     }
 
     pub fn readIntoMemoryMaybe(self: *PackObjectStream, allocator: std.mem.Allocator, object_size: u64) !void {
-        switch (self.pack_stream) {
+        switch (self.pack_stream.*) {
             .file => {
                 switch (self.object_stream) {
                     .zlib => |*zlib| {
@@ -521,7 +524,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             const file_name = try std.fmt.bufPrint(&file_name_buf, "{s}{s}{s}", .{ pack_prefix, pack_offset.pack_id, pack_suffix });
 
             var pack_stream = try PackStream.initFile(io, allocator, pack_dir, file_name);
-            errdefer pack_stream.deinit();
+            defer pack_stream.deinit();
 
             // parse header
             const sig = try pack_stream.reader().takeArray(4);
@@ -711,7 +714,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             base_reader.* = switch (self.internal.delta.init) {
                 .ofs => |ofs| blk: {
                     var pack_stream = try self.stream.pack_stream.dupe();
-                    errdefer pack_stream.deinit();
+                    defer pack_stream.deinit();
                     break :blk .{ .pack = try PackObjectReader(repo_kind, repo_opts).initAtPosition(io, allocator, &pack_stream, ofs.position) };
                 },
                 .ref => |ref| switch (repo_kind) {
