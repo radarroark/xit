@@ -93,7 +93,7 @@ pub fn PackObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
         start_position: u64,
         object_count: u32,
         object_index: u32,
-        pack_obj_rdr: PackObjectReader(repo_kind, repo_opts),
+        pack_obj_rdr: ?PackObjectReader(repo_kind, repo_opts),
 
         pub fn init(io: std.Io, allocator: std.mem.Allocator, pack_reader: *PackReader) !PackObjectIterator(repo_kind, repo_opts) {
             // parse header
@@ -114,7 +114,7 @@ pub fn PackObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
                 .start_position = pack_reader.logicalPos(),
                 .object_count = obj_count,
                 .object_index = 0,
-                .pack_obj_rdr = undefined,
+                .pack_obj_rdr = null,
             };
         }
 
@@ -124,6 +124,14 @@ pub fn PackObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
         ) !?*PackObjectReader(repo_kind, repo_opts) {
             if (self.object_index == self.object_count) {
                 return null;
+            }
+
+            if (self.pack_obj_rdr) |*pack_obj_rdr| {
+                if (pack_obj_rdr.stream.end_position) |end_pos| {
+                    self.start_position = end_pos;
+                } else {
+                    return error.PackObjectReaderNotDeinited;
+                }
             }
 
             const start_position = self.start_position;
@@ -136,12 +144,10 @@ pub fn PackObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
                 .delta => try pack_obj_rdr.initDeltaAndCache(self.io, self.allocator, state),
             }
 
-            self.start_position = try pack_obj_rdr.stream.getEndPos();
             self.object_index += 1;
 
-            try pack_obj_rdr.reset();
             self.pack_obj_rdr = pack_obj_rdr;
-            return &self.pack_obj_rdr;
+            return &(self.pack_obj_rdr orelse unreachable);
         }
     };
 }
@@ -269,6 +275,9 @@ const PackObjectStream = struct {
         },
     },
     start_position: u64,
+    // this is set during deinit for the sake of the PackObjectIterator.
+    // it reads this field after deinit to see where the zlib data ended.
+    end_position: ?u64 = null,
 
     fn init(
         io: std.Io,
@@ -306,6 +315,9 @@ const PackObjectStream = struct {
     }
 
     fn deinit(self: *PackObjectStream) void {
+        if (self.getEndPos()) |end_pos| {
+            self.end_position = end_pos;
+        } else |_| {}
         self.pack_reader.deinit();
         self.allocator.destroy(self.pack_reader);
         switch (self.object_stream) {
