@@ -37,15 +37,32 @@ pub fn writeObject(
     var header_bytes = [_]u8{0} ** 32;
     const header_str = try header.write(&header_bytes);
 
-    // calc the hash of its contents
-    try hash.hashReader(repo_opts.hash, repo_opts.read_size, &stream.interface, header_str, hash_bytes_buffer);
-    const hash_hex = std.fmt.bytesToHex(hash_bytes_buffer, .lower);
+    var hasher = hash.Hasher(repo_opts.hash).init();
+    hasher.update(header_str);
 
-    // reset seek pos so we can reuse the reader for copying
-    try stream.seekTo(0);
+    var hash_buffer = [_]u8{0} ** repo_opts.buffer_size;
+    var hashed = stream.interface.hashed(hasher, &hash_buffer);
 
     switch (repo_kind) {
         .git => {
+            var temp_lock = try fs.LockFile.init(io, state.core.repo_dir, "object.temp");
+            defer temp_lock.deinit(io);
+            try temp_lock.lock_file.writeStreamingAll(io, header_str);
+
+            // copy file into temp file
+            var read_buffer = [_]u8{0} ** repo_opts.read_size;
+            while (true) {
+                const size = try hashed.reader.readSliceShort(&read_buffer);
+                if (size == 0) {
+                    break;
+                }
+                try temp_lock.lock_file.writeStreamingAll(io, read_buffer[0..size]);
+            }
+
+            hashed.hasher.final(hash_bytes_buffer);
+
+            const hash_hex = std.fmt.bytesToHex(hash_bytes_buffer, .lower);
+
             var objects_dir = try state.core.repo_dir.openDir(io, "objects", .{});
             defer objects_dir.close(io);
 
@@ -63,30 +80,14 @@ pub fn writeObject(
                 else => |e| return e,
             }
 
-            // create lock file
-            var lock = try fs.LockFile.init(io, hash_prefix_dir, hash_suffix ++ ".uncompressed");
-            defer lock.deinit(io);
-            try lock.lock_file.writeStreamingAll(io, header_str);
-
-            // copy file into temp file
-            var read_buffer = [_]u8{0} ** repo_opts.read_size;
-            while (true) {
-                const size = try stream.interface.readSliceShort(&read_buffer);
-                if (size == 0) {
-                    break;
-                }
-                try lock.lock_file.writeStreamingAll(io, read_buffer[0..size]);
-            }
-
             // create compressed lock file
             var compressed_lock = try fs.LockFile.init(io, hash_prefix_dir, hash_suffix);
             defer compressed_lock.deinit(io);
-            try compressZlib(repo_opts.buffer_size, io, lock.lock_file, compressed_lock.lock_file);
+            try compressZlib(repo_opts.buffer_size, io, temp_lock.lock_file, compressed_lock.lock_file);
             compressed_lock.success = true;
         },
         .xit => {
-            const object_hash = hash.bytesToInt(repo_opts.hash, hash_bytes_buffer);
-            try chunk.writeChunks(repo_opts, state, io, &stream.interface, object_hash, header.size, header.kind.name());
+            try chunk.writeChunks(repo_opts, state, io, &hashed, header.size, header.kind.name(), hash_bytes_buffer);
         },
     }
 }
@@ -198,18 +199,18 @@ fn writeTree(
 
     // create tree header
     var header_buffer = [_]u8{0} ** 32;
-    const header = try std.fmt.bufPrint(&header_buffer, "tree {}\x00", .{tree_contents.len});
+    const header_str = try std.fmt.bufPrint(&header_buffer, "tree {}\x00", .{tree_contents.len});
 
     // create tree
-    const tree_bytes = try std.fmt.allocPrint(allocator, "{s}{s}", .{ header, tree_contents });
+    const tree_bytes = try std.fmt.allocPrint(allocator, "{s}{s}", .{ header_str, tree_contents });
     defer allocator.free(tree_bytes);
-
-    // calc the hash of its contents
-    try hash.hashBuffer(repo_opts.hash, tree_bytes, hash_bytes_buffer);
-    const tree_hash_hex = std.fmt.bytesToHex(hash_bytes_buffer, .lower);
 
     switch (repo_kind) {
         .git => {
+            // calc the hash of its contents
+            try hash.hashBuffer(repo_opts.hash, tree_bytes, hash_bytes_buffer);
+            const tree_hash_hex = std.fmt.bytesToHex(hash_bytes_buffer, .lower);
+
             var objects_dir = try state.core.repo_dir.openDir(io, "objects", .{});
             defer objects_dir.close(io);
 
@@ -239,9 +240,15 @@ fn writeTree(
             compressed_lock.success = true;
         },
         .xit => {
-            const object_hash = hash.bytesToInt(repo_opts.hash, hash_bytes_buffer);
             var reader = std.Io.Reader.fixed(tree_contents);
-            try chunk.writeChunks(repo_opts, state, io, &reader, object_hash, tree_contents.len, "tree");
+
+            var hasher = hash.Hasher(repo_opts.hash).init();
+            hasher.update(header_str);
+
+            var hash_buffer = [_]u8{0} ** repo_opts.buffer_size;
+            var hashed = reader.hashed(hasher, &hash_buffer);
+
+            try chunk.writeChunks(repo_opts, state, io, &hashed, tree_contents.len, "tree", hash_bytes_buffer);
         },
     }
 }
@@ -444,20 +451,20 @@ pub fn writeCommit(
 
     // create commit header
     var header_buffer = [_]u8{0} ** 32;
-    const header = try std.fmt.bufPrint(&header_buffer, "commit {}\x00", .{commit_contents.len});
+    const header_str = try std.fmt.bufPrint(&header_buffer, "commit {}\x00", .{commit_contents.len});
 
     // create commit
-    const obj_content = try std.fmt.allocPrint(allocator, "{s}{s}", .{ header, commit_contents });
+    const obj_content = try std.fmt.allocPrint(allocator, "{s}{s}", .{ header_str, commit_contents });
     defer allocator.free(obj_content);
 
-    // calc the hash of its contents
     var commit_hash_bytes_buffer = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-    try hash.hashBuffer(repo_opts.hash, obj_content, &commit_hash_bytes_buffer);
-    const commit_hash_hex = std.fmt.bytesToHex(commit_hash_bytes_buffer, .lower);
-    const commit_hash = hash.bytesToInt(repo_opts.hash, &commit_hash_bytes_buffer);
 
     switch (repo_kind) {
         .git => {
+            // calc the hash of its contents
+            try hash.hashBuffer(repo_opts.hash, obj_content, &commit_hash_bytes_buffer);
+            const commit_hash_hex = std.fmt.bytesToHex(commit_hash_bytes_buffer, .lower);
+
             // open the objects dir
             var objects_dir = try state.core.repo_dir.openDir(io, "objects", .{});
             defer objects_dir.close(io);
@@ -483,9 +490,17 @@ pub fn writeCommit(
         },
         .xit => {
             var reader = std.Io.Reader.fixed(commit_contents);
-            try chunk.writeChunks(repo_opts, state, io, &reader, commit_hash, commit_contents.len, "commit");
+
+            var hasher = hash.Hasher(repo_opts.hash).init();
+            hasher.update(header_str);
+
+            var hash_buffer = [_]u8{0} ** repo_opts.buffer_size;
+            var hashed = reader.hashed(hasher, &hash_buffer);
+
+            try chunk.writeChunks(repo_opts, state, io, &hashed, commit_contents.len, "commit", &commit_hash_bytes_buffer);
 
             // write commit id to HEAD
+            const commit_hash_hex = std.fmt.bytesToHex(commit_hash_bytes_buffer, .lower);
             try rf.writeRecur(repo_kind, repo_opts, state, io, "HEAD", &commit_hash_hex);
         },
     }
@@ -548,20 +563,20 @@ pub fn writeTag(
 
     // create tag header
     var header_buffer = [_]u8{0} ** 32;
-    const header = try std.fmt.bufPrint(&header_buffer, "tag {}\x00", .{tag_contents.len});
+    const header_str = try std.fmt.bufPrint(&header_buffer, "tag {}\x00", .{tag_contents.len});
 
     // create tag
-    const obj_content = try std.fmt.allocPrint(allocator, "{s}{s}", .{ header, tag_contents });
+    const obj_content = try std.fmt.allocPrint(allocator, "{s}{s}", .{ header_str, tag_contents });
     defer allocator.free(obj_content);
 
-    // calc the hash of its contents
     var tag_hash_bytes_buffer = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-    try hash.hashBuffer(repo_opts.hash, obj_content, &tag_hash_bytes_buffer);
-    const tag_hash_hex = std.fmt.bytesToHex(tag_hash_bytes_buffer, .lower);
-    const tag_hash = hash.bytesToInt(repo_opts.hash, &tag_hash_bytes_buffer);
 
     switch (repo_kind) {
         .git => {
+            // calc the hash of its contents
+            try hash.hashBuffer(repo_opts.hash, obj_content, &tag_hash_bytes_buffer);
+            const tag_hash_hex = std.fmt.bytesToHex(tag_hash_bytes_buffer, .lower);
+
             // open the objects dir
             var objects_dir = try state.core.repo_dir.openDir(io, "objects", .{});
             defer objects_dir.close(io);
@@ -584,7 +599,14 @@ pub fn writeTag(
         },
         .xit => {
             var reader = std.Io.Reader.fixed(tag_contents);
-            try chunk.writeChunks(repo_opts, state, io, &reader, tag_hash, tag_contents.len, "tag");
+
+            var hasher = hash.Hasher(repo_opts.hash).init();
+            hasher.update(header_str);
+
+            var hash_buffer = [_]u8{0} ** repo_opts.buffer_size;
+            var hashed = reader.hashed(hasher, &hash_buffer);
+
+            try chunk.writeChunks(repo_opts, state, io, &hashed, tag_contents.len, "tag", &tag_hash_bytes_buffer);
         },
     }
 

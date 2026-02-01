@@ -298,23 +298,15 @@ pub fn writeChunks(
     comptime repo_opts: rp.RepoOpts(.xit),
     state: rp.Repo(.xit, repo_opts).State(.read_write),
     io: std.Io,
-    reader: *std.Io.Reader,
-    object_hash: hash.HashInt(repo_opts.hash),
+    hashed: anytype,
     object_len: usize,
     object_kind_name: []const u8,
+    object_hash_bytes: *[hash.byteLen(repo_opts.hash)]u8,
 ) !void {
-    // exit early if the chunks for this object already exist
-    const blob_id_to_chunk_info_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "object-id->chunk-info"));
-    const blob_id_to_chunk_info = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(blob_id_to_chunk_info_cursor);
-    if (null != try blob_id_to_chunk_info.getCursor(object_hash)) return;
-
-    // write object kind in the key slot
-    try blob_id_to_chunk_info.putKey(object_hash, .{ .bytes = object_kind_name });
-
     // get a writer to the value slot
-    var chunk_info_cursor = try blob_id_to_chunk_info.putCursor(object_hash);
+    var temp_chunk_info_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "object.temp"));
     var write_buffer: [repo_opts.buffer_size]u8 = undefined;
-    var writer = try chunk_info_cursor.writer(&write_buffer);
+    var writer = try temp_chunk_info_cursor.writer(&write_buffer);
 
     // make the .xit/chunks dir
     var chunks_dir = try state.core.repo_dir.createDirPathOpen(io, "chunks", .{});
@@ -323,7 +315,7 @@ pub fn writeChunks(
     var chunk_buffer = [_]u8{0} ** repo_opts.extra.chunk_opts.max_size;
     var iter = FastCdc(repo_opts.extra.chunk_opts).init(object_len);
     var offset: u64 = 0;
-    while (try iter.next(reader, &chunk_buffer)) |chunk| {
+    while (try iter.next(&hashed.reader, &chunk_buffer)) |chunk| {
         // hash the chunk
         var chunk_hash_bytes = [_]u8{0} ** hash.byteLen(repo_opts.hash);
         try hash.hashBuffer(repo_opts.hash, chunk, &chunk_hash_bytes);
@@ -385,6 +377,19 @@ pub fn writeChunks(
 
     // finish writing to db
     try writer.finish();
+
+    hashed.hasher.final(object_hash_bytes);
+
+    // write slot to the map
+    const blob_id_to_chunk_info_cursor = try state.extra.moment.putCursor(hash.hashInt(repo_opts.hash, "object-id->chunk-info"));
+    const blob_id_to_chunk_info = try rp.Repo(.xit, repo_opts).DB.HashMap(.read_write).init(blob_id_to_chunk_info_cursor);
+
+    const object_hash = hash.bytesToInt(repo_opts.hash, object_hash_bytes);
+    try blob_id_to_chunk_info.putKey(object_hash, .{ .bytes = object_kind_name });
+    try blob_id_to_chunk_info.put(object_hash, .{ .slot = temp_chunk_info_cursor.slot() });
+
+    // remove temp object
+    _ = try state.extra.moment.remove(hash.hashInt(repo_opts.hash, "object.temp"));
 }
 
 fn findChunkIndex(
