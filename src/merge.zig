@@ -570,7 +570,7 @@ fn writeBlobWithDiff3(
     try stream.seekTo(0);
 
     var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-    try obj.writeObject(repo_kind, repo_opts, state, io, &stream, header, &oid);
+    try obj.writeObject(repo_kind, repo_opts, state, io, &stream.interface, header, &oid);
     return oid;
 }
 
@@ -1185,7 +1185,7 @@ fn writeBlobWithPatches(
     try stream.seekTo(0);
 
     var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-    try obj.writeObject(.xit, repo_opts, state, io, &stream, header, &oid);
+    try obj.writeObject(.xit, repo_opts, state, io, &stream.interface, header, &oid);
     return oid;
 }
 

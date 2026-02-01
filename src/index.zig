@@ -242,7 +242,7 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
 
                     // write object
                     var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-                    try obj.writeObject(repo_kind, repo_opts, state, self.io, &reader, .{ .kind = .blob, .size = meta.size }, &oid);
+                    try obj.writeObject(repo_kind, repo_opts, state, self.io, &reader.interface, .{ .kind = .blob, .size = meta.size }, &oid);
 
                     // get the mode
                     // on windows, if a tree entry was supplied to this fn and its hash
@@ -324,23 +324,10 @@ pub fn Index(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
                     const target_path_size = try state.core.work_dir.readLink(io, path, &target_path_buffer);
                     const target_path = target_path_buffer[0..target_path_size];
 
-                    // make reader
-                    const Stream = struct {
-                        interface: std.Io.Reader,
-
-                        pub fn seekTo(stream_self: *@This(), offset: u64) !void {
-                            if (offset == 0) {
-                                stream_self.interface.seek = 0;
-                            } else {
-                                return error.InvalidOffset;
-                            }
-                        }
-                    };
-                    var stream = Stream{ .interface = std.Io.Reader.fixed(target_path) };
-
                     // write object
                     var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
-                    try obj.writeObject(repo_kind, repo_opts, state, self.io, &stream, .{ .kind = .blob, .size = meta.size }, &oid);
+                    var reader = std.Io.Reader.fixed(target_path);
+                    try obj.writeObject(repo_kind, repo_opts, state, self.io, &reader, .{ .kind = .blob, .size = meta.size }, &oid);
 
                     const entry = Entry{
                         .ctime_secs = meta.times.ctime_secs,

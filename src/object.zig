@@ -29,7 +29,7 @@ pub fn writeObject(
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
     io: std.Io,
-    stream: anytype,
+    reader: *std.Io.Reader,
     header: ObjectHeader,
     hash_bytes_buffer: *[hash.byteLen(repo_opts.hash)]u8,
 ) !void {
@@ -41,7 +41,7 @@ pub fn writeObject(
     hasher.update(header_str);
 
     var hash_buffer = [_]u8{0} ** repo_opts.buffer_size;
-    var hashed = stream.interface.hashed(hasher, &hash_buffer);
+    var hashed = reader.hashed(hasher, &hash_buffer);
 
     switch (repo_kind) {
         .git => {
@@ -1272,7 +1272,7 @@ pub fn copyFromObjectIterator(
             repo_opts,
             state,
             io,
-            &object.object_reader,
+            &object.object_reader.interface,
             object.object_reader.header(),
             &oid,
         );
@@ -1328,16 +1328,6 @@ pub fn copyFromPackObjectIterator(
                 };
             }
 
-            pub fn seekTo(self: *@This(), offset: usize) !void {
-                if (offset == 0) {
-                    try self.reader.reset();
-                    self.interface.seek = 0;
-                    self.interface.end = 0;
-                } else {
-                    return error.InvalidOffset;
-                }
-            }
-
             fn stream(io_r: *std.Io.Reader, io_w: *std.Io.Writer, limit: std.Io.Limit) std.Io.Reader.StreamError!usize {
                 const r: *@This() = @alignCast(@fieldParentPtr("interface", io_r));
                 const dest = limit.slice(try io_w.writableSliceGreedy(1));
@@ -1353,7 +1343,7 @@ pub fn copyFromPackObjectIterator(
 
         var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
         const header = pack_obj_rdr.header();
-        try writeObject(repo_kind, repo_opts, state, io, &stream, header, &oid);
+        try writeObject(repo_kind, repo_opts, state, io, &stream.interface, header, &oid);
 
         if (repo_opts.ProgressCtx != void) {
             if (progress_ctx_maybe) |progress_ctx| {
