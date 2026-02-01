@@ -446,8 +446,8 @@ const PackObjectStream = struct {
 
     fn skipBytes(self: *PackObjectStream, num_bytes: u64) !void {
         switch (self.object_stream) {
-            .zlib => |*zlib| _ = try zlib.stream.reader.take(num_bytes),
-            .memory => |*memory| memory.interface.toss(num_bytes),
+            .zlib => |*zlib| try zlib.stream.reader.discardAll(num_bytes),
+            .memory => |*memory| try memory.interface.discardAll(num_bytes),
         }
     }
 };
@@ -866,7 +866,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                         // pack readers can seek, so we don't choose not to cache the instruction
                         // in order to reduce memory use.
                         switch (self.stream.pack_reader.*) {
-                            .file => _ = try zlib_stream.reader.take(next_byte.value),
+                            .file => try zlib_stream.reader.discardAll(next_byte.value),
                             .stream => {
                                 const bytes = try zlib_stream.reader.take(next_byte.value);
                                 try cache.put(loc, try cache_arena.allocator().dupe(u8, bytes));
@@ -1221,7 +1221,7 @@ pub fn LooseOrPackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_op
 
         pub fn skipBytes(self: *LooseOrPackObjectReader(repo_kind, repo_opts), num_bytes: u64) !void {
             switch (self.*) {
-                .loose => |*loose| _ = try loose.zlib_stream.reader.take(num_bytes),
+                .loose => |*loose| try loose.zlib_stream.reader.discardAll(num_bytes),
                 .pack => |*pack| try pack.skipBytes(num_bytes),
             }
         }
