@@ -650,7 +650,7 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
         interface: std.Io.Reader,
 
         pub const Reader = switch (repo_kind) {
-            .git => pack.LooseOrPackObjectReader(repo_opts),
+            .git => pack.LooseOrPackObjectReader(repo_kind, repo_opts),
             .xit => chunk.ChunkObjectReader(repo_opts),
         };
 
@@ -667,7 +667,7 @@ pub fn ObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Repo
                 .io = io,
                 .allocator = allocator,
                 .reader = switch (repo_kind) {
-                    .git => try pack.LooseOrPackObjectReader(repo_opts).init(state, io, allocator, oid),
+                    .git => try pack.LooseOrPackObjectReader(repo_kind, repo_opts).init(state, io, allocator, oid),
                     .xit => try chunk.ChunkObjectReader(repo_opts).init(state, io, allocator, oid),
                 },
                 .interface = .{
@@ -1309,7 +1309,10 @@ pub fn copyFromPackObjectIterator(
         }
     }
 
-    while (try pack_iter.next(state.readOnly())) |pack_obj_rdr| {
+    var offset_to_oid = std.AutoArrayHashMap(u64, [hash.byteLen(repo_opts.hash)]u8).init(allocator);
+    defer offset_to_oid.deinit();
+
+    while (try pack_iter.next(state.readOnly(), &offset_to_oid)) |pack_obj_rdr| {
         defer pack_obj_rdr.deinit(io, allocator);
 
         const Stream = struct {
@@ -1344,6 +1347,8 @@ pub fn copyFromPackObjectIterator(
         var oid = [_]u8{0} ** hash.byteLen(repo_opts.hash);
         const header = pack_obj_rdr.header();
         try writeObject(repo_kind, repo_opts, state, io, &stream.interface, header, &oid);
+
+        try offset_to_oid.put(pack_iter.start_position, oid);
 
         if (repo_opts.ProgressCtx != void) {
             if (progress_ctx_maybe) |progress_ctx| {

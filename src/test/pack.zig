@@ -254,10 +254,10 @@ test "create and read pack" {
     }
 }
 
-test "iterate over large pack" {
+test "iterate pack from file" {
     const io = std.testing.io;
     const allocator = std.testing.allocator;
-    const temp_dir_name = "temp-test-iterate-over-large-pack";
+    const temp_dir_name = "temp-test-iterate-file-packreader";
     const repo_opts = rp.RepoOpts(.git){ .is_test = true };
 
     // create the temp dir
@@ -290,9 +290,49 @@ test "iterate over large pack" {
 
     var pack_iter = try pack.PackObjectIterator(.git, repo_opts).init(io, allocator, &pack_reader);
 
-    while (try pack_iter.next(.{ .core = &r.core, .extra = .{} })) |pack_obj_rdr| {
-        defer pack_obj_rdr.deinit(io, allocator);
-    }
+    try obj.copyFromPackObjectIterator(.git, repo_opts, .{ .core = &r.core, .extra = .{} }, io, allocator, &pack_iter, null);
+}
+
+test "iterate pack from stream" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+    const temp_dir_name = "temp-test-iterate-stream-packreader";
+    const repo_opts = rp.RepoOpts(.git){ .is_test = true };
+
+    // create the temp dir
+    const cwd = std.Io.Dir.cwd();
+    var temp_dir_or_err = cwd.openDir(io, temp_dir_name, .{});
+    if (temp_dir_or_err) |*temp_dir| {
+        temp_dir.close(io);
+        try cwd.deleteTree(io, temp_dir_name);
+    } else |_| {}
+    var temp_dir = try cwd.createDirPathOpen(io, temp_dir_name, .{});
+    defer cwd.deleteTree(io, temp_dir_name) catch {};
+    defer temp_dir.close(io);
+
+    // get the cwd path
+    const cwd_path = try std.process.getCwdAlloc(allocator);
+    defer allocator.free(cwd_path);
+
+    // get work dir path (null-terminated because it's used by libgit)
+    const work_path = try std.fs.path.joinZ(allocator, &.{ cwd_path, temp_dir_name, "repo" });
+    defer allocator.free(work_path);
+
+    var r = try rp.Repo(.git, repo_opts).init(io, allocator, .{ .path = work_path });
+    defer r.deinit(io, allocator);
+
+    var pack_dir = try cwd.openDir(io, "src/test/data", .{});
+    defer pack_dir.close(io);
+
+    var pack_reader = try pack.PackReader.initFile(io, allocator, pack_dir, "pack-b7f085e431fc05b0bca3d5c306dc148d7bbed2f4.pack");
+    defer pack_reader.deinit();
+
+    var pack_reader_ptr = pack.PackReader.initStream(pack_reader.file.file_reader);
+    defer pack_reader_ptr.deinit();
+
+    var pack_iter = try pack.PackObjectIterator(.git, repo_opts).init(io, allocator, &pack_reader_ptr);
+
+    try obj.copyFromPackObjectIterator(.git, repo_opts, .{ .core = &r.core, .extra = .{} }, io, allocator, &pack_iter, null);
 }
 
 test "read packed refs" {

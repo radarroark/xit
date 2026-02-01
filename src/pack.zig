@@ -14,6 +14,9 @@ pub const PackReader = union(enum) {
         file_reader: *std.Io.File.Reader,
         file_reader_buffer: []u8,
     },
+    stream: struct {
+        file_reader: *std.Io.File.Reader,
+    },
 
     const buffer_size = 4 * 1024;
 
@@ -48,6 +51,14 @@ pub const PackReader = union(enum) {
         };
     }
 
+    pub fn initStream(rdr: *std.Io.File.Reader) PackReader {
+        return .{
+            .stream = .{
+                .file_reader = rdr,
+            },
+        };
+    }
+
     pub fn deinit(self: *PackReader) void {
         switch (self.*) {
             .file => |*file| {
@@ -57,30 +68,39 @@ pub const PackReader = union(enum) {
                 file.allocator.free(file.file_reader_buffer);
                 file.allocator.destroy(file.file_reader);
             },
+            .stream => {},
         }
     }
 
     pub fn dupe(self: *const PackReader) !PackReader {
         switch (self.*) {
             .file => |*file| return try .initFile(file.io, file.allocator, file.dir, file.file_name),
+            .stream => |*stream| return .initStream(stream.file_reader),
         }
     }
 
     pub fn seekTo(self: *PackReader, position: u64) !void {
         switch (self.*) {
             .file => |*file| try file.file_reader.seekTo(position),
+            // stream-based PackReaders can't seek, so unless we are trying to seek
+            // to the position that we are already at, we have to return an error
+            .stream => |*stream| if (position != stream.file_reader.logicalPos()) {
+                return error.Unseekable;
+            },
         }
     }
 
     pub fn logicalPos(self: *const PackReader) u64 {
         switch (self.*) {
             .file => |*file| return file.file_reader.logicalPos(),
+            .stream => |*stream| return stream.file_reader.logicalPos(),
         }
     }
 
     pub fn reader(self: *PackReader) *std.Io.Reader {
         switch (self.*) {
             .file => |*file| return &file.file_reader.interface,
+            .stream => |*stream| return &stream.file_reader.interface,
         }
     }
 };
@@ -121,6 +141,7 @@ pub fn PackObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
         pub fn next(
             self: *PackObjectIterator(repo_kind, repo_opts),
             state: rp.Repo(repo_kind, repo_opts).State(.read_only),
+            offset_to_oid_maybe: ?*std.AutoArrayHashMap(u64, [hash.byteLen(repo_opts.hash)]u8),
         ) !?*PackObjectReader(repo_kind, repo_opts) {
             if (self.object_index == self.object_count) {
                 return null;
@@ -141,7 +162,30 @@ pub fn PackObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
 
             switch (pack_obj_rdr.internal) {
                 .basic => {},
-                .delta => try pack_obj_rdr.initDeltaAndCache(self.io, self.allocator, state),
+                .delta => |*delta| switch (delta.init) {
+                    .ofs => |*ofs| {
+                        // stream-based pack readers can't seek, so the easiest way
+                        // to find the base object of a ofs_delta object is to look
+                        // for it as a loose object. this is technically not always
+                        // possible, but in our case we only use stream-based pack
+                        // readers when we are copying objects from a pack file to
+                        // loose objects (i.e. git's `unpack-objects` subcommand).
+                        switch (self.pack_reader.*) {
+                            .file => {},
+                            .stream => if (offset_to_oid_maybe) |offset_to_oid| {
+                                if (offset_to_oid.get(ofs.position)) |*oid| {
+                                    delta.init = .{
+                                        .ref = .{
+                                            .oid_hex = std.fmt.bytesToHex(oid.*, .lower),
+                                        },
+                                    };
+                                }
+                            },
+                        }
+                        try pack_obj_rdr.initDeltaAndCache(self.io, self.allocator, state);
+                    },
+                    .ref => try pack_obj_rdr.initDeltaAndCache(self.io, self.allocator, state),
+                },
             }
 
             self.object_index += 1;
@@ -157,76 +201,79 @@ pub fn PackObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
 /// the backend's object store. for the xit backend, that means it needs to
 /// look it up in the chunk object store. the git backend will never do that,
 /// which is why you see all those `unreachable`s.
-fn PackOrChunkObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
+fn GitOrXitObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return union(enum) {
-        pack: PackObjectReader(repo_kind, repo_opts),
-        chunk: ChunkObjectReader,
+        git: LooseOrPackObjectReader(repo_kind, repo_opts),
+        xit: ChunkObjectReader,
 
         const ChunkObjectReader = switch (repo_kind) {
             .git => void,
             .xit => @import("./chunk.zig").ChunkObjectReader(repo_opts),
         };
 
-        pub fn deinit(self: *PackOrChunkObjectReader(repo_kind, repo_opts), io: std.Io, allocator: std.mem.Allocator) void {
+        pub fn deinit(self: *GitOrXitObjectReader(repo_kind, repo_opts), io: std.Io, allocator: std.mem.Allocator) void {
             switch (self.*) {
-                .pack => |*pack| pack.deinit(io, allocator),
-                .chunk => |*chunk_reader| switch (repo_kind) {
+                .git => |*loose_or_pack| loose_or_pack.deinit(io, allocator),
+                .xit => |*chunk_reader| switch (repo_kind) {
                     .git => unreachable,
                     .xit => chunk_reader.deinit(io, allocator),
                 },
             }
         }
 
-        pub fn header(self: *const PackOrChunkObjectReader(repo_kind, repo_opts)) obj.ObjectHeader {
+        pub fn header(self: *const GitOrXitObjectReader(repo_kind, repo_opts)) obj.ObjectHeader {
             return switch (self.*) {
-                .pack => |*pack| pack.header(),
-                .chunk => |*chunk_reader| switch (repo_kind) {
+                .git => |*loose_or_pack| loose_or_pack.header(),
+                .xit => |*chunk_reader| switch (repo_kind) {
                     .git => unreachable,
                     .xit => chunk_reader.header,
                 },
             };
         }
 
-        pub fn reset(self: *PackOrChunkObjectReader(repo_kind, repo_opts)) anyerror!void {
+        pub fn reset(self: *GitOrXitObjectReader(repo_kind, repo_opts)) anyerror!void {
             switch (self.*) {
-                .pack => |*pack| try pack.reset(),
-                .chunk => |*chunk_reader| switch (repo_kind) {
+                .git => |*loose_or_pack| try loose_or_pack.reset(),
+                .xit => |*chunk_reader| switch (repo_kind) {
                     .git => unreachable,
                     .xit => try chunk_reader.reset(),
                 },
             }
         }
 
-        pub fn position(self: *const PackOrChunkObjectReader(repo_kind, repo_opts)) u64 {
+        pub fn position(self: *const GitOrXitObjectReader(repo_kind, repo_opts)) u64 {
             return switch (self.*) {
-                .pack => |*pack| switch (pack.internal) {
-                    .basic => pack.relative_position,
-                    .delta => |delta| if (delta.state) |base_delta_state|
-                        base_delta_state.real_position
-                    else
-                        unreachable,
+                .git => |*loose_or_pack| switch (loose_or_pack.*) {
+                    .loose => 0,
+                    .pack => |*pack| switch (pack.internal) {
+                        .basic => pack.relative_position,
+                        .delta => |delta| if (delta.state) |base_delta_state|
+                            base_delta_state.real_position
+                        else
+                            unreachable,
+                    },
                 },
-                .chunk => |*chunk_reader| switch (repo_kind) {
+                .xit => |*chunk_reader| switch (repo_kind) {
                     .git => unreachable,
                     .xit => chunk_reader.position,
                 },
             };
         }
 
-        pub fn skipBytes(self: *PackOrChunkObjectReader(repo_kind, repo_opts), num_bytes: u64) !void {
+        pub fn skipBytes(self: *GitOrXitObjectReader(repo_kind, repo_opts), num_bytes: u64) !void {
             switch (self.*) {
-                .pack => |*pack| try pack.skipBytes(num_bytes),
-                .chunk => |*chunk_reader| switch (repo_kind) {
+                .git => |*loose_or_pack| try loose_or_pack.skipBytes(num_bytes),
+                .xit => |*chunk_reader| switch (repo_kind) {
                     .git => unreachable,
                     .xit => try chunk_reader.skipBytes(num_bytes),
                 },
             }
         }
 
-        pub fn read(self: *PackOrChunkObjectReader(repo_kind, repo_opts), buf: []u8) !usize {
+        pub fn read(self: *GitOrXitObjectReader(repo_kind, repo_opts), buf: []u8) !usize {
             return switch (self.*) {
-                .pack => |*pack| try pack.read(buf),
-                .chunk => |*chunk_reader| switch (repo_kind) {
+                .git => |*loose_or_pack| try loose_or_pack.read(buf),
+                .xit => |*chunk_reader| switch (repo_kind) {
                     .git => unreachable,
                     .xit => try chunk_reader.read(buf),
                 },
@@ -368,6 +415,7 @@ const PackObjectStream = struct {
                     .memory => {},
                 }
             },
+            .stream => {},
         }
     }
 
@@ -423,7 +471,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     },
                 },
                 state: ?struct {
-                    base_reader: *PackOrChunkObjectReader(repo_kind, repo_opts),
+                    base_reader: *GitOrXitObjectReader(repo_kind, repo_opts),
                     chunk_index: usize,
                     chunk_position: u64,
                     real_position: u64,
@@ -453,7 +501,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             allocator: std.mem.Allocator,
             state: rp.Repo(repo_kind, repo_opts).State(.read_only),
             oid_hex: *const [hash.hexLen(repo_opts.hash)]u8,
-        ) !PackObjectReader(repo_kind, repo_opts) {
+        ) anyerror!PackObjectReader(repo_kind, repo_opts) {
             var pack_obj_rdr = try PackObjectReader(repo_kind, repo_opts).initWithIndex(state.core, io, allocator, oid_hex);
             errdefer pack_obj_rdr.deinit(io, allocator);
             try pack_obj_rdr.initDeltaAndCache(io, allocator, state);
@@ -469,7 +517,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
         ) !PackObjectReader(repo_kind, repo_opts) {
             var iter = try PackObjectIterator(repo_kind, repo_opts).init(io, allocator, pack_reader);
 
-            while (try iter.next(state)) |pack_obj_rdr| {
+            while (try iter.next(state, null)) |pack_obj_rdr| {
                 {
                     errdefer pack_obj_rdr.deinit(io, allocator);
 
@@ -694,8 +742,11 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                 try delta_objects.append(allocator, last_object);
                 last_object = if (last_object.internal.delta.state) |delta_state|
                     switch (delta_state.base_reader.*) {
-                        .pack => |*pack| pack,
-                        .chunk => break,
+                        .git => |*loose_or_pack| switch (loose_or_pack.*) {
+                            .loose => break,
+                            .pack => |*pack| pack,
+                        },
+                        .xit => break,
                     }
                 else
                     // delta object wasn't initialized
@@ -720,18 +771,18 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             allocator: std.mem.Allocator,
             state: rp.Repo(repo_kind, repo_opts).State(.read_only),
         ) !void {
-            const base_reader = try allocator.create(PackOrChunkObjectReader(repo_kind, repo_opts));
+            const base_reader = try allocator.create(GitOrXitObjectReader(repo_kind, repo_opts));
             errdefer allocator.destroy(base_reader);
 
             base_reader.* = switch (self.internal.delta.init) {
                 .ofs => |ofs| blk: {
                     var pack_reader = try self.stream.pack_reader.dupe();
                     defer pack_reader.deinit();
-                    break :blk .{ .pack = try PackObjectReader(repo_kind, repo_opts).initAtPosition(io, allocator, &pack_reader, ofs.position) };
+                    break :blk .{ .git = .{ .pack = try PackObjectReader(repo_kind, repo_opts).initAtPosition(io, allocator, &pack_reader, ofs.position) } };
                 },
                 .ref => |ref| switch (repo_kind) {
-                    .git => .{ .pack = try PackObjectReader(repo_kind, repo_opts).initWithIndex(state.core, io, allocator, &ref.oid_hex) },
-                    .xit => .{ .chunk = try PackOrChunkObjectReader(repo_kind, repo_opts).ChunkObjectReader.init(state, io, allocator, &ref.oid_hex) },
+                    .git => .{ .git = try LooseOrPackObjectReader(repo_kind, repo_opts).init(state, io, allocator, &ref.oid_hex) },
+                    .xit => .{ .xit = try GitOrXitObjectReader(repo_kind, repo_opts).ChunkObjectReader.init(state, io, allocator, &ref.oid_hex) },
                 },
             };
             errdefer base_reader.deinit(io, allocator);
@@ -802,14 +853,25 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                         if (next_byte.value == 0) { // reserved instruction
                             continue;
                         }
+                        const loc = Location{
+                            .offset = bytes_read,
+                            .size = next_byte.value,
+                        };
                         try chunks.append(allocator, .{
-                            .location = .{
-                                .offset = bytes_read,
-                                .size = next_byte.value,
-                            },
+                            .location = loc,
                             .kind = .add_new,
                         });
-                        _ = try zlib_stream.reader.take(next_byte.value);
+                        // stream-based pack readers can't seek, so we need to cache the add_new
+                        // instructions in memory to enable us to read delta objects. file-based
+                        // pack readers can seek, so we don't choose not to cache the instruction
+                        // in order to reduce memory use.
+                        switch (self.stream.pack_reader.*) {
+                            .file => _ = try zlib_stream.reader.take(next_byte.value),
+                            .stream => {
+                                const bytes = try zlib_stream.reader.take(next_byte.value);
+                                try cache.put(loc, try cache_arena.allocator().dupe(u8, bytes));
+                            },
+                        }
                         bytes_read += next_byte.value;
                     },
                     // copy data
@@ -834,6 +896,11 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                             .location = loc,
                             .kind = .copy_from_base,
                         });
+                        // copy_from_base instructions must always be cached in memory
+                        // for performance. however, we won't read the data yet. if
+                        // the base object is also a delta object, we will delay reading
+                        // until we call `initCache` so we can read the chain of delta
+                        // objects in the correct order.
                         try cache.put(loc, "");
                     },
                 }
@@ -881,6 +948,9 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             const keys = delta_state.cache.keys();
             const values = delta_state.cache.values();
             for (keys, values, 0..) |location, *value, i| {
+                // the value has already been set
+                if (value.len > 0) continue;
+
                 // if the value is a subset of the previous value, just get a slice of it
                 if (i > 0 and location.offset == keys[i - 1].offset and location.size < keys[i - 1].size) {
                     const last_buffer = values[i - 1];
@@ -917,15 +987,18 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             // now that the cache has been initialized, clear the cache in
             // the base object if necessary, because it won't be used anymore.
             switch (delta_state.base_reader.*) {
-                .pack => |*pack| switch (pack.internal) {
-                    .basic => {},
-                    .delta => |*delta| {
-                        const base_delta_state = if (delta.state) |*state| state else unreachable;
-                        _ = base_delta_state.cache_arena.reset(.free_all);
-                        base_delta_state.cache.clearAndFree();
+                .git => |*loose_or_pack| switch (loose_or_pack.*) {
+                    .loose => {},
+                    .pack => |*pack| switch (pack.internal) {
+                        .basic => {},
+                        .delta => |*delta| {
+                            const base_delta_state = if (delta.state) |*state| state else unreachable;
+                            _ = base_delta_state.cache_arena.reset(.free_all);
+                            base_delta_state.cache.clearAndFree();
+                        },
                     },
                 },
-                .chunk => {},
+                .xit => {},
             }
         }
 
@@ -992,22 +1065,29 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                         switch (delta_chunk.kind) {
                             .add_new => {
                                 const offset = delta_chunk.location.offset + delta_state.chunk_position;
-                                if (self.relative_position > offset) {
-                                    try self.stream.reset();
-                                    self.relative_position = 0;
+                                if (delta_state.cache.get(delta_chunk.location)) |buffer| {
+                                    @memcpy(dest_slice[0..bytes_to_read], buffer[delta_state.chunk_position .. delta_state.chunk_position + bytes_to_read]);
+                                    bytes_read += bytes_to_read;
+                                    delta_state.chunk_position += bytes_to_read;
+                                    delta_state.real_position += bytes_to_read;
+                                } else {
+                                    if (self.relative_position > offset) {
+                                        try self.stream.reset();
+                                        self.relative_position = 0;
+                                    }
+                                    if (self.relative_position < offset) {
+                                        const bytes_to_skip = offset - self.relative_position;
+                                        try self.stream.skipBytes(bytes_to_skip);
+                                        self.relative_position += bytes_to_skip;
+                                    }
+                                    const size = try self.stream.read(dest_slice[0..bytes_to_read]);
+                                    // TODO: in rare cases this is not true....why?
+                                    //if (size != bytes_to_read) return error.UnexpectedEndOfStream;
+                                    self.relative_position += size;
+                                    bytes_read += size;
+                                    delta_state.chunk_position += size;
+                                    delta_state.real_position += size;
                                 }
-                                if (self.relative_position < offset) {
-                                    const bytes_to_skip = offset - self.relative_position;
-                                    try self.stream.skipBytes(bytes_to_skip);
-                                    self.relative_position += bytes_to_skip;
-                                }
-                                const size = try self.stream.read(dest_slice[0..bytes_to_read]);
-                                // TODO: in rare cases this is not true....why?
-                                //if (size != bytes_to_read) return error.UnexpectedEndOfStream;
-                                self.relative_position += size;
-                                bytes_read += size;
-                                delta_state.chunk_position += size;
-                                delta_state.real_position += size;
                             },
                             .copy_from_base => {
                                 const buffer = delta_state.cache.get(delta_chunk.location) orelse return error.InvalidDeltaCache;
@@ -1039,7 +1119,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
     };
 }
 
-pub fn LooseOrPackObjectReader(comptime repo_opts: rp.RepoOpts(.git)) type {
+pub fn LooseOrPackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return union(enum) {
         loose: struct {
             io: std.Io,
@@ -1050,14 +1130,14 @@ pub fn LooseOrPackObjectReader(comptime repo_opts: rp.RepoOpts(.git)) type {
             zlib_stream_buffer: []u8,
             header: obj.ObjectHeader,
         },
-        pack: PackObjectReader(.git, repo_opts),
+        pack: PackObjectReader(repo_kind, repo_opts),
 
         pub fn init(
-            state: rp.Repo(.git, repo_opts).State(.read_only),
+            state: rp.Repo(repo_kind, repo_opts).State(.read_only),
             io: std.Io,
             allocator: std.mem.Allocator,
             oid_hex: *const [hash.hexLen(repo_opts.hash)]u8,
-        ) !LooseOrPackObjectReader(repo_opts) {
+        ) !LooseOrPackObjectReader(repo_kind, repo_opts) {
             // open the objects dir
             var objects_dir = try state.core.repo_dir.openDir(io, "objects", .{});
             defer objects_dir.close(io);
@@ -1067,7 +1147,7 @@ pub fn LooseOrPackObjectReader(comptime repo_opts: rp.RepoOpts(.git)) type {
             const path = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ oid_hex[0..2], oid_hex[2..] });
             var object_file = objects_dir.openFile(io, path, .{ .mode = .read_only }) catch |err| switch (err) {
                 error.FileNotFound => return .{
-                    .pack = try PackObjectReader(.git, repo_opts).init(io, allocator, state, oid_hex),
+                    .pack = try PackObjectReader(repo_kind, repo_opts).init(io, allocator, state, oid_hex),
                 },
                 else => |e| return e,
             };
@@ -1100,7 +1180,7 @@ pub fn LooseOrPackObjectReader(comptime repo_opts: rp.RepoOpts(.git)) type {
             };
         }
 
-        pub fn deinit(self: *LooseOrPackObjectReader(repo_opts), io: std.Io, allocator: std.mem.Allocator) void {
+        pub fn deinit(self: *LooseOrPackObjectReader(repo_kind, repo_opts), io: std.Io, allocator: std.mem.Allocator) void {
             switch (self.*) {
                 .loose => |*loose| {
                     loose.file.close(io);
@@ -1113,14 +1193,14 @@ pub fn LooseOrPackObjectReader(comptime repo_opts: rp.RepoOpts(.git)) type {
             }
         }
 
-        pub fn header(self: LooseOrPackObjectReader(repo_opts)) obj.ObjectHeader {
+        pub fn header(self: LooseOrPackObjectReader(repo_kind, repo_opts)) obj.ObjectHeader {
             return switch (self) {
                 .loose => |loose| loose.header,
                 .pack => |pack| pack.header(),
             };
         }
 
-        pub fn reset(self: *LooseOrPackObjectReader(repo_opts)) !void {
+        pub fn reset(self: *LooseOrPackObjectReader(repo_kind, repo_opts)) !void {
             switch (self.*) {
                 .loose => |*loose| {
                     loose.file_reader.* = loose.file.reader(loose.io, loose.file_reader_buffer);
@@ -1132,14 +1212,14 @@ pub fn LooseOrPackObjectReader(comptime repo_opts: rp.RepoOpts(.git)) type {
             }
         }
 
-        pub fn read(self: *LooseOrPackObjectReader(repo_opts), dest: []u8) !usize {
+        pub fn read(self: *LooseOrPackObjectReader(repo_kind, repo_opts), dest: []u8) !usize {
             switch (self.*) {
                 .loose => |*loose| return try loose.zlib_stream.reader.readSliceShort(dest),
                 .pack => |*pack| return try pack.read(dest),
             }
         }
 
-        pub fn skipBytes(self: *LooseOrPackObjectReader(repo_opts), num_bytes: u64) !void {
+        pub fn skipBytes(self: *LooseOrPackObjectReader(repo_kind, repo_opts), num_bytes: u64) !void {
             switch (self.*) {
                 .loose => |*loose| _ = try loose.zlib_stream.reader.take(num_bytes),
                 .pack => |*pack| try pack.skipBytes(num_bytes),
