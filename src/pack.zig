@@ -445,8 +445,8 @@ const PackObjectStream = struct {
 
     fn skipBytes(self: *PackObjectStream, num_bytes: u64) !void {
         switch (self.object_stream) {
-            .zlib => |*zlib| try zlib.stream.reader.discardAll(num_bytes),
-            .memory => |*memory| try memory.interface.discardAll(num_bytes),
+            .zlib => |*zlib| try zlib.stream.reader.discardAll64(num_bytes),
+            .memory => |*memory| try memory.interface.discardAll64(num_bytes),
         }
     }
 };
@@ -865,7 +865,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                         // pack readers can seek, so we choose not to cache this instruction in
                         // order to reduce memory use.
                         switch (self.stream.pack_reader.*) {
-                            .file => try zlib_stream.reader.discardAll(next_byte.value),
+                            .file => try zlib_stream.reader.discardAll64(next_byte.value),
                             .stream => {
                                 var writer = std.Io.Writer.Allocating.init(cache_arena.allocator());
                                 try zlib_stream.reader.streamExact(&writer.writer, next_byte.value);
@@ -1221,7 +1221,7 @@ pub fn LooseOrPackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_op
 
         pub fn skipBytes(self: *LooseOrPackObjectReader(repo_kind, repo_opts), num_bytes: u64) !void {
             switch (self.*) {
-                .loose => |*loose| try loose.zlib_stream.reader.discardAll(num_bytes),
+                .loose => |*loose| try loose.zlib_stream.reader.discardAll64(num_bytes),
                 .pack => |*pack| try pack.skipBytes(num_bytes),
             }
         }
