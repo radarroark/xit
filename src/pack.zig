@@ -164,16 +164,14 @@ pub fn PackObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
                 .basic => {},
                 .delta => |*delta| switch (delta.init) {
                     .ofs => |*ofs| {
-                        // `offset_to_oid` lets you look up the oid of
-                        // the object at the given offset. this is possible
-                        // if we are writing each object in the pack file
-                        // as loose objects. it allows us to turn ofs_delta
-                        // objects into ref_delta objects (i.e., they read
-                        // their base object as a loose object rather than
-                        // trying to read it from this pack file). this is
-                        // especially important for stream-based PackReaders,
-                        // because they can't seek, so reading it from a
-                        // loose object is the easiest thing to do.
+                        // `offset_to_oid` lets you look up the oid of  the object at
+                        // the given offset. this is possible if we are writing each
+                        // object in the pack file as loose objects. it allows us to
+                        // turn ofs_delta objects into ref_delta objects (i.e., they
+                        // read their base object as a loose object rather than trying
+                        // to read it from this pack file). this is especially important
+                        // for stream-based PackReaders, because they can't seek, so
+                        // reading it from a loose object is the easiest thing to do.
                         if (offset_to_oid_maybe) |offset_to_oid| {
                             if (offset_to_oid.get(ofs.position)) |*oid| {
                                 delta.init = .{
