@@ -1,3 +1,14 @@
+<p align="center">
+<code>                        
+           ░██   ░██    
+                 ░██    
+░██    ░██ ░██░████████ 
+ ░██  ░██  ░██   ░██    
+  ░█████   ░██   ░██    
+ ░██  ░██  ░██   ░██    
+░██    ░██ ░██    ░████ 
+                        </code></p>
+
 You're looking at xit, a new version control system. It's pronounced like "zit" (or "shit" if you prefer). Here be dragons, as they say. This is new and unstable software, but the ambition is to make a worthy successor to git. Here are the main features:
 
 * git compatible
