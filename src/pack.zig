@@ -164,23 +164,24 @@ pub fn PackObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
                 .basic => {},
                 .delta => |*delta| switch (delta.init) {
                     .ofs => |*ofs| {
-                        // stream-based pack readers can't seek, so the easiest way
-                        // to find the base object of a ofs_delta object is to look
-                        // for it as a loose object. this is technically not always
-                        // possible, but in our case we only use stream-based pack
-                        // readers when we are copying objects from a pack file to
-                        // loose objects (i.e. git's `unpack-objects` subcommand).
-                        switch (self.pack_reader.*) {
-                            .file => {},
-                            .stream => if (offset_to_oid_maybe) |offset_to_oid| {
-                                if (offset_to_oid.get(ofs.position)) |*oid| {
-                                    delta.init = .{
-                                        .ref = .{
-                                            .oid_hex = std.fmt.bytesToHex(oid.*, .lower),
-                                        },
-                                    };
-                                }
-                            },
+                        // `offset_to_oid` lets you look up the oid of
+                        // the object at the given offset. this is possible
+                        // if we are writing each object in the pack file
+                        // as loose objects. it allows us to turn ofs_delta
+                        // objects into ref_delta objects (i.e., they read
+                        // their base object as a loose object rather than
+                        // trying to read it from this pack file). this is
+                        // especially important for stream-based PackReaders,
+                        // because they can't seek, so reading it from a
+                        // loose object is the easiest thing to do.
+                        if (offset_to_oid_maybe) |offset_to_oid| {
+                            if (offset_to_oid.get(ofs.position)) |*oid| {
+                                delta.init = .{
+                                    .ref = .{
+                                        .oid_hex = std.fmt.bytesToHex(oid.*, .lower),
+                                    },
+                                };
+                            }
                         }
                         try pack_obj_rdr.initDeltaAndCache(self.io, self.allocator, state);
                     },
