@@ -862,13 +862,14 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                         });
                         // stream-based pack readers can't seek, so we need to cache the add_new
                         // instructions in memory to enable us to read delta objects. file-based
-                        // pack readers can seek, so we don't choose not to cache the instruction
-                        // in order to reduce memory use.
+                        // pack readers can seek, so we choose not to cache this instruction in
+                        // order to reduce memory use.
                         switch (self.stream.pack_reader.*) {
                             .file => try zlib_stream.reader.discardAll(next_byte.value),
                             .stream => {
-                                const bytes = try zlib_stream.reader.take(next_byte.value);
-                                try cache.put(loc, try cache_arena.allocator().dupe(u8, bytes));
+                                var writer = std.Io.Writer.Allocating.init(cache_arena.allocator());
+                                try zlib_stream.reader.streamExact(&writer.writer, next_byte.value);
+                                try cache.put(loc, writer.written());
                             },
                         }
                         bytes_read += next_byte.value;
