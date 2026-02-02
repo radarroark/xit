@@ -65,7 +65,7 @@ xit merge stuff
 There are also networking commands. You can clone, fetch, and push with git remotes over HTTP and SSH. Here's what a clone and push look like:
 
 ```
-xit clone https://github.com/radarroark/xitstarter myrepo
+xit clone https://github.com/xit-vcs/xitstarter myrepo
 cd myrepo
 
 echo hello > readme.md

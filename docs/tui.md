@@ -113,4 +113,4 @@ Accessibility
 
 * Terminals have no such semantic information. To them, a given TUI is just rendering a grid of characters. There is no high-level concept of a button or a text field. To fix this, we need to build new standards. There is a lot we can learn from the web here.
 
-I tried to design my own TUI library, [xitui](https://github.com/radarroark/xitui), around these ideas. It has built-in support for responsive design, and a built-in focus system.
+I tried to design my own TUI library, [xitui](https://github.com/xit-vcs/xitui), around these ideas. It has built-in support for responsive design, and a built-in focus system.

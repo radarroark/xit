@@ -14,7 +14,7 @@ Performance
 
 * When merging a branch, a patch-based system will probably be slower because (once again) it has to apply each patch from the source branch onto the target branch separately. A snapshot-based system generally uses some form of three-way merge, which computes a consolidated diff of *all* changes on the source branch that aren't on the target branch, and merges it with the changes on the target branch. The three-way merge is faster because it skips the intermediate changes made in each commit.
 
-  * However, this is a tradeoff. By skipping the intermediate changes, the three-way merge is missing useful information. This can lead to a bad merge, where changes from the source branch end up [in the wrong place](https://tahoe-lafs.org/~zooko/badmerge/simple.html). It also can potentially lead to unnecessary merge conflicts, as explained below.
+  * However, this is a tradeoff. By skipping the intermediate changes, the three-way merge is missing useful information. This can lead to unnecessary merge conflicts -- or worse, successful merges that put the code in the wrong place. See the merge conflicts section below for more.
 
   * Darcs had an additional performance problem in which some merges could end up taking an exponentially long time. This problem was specific to Darcs, though, because it used operational transforms when applying patches. Pijul solves this by using a CRDT to represent the history of a file, and patch application is merely about updating this CRDT.
 
@@ -31,6 +31,10 @@ Merge Conflicts
   * Remember, since a snapshot-based system typically uses a three-way merge, it isn't moving each commit one-at-a-time, so it can't really "skip" a commit even if it knew which one to skip. As mentioned above, it makes a single consolidated diff of all changes, so inevitably it will include the changes that were already cherry-picked. This is how the conflict happens.
 
 * Patch-based systems don't need to distinguish between merging and cherry-picking. Both are the exact same action: applying patches. When "cherry-picking", you're simply applying the patch from a single commit. When "merging", you're applying all patches from the source branch that aren't already in the target branch. Since patches have stable identities, they can naturally skip patches that have already been applied there.
+
+* Another unnecessary merge conflict that git produces is adjacent line conflicts. If one branch edits a line, and another branch edits the line directly above or below it, git will produce a conflict -- even though they're not the same line. People assume this is a safety feature, but it isn't; it's a limitation of the diff3 algorithm that git uses. Read [the blog post](https://xit-vcs.github.io/xit/devlog-patch-merge-default.html) for more.
+
+* Lastly, git can sometimes produce a *successful* merge where changes from the source branch end up [in the wrong place](https://tahoe-lafs.org/~zooko/badmerge/simple.html). While not as common as adjacent line conflicts, it's scary that it's even possible.
 
 Combining snapshots and patches
 
