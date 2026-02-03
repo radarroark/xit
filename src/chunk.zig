@@ -87,9 +87,11 @@ fn FastCdc(comptime opts: FastCdcOpts) type {
         }
 
         fn read(self: FastCdc(opts), reader: *std.Io.Reader, buffer: *[opts.max_size]u8) ![]const u8 {
+            var writer = std.Io.Writer.fixed(buffer);
+
             var remaining = self.remaining;
             if (remaining <= opts.min_size) {
-                @memcpy(buffer[0..remaining], try reader.take(remaining));
+                try reader.streamExact(&writer, remaining);
                 return buffer[0..remaining];
             }
 
@@ -101,7 +103,7 @@ fn FastCdc(comptime opts: FastCdcOpts) type {
             }
 
             var index = opts.min_size - 1;
-            @memcpy(buffer[0..index], try reader.take(index));
+            try reader.streamExact(&writer, index);
 
             var h: u64 = 0;
             while (index < center) {
