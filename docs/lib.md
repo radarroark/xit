@@ -35,7 +35,7 @@ pub fn main() !void {
     defer threaded.deinit();
     const io = threaded.io();
 
-    const cwd_path = try std.process.getCwdAlloc(allocator);
+    const cwd_path = try std.process.currentPathAlloc(io, allocator);
     defer allocator.free(cwd_path);
 
     const work_path = try std.fs.path.resolve(allocator, &.{ cwd_path, "myrepo" });
