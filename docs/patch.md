@@ -32,7 +32,7 @@ Merge Conflicts
 
 * Patch-based systems don't need to distinguish between merging and cherry-picking. Both are the exact same action: applying patches. When "cherry-picking", you're simply applying the patch from a single commit. When "merging", you're applying all patches from the source branch that aren't already in the target branch. Since patches have stable identities, they can naturally skip patches that have already been applied there.
 
-* Another unnecessary merge conflict that git produces is adjacent line conflicts. If one branch edits a line, and another branch edits the line directly above or below it, git will produce a conflict -- even though they're not the same line. People assume this is a safety feature, but it isn't; it's a limitation of the diff3 algorithm that git uses. Read [the blog post](https://xit-vcs.github.io/xit/devlog-patch-merge-default.html) for more.
+* Another unnecessary merge conflict that git produces is adjacent line conflicts. If one branch edits a line, and another branch edits the line directly above or below it, git will produce a conflict -- even though they're not the same line. People assume this is a safety feature, but it isn't; it's a limitation of the diff3 algorithm that git uses. Read [the blog post](https://xit-vcs.github.io/xitlog/devlog-patch-merge-default.html) for more.
 
 * Lastly, git can sometimes produce a *successful* merge where changes from the source branch end up [in the wrong place](https://tahoe-lafs.org/~zooko/badmerge/simple.html). While not as common as adjacent line conflicts, it's scary that it's even possible.
 
