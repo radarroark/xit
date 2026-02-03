@@ -32,7 +32,7 @@ test "create and read pack" {
     defer temp_dir.close(io);
 
     // get the cwd path
-    const cwd_path = try std.process.getCwdAlloc(allocator);
+    const cwd_path = try std.process.currentPathAlloc(io, allocator);
     defer allocator.free(cwd_path);
 
     // get work dir path (null-terminated because it's used by libgit)
@@ -272,7 +272,7 @@ test "iterate pack from file" {
     defer temp_dir.close(io);
 
     // get the cwd path
-    const cwd_path = try std.process.getCwdAlloc(allocator);
+    const cwd_path = try std.process.currentPathAlloc(io, allocator);
     defer allocator.free(cwd_path);
 
     // get work dir path (null-terminated because it's used by libgit)
@@ -311,7 +311,7 @@ test "iterate pack from stream" {
     defer temp_dir.close(io);
 
     // get the cwd path
-    const cwd_path = try std.process.getCwdAlloc(allocator);
+    const cwd_path = try std.process.currentPathAlloc(io, allocator);
     defer allocator.free(cwd_path);
 
     // get work dir path (null-terminated because it's used by libgit)
@@ -353,7 +353,7 @@ test "read packed refs" {
     defer temp_dir.close(io);
 
     // get the cwd path
-    const cwd_path = try std.process.getCwdAlloc(allocator);
+    const cwd_path = try std.process.currentPathAlloc(io, allocator);
     defer allocator.free(cwd_path);
 
     // get work dir path (null-terminated because it's used by libgit)

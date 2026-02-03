@@ -755,7 +755,7 @@ pub fn main(init: std.process.Init) !u8 {
     var stderr_writer = std.Io.File.stderr().writer(io, &.{});
     const writers = Writers{ .out = &stdout_writer.interface, .err = &stderr_writer.interface };
 
-    const cwd_path = try std.process.getCwdAlloc(allocator);
+    const cwd_path = try std.process.currentPathAlloc(io, allocator);
     defer allocator.free(cwd_path);
 
     runPrint(.xit, .{ .ProgressCtx = ProgressCtx }, io, allocator, args.items, cwd_path, writers) catch |err| switch (err) {

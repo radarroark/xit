@@ -235,7 +235,7 @@ fn Server(
                         }
 
                         // create sshd.sh contents
-                        const cwd_path = try std.process.getCwdAlloc(allocator);
+                        const cwd_path = try std.process.currentPathAlloc(io, allocator);
                         defer allocator.free(cwd_path);
                         const host_key_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "host_key" });
                         defer allocator.free(host_key_path);
@@ -308,7 +308,7 @@ fn Server(
                                         else
                                             return error.SlashNotFound;
 
-                                        const cwd_path = try std.process.getCwdAlloc(core.allocator);
+                                        const cwd_path = try std.process.currentPathAlloc(core.io, core.allocator);
                                         defer core.allocator.free(cwd_path);
                                         const temp_dir_path = try std.fs.path.join(core.allocator, &.{ cwd_path, core.temp_dir_name });
                                         defer core.allocator.free(temp_dir_path);
@@ -486,7 +486,7 @@ fn testFetch(
     try server.start();
     defer server.stop();
 
-    const cwd_path = try std.process.getCwdAlloc(allocator);
+    const cwd_path = try std.process.currentPathAlloc(io, allocator);
     defer allocator.free(cwd_path);
 
     const server_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "server" });
@@ -672,7 +672,7 @@ fn testPush(
     try server.start();
     defer server.stop();
 
-    const cwd_path = try std.process.getCwdAlloc(allocator);
+    const cwd_path = try std.process.currentPathAlloc(io, allocator);
     defer allocator.free(cwd_path);
 
     const server_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "server" });
@@ -941,7 +941,7 @@ fn testClone(
     try server.start();
     defer server.stop();
 
-    const cwd_path = try std.process.getCwdAlloc(allocator);
+    const cwd_path = try std.process.currentPathAlloc(io, allocator);
     defer allocator.free(cwd_path);
 
     const temp_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name });
@@ -1064,7 +1064,7 @@ fn testFetchLarge(
     try server.start();
     defer server.stop();
 
-    const cwd_path = try std.process.getCwdAlloc(allocator);
+    const cwd_path = try std.process.currentPathAlloc(io, allocator);
     defer allocator.free(cwd_path);
 
     const server_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "server" });
@@ -1200,7 +1200,7 @@ fn testPushLarge(
     try server.start();
     defer server.stop();
 
-    const cwd_path = try std.process.getCwdAlloc(allocator);
+    const cwd_path = try std.process.currentPathAlloc(io, allocator);
     defer allocator.free(cwd_path);
 
     const server_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "server" });

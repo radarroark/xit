@@ -50,7 +50,7 @@ fn testSimple(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(r
     defer cwd.deleteTree(io, temp_dir_name) catch {};
     defer temp_dir.close(io);
 
-    const cwd_path = try std.process.getCwdAlloc(allocator);
+    const cwd_path = try std.process.currentPathAlloc(io, allocator);
     defer allocator.free(cwd_path);
 
     const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "repo" });
@@ -200,7 +200,7 @@ fn testMerge(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(re
     defer cwd.deleteTree(io, temp_dir_name) catch {};
     defer temp_dir.close(io);
 
-    const cwd_path = try std.process.getCwdAlloc(allocator);
+    const cwd_path = try std.process.currentPathAlloc(io, allocator);
     defer allocator.free(cwd_path);
 
     const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "repo" });
@@ -352,7 +352,7 @@ fn testMergeSideBranch(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.R
     defer cwd.deleteTree(io, temp_dir_name) catch {};
     defer temp_dir.close(io);
 
-    const cwd_path = try std.process.getCwdAlloc(allocator);
+    const cwd_path = try std.process.currentPathAlloc(io, allocator);
     defer allocator.free(cwd_path);
 
     const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "repo" });
@@ -504,7 +504,7 @@ fn testMergeConflictSameFile(comptime repo_kind: rp.RepoKind, comptime repo_opts
     defer cwd.deleteTree(io, temp_dir_name) catch {};
     defer temp_dir.close(io);
 
-    const cwd_path = try std.process.getCwdAlloc(allocator);
+    const cwd_path = try std.process.currentPathAlloc(io, allocator);
     defer allocator.free(cwd_path);
 
     const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "repo" });
@@ -773,7 +773,7 @@ fn testMergeConflictSameFileEmptyBase(comptime repo_kind: rp.RepoKind, comptime 
     defer cwd.deleteTree(io, temp_dir_name) catch {};
     defer temp_dir.close(io);
 
-    const cwd_path = try std.process.getCwdAlloc(allocator);
+    const cwd_path = try std.process.currentPathAlloc(io, allocator);
     defer allocator.free(cwd_path);
 
     const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "repo" });
@@ -1054,7 +1054,7 @@ fn testMergeConflictSameFileAutoresolved(comptime repo_kind: rp.RepoKind, compti
     defer cwd.deleteTree(io, temp_dir_name) catch {};
     defer temp_dir.close(io);
 
-    const cwd_path = try std.process.getCwdAlloc(allocator);
+    const cwd_path = try std.process.currentPathAlloc(io, allocator);
     defer allocator.free(cwd_path);
 
     const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "repo" });
@@ -1156,7 +1156,7 @@ fn testMergeConflictSameFileAutoresolvedNeighboringLines(comptime repo_kind: rp.
     defer cwd.deleteTree(io, temp_dir_name) catch {};
     defer temp_dir.close(io);
 
-    const cwd_path = try std.process.getCwdAlloc(allocator);
+    const cwd_path = try std.process.currentPathAlloc(io, allocator);
     defer allocator.free(cwd_path);
 
     const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "repo" });
@@ -1334,7 +1334,7 @@ fn testMergeConflictModifyDelete(comptime repo_kind: rp.RepoKind, comptime repo_
     defer cwd.deleteTree(io, temp_dir_name) catch {};
     defer temp_dir.close(io);
 
-    const cwd_path = try std.process.getCwdAlloc(allocator);
+    const cwd_path = try std.process.currentPathAlloc(io, allocator);
     defer allocator.free(cwd_path);
 
     const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "repo" });
@@ -1475,7 +1475,7 @@ fn testMergeConflictDeleteModify(comptime repo_kind: rp.RepoKind, comptime repo_
     defer cwd.deleteTree(io, temp_dir_name) catch {};
     defer temp_dir.close(io);
 
-    const cwd_path = try std.process.getCwdAlloc(allocator);
+    const cwd_path = try std.process.currentPathAlloc(io, allocator);
     defer allocator.free(cwd_path);
 
     const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "repo" });
@@ -1614,7 +1614,7 @@ fn testMergeConflictFileDir(comptime repo_kind: rp.RepoKind, comptime repo_opts:
     defer cwd.deleteTree(io, temp_dir_name) catch {};
     defer temp_dir.close(io);
 
-    const cwd_path = try std.process.getCwdAlloc(allocator);
+    const cwd_path = try std.process.currentPathAlloc(io, allocator);
     defer allocator.free(cwd_path);
 
     const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "repo" });
@@ -1825,7 +1825,7 @@ fn testMergeConflictDirFile(comptime repo_kind: rp.RepoKind, comptime repo_opts:
     defer cwd.deleteTree(io, temp_dir_name) catch {};
     defer temp_dir.close(io);
 
-    const cwd_path = try std.process.getCwdAlloc(allocator);
+    const cwd_path = try std.process.currentPathAlloc(io, allocator);
     defer allocator.free(cwd_path);
 
     const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "repo" });
@@ -2008,7 +2008,7 @@ pub fn testMergeConflictBinary(comptime repo_kind: rp.RepoKind, comptime repo_op
     defer cwd.deleteTree(io, temp_dir_name) catch {};
     defer temp_dir.close(io);
 
-    const cwd_path = try std.process.getCwdAlloc(allocator);
+    const cwd_path = try std.process.currentPathAlloc(io, allocator);
     defer allocator.free(cwd_path);
 
     const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "repo" });
@@ -2171,7 +2171,7 @@ fn testMergeConflictShuffle(comptime repo_kind: rp.RepoKind, comptime repo_opts:
     defer cwd.deleteTree(io, temp_dir_name) catch {};
     defer temp_dir.close(io);
 
-    const cwd_path = try std.process.getCwdAlloc(allocator);
+    const cwd_path = try std.process.currentPathAlloc(io, allocator);
     defer allocator.free(cwd_path);
 
     // from https://pijul.org/manual/why_pijul.html
@@ -2467,7 +2467,7 @@ fn testCherryPick(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOp
     defer cwd.deleteTree(io, temp_dir_name) catch {};
     defer temp_dir.close(io);
 
-    const cwd_path = try std.process.getCwdAlloc(allocator);
+    const cwd_path = try std.process.currentPathAlloc(io, allocator);
     defer allocator.free(cwd_path);
 
     const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "repo" });
@@ -2554,7 +2554,7 @@ fn testCherryPickConflict(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
     defer cwd.deleteTree(io, temp_dir_name) catch {};
     defer temp_dir.close(io);
 
-    const cwd_path = try std.process.getCwdAlloc(allocator);
+    const cwd_path = try std.process.currentPathAlloc(io, allocator);
     defer allocator.free(cwd_path);
 
     const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "repo" });
@@ -2702,7 +2702,7 @@ fn testLog(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo
     defer cwd.deleteTree(io, temp_dir_name) catch {};
     defer temp_dir.close(io);
 
-    const cwd_path = try std.process.getCwdAlloc(allocator);
+    const cwd_path = try std.process.currentPathAlloc(io, allocator);
     defer allocator.free(cwd_path);
 
     const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "repo" });

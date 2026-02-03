@@ -30,7 +30,7 @@ fn testSign(
     defer cwd.deleteTree(io, temp_dir_name) catch {};
     defer temp_dir.close(io);
 
-    const cwd_path = try std.process.getCwdAlloc(allocator);
+    const cwd_path = try std.process.currentPathAlloc(io, allocator);
     defer allocator.free(cwd_path);
 
     const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name });
