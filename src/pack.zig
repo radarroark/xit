@@ -475,24 +475,20 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                     chunk_position: u64,
                     real_position: u64,
                     chunks: std.ArrayList(DeltaChunk),
-                    cache: std.AutoArrayHashMap(Location, []const u8),
+                    cache: std.AutoArrayHashMap(DeltaChunk, []const u8),
                     cache_arena: *std.heap.ArenaAllocator,
                     recon_size: u64,
                 },
             },
         },
 
-        const Location = struct {
-            offset: usize,
-            size: usize,
-        };
-
         const DeltaChunk = struct {
-            location: Location,
             kind: enum {
                 add_new,
                 copy_from_base,
             },
+            offset: usize,
+            size: usize,
         };
 
         pub fn init(
@@ -829,7 +825,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             var chunks = std.ArrayList(DeltaChunk){};
             errdefer chunks.deinit(allocator);
 
-            var cache = std.AutoArrayHashMap(Location, []const u8).init(allocator);
+            var cache = std.AutoArrayHashMap(DeltaChunk, []const u8).init(allocator);
             errdefer cache.deinit();
 
             const cache_arena = try allocator.create(std.heap.ArenaAllocator);
@@ -852,14 +848,12 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                         if (next_byte.value == 0) { // reserved instruction
                             continue;
                         }
-                        const loc = Location{
+                        const chunk = DeltaChunk{
+                            .kind = .add_new,
                             .offset = bytes_read,
                             .size = next_byte.value,
                         };
-                        try chunks.append(allocator, .{
-                            .location = loc,
-                            .kind = .add_new,
-                        });
+                        try chunks.append(allocator, chunk);
                         // stream-based pack readers can't seek, so we need to cache the add_new
                         // instructions in memory to enable us to read delta objects. file-based
                         // pack readers can seek, so we choose not to cache this instruction in
@@ -869,7 +863,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                             .stream => {
                                 var writer = std.Io.Writer.Allocating.init(cache_arena.allocator());
                                 try zlib_stream.reader.streamExact(&writer.writer, next_byte.value);
-                                try cache.put(loc, writer.written());
+                                try cache.put(chunk, writer.written());
                             },
                         }
                         bytes_read += next_byte.value;
@@ -888,26 +882,24 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                         }
                         const copy_offset = std.mem.readInt(u32, vals[0..4], .little);
                         const copy_size = std.mem.readInt(u24, vals[4..], .little);
-                        const loc = Location{
+                        const chunk = DeltaChunk{
+                            .kind = .copy_from_base,
                             .offset = copy_offset,
                             .size = if (copy_size == 0) 0x10000 else copy_size,
                         };
-                        try chunks.append(allocator, .{
-                            .location = loc,
-                            .kind = .copy_from_base,
-                        });
+                        try chunks.append(allocator, chunk);
                         // copy_from_base instructions must always be cached in memory
                         // for performance. however, we won't read the data yet. if
                         // the base object is also a delta object, we will delay reading
                         // until we call `initCache` so we can read the chain of delta
                         // objects in the correct order.
-                        try cache.put(loc, "");
+                        try cache.put(chunk, "");
                     },
                 }
             }
 
             const SortCtx = struct {
-                keys: []Location,
+                keys: []DeltaChunk,
                 pub fn lessThan(ctx: @This(), a_index: usize, b_index: usize) bool {
                     const a_loc = ctx.keys[a_index];
                     const b_loc = ctx.keys[b_index];
@@ -1061,11 +1053,11 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                         }
                         const delta_chunk = delta_state.chunks.items[delta_state.chunk_index];
                         var dest_slice = dest[bytes_read..];
-                        const bytes_to_read = @min(delta_chunk.location.size - delta_state.chunk_position, dest_slice.len);
+                        const bytes_to_read = @min(delta_chunk.size - delta_state.chunk_position, dest_slice.len);
                         switch (delta_chunk.kind) {
                             .add_new => {
-                                const offset = delta_chunk.location.offset + delta_state.chunk_position;
-                                if (delta_state.cache.get(delta_chunk.location)) |buffer| {
+                                const offset = delta_chunk.offset + delta_state.chunk_position;
+                                if (delta_state.cache.get(delta_chunk)) |buffer| {
                                     @memcpy(dest_slice[0..bytes_to_read], buffer[delta_state.chunk_position .. delta_state.chunk_position + bytes_to_read]);
                                     bytes_read += bytes_to_read;
                                     delta_state.chunk_position += bytes_to_read;
@@ -1090,14 +1082,14 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                                 }
                             },
                             .copy_from_base => {
-                                const buffer = delta_state.cache.get(delta_chunk.location) orelse return error.InvalidDeltaCache;
+                                const buffer = delta_state.cache.get(delta_chunk) orelse return error.InvalidDeltaCache;
                                 @memcpy(dest_slice[0..bytes_to_read], buffer[delta_state.chunk_position .. delta_state.chunk_position + bytes_to_read]);
                                 bytes_read += bytes_to_read;
                                 delta_state.chunk_position += bytes_to_read;
                                 delta_state.real_position += bytes_to_read;
                             },
                         }
-                        if (delta_state.chunk_position == delta_chunk.location.size) {
+                        if (delta_state.chunk_position == delta_chunk.size) {
                             delta_state.chunk_index += 1;
                             delta_state.chunk_position = 0;
                         }
