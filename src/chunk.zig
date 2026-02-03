@@ -85,9 +85,11 @@ fn FastCdc(comptime opts: FastCdcOpts) type {
         }
 
         fn read(self: FastCdc(opts), reader: *std.Io.Reader, buffer: *[opts.max_size]u8) ![]const u8 {
+            var writer = std.Io.Writer.fixed(buffer);
+
             var remaining = self.remaining;
             if (remaining <= opts.min_size) {
-                @memcpy(buffer[0..remaining], try reader.take(remaining));
+                try reader.streamExact(&writer, remaining);
                 return buffer[0..remaining];
             }
 
@@ -99,7 +101,7 @@ fn FastCdc(comptime opts: FastCdcOpts) type {
             }
 
             var index = opts.min_size - 1;
-            @memcpy(buffer[0..index], try reader.take(index));
+            try reader.streamExact(&writer, index);
 
             var h: u64 = 0;
             while (index < center) {
@@ -603,14 +605,8 @@ pub fn ChunkObjectReader(comptime repo_opts: rp.RepoOpts(.xit)) type {
             self.position = offset;
         }
 
-        pub fn skipBytes(self: *ChunkObjectReader(repo_opts), num_bytes: u64) !void {
-            var buf = [_]u8{0} ** 512;
-            var remaining = num_bytes;
-            while (remaining > 0) {
-                const max_size = @min(remaining, buf.len);
-                const size = try self.read(buf[0..max_size]);
-                remaining -= size;
-            }
+        pub fn skipBytes(self: *ChunkObjectReader(repo_opts), num_bytes: u64) void {
+            self.position += num_bytes;
         }
     };
 }

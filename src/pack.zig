@@ -264,7 +264,7 @@ fn GitOrXitObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
                 .git => |*loose_or_pack| try loose_or_pack.skipBytes(num_bytes),
                 .xit => |*chunk_reader| switch (repo_kind) {
                     .git => unreachable,
-                    .xit => try chunk_reader.skipBytes(num_bytes),
+                    .xit => chunk_reader.skipBytes(num_bytes),
                 },
             }
         }

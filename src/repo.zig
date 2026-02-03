@@ -62,9 +62,9 @@ pub fn RepoOpts(comptime repo_kind: RepoKind) type {
             .xit => struct {
                 compress_chunks: bool = true,
                 chunk_opts: chunk.FastCdcOpts = .{
-                    .min_size = 2048,
-                    .avg_size = 4096,
-                    .max_size = 8192,
+                    .min_size = 4096,
+                    .avg_size = 16384,
+                    .max_size = 65535,
                     .normalization = .level1,
                 },
             },
