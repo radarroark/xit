@@ -592,14 +592,8 @@ pub fn ChunkObjectReader(comptime repo_opts: rp.RepoOpts(.xit)) type {
             self.position = offset;
         }
 
-        pub fn skipBytes(self: *ChunkObjectReader(repo_opts), num_bytes: u64) !void {
-            var buf = [_]u8{0} ** 512;
-            var remaining = num_bytes;
-            while (remaining > 0) {
-                const max_size = @min(remaining, buf.len);
-                const size = try self.read(buf[0..max_size]);
-                remaining -= size;
-            }
+        pub fn skipBytes(self: *ChunkObjectReader(repo_opts), num_bytes: u64) void {
+            self.position += num_bytes;
         }
     };
 }

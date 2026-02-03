@@ -146,7 +146,7 @@ fn PackOrChunkObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: 
                 .pack => |*pack| try pack.skipBytes(num_bytes),
                 .chunk => |*chunk_reader| switch (repo_kind) {
                     .git => unreachable,
-                    .xit => try chunk_reader.skipBytes(num_bytes),
+                    .xit => chunk_reader.skipBytes(num_bytes),
                 },
             }
         }
