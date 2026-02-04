@@ -108,7 +108,7 @@ pub fn main() !void {
             commits.deinit(allocator);
         }
 
-        var log_iter = try git_repo.log(allocator, null);
+        var log_iter = try git_repo.log(allocator, &.{"34695c9f87c5c5eb4650fc55c04a23dfadaa64a6".*});
         defer log_iter.deinit();
         var commit_count: usize = 0;
         while (try log_iter.next()) |commit| {
