@@ -1,4 +1,4 @@
-Handling large, binary files well is non-negotiable for the next version control system. People are using VCSes for more things than in the past, and many of those things involve tracking non-text files.
+Handling large, binary files well is non-negotiable for the next version control system. People are using VCSes for more things than in the past, and many of those things involve tracking non-text files. For example, game developers need to store large asset files, and AI developers need to store large model files.
 
 Git is famously bad at handling large, binary files, but most people can't articulate why. Is it because version control as a concept just isn't compatible with them? Is it a conspiracy by Big Text to force you to keep your binary files outside of your repo? No, it's way more boring than that. I would give two main technical reasons:
 
@@ -12,8 +12,6 @@ The above issues were very straight-forward to solve in xit:
 
 2. A chunk with binary data is always stored uncompressed. Chunks mark their compression type with a special byte at the beginning of the chunk. If the first byte is 0, it is uncompressed; if it is 1, it is zlib-compressed. Other algorithms can be accomodated later.
 
-Since compression is done per chunk, rather than on the entire object, it won't compress as well as it would in git. You get more benefit from compression if you can run it over the entire file. I think this is a worthwhile tradeoff:
- 
- * Compressing before chunking would harm deduplication by causing more chunks to be different compared to an earlier revision.
- 
- * Compressing before chunking would force the system to decompress all previous chunks before getting the data in a given chunk. By compressing per chunk, we can jump directly to the chunk we want and only start decompressing from there.
+Currently, the the max chunk size is 64k. It is likely that xit will eventually vary max chunk size based on the size of the file, so really large files can be stored with larger chunk sizes.
+
+It's important to note that xit only does chunking locally. When you push to a git host, they will likely store your objects in a standard git repo, and thus will still have performance problems with large files. You won't see the full benefit of this design until there is a host that stores objects the way xit does.
