@@ -327,10 +327,10 @@ test "iterate pack from stream" {
     var pack_reader = try pack.PackReader.initFile(io, allocator, pack_dir, "pack-b7f085e431fc05b0bca3d5c306dc148d7bbed2f4.pack");
     defer pack_reader.deinit();
 
-    var pack_reader_ptr = pack.PackReader.initStream(pack_reader.file.file_reader);
-    defer pack_reader_ptr.deinit();
+    var pack_reader_stream = pack.PackReader.initStream(pack_reader.file.file_reader);
+    defer pack_reader_stream.deinit();
 
-    var pack_iter = try pack.PackObjectIterator(.git, repo_opts).init(io, allocator, &pack_reader_ptr);
+    var pack_iter = try pack.PackObjectIterator(.git, repo_opts).init(io, allocator, &pack_reader_stream);
 
     try obj.copyFromPackObjectIterator(.git, repo_opts, .{ .core = &r.core, .extra = .{} }, io, allocator, &pack_iter, null);
 }
