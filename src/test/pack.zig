@@ -324,13 +324,16 @@ test "iterate pack from stream" {
     var pack_dir = try cwd.openDir(io, "src/test/data", .{});
     defer pack_dir.close(io);
 
-    var pack_reader = try pack.PackReader.initFile(io, allocator, pack_dir, "pack-b7f085e431fc05b0bca3d5c306dc148d7bbed2f4.pack");
+    const pack_file = try pack_dir.openFile(io, "pack-b7f085e431fc05b0bca3d5c306dc148d7bbed2f4.pack", .{ .mode = .read_only });
+    defer pack_file.close(io);
+
+    var buffer: [repo_opts.buffer_size]u8 = undefined;
+    var reader = pack_file.reader(io, &buffer);
+
+    var pack_reader = pack.PackReader.initStream(&reader);
     defer pack_reader.deinit();
 
-    var pack_reader_stream = pack.PackReader.initStream(pack_reader.file.file_reader);
-    defer pack_reader_stream.deinit();
-
-    var pack_iter = try pack.PackObjectIterator(.git, repo_opts).init(io, allocator, &pack_reader_stream);
+    var pack_iter = try pack.PackObjectIterator(.git, repo_opts).init(io, allocator, &pack_reader);
 
     try obj.copyFromPackObjectIterator(.git, repo_opts, .{ .core = &r.core, .extra = .{} }, io, allocator, &pack_iter, null);
 }
