@@ -368,6 +368,7 @@ fn Server(
                                             .stdout = .pipe,
                                             .stderr = .pipe,
                                         });
+                                        defer process.kill(core.io);
 
                                         if (request.head.method == .POST) {
                                             const reader = try request.readerExpectContinue(&.{});
@@ -376,24 +377,35 @@ fn Server(
                                             try process.stdin.?.writeStreamingAll(core.io, request_body);
                                         }
 
-                                        var stdout = std.ArrayList(u8){};
-                                        defer stdout.deinit(core.allocator);
-                                        var stderr = std.ArrayList(u8){};
-                                        defer stderr.deinit(core.allocator);
-                                        try process.collectOutput(core.allocator, &stdout, &stderr, 20 * 1024 * 1024);
+                                        var multi_reader_buffer: std.Io.File.MultiReader.Buffer(2) = undefined;
+                                        var multi_reader: std.Io.File.MultiReader = undefined;
+                                        multi_reader.init(core.allocator, core.io, multi_reader_buffer.toStreams(), &.{ process.stdout.?, process.stderr.? });
+                                        defer multi_reader.deinit();
+
+                                        while (multi_reader.fill(64, .none)) |_| {} else |err| switch (err) {
+                                            error.EndOfStream => {},
+                                            else => |e| return e,
+                                        }
+
+                                        try multi_reader.checkAnyError();
 
                                         _ = try process.wait(core.io);
 
-                                        if (stderr.items.len > 0) {
-                                            std.debug.print("Error from git-http-backend:\n{s}\n", .{stderr.items});
+                                        const stdout_slice = try multi_reader.toOwnedSlice(0);
+                                        defer core.allocator.free(stdout_slice);
+                                        const stderr_slice = try multi_reader.toOwnedSlice(1);
+                                        defer core.allocator.free(stderr_slice);
+
+                                        if (stderr_slice.len > 0) {
+                                            std.debug.print("Error from git-http-backend:\n{s}\n", .{stderr_slice});
                                             try http_server.out.writeAll("HTTP/1.1 500 Internal Server Error\r\n\r\n");
                                         } else {
                                             try http_server.out.writeAll("HTTP/1.1 200 OK\r\n");
                                             const double_newline = "\r\n\r\n";
-                                            const double_newline_idx = std.mem.indexOf(u8, stdout.items, double_newline) orelse unreachable;
-                                            try http_server.out.writeAll(stdout.items[0..double_newline_idx]);
-                                            try http_server.out.print("\r\nContent-Length: {}", .{stdout.items.len - (double_newline_idx + double_newline.len)});
-                                            try http_server.out.writeAll(stdout.items[double_newline_idx..]);
+                                            const double_newline_idx = std.mem.indexOf(u8, stdout_slice, double_newline) orelse unreachable;
+                                            try http_server.out.writeAll(stdout_slice[0..double_newline_idx]);
+                                            try http_server.out.print("\r\nContent-Length: {}", .{stdout_slice.len - (double_newline_idx + double_newline.len)});
+                                            try http_server.out.writeAll(stdout_slice[double_newline_idx..]);
                                         }
                                         try http_server.out.flush();
 
@@ -411,7 +423,7 @@ fn Server(
                         const port_str = std.fmt.comptimePrint("{}", .{port});
                         self.core.process = try std.process.spawn(self.core.io, .{
                             .argv = &.{ "git", "daemon", "--reuseaddr", "--base-path=.", "--export-all", "--enable=receive-pack", "--log-destination=stderr", "--port=" ++ port_str },
-                            .cwd = temp_dir_name,
+                            .cwd = .{ .path = temp_dir_name },
                             .stdin = .ignore,
                             .stdout = .ignore,
                             .stderr = .ignore,
@@ -421,7 +433,7 @@ fn Server(
                         std.debug.assert(self.core.process == null);
                         self.core.process = try std.process.spawn(self.core.io, .{
                             .argv = &.{"./sshd.sh"},
-                            .cwd = temp_dir_name,
+                            .cwd = .{ .path = temp_dir_name },
                             .stdin = .pipe,
                             .stdout = .pipe,
                             .stderr = .pipe,
@@ -567,23 +579,12 @@ fn testFetch(
     } else null;
     defer if (ssh_cmd_maybe) |ssh_cmd| allocator.free(ssh_cmd);
 
-    client_repo.fetch(
+    try client_repo.fetch(
         io,
         allocator,
         "origin",
         .{ .refspecs = refspecs, .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
-    ) catch |err| {
-        if (false) {
-            var stdout = std.ArrayList(u8){};
-            defer stdout.deinit(allocator);
-            var stderr = std.ArrayList(u8){};
-            defer stderr.deinit(allocator);
-            try server.core.process.collectOutput(allocator, &stdout, &stderr, 1024 * 1024);
-            if (stdout.items.len > 0) std.debug.print("server output:\n{s}\n", .{stdout.items});
-            if (stderr.items.len > 0) std.debug.print("server error:\n{s}\n", .{stderr.items});
-        }
-        return err;
-    };
+    );
 
     // update the working dir
     try client_repo.restore(io, allocator, ".");
@@ -615,23 +616,12 @@ fn testFetch(
         break :blk try server_repo.commit(io, allocator, .{ .message = "goodbye" });
     };
 
-    client_repo.fetch(
+    try client_repo.fetch(
         io,
         allocator,
         "origin",
         .{ .refspecs = refspecs, .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
-    ) catch |err| {
-        if (false) {
-            var stdout = std.ArrayList(u8){};
-            defer stdout.deinit(allocator);
-            var stderr = std.ArrayList(u8){};
-            defer stderr.deinit(allocator);
-            try server.core.process.collectOutput(allocator, &stdout, &stderr, 1024 * 1024);
-            if (stdout.items.len > 0) std.debug.print("server output:\n{s}\n", .{stdout.items});
-            if (stderr.items.len > 0) std.debug.print("server error:\n{s}\n", .{stderr.items});
-        }
-        return err;
-    };
+    );
 
     // update the working dir
     try client_repo.restore(io, allocator, ".");
@@ -756,25 +746,14 @@ fn testPush(
     } else null;
     defer if (ssh_cmd_maybe) |ssh_cmd| allocator.free(ssh_cmd);
 
-    client_repo.push(
+    try client_repo.push(
         io,
         allocator,
         "origin",
         "master",
         false,
         .{ .refspecs = refspecs, .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
-    ) catch |err| {
-        if (false) {
-            var stdout = std.ArrayList(u8){};
-            defer stdout.deinit(allocator);
-            var stderr = std.ArrayList(u8){};
-            defer stderr.deinit(allocator);
-            try server.core.process.collectOutput(allocator, &stdout, &stderr, 1024 * 1024);
-            if (stdout.items.len > 0) std.debug.print("server output:\n{s}\n", .{stdout.items});
-            if (stderr.items.len > 0) std.debug.print("server error:\n{s}\n", .{stderr.items});
-        }
-        return err;
-    };
+    );
 
     // make sure push was successful
     {
@@ -1007,25 +986,14 @@ fn testClone(
     defer if (ssh_cmd_maybe) |ssh_cmd| allocator.free(ssh_cmd);
 
     // clone repo
-    var client_repo = rp.Repo(repo_kind, repo_opts).clone(
+    var client_repo = try rp.Repo(repo_kind, repo_opts).clone(
         io,
         allocator,
         remote_url,
         temp_path,
         client_path,
         .{ .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
-    ) catch |err| {
-        if (false) {
-            var stdout = std.ArrayList(u8){};
-            defer stdout.deinit(allocator);
-            var stderr = std.ArrayList(u8){};
-            defer stderr.deinit(allocator);
-            try server.core.process.collectOutput(allocator, &stdout, &stderr, 1024 * 1024);
-            if (stdout.items.len > 0) std.debug.print("server output:\n{s}\n", .{stdout.items});
-            if (stderr.items.len > 0) std.debug.print("server error:\n{s}\n", .{stderr.items});
-        }
-        return err;
-    };
+    );
     defer client_repo.deinit(io, allocator);
 
     // make sure clone was successful
@@ -1145,23 +1113,12 @@ fn testFetchLarge(
     } else null;
     defer if (ssh_cmd_maybe) |ssh_cmd| allocator.free(ssh_cmd);
 
-    client_repo.fetch(
+    try client_repo.fetch(
         io,
         allocator,
         "origin",
         .{ .refspecs = refspecs, .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
-    ) catch |err| {
-        if (false) {
-            var stdout = std.ArrayList(u8){};
-            defer stdout.deinit(allocator);
-            var stderr = std.ArrayList(u8){};
-            defer stderr.deinit(allocator);
-            try server.core.process.collectOutput(allocator, &stdout, &stderr, 1024 * 1024);
-            if (stdout.items.len > 0) std.debug.print("server output:\n{s}\n", .{stdout.items});
-            if (stderr.items.len > 0) std.debug.print("server error:\n{s}\n", .{stderr.items});
-        }
-        return err;
-    };
+    );
 
     // update the working dir
     try client_repo.restore(io, allocator, ".");
@@ -1300,7 +1257,7 @@ fn testPushLarge(
         // shell out to git so it will send delta objects
         var process = try std.process.spawn(io, .{
             .argv = &.{ "git", "push", "origin", "master" },
-            .cwd = client_path,
+            .cwd = .{ .path = client_path },
             .stdin = .ignore,
             .stdout = .ignore,
             .stderr = .ignore,
@@ -1326,25 +1283,14 @@ fn testPushLarge(
         } else null;
         defer if (ssh_cmd_maybe) |ssh_cmd| allocator.free(ssh_cmd);
 
-        client_repo.push(
+        try client_repo.push(
             io,
             allocator,
             "origin",
             "master",
             false,
             .{ .refspecs = &.{}, .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
-        ) catch |err| {
-            if (false) {
-                var stdout = std.ArrayList(u8){};
-                defer stdout.deinit(allocator);
-                var stderr = std.ArrayList(u8){};
-                defer stderr.deinit(allocator);
-                try server.core.process.collectOutput(allocator, &stdout, &stderr, 1024 * 1024);
-                if (stdout.items.len > 0) std.debug.print("server output:\n{s}\n", .{stdout.items});
-                if (stderr.items.len > 0) std.debug.print("server error:\n{s}\n", .{stderr.items});
-            }
-            return err;
-        };
+        );
     }
 
     // make sure push was successful

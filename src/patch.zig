@@ -246,7 +246,7 @@ pub fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
             }
 
             var showed_perf_warning = false;
-            const start_time = (try std.Io.Clock.Timestamp.now(io, .real)).raw.toSeconds();
+            const start_time = std.Io.Timestamp.now(io, .real).toSeconds();
 
             while (self.oid_queue.count() > 0) {
                 const oid = self.oid_queue.keys()[0];
@@ -276,7 +276,7 @@ pub fn PatchWriter(comptime repo_opts: rp.RepoOpts(.xit)) type {
                 if (repo_opts.ProgressCtx != void) {
                     if (progress_ctx_maybe) |progress_ctx| {
                         if (!showed_perf_warning) {
-                            const current_time = (try std.Io.Clock.Timestamp.now(io, .real)).raw.toSeconds();
+                            const current_time = std.Io.Timestamp.now(io, .real).toSeconds();
                             if (current_time - start_time >= 5) {
                                 showed_perf_warning = true;
                                 try progress_ctx.run(io, .{ .child_text = "making patches can take a while." });

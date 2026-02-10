@@ -213,7 +213,7 @@ fn setBlocking(s: std.posix.socket_t, blocking: bool) !void {
             return error.SocketError;
         }
     } else {
-        var flags = try std.posix.fcntl(s, std.posix.F.GETFL, 0);
+        var flags = try fcntl(s, std.posix.F.GETFL, 0);
 
         if (flags == -1) {
             return error.SocketError;
@@ -225,7 +225,36 @@ fn setBlocking(s: std.posix.socket_t, blocking: bool) !void {
             flags |= std.os.linux.SOCK.NONBLOCK;
         }
 
-        _ = try std.posix.fcntl(s, std.posix.F.SETFL, flags);
+        _ = try fcntl(s, std.posix.F.SETFL, flags);
+    }
+}
+
+const FcntlError = error{
+    PermissionDenied,
+    FileBusy,
+    ProcessFdQuotaExceeded,
+    Locked,
+    DeadLock,
+    LockedRegionLimitExceeded,
+} || std.Io.UnexpectedError;
+
+fn fcntl(fd: std.posix.fd_t, cmd: i32, arg: usize) FcntlError!usize {
+    while (true) {
+        const rc = std.posix.system.fcntl(fd, cmd, arg);
+        switch (std.posix.errno(rc)) {
+            .SUCCESS => return @intCast(rc),
+            .INTR => continue,
+            .AGAIN, .ACCES => return error.Locked,
+            .BADF => unreachable,
+            .BUSY => return error.FileBusy,
+            .INVAL => unreachable, // invalid parameters
+            .PERM => return error.PermissionDenied,
+            .MFILE => return error.ProcessFdQuotaExceeded,
+            .NOTDIR => unreachable, // invalid parameter
+            .DEADLK => return error.DeadLock,
+            .NOLCK => return error.LockedRegionLimitExceeded,
+            else => |err| return std.posix.unexpectedErrno(err),
+        }
     }
 }
 
@@ -293,7 +322,7 @@ fn connectWithTimeout(
     var storage: PosixAddress = undefined;
     const addr_len = addressToPosix(address, &storage);
 
-    std.posix.connect(socket, &storage.any, addr_len) catch |err| switch (err) {
+    connect(socket, &storage.any, addr_len) catch |err| switch (err) {
         error.WouldBlock => {},
         else => |e| return e,
     };
@@ -302,6 +331,34 @@ fn connectWithTimeout(
         try waitWithTimeout(socket, timeout, .out);
 
         try setBlocking(socket, true);
+    }
+}
+
+fn connect(sock: std.posix.socket_t, sock_addr: *const std.posix.sockaddr, len: std.posix.socklen_t) !void {
+    while (true) {
+        switch (std.posix.errno(std.posix.system.connect(sock, sock_addr, len))) {
+            .SUCCESS => return,
+            .ACCES => return error.AccessDenied,
+            .PERM => return error.PermissionDenied,
+            .ADDRNOTAVAIL => return error.AddressUnavailable,
+            .AFNOSUPPORT => return error.AddressFamilyUnsupported,
+            .AGAIN, .INPROGRESS => return error.WouldBlock,
+            .ALREADY => return error.ConnectionPending,
+            .BADF => unreachable, // sockfd is not a valid open file descriptor.
+            .CONNREFUSED => return error.ConnectionRefused,
+            .CONNRESET => return error.ConnectionResetByPeer,
+            .FAULT => unreachable, // The socket structure address is outside the user's address space.
+            .INTR => continue,
+            .ISCONN => @panic("AlreadyConnected"), // The socket is already connected.
+            .HOSTUNREACH => return error.NetworkUnreachable,
+            .NETUNREACH => return error.NetworkUnreachable,
+            .NOTSOCK => unreachable, // The file descriptor sockfd does not refer to a socket.
+            .PROTOTYPE => unreachable, // The socket type does not support the requested communications protocol.
+            .TIMEDOUT => return error.Timeout,
+            .NOENT => return error.FileNotFound, // Returned when socket is AF.UNIX and the given path does not exist.
+            .CONNABORTED => unreachable, // Tried to reuse socket that previously received error.ConnectionRefused.
+            else => |err| return std.posix.unexpectedErrno(err),
+        }
     }
 }
 

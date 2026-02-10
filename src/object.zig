@@ -408,7 +408,7 @@ pub fn writeCommit(
             try metadata_lines.append(arena.allocator(), try std.fmt.allocPrint(arena.allocator(), "parent {s}", .{parent_oid}));
         }
 
-        const ts = if (repo_opts.is_test) 0 else (try std.Io.Clock.Timestamp.now(io, .real)).raw.toSeconds();
+        const ts = if (repo_opts.is_test) 0 else std.Io.Timestamp.now(io, .real).toSeconds();
 
         const author = metadata.author orelse auth_blk: {
             if (repo_opts.is_test) break :auth_blk "radar <radar@roark>";
@@ -536,7 +536,7 @@ pub fn writeTag(
         try metadata_lines.append(arena.allocator(), try std.fmt.allocPrint(arena.allocator(), "type {s}", .{kind.name()}));
         try metadata_lines.append(arena.allocator(), try std.fmt.allocPrint(arena.allocator(), "tag {s}", .{input.name}));
 
-        const ts = if (repo_opts.is_test) 0 else (try std.Io.Clock.Timestamp.now(io, .real)).raw.toSeconds();
+        const ts = if (repo_opts.is_test) 0 else std.Io.Timestamp.now(io, .real).toSeconds();
 
         const tagger = input.tagger orelse auth_blk: {
             if (repo_opts.is_test) break :auth_blk "radar <radar@roark>";

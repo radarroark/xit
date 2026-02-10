@@ -166,7 +166,15 @@ pub const Stat = struct {
                 }
             },
             .macos => {
-                const stat = try std.posix.fstat(fd);
+                var stat = std.mem.zeroes(std.posix.Stat);
+                switch (std.posix.errno(std.posix.system.fstat(fd, &stat))) {
+                    .SUCCESS => {},
+                    .INVAL => unreachable,
+                    .BADF => unreachable, // Always a race condition.
+                    .NOMEM => return error.SystemResources,
+                    .ACCES => return error.AccessDenied,
+                    else => |err| return std.posix.unexpectedErrno(err),
+                }
                 return .{
                     .dev = @intCast(stat.dev),
                     .ino = @intCast(stat.ino),
