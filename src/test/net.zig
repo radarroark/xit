@@ -76,25 +76,45 @@ test "xit clone" {
 test "git fetch large" {
     const io = std.testing.io;
     const allocator = std.testing.allocator;
-    try testFetchLarge(.git, .{ .is_test = true }, .{ .wire = .http }, 3019, io, allocator);
-    if (true) return; // skip the rest for now because they're slow
+    try testFetchLarge(.git, .{ .is_test = true }, .{ .wire = .http }, 3019, false, io, allocator);
     if (.windows != builtin.os.tag) {
-        try testFetchLarge(.git, .{ .is_test = true }, .{ .wire = .raw }, 3020, io, allocator);
-        try testFetchLarge(.git, .{ .is_test = true }, .{ .wire = .ssh }, 3021, io, allocator);
+        try testFetchLarge(.git, .{ .is_test = true }, .{ .wire = .raw }, 3020, false, io, allocator);
+        try testFetchLarge(.git, .{ .is_test = true }, .{ .wire = .ssh }, 3021, false, io, allocator);
     }
-    try testFetchLarge(.git, .{ .is_test = true }, .file, 0, io, allocator);
+    try testFetchLarge(.git, .{ .is_test = true }, .file, 0, false, io, allocator);
+}
+
+test "git fetch large subprocess" {
+    if (true) return; // skip for now
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+    try testFetchLarge(.git, .{ .is_test = true }, .{ .wire = .http }, 3022, true, io, allocator);
+    if (.windows != builtin.os.tag) {
+        try testFetchLarge(.git, .{ .is_test = true }, .{ .wire = .raw }, 3023, true, io, allocator);
+        //try testFetchLarge(.git, .{ .is_test = true }, .{ .wire = .ssh }, 3024, true, io, allocator);
+    }
 }
 
 test "git push large" {
     const io = std.testing.io;
     const allocator = std.testing.allocator;
-    try testPushLarge(.git, .{ .is_test = true }, .{ .wire = .http }, 3022, false, io, allocator);
-    if (true) return; // skip the rest for now because they're slow
+    try testPushLarge(.git, .{ .is_test = true }, .{ .wire = .http }, 3025, false, io, allocator);
     if (.windows != builtin.os.tag) {
-        try testPushLarge(.git, .{ .is_test = true }, .{ .wire = .raw }, 3023, false, io, allocator);
-        try testPushLarge(.git, .{ .is_test = true }, .{ .wire = .ssh }, 3024, false, io, allocator);
+        try testPushLarge(.git, .{ .is_test = true }, .{ .wire = .raw }, 3026, false, io, allocator);
+        try testPushLarge(.git, .{ .is_test = true }, .{ .wire = .ssh }, 3027, false, io, allocator);
     }
-    try testPushLarge(.git, .{ .is_test = true }, .file, 0, io, false, allocator);
+    try testPushLarge(.git, .{ .is_test = true }, .file, 0, false, io, allocator);
+}
+
+test "git push large subprocess" {
+    if (true) return; // skip for now
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+    try testPushLarge(.git, .{ .is_test = true }, .{ .wire = .http }, 3028, true, io, allocator);
+    if (.windows != builtin.os.tag) {
+        try testPushLarge(.git, .{ .is_test = true }, .{ .wire = .raw }, 3029, true, io, allocator);
+        //try testPushLarge(.git, .{ .is_test = true }, .{ .wire = .ssh }, 3030, true, io, allocator);
+    }
 }
 
 fn Server(
@@ -1011,6 +1031,7 @@ fn testFetchLarge(
     comptime repo_opts: rp.RepoOpts(repo_kind),
     comptime transport_def: net.TransportDefinition,
     comptime port: u16,
+    comptime shell_out_to_git: bool,
     io: std.Io,
     allocator: std.mem.Allocator,
 ) !void {
@@ -1094,34 +1115,48 @@ fn testFetchLarge(
         try client_repo.addConfig(io, allocator, .{ .name = "branch.master.remote", .value = "origin" });
     }
 
-    const refspecs = &.{
-        "+refs/heads/master:refs/heads/master",
-    };
+    if (shell_out_to_git) {
+        var process = try std.process.spawn(io, .{
+            .argv = &.{ "git", "pull", "origin", "master" },
+            .cwd = .{ .path = client_path },
+            .stdin = .ignore,
+            .stdout = .ignore,
+            .stderr = .ignore,
+        });
+        const term = try process.wait(io);
+        if (term != .exited) {
+            return error.GitCommandFailed;
+        }
+    } else {
+        const refspecs = &.{
+            "+refs/heads/master:refs/heads/master",
+        };
 
-    const is_ssh = switch (transport_def) {
-        .file => false,
-        .wire => |wire_kind| .ssh == wire_kind,
-    };
-    const ssh_cmd_maybe: ?[]const u8 = if (is_ssh) blk: {
-        const known_hosts_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "known_hosts" });
-        defer allocator.free(known_hosts_path);
+        const is_ssh = switch (transport_def) {
+            .file => false,
+            .wire => |wire_kind| .ssh == wire_kind,
+        };
+        const ssh_cmd_maybe: ?[]const u8 = if (is_ssh) blk: {
+            const known_hosts_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "known_hosts" });
+            defer allocator.free(known_hosts_path);
 
-        const priv_key_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "key" });
-        defer allocator.free(priv_key_path);
+            const priv_key_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "key" });
+            defer allocator.free(priv_key_path);
 
-        break :blk try std.fmt.allocPrint(allocator, "ssh -o UserKnownHostsFile=\"{s}\" -o IdentityFile=\"{s}\"", .{ known_hosts_path, priv_key_path });
-    } else null;
-    defer if (ssh_cmd_maybe) |ssh_cmd| allocator.free(ssh_cmd);
+            break :blk try std.fmt.allocPrint(allocator, "ssh -o UserKnownHostsFile=\"{s}\" -o IdentityFile=\"{s}\"", .{ known_hosts_path, priv_key_path });
+        } else null;
+        defer if (ssh_cmd_maybe) |ssh_cmd| allocator.free(ssh_cmd);
 
-    try client_repo.fetch(
-        io,
-        allocator,
-        "origin",
-        .{ .refspecs = refspecs, .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
-    );
+        try client_repo.fetch(
+            io,
+            allocator,
+            "origin",
+            .{ .refspecs = refspecs, .wire = .{ .ssh = .{ .command = ssh_cmd_maybe } } },
+        );
 
-    // update the working dir
-    try client_repo.restore(io, allocator, ".");
+        // update the working dir
+        try client_repo.restore(io, allocator, ".");
+    }
 
     // make sure fetch was successful
     {
