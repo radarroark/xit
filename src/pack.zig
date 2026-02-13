@@ -105,7 +105,7 @@ pub const PackReader = union(enum) {
     }
 };
 
-pub fn PackObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
+pub fn PackIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return struct {
         io: std.Io,
         allocator: std.mem.Allocator,
@@ -115,7 +115,7 @@ pub fn PackObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
         object_index: u32,
         pack_obj_rdr: ?PackObjectReader(repo_kind, repo_opts),
 
-        pub fn init(io: std.Io, allocator: std.mem.Allocator, pack_reader: *PackReader) !PackObjectIterator(repo_kind, repo_opts) {
+        pub fn init(io: std.Io, allocator: std.mem.Allocator, pack_reader: *PackReader) !PackIterator(repo_kind, repo_opts) {
             // parse header
             const sig = try pack_reader.reader().takeArray(4);
             if (!std.mem.eql(u8, "PACK", sig)) {
@@ -139,7 +139,7 @@ pub fn PackObjectIterator(comptime repo_kind: rp.RepoKind, comptime repo_opts: r
         }
 
         pub fn next(
-            self: *PackObjectIterator(repo_kind, repo_opts),
+            self: *PackIterator(repo_kind, repo_opts),
             state: rp.Repo(repo_kind, repo_opts).State(.read_only),
             offset_to_oid_maybe: ?*std.AutoArrayHashMap(u64, [hash.byteLen(repo_opts.hash)]u8),
         ) !?*PackObjectReader(repo_kind, repo_opts) {
@@ -321,7 +321,7 @@ const PackObjectStream = struct {
         },
     },
     start_position: u64,
-    // this is set during deinit for the sake of the PackObjectIterator.
+    // this is set during deinit for the sake of the PackIterator.
     // it reads this field after deinit to see where the zlib data ended.
     end_position: ?u64 = null,
 
@@ -510,7 +510,7 @@ pub fn PackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             pack_reader: *PackReader,
             oid_hex: *const [hash.hexLen(repo_opts.hash)]u8,
         ) !PackObjectReader(repo_kind, repo_opts) {
-            var iter = try PackObjectIterator(repo_kind, repo_opts).init(io, allocator, pack_reader);
+            var iter = try PackIterator(repo_kind, repo_opts).init(io, allocator, pack_reader);
 
             while (try iter.next(state, null)) |pack_obj_rdr| {
                 {
@@ -1220,7 +1220,7 @@ pub fn LooseOrPackObjectReader(comptime repo_kind: rp.RepoKind, comptime repo_op
     };
 }
 
-pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
+pub fn PackWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.RepoOpts(repo_kind)) type {
     return struct {
         allocator: std.mem.Allocator,
         objects: std.ArrayList(obj.Object(repo_kind, repo_opts, .raw)),
@@ -1238,8 +1238,8 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             finished,
         },
 
-        pub fn init(allocator: std.mem.Allocator, obj_iter: *obj.ObjectIterator(repo_kind, repo_opts, .raw)) !?PackObjectWriter(repo_kind, repo_opts) {
-            var self = PackObjectWriter(repo_kind, repo_opts){
+        pub fn init(allocator: std.mem.Allocator, obj_iter: *obj.ObjectIterator(repo_kind, repo_opts, .raw)) !?PackWriter(repo_kind, repo_opts) {
+            var self = PackWriter(repo_kind, repo_opts){
                 .allocator = allocator,
                 .objects = std.ArrayList(obj.Object(repo_kind, repo_opts, .raw)){},
                 .object_index = 0,
@@ -1269,7 +1269,7 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             return self;
         }
 
-        pub fn deinit(self: *PackObjectWriter(repo_kind, repo_opts)) void {
+        pub fn deinit(self: *PackWriter(repo_kind, repo_opts)) void {
             for (self.objects.items) |*object| {
                 object.deinit();
             }
@@ -1277,7 +1277,7 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             self.out_bytes.deinit();
         }
 
-        pub fn read(self: *PackObjectWriter(repo_kind, repo_opts), buffer: []u8) !usize {
+        pub fn read(self: *PackWriter(repo_kind, repo_opts), buffer: []u8) !usize {
             var size: usize = 0;
             while (size < buffer.len and .finished != self.mode) {
                 size += try self.readStep(buffer[size..]);
@@ -1285,7 +1285,7 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             return size;
         }
 
-        fn readStep(self: *PackObjectWriter(repo_kind, repo_opts), buffer: []u8) !usize {
+        fn readStep(self: *PackWriter(repo_kind, repo_opts), buffer: []u8) !usize {
             switch (self.mode) {
                 .header => {
                     const size = @min(self.out_bytes.written().len - self.out_index, buffer.len);
@@ -1370,7 +1370,7 @@ pub fn PackObjectWriter(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.
             }
         }
 
-        fn writeObjectHeader(self: *PackObjectWriter(repo_kind, repo_opts)) !void {
+        fn writeObjectHeader(self: *PackWriter(repo_kind, repo_opts)) !void {
             const object = self.objects.items[self.object_index];
             const size = object.len;
 

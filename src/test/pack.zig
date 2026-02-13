@@ -223,7 +223,7 @@ test "create and read pack" {
         defer obj_iter.deinit();
         try obj_iter.include(&head_oid);
 
-        var pack_writer = try pack.PackObjectWriter(.git, repo_opts).init(allocator, &obj_iter) orelse return error.PackWriterIsEmpty;
+        var pack_writer = try pack.PackWriter(.git, repo_opts).init(allocator, &obj_iter) orelse return error.PackWriterIsEmpty;
         defer pack_writer.deinit();
 
         var pack_file = try temp_dir.createFile(io, "test.pack", .{});
@@ -333,7 +333,7 @@ test "write pack file" {
     try obj_iter.include(&commit2);
 
     // write pack file
-    var pack_writer_maybe = try pack.PackObjectWriter(.git, repo_opts).init(allocator, &obj_iter);
+    var pack_writer_maybe = try pack.PackWriter(.git, repo_opts).init(allocator, &obj_iter);
     if (pack_writer_maybe) |*pack_writer| {
         defer pack_writer.deinit();
 
@@ -361,8 +361,8 @@ test "write pack file" {
         var pack_reader = try pack.PackReader.initFile(io, allocator, temp_dir, "test.pack");
         defer pack_reader.deinit();
 
-        var pack_iter = try pack.PackObjectIterator(.git, repo_opts).init(io, allocator, &pack_reader);
-        try obj.copyFromPackObjectIterator(.git, repo_opts, .{ .core = &server_repo.core, .extra = .{} }, io, allocator, &pack_iter, null);
+        var pack_iter = try pack.PackIterator(.git, repo_opts).init(io, allocator, &pack_reader);
+        try obj.copyFromPackIterator(.git, repo_opts, .{ .core = &server_repo.core, .extra = .{} }, io, allocator, &pack_iter, null);
     }
 }
 
@@ -418,9 +418,9 @@ test "iterate pack from file" {
     var pack_reader = try pack.PackReader.initFile(io, allocator, pack_dir, "pack-b7f085e431fc05b0bca3d5c306dc148d7bbed2f4.pack");
     defer pack_reader.deinit();
 
-    var pack_iter = try pack.PackObjectIterator(.git, repo_opts).init(io, allocator, &pack_reader);
+    var pack_iter = try pack.PackIterator(.git, repo_opts).init(io, allocator, &pack_reader);
 
-    try obj.copyFromPackObjectIterator(.git, repo_opts, .{ .core = &r.core, .extra = .{} }, io, allocator, &pack_iter, null);
+    try obj.copyFromPackIterator(.git, repo_opts, .{ .core = &r.core, .extra = .{} }, io, allocator, &pack_iter, null);
 }
 
 test "iterate pack from stream" {
@@ -463,9 +463,9 @@ test "iterate pack from stream" {
     var pack_reader = pack.PackReader.initStream(&reader);
     defer pack_reader.deinit();
 
-    var pack_iter = try pack.PackObjectIterator(.git, repo_opts).init(io, allocator, &pack_reader);
+    var pack_iter = try pack.PackIterator(.git, repo_opts).init(io, allocator, &pack_reader);
 
-    try obj.copyFromPackObjectIterator(.git, repo_opts, .{ .core = &r.core, .extra = .{} }, io, allocator, &pack_iter, null);
+    try obj.copyFromPackIterator(.git, repo_opts, .{ .core = &r.core, .extra = .{} }, io, allocator, &pack_iter, null);
 }
 
 test "read packed refs" {

@@ -1291,13 +1291,13 @@ pub fn copyFromObjectIterator(
     }
 }
 
-pub fn copyFromPackObjectIterator(
+pub fn copyFromPackIterator(
     comptime repo_kind: rp.RepoKind,
     comptime repo_opts: rp.RepoOpts(repo_kind),
     state: rp.Repo(repo_kind, repo_opts).State(.read_write),
     io: std.Io,
     allocator: std.mem.Allocator,
-    pack_iter: *pack.PackObjectIterator(repo_kind, repo_opts),
+    pack_iter: *pack.PackIterator(repo_kind, repo_opts),
     progress_ctx_maybe: ?repo_opts.ProgressCtx,
 ) !void {
     if (repo_opts.ProgressCtx != void) {

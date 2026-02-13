@@ -335,7 +335,7 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
             try stream.write(allocator, buffer.items.ptr, buffer.items.len);
 
             if (need_pack) {
-                var pack_writer_maybe = try pack.PackObjectWriter(repo_kind, repo_opts).init(allocator, &git_push.obj_iter);
+                var pack_writer_maybe = try pack.PackWriter(repo_kind, repo_opts).init(allocator, &git_push.obj_iter);
                 if (pack_writer_maybe) |*pack_writer| {
                     defer pack_writer.deinit();
 
@@ -583,9 +583,9 @@ pub fn WireTransport(comptime repo_kind: rp.RepoKind, comptime repo_opts: rp.Rep
                 var pack_reader = try pack.PackReader.initFile(io, allocator, state.core.repo_dir, temp_pack_name);
                 defer pack_reader.deinit();
 
-                var pack_iter = try pack.PackObjectIterator(repo_kind, repo_opts).init(io, allocator, &pack_reader);
+                var pack_iter = try pack.PackIterator(repo_kind, repo_opts).init(io, allocator, &pack_reader);
 
-                try obj.copyFromPackObjectIterator(repo_kind, repo_opts, state, io, allocator, &pack_iter, self.opts.progress_ctx);
+                try obj.copyFromPackIterator(repo_kind, repo_opts, state, io, allocator, &pack_iter, self.opts.progress_ctx);
             }
         }
 
