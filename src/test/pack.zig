@@ -254,6 +254,136 @@ test "create and read pack" {
     }
 }
 
+test "write pack file" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+    const temp_dir_name = "temp-test-write-pack-file";
+    const repo_opts = rp.RepoOpts(.git){ .is_test = true };
+
+    // create the temp dir
+    const cwd = std.Io.Dir.cwd();
+    var temp_dir_or_err = cwd.openDir(io, temp_dir_name, .{});
+    if (temp_dir_or_err) |*temp_dir| {
+        temp_dir.close(io);
+        try cwd.deleteTree(io, temp_dir_name);
+    } else |_| {}
+    var temp_dir = try cwd.createDirPathOpen(io, temp_dir_name, .{});
+    defer cwd.deleteTree(io, temp_dir_name) catch {};
+    defer temp_dir.close(io);
+
+    // get the cwd path
+    const cwd_path = try std.process.currentPathAlloc(io, allocator);
+    defer allocator.free(cwd_path);
+
+    const client_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "client" });
+    defer allocator.free(client_path);
+
+    var client_repo = try rp.Repo(.git, repo_opts).init(io, allocator, .{ .path = client_path });
+    defer client_repo.deinit(io, allocator);
+
+    var client_dir = try cwd.openDir(io, client_path, .{});
+    defer client_dir.close(io);
+
+    // copy files from current repo into client dir
+    for (&[_][]const u8{ "src", "docs" }) |dir_name| {
+        var src_repo_dir = try cwd.openDir(io, dir_name, .{ .iterate = true });
+        defer src_repo_dir.close(io);
+
+        var dest_repo_dir = try client_dir.createDirPathOpen(io, dir_name, .{});
+        defer dest_repo_dir.close(io);
+
+        try copyDir(io, src_repo_dir, dest_repo_dir);
+
+        try client_repo.add(io, allocator, &.{dir_name});
+    }
+
+    _ = try client_repo.commit(io, allocator, .{ .message = "let there be light" });
+
+    // change the files so git will send them as delta objects
+    for (&[_][]const u8{ "src", "docs" }) |dir_name| {
+        var dest_repo_dir = try client_dir.createDirPathOpen(io, dir_name, .{ .open_options = .{ .iterate = true } });
+        defer dest_repo_dir.close(io);
+
+        {
+            var iter = dest_repo_dir.iterate();
+            while (try iter.next(io)) |entry| {
+                switch (entry.kind) {
+                    .file => {
+                        const file = try dest_repo_dir.openFile(io, entry.name, .{ .mode = .read_write });
+                        defer file.close(io);
+                        var writer = file.writer(io, &.{});
+                        try writer.interface.writeAll("EDIT");
+                    },
+                    else => {},
+                }
+            }
+        }
+
+        try client_repo.add(io, allocator, &.{dir_name});
+    }
+
+    const commit2 = try client_repo.commit(io, allocator, .{ .message = "more stuff" });
+
+    var pack_file = try temp_dir.createFile(io, "test.pack", .{});
+    defer pack_file.close(io);
+
+    var obj_iter = try obj.ObjectIterator(.git, repo_opts, .raw).init(.{ .core = &client_repo.core, .extra = .{} }, io, allocator, .{ .kind = .all });
+    defer obj_iter.deinit();
+
+    try obj_iter.include(&commit2);
+
+    // write pack file
+    var pack_writer_maybe = try pack.PackObjectWriter(.git, repo_opts).init(allocator, &obj_iter);
+    if (pack_writer_maybe) |*pack_writer| {
+        defer pack_writer.deinit();
+
+        var read_buffer = [_]u8{0} ** repo_opts.read_size;
+
+        while (true) {
+            const size = try pack_writer.read(&read_buffer);
+            if (size == 0) {
+                break;
+            }
+
+            const pack_data = read_buffer[0..size];
+            try pack_file.writeStreamingAll(io, pack_data);
+        }
+    }
+
+    // make sure the pack file is valid
+    {
+        const server_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "server" });
+        defer allocator.free(server_path);
+
+        var server_repo = try rp.Repo(.git, .{ .is_test = true }).init(io, allocator, .{ .path = server_path });
+        defer server_repo.deinit(io, allocator);
+
+        var pack_reader = try pack.PackReader.initFile(io, allocator, temp_dir, "test.pack");
+        defer pack_reader.deinit();
+
+        var pack_iter = try pack.PackObjectIterator(.git, repo_opts).init(io, allocator, &pack_reader);
+        try obj.copyFromPackObjectIterator(.git, repo_opts, .{ .core = &server_repo.core, .extra = .{} }, io, allocator, &pack_iter, null);
+    }
+}
+
+fn copyDir(io: std.Io, src_dir: std.Io.Dir, dest_dir: std.Io.Dir) !void {
+    var iter = src_dir.iterate();
+    while (try iter.next(io)) |entry| {
+        switch (entry.kind) {
+            .file => try src_dir.copyFile(entry.name, dest_dir, entry.name, io, .{}),
+            .directory => {
+                try dest_dir.createDirPath(io, entry.name);
+                var dest_entry_dir = try dest_dir.openDir(io, entry.name, .{ .access_sub_paths = true, .iterate = true, .follow_symlinks = false });
+                defer dest_entry_dir.close(io);
+                var src_entry_dir = try src_dir.openDir(io, entry.name, .{ .access_sub_paths = true, .iterate = true, .follow_symlinks = false });
+                defer src_entry_dir.close(io);
+                try copyDir(io, src_entry_dir, dest_entry_dir);
+            },
+            else => {},
+        }
+    }
+}
+
 test "iterate pack from file" {
     const io = std.testing.io;
     const allocator = std.testing.allocator;
@@ -275,8 +405,8 @@ test "iterate pack from file" {
     const cwd_path = try std.process.currentPathAlloc(io, allocator);
     defer allocator.free(cwd_path);
 
-    // get work dir path (null-terminated because it's used by libgit)
-    const work_path = try std.fs.path.joinZ(allocator, &.{ cwd_path, temp_dir_name, "repo" });
+    // get work dir path
+    const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "repo" });
     defer allocator.free(work_path);
 
     var r = try rp.Repo(.git, repo_opts).init(io, allocator, .{ .path = work_path });
@@ -314,8 +444,8 @@ test "iterate pack from stream" {
     const cwd_path = try std.process.currentPathAlloc(io, allocator);
     defer allocator.free(cwd_path);
 
-    // get work dir path (null-terminated because it's used by libgit)
-    const work_path = try std.fs.path.joinZ(allocator, &.{ cwd_path, temp_dir_name, "repo" });
+    // get work dir path
+    const work_path = try std.fs.path.join(allocator, &.{ cwd_path, temp_dir_name, "repo" });
     defer allocator.free(work_path);
 
     var r = try rp.Repo(.git, repo_opts).init(io, allocator, .{ .path = work_path });
